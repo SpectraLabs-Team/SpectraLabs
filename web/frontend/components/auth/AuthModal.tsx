@@ -11,21 +11,55 @@ const LEN = 6;
 const RESEND_SECONDS = 60;
 const empty = () => Array<string>(LEN).fill('');
 
-// ── Placeholder transport until the Gmail SMTP / auth endpoints are wired up ──
-// Swap each for a fetch to the backend. Nothing here stores or checks a password.
-async function sendSignupCode(_email: string, _password: string) {
-  await new Promise((r) => setTimeout(r, 900)); // POST /api/auth/signup → emails OTP
+// ── Real API transport connecting to Gmail SMTP & session endpoints ──
+async function sendSignupCode(email: string, password: string) {
+  const res = await fetch('/api/auth/send-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, mode: 'signup' }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to send verification code.');
+  }
 }
-async function resendCode(_email: string) {
-  await new Promise((r) => setTimeout(r, 900)); // POST /api/auth/resend
+
+async function resendCode(email: string) {
+  const res = await fetch('/api/auth/send-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, mode: 'resend' }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    throw new Error(data.error || 'Failed to resend code.');
+  }
 }
-async function verifySignupCode(_email: string, _code: string) {
-  await new Promise((r) => setTimeout(r, 700)); // POST /api/auth/verify → session
-  return true;
+
+async function verifySignupCode(email: string, code: string): Promise<{ ok: boolean; user?: { email: string; role: Role }; error?: string }> {
+  const res = await fetch('/api/auth/verify-otp', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    return { ok: false, error: data.error || 'Invalid or expired code.' };
+  }
+  return { ok: true, user: data.user };
 }
-async function loginWithPassword(_email: string, password: string) {
-  await new Promise((r) => setTimeout(r, 800)); // POST /api/auth/login → session
-  return password.length >= MIN_PASSWORD;
+
+async function loginWithPassword(email: string, password: string): Promise<{ ok: boolean; user?: { email: string; role: Role }; error?: string }> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) {
+    return { ok: false, error: data.error || 'Incorrect email or password.' };
+  }
+  return { ok: true, user: data.user };
 }
 
 export function RoleBadge({ role, className }: { role: Role; className?: string }) {
@@ -172,14 +206,14 @@ export function AuthModal() {
     setBusy(true);
     setError(null);
     try {
-      const ok = await loginWithPassword(email.trim(), password);
-      if (!ok) {
-        setError('Incorrect email or password.');
+      const res = await loginWithPassword(email.trim(), password);
+      if (!res.ok || !res.user) {
+        setError(res.error || 'Incorrect email or password.');
         return;
       }
-      finish(roleForEmail(email));
-    } catch {
-      setError('Could not log in. Try again.');
+      finish(res.user.role);
+    } catch (err: any) {
+      setError(err?.message || 'Could not log in. Try again.');
     } finally {
       setBusy(false);
     }
@@ -198,8 +232,8 @@ export function AuthModal() {
       setDigits(empty());
       setLeft(RESEND_SECONDS);
       setTimeout(() => boxes.current[0]?.focus(), 50);
-    } catch {
-      setError('Could not send the code. Try again.');
+    } catch (err: any) {
+      setError(err?.message || 'Could not send the code. Try again.');
     } finally {
       setBusy(false);
     }
@@ -214,8 +248,8 @@ export function AuthModal() {
       setDigits(empty());
       setLeft(RESEND_SECONDS);
       boxes.current[0]?.focus();
-    } catch {
-      setError('Could not resend the code.');
+    } catch (err: any) {
+      setError(err?.message || 'Could not resend the code.');
     } finally {
       setBusy(false);
     }
@@ -228,14 +262,16 @@ export function AuthModal() {
       setVerifying(true);
       setError(null);
       try {
-        const ok = await verifySignupCode(email.trim(), code);
-        if (!ok) {
-          setError('That code is incorrect or expired.');
+        const res = await verifySignupCode(email.trim(), code);
+        if (!res.ok || !res.user) {
+          setError(res.error || 'That code is incorrect or expired.');
           setDigits(empty());
           boxes.current[0]?.focus();
           return;
         }
-        finish(roleForEmail(email));
+        finish(res.user.role);
+      } catch (err: any) {
+        setError(err?.message || 'Verification failed. Try again.');
       } finally {
         setVerifying(false);
       }

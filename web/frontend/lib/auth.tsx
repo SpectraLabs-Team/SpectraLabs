@@ -2,39 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-export type Role = 'admin' | 'user';
-export type AuthUser = { email: string; role: Role };
-export type AuthMode = 'login' | 'signup';
-
-export const ADMIN_EMAIL = 'spectralabs.team@gmail.com';
-export const MIN_PASSWORD = 8;
-export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-
-export type PasswordRules = {
-  length: boolean;
-  letter: boolean;
-  number: boolean;
-  special: boolean;
-};
-
-export function checkPasswordRules(password: string): PasswordRules {
-  return {
-    length: password.length >= MIN_PASSWORD,
-    letter: /[a-zA-Z]/.test(password),
-    number: /[0-9]/.test(password),
-    special: /[^a-zA-Z0-9]/.test(password),
-  };
-}
-
-export function isPasswordValid(password: string): boolean {
-  const r = checkPasswordRules(password);
-  return r.length && r.letter && r.number && r.special;
-}
-
-/** Role is derived from the email for the UI preview only; the backend must assign the real role. */
-export function roleForEmail(email: string): Role {
-  return email.trim().toLowerCase() === ADMIN_EMAIL ? 'admin' : 'user';
-}
+export * from './auth-shared';
+import { type AuthMode, type AuthUser, type Role } from './auth-shared';
 
 // Frontend-stage session persistence so a refresh doesn't sign you out.
 // Replace with the server-issued session (HttpOnly cookie) once the SMTP/OTP endpoints land.
@@ -62,14 +31,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authMode, setAuthMode] = useState<AuthMode>('login');
 
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(KEY);
-      if (raw) {
-        const u = JSON.parse(raw) as AuthUser;
-        if (u && typeof u.email === 'string' && (u.role === 'admin' || u.role === 'user')) setUser(u);
-      }
-    } catch {}
-    setIsLoading(false);
+    let active = true;
+    // Check server-side HttpOnly session first, fallback to sessionStorage
+    fetch('/api/auth/session')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active) return;
+        if (data.ok && data.user) {
+          setUser(data.user);
+          try {
+            sessionStorage.setItem(KEY, JSON.stringify(data.user));
+          } catch {}
+        } else {
+          // Check sessionStorage fallback
+          try {
+            const raw = sessionStorage.getItem(KEY);
+            if (raw) {
+              const u = JSON.parse(raw) as AuthUser;
+              if (u && typeof u.email === 'string' && (u.role === 'admin' || u.role === 'user')) setUser(u);
+            }
+          } catch {}
+        }
+      })
+      .catch(() => {
+        if (!active) return;
+        try {
+          const raw = sessionStorage.getItem(KEY);
+          if (raw) {
+            const u = JSON.parse(raw) as AuthUser;
+            if (u && typeof u.email === 'string') setUser(u);
+          }
+        } catch {}
+      })
+      .finally(() => {
+        if (active) setIsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const login = useCallback((email: string, role: Role) => {
@@ -85,6 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       sessionStorage.removeItem(KEY);
     } catch {}
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
   }, []);
 
   const openAuthModal = useCallback((mode: AuthMode = 'login') => {

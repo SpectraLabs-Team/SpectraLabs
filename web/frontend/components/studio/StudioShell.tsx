@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Briefcase, ChevronsLeft, ChevronsRight, Cpu, Lock, Menu, PlugZap, ShieldAlert, X } from 'lucide-react';
-import { HealthPill } from '@/components/ui/HealthPill';
+import { StatusPills } from '@/components/ui/StatusPills';
 import { Logo } from '@/components/ui/primitives';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { cn, formatCompactCurrency, formatCurrency } from '@/lib/utils';
@@ -225,7 +225,7 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
               <Briefcase className="h-3.5 w-3.5 text-ink/40" />
               <span className="num text-ink/90">{formatCompactCurrency(stats.netValue)}</span>· {positions.length} positions · {source}
             </span>
-            <HealthPill />
+            <StatusPills className="hidden md:flex" />
           </div>
         </header>
 

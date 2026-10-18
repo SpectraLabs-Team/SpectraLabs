@@ -40,10 +40,10 @@ function SignInScreen({ title }: { title: string }) {
       <p className="mt-2 text-sm leading-6 text-ink/60">Access is protected by a one-time code sent to your email.</p>
       <button
         type="button"
-        onClick={openAuthModal}
+        onClick={() => openAuthModal('login')}
         className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-500 py-3 text-sm font-bold text-white shadow-[0_0_24px_rgba(6,182,212,0.4)] transition hover:brightness-110 active:scale-[0.99]"
       >
-        <Mail className="h-4 w-4" /> Sign In with Email
+        <Mail className="h-4 w-4" /> Log In with Email
       </button>
     </Screen>
   );
@@ -82,10 +82,10 @@ function SignInButton() {
   return (
     <button
       type="button"
-      onClick={openAuthModal}
+      onClick={() => openAuthModal('login')}
       className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-500 py-3 text-sm font-bold text-white transition hover:brightness-110"
     >
-      <Mail className="h-4 w-4" /> Sign In with Email
+      <Mail className="h-4 w-4" /> Log In with Email
     </button>
   );
 }

@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { Activity, Cpu, Gauge, ScrollText, Server, Workflow } from 'lucide-react';
+import { StatusPills } from '@/components/ui/StatusPills';
 import { useAuth } from '@/lib/auth';
 import { useEngineHealth } from '@/lib/useEngineHealth';
 import { cn } from '@/lib/utils';
@@ -64,9 +65,21 @@ export function AdminDashboard() {
 
   return (
     <>
-      <p className="font-mono text-[11.5px] font-medium uppercase tracking-[0.22em] text-ink/60">Admin console</p>
-      <h1 className="mt-3 text-3xl font-bold tracking-tight text-ink sm:text-[2.15rem]">Platform operations</h1>
-      <p className="mt-2 text-sm text-ink/60">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="font-mono text-[11.5px] font-medium uppercase tracking-[0.22em] text-ink/60">Admin console</p>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight text-ink sm:text-[2.15rem]">Platform operations</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <StatusPills />
+          <span className="flex items-center gap-3 rounded-full border border-slate-300/80 bg-slate-100/90 px-4 py-1.5 font-mono text-[12px] text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
+            <span className="flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-accent" /> CPU 63%</span>
+            <span className="h-3 w-px bg-slate-300 dark:bg-white/15" />
+            <span>MEM 3.1/8 GB</span>
+          </span>
+        </div>
+      </div>
+      <p className="mt-3 text-sm text-ink/60">
         Signed in as <span className="font-medium text-ink/85">{user?.email}</span>. Figures below are placeholders until the telemetry API is wired up.
       </p>
 

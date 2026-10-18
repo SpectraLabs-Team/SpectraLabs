@@ -11,25 +11,64 @@ const KEY = 'spectra-theme';
  */
 export const themeInitScript = `(function(){try{var t=localStorage.getItem('${KEY}');if(t==='light'){document.documentElement.classList.remove('dark')}else{document.documentElement.classList.add('dark')}}catch(e){}})();`;
 
-const Ctx = createContext<{ theme: Theme; toggle: () => void }>({ theme: 'dark', toggle: () => {} });
+const Ctx = createContext<{ theme: Theme; toggle: (e?: React.MouseEvent) => void }>({ theme: 'dark', toggle: () => {} });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>('dark');
   useEffect(() => {
     setTheme(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
   }, []);
-  const toggle = useCallback(() => {
-    setTheme((t) => {
-      const next: Theme = t === 'dark' ? 'light' : 'dark';
+
+  const toggle = useCallback((e?: React.MouseEvent) => {
+    const isDark = document.documentElement.classList.contains('dark');
+    const next: Theme = isDark ? 'light' : 'dark';
+
+    const hasViewTransitions =
+      typeof document !== 'undefined' &&
+      'startViewTransition' in document &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (!hasViewTransitions) {
       document.documentElement.classList.toggle('dark', next === 'dark');
+      setTheme(next);
       try {
         localStorage.setItem(KEY, next);
-      } catch {
-        /* storage unavailable: theme still applies for this page view */
-      }
-      return next;
+      } catch {}
+      return;
+    }
+
+    const x = e?.clientX ?? window.innerWidth - 80;
+    const y = e?.clientY ?? 32;
+    const endRadius = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y),
+    );
+
+    const transition = (document as any).startViewTransition(async () => {
+      document.documentElement.classList.toggle('dark', next === 'dark');
+      setTheme(next);
+      try {
+        localStorage.setItem(KEY, next);
+      } catch {}
+    });
+
+    transition.ready.then(() => {
+      document.documentElement.animate(
+        {
+          clipPath: [
+            `circle(0px at ${x}px ${y}px)`,
+            `circle(${endRadius}px at ${x}px ${y}px)`,
+          ],
+        },
+        {
+          duration: 480,
+          easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          pseudoElement: '::view-transition-new(root)',
+        },
+      );
     });
   }, []);
+
   return <Ctx.Provider value={{ theme, toggle }}>{children}</Ctx.Provider>;
 }
 

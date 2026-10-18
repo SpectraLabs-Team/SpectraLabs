@@ -24,10 +24,10 @@ const parity = [
 export function Architecture() {
   const reduce = useReducedMotion();
   return (
-    <section id="architecture" className="py-16">
-      <div className="mx-auto max-w-[1320px] px-5 sm:px-8">
+    <section aria-labelledby="architecture-title">
+      <div>
         <p className="font-mono text-[11.5px] font-medium uppercase tracking-[0.22em] text-ink/60">Architecture</p>
-        <h2 className="mt-3 text-3xl font-bold tracking-tight text-ink sm:text-[2.15rem]">Eight crates. Standard library only.</h2>
+        <h1 id="architecture-title" className="mt-3 text-3xl font-bold tracking-tight text-ink sm:text-[2.4rem]">Eight crates. Standard library only.</h1>
         <p className="mt-3 max-w-2xl text-sm leading-6 text-ink/60">
           No crates.io dependencies and <code className="font-mono text-ink/80">unsafe_code = &quot;forbid&quot;</code> across the workspace. The HTTP server, JSON, SHA-256 and RNG are written in-house, so the whole supply chain fits in one review.
         </p>
@@ -39,7 +39,7 @@ export function Architecture() {
             </div>
             <div className="mt-6 space-y-3">
               {layers.map((layer, li) => (
-                <motion.div key={layer.label} initial={reduce ? false : { opacity: 0, x: -12 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} transition={{ delay: li * 0.1, duration: 0.45 }} className="grid gap-3 sm:grid-cols-[96px_1fr] sm:items-center">
+                <motion.div key={layer.label} initial={reduce ? false : { opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: li * 0.1, duration: 0.45 }} className="grid gap-3 sm:grid-cols-[96px_1fr] sm:items-center">
                   <span className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-ink/45">{layer.label}</span>
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                     {layer.crates.map((c) => (

@@ -14,11 +14,24 @@ export function ThemeToggle({ className }: { className?: string }) {
       onClick={(e) => toggle(e)}
       aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
       title={dark ? 'Light mode' : 'Dark mode'}
-      className={cn('relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg border border-ink/10 bg-ink/[0.03] text-ink/70 transition hover:border-ink/20 hover:text-ink', className)}
+      className={cn(
+        'relative isolate flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors',
+        'border-slate-300 bg-slate-100 text-slate-700 hover:border-slate-400 hover:text-slate-900',
+        'dark:border-white/15 dark:bg-white/5 dark:text-slate-200 dark:hover:border-white/30 dark:hover:text-white',
+        className,
+      )}
     >
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.span key={theme} initial={{ y: 12, opacity: 0, rotate: -40 }} animate={{ y: 0, opacity: 1, rotate: 0 }} exit={{ y: -12, opacity: 0, rotate: 40 }} transition={{ duration: 0.2 }}>
-          {dark ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+      {/* No exit animation and no opacity fade: the icon is fully opaque in every frame, so the
+          view-transition snapshot (old + new) never captures a half-faded glyph. */}
+      <AnimatePresence initial={false}>
+        <motion.span
+          key={theme}
+          className="absolute inset-0 flex items-center justify-center"
+          initial={{ rotate: -90, scale: 0.6 }}
+          animate={{ rotate: 0, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 26 }}
+        >
+          {dark ? <Moon className="h-4 w-4" strokeWidth={2.25} /> : <Sun className="h-4 w-4" strokeWidth={2.25} />}
         </motion.span>
       </AnimatePresence>
     </button>

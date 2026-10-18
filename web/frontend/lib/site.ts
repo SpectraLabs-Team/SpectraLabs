@@ -4,7 +4,7 @@ export const NAV: { href: string; label: string; external?: boolean }[] = [
   { href: '/studio', label: 'Product' },
   { href: '/#features', label: 'Features' },
   { href: '/#benchmarks', label: 'Benchmarks' },
-  { href: '/#architecture', label: 'Architecture' },
+  { href: '/architecture', label: 'Architecture' },
 ];
 
 /** Developer references: footer only, kept out of the product header. */

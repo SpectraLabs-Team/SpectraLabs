@@ -5,6 +5,7 @@ import { useRef } from 'react';
 import Link from 'next/link';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
+import { useLaunchStudio } from './Header';
 import { DustOverlay } from './HeroScene';
 import { TickerChips } from './HoloCards';
 
@@ -18,6 +19,7 @@ export function Hero() {
   const reduce = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
   const tickerRef = useRef<HTMLDivElement>(null);
+  const launch = useLaunchStudio();
 
   const rise = (delay: number) =>
     reduce
@@ -104,22 +106,20 @@ export function Hero() {
               ))}
             </motion.div>
             <motion.div {...rise(0.22)} className="mt-8 flex flex-wrap items-center gap-3.5 lg:[@media(max-height:760px)]:mt-5">
-              <Link
-                href="/studio"
+              <button
+                type="button"
+                onClick={launch}
                 className="group inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#00F2FE] via-[#38BDF8] to-[#0284C7] px-6 py-3.5 text-sm font-bold text-[#03131A] shadow-[0_0_30px_rgba(0,242,254,0.5)] transition-all hover:shadow-[0_0_45px_rgba(0,242,254,0.75)] hover:brightness-110 active:scale-[0.98]"
               >
                 Launch Quant Studio{' '}
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-              </Link>
-              <button
-                type="button"
-                onClick={() => {
-                  document.getElementById('architecture')?.scrollIntoView({ behavior: 'smooth' });
-                }}
+              </button>
+              <Link
+                href="/architecture"
                 className="inline-flex cursor-pointer items-center rounded-xl border border-white/25 bg-[#040711]/60 px-6 py-3.5 text-sm font-semibold text-white backdrop-blur-md transition-all hover:border-white/45 hover:bg-white/10 active:scale-[0.98]"
               >
                 View Architecture
-              </button>
+              </Link>
             </motion.div>
           </div>
         </div>

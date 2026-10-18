@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from 'next';
+import { AuthModal } from '@/components/auth/AuthModal';
+import { AuthProvider } from '@/lib/auth';
 import { ThemeProvider, themeInitScript } from '@/lib/theme';
 import './globals.css';
 
@@ -26,7 +28,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: scrollResetScript }} />
       </head>
       <body className="min-h-screen">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <AuthProvider>
+            {children}
+            <AuthModal />
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

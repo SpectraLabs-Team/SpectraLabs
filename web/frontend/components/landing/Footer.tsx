@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Github } from 'lucide-react';
 import { Logo } from '@/components/ui/primitives';
-import { GITHUB_URL, NAV } from '@/lib/site';
+import { DEV_LINKS, GITHUB_URL, NAV } from '@/lib/site';
 
 export function Footer() {
   return (
@@ -12,7 +12,7 @@ export function Footer() {
           <p className="mt-1.5 pl-[38px] text-xs text-ink/50">Evidence-First Quantitative Research</p>
         </div>
         <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2 lg:mx-auto">
-          {NAV.map((l) =>
+          {[...NAV, ...DEV_LINKS].map((l) =>
             l.external ? (
               <a key={l.label} href={l.href} target="_blank" rel="noreferrer" className="text-[13px] text-ink/60 transition hover:text-ink">
                 {l.label}

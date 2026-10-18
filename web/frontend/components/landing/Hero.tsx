@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
@@ -21,19 +22,69 @@ const BADGES = [
 export function Hero() {
   const reduce = useReducedMotion();
   const data = useHeroData();
+  const sectionRef = useRef<HTMLElement>(null);
+  const plateRef = useRef<HTMLDivElement>(null);
+  const dustRef = useRef<HTMLDivElement>(null);
+
+  // Mouse parallax: the plate shifts up to ±12px and the dust ±22px against the cursor, eased per
+  // frame. Transform-only on GPU layers; off for touch devices and reduced motion.
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || reduce || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+    const target = { x: 0, y: 0 };
+    const cur = { x: 0, y: 0 };
+    let raf = 0;
+    const tick = () => {
+      cur.x += (target.x - cur.x) * 0.06;
+      cur.y += (target.y - cur.y) * 0.06;
+      if (plateRef.current) plateRef.current.style.transform = `translate3d(${(-cur.x * 12).toFixed(2)}px, ${(-cur.y * 8).toFixed(2)}px, 0)`;
+      if (dustRef.current) dustRef.current.style.transform = `translate3d(${(-cur.x * 22).toFixed(2)}px, ${(-cur.y * 14).toFixed(2)}px, 0)`;
+      raf = Math.abs(target.x - cur.x) + Math.abs(target.y - cur.y) > 0.001 ? requestAnimationFrame(tick) : 0;
+    };
+    const kick = () => {
+      if (!raf) raf = requestAnimationFrame(tick);
+    };
+    const onMove = (e: PointerEvent) => {
+      const r = section.getBoundingClientRect();
+      target.x = ((e.clientX - r.left) / r.width) * 2 - 1;
+      target.y = ((e.clientY - r.top) / r.height) * 2 - 1;
+      kick();
+    };
+    const onLeave = () => {
+      target.x = 0;
+      target.y = 0;
+      kick();
+    };
+    section.addEventListener('pointermove', onMove, { passive: true });
+    section.addEventListener('pointerleave', onLeave);
+    return () => {
+      cancelAnimationFrame(raf);
+      section.removeEventListener('pointermove', onMove);
+      section.removeEventListener('pointerleave', onLeave);
+    };
+  }, [reduce]);
+
   const rise = (delay: number) => (reduce ? {} : { initial: { opacity: 0, y: 18 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.6, delay, ease: [0.22, 1, 0.36, 1] } });
 
   return (
-    <section className="dark relative isolate overflow-hidden bg-[#040711] text-slate-200">
-      {/* Backdrop plate */}
-      <Image src="/images/hero-backdrop.webp" alt="" fill priority sizes="100vw" className="-z-20 object-cover object-[70%_bottom] opacity-95" />
+    <section ref={sectionRef} className="dark relative isolate overflow-hidden bg-[#040711] text-slate-200">
+      {/* Backdrop plate. Outer layer: mouse parallax. Inner layer: 20s ambient drift, scaling about the
+          galaxy. Both are oversized past the section edges so movement never reveals an edge.
+          Anchored top-right (the spiral sits at the artwork's right edge) so it stays whole in frame. */}
+      <div ref={plateRef} aria-hidden className="pointer-events-none absolute -bottom-6 -left-8 -right-6 -top-4 -z-20 transform-gpu will-change-transform">
+        <div className="absolute inset-0 transform-gpu animate-hero-drift will-change-transform [transform-origin:84%_22%]">
+          <Image src="/images/hero-backdrop.webp" alt="" fill priority sizes="100vw" className="object-cover object-right-top opacity-95" />
+        </div>
+      </div>
       {/* Vignette + ambient glows so the plate blends into the page */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(90deg,#040711_0%,rgba(4,7,17,0.85)_22%,rgba(4,7,17,0.25)_48%,transparent_70%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_120%_90%_at_60%_40%,transparent_55%,rgba(4,7,17,0.85)_100%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(40%_35%_at_20%_30%,rgba(34,211,238,0.10),transparent_70%),radial-gradient(35%_30%_at_78%_22%,rgba(139,92,246,0.14),transparent_70%)]" />
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-28 bg-gradient-to-b from-[#040711] to-transparent" />
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-20 bg-gradient-to-b from-[#040711]/70 to-transparent" />
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-24 bg-gradient-to-t from-canvas to-transparent" />
-      <DustOverlay className="pointer-events-none absolute inset-0 -z-10 h-full w-full" />
+      <div ref={dustRef} aria-hidden className="pointer-events-none absolute -inset-6 -z-10 transform-gpu will-change-transform">
+        <DustOverlay className="h-full w-full" />
+      </div>
 
       <div className="mx-auto flex min-h-[640px] max-w-[1320px] flex-col px-5 pb-6 pt-24 sm:px-8 lg:h-[100svh] lg:max-h-[860px] lg:pt-[104px] [@media(max-height:760px)]:min-h-[600px] lg:[@media(max-height:760px)]:pt-[80px]">
         <div className="grid flex-1 items-start gap-10 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)] lg:gap-12 xl:grid-cols-[minmax(0,620px)_minmax(0,1fr)]">

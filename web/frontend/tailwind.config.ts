@@ -36,7 +36,7 @@ const config: Config = {
         'pulse-dot': { '0%,100%': { opacity: '1', transform: 'scale(1)' }, '50%': { opacity: '0.45', transform: 'scale(0.85)' } },
         shimmer: { from: { backgroundPosition: '200% 0' }, to: { backgroundPosition: '-200% 0' } },
         float: { '0%,100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-8px)' } },
-        'hero-drift': { '0%': { transform: 'scale(1) translate3d(0, 0, 0)' }, '100%': { transform: 'scale(1.04) translate3d(-1%, -0.5%, 0)' } },
+        'hero-drift': { '0%': { transform: 'translate3d(0, 0, 0)' }, '100%': { transform: 'translate3d(-10px, -6px, 0)' } },
       },
       animation: {
         'pulse-dot': 'pulse-dot 2s ease-in-out infinite',

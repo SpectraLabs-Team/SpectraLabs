@@ -15,12 +15,15 @@ export const viewport: Viewport = {
   ],
 };
 
+const scrollResetScript = `(function(){try{if('scrollRestoration' in history){history.scrollRestoration='manual'}if(window.location.hash){history.replaceState(null,'',window.location.pathname);window.scrollTo(0,0)}}catch(e){}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     // `dark` is the default; the init script restores a stored "light" choice before paint.
     <html lang="en" className="dark font-sans" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script dangerouslySetInnerHTML={{ __html: scrollResetScript }} />
       </head>
       <body className="min-h-screen">
         <ThemeProvider>{children}</ThemeProvider>

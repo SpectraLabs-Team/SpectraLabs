@@ -3,155 +3,173 @@
 @tailwind utilities;
 
 :root {
-  /* QuantForge Dark Terminal Theme */
-  --background: #0a0a0b;
-  --surface: #111113;
-  --surface-elevated: #1a1a1d;
-  --surface-hover: #222225;
-  --border: #2a2a2e;
-  --border-subtle: #1f1f23;
-  
-  --foreground: #e4e4e7;
-  --foreground-muted: #a1a1aa;
-  --foreground-subtle: #71717a;
-  
-  --accent-primary: #3b82f6;
-  --accent-primary-dim: rgba(59, 130, 246, 0.15);
-  --accent-secondary: #8b5cf6;
-  --accent-success: #10b981;
-  --accent-warning: #f59e0b;
-  --accent-danger: #ef4444;
-  
-  --gpu-color: #00d4ff;
-  --cpu-color: #ff6b6b;
-  --omp-color: #ffd93d;
-  
-  --grid-color: rgba(255, 255, 255, 0.03);
-  
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+  color-scheme: dark;
+  --bg: #07090e;
+  --bg-raised: #0b0f17;
+  --grid-dot: rgba(148, 163, 184, 0.09);
+  --accent: #22d3ee;
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-/* Grid background pattern */
-.bg-grid {
-  background-image: 
-    linear-gradient(to right, var(--grid-color) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px);
-  background-size: 40px 40px;
-}
-
-.engine-scene {
-  transform-style: preserve-3d;
-  background-image: radial-gradient(ellipse at 78% 40%, rgba(18, 78, 125, 0.25), transparent 52%);
-}
-
-.scene-grid {
-  background-image: linear-gradient(rgba(148, 190, 230, 0.055) 1px, transparent 1px), linear-gradient(90deg, rgba(148, 190, 230, 0.055) 1px, transparent 1px);
-  background-size: 28px 28px;
-  mask-image: linear-gradient(120deg, transparent 10%, black 60%, transparent 100%);
-}
-
-.scene-node {
-  transform-style: preserve-3d;
-  box-shadow: 0 16px 30px rgba(0, 5, 18, 0.34), inset 0 1px rgba(255, 255, 255, 0.06);
-}
-
-.scene-node-1 { transform: translateZ(4px); }
-.scene-node-2 { transform: translateZ(22px); }
-.scene-node-3 { transform: translateZ(8px); }
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+  }
+  body {
+    @apply bg-obsidian-950 font-sans text-slate-200 antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  ::selection {
+    background: rgba(34, 211, 238, 0.3);
+    color: #fff;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent/70 ring-offset-2 ring-offset-obsidian-950;
   }
 }
 
-/* Custom scrollbar */
+@layer components {
+  /* Frosted glass surface */
+  .glass {
+    @apply rounded-2xl border border-white/10 bg-slate-900/60 shadow-2xl backdrop-blur-md;
+  }
+  .glass-subtle {
+    @apply rounded-xl border border-white/[0.07] bg-white/[0.02];
+  }
+
+  /* All financial figures: monospace, tabular, slashed zero — no layout jitter. */
+  .num {
+    @apply font-mono tabular-nums;
+    font-feature-settings: 'tnum' 1, 'zero' 1;
+  }
+
+  .eyebrow {
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-accent;
+  }
+
+  .text-gradient {
+    @apply bg-gradient-to-r from-cyan-electric via-accent-ice to-[#7AA7FF] bg-clip-text text-transparent;
+  }
+
+  .btn-primary {
+    @apply relative inline-flex items-center justify-center gap-2 rounded-lg bg-accent-gradient px-4 py-2.5 text-sm font-semibold text-obsidian-950 shadow-glow transition duration-200 hover:shadow-glow-lg hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-slate-200 transition duration-200 hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-400 transition hover:bg-white/5 hover:text-slate-100;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-white/10 bg-obsidian-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 transition focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/20;
+  }
+
+  .kbd {
+    @apply rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-400;
+  }
+}
+
+@layer utilities {
+  .bg-dot-grid {
+    background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .mask-fade-b {
+    mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+  }
+  .mask-radial {
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 30%, transparent 75%);
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Glowing hover border for bento cards: follows the cursor via --mx/--my set in JS. */
+.glow-card {
+  position: relative;
+  isolation: isolate;
+}
+.glow-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgba(34, 211, 238, 0.65), rgba(56, 189, 248, 0.15) 35%, transparent 60%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transition: opacity 300ms ease;
+  pointer-events: none;
+  z-index: 1;
+}
+.glow-card:hover::before {
+  opacity: 1;
+}
+
+/* Range input */
+input[type='range'].range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #22d3ee 0%, #38bdf8 var(--fill, 50%), rgba(255, 255, 255, 0.08) var(--fill, 50%));
+  cursor: pointer;
+}
+input[type='range'].range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 18px;
+  width: 18px;
+  border-radius: 999px;
+  background: #e0faff;
+  border: 3px solid #22d3ee;
+  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.18), 0 0 16px rgba(34, 211, 238, 0.6);
+  transition: transform 120ms ease;
+}
+input[type='range'].range:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+input[type='range'].range::-moz-range-thumb {
+  height: 14px;
+  width: 14px;
+  border-radius: 999px;
+  background: #e0faff;
+  border: 3px solid #22d3ee;
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.6);
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
+}
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-
-::-webkit-scrollbar-track {
-  background: var(--surface);
-}
-
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 4px;
+  background: rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--border-subtle);
+/* Recharts: keep tooltips and axes on-brand */
+.recharts-cartesian-axis-tick-value {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
-/* Monospace typography for numbers */
-.font-mono-numbers {
-  font-family: var(--font-mono);
-  font-feature-settings: 'tnum' 1, 'zero' 1;
-}
-
-/* Glass effect */
-.glass {
-  background: rgba(17, 17, 19, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-/* Border glow effect */
-.border-glow {
-  box-shadow: 0 0 0 1px var(--border-subtle);
-}
-
-.border-glow-accent {
-  box-shadow: 0 0 0 1px var(--accent-primary-dim);
-}
-
-/* Animation utilities */
-@keyframes pulse-subtle {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-.animate-pulse-subtle {
-  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-@keyframes scanline {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(100%); }
-}
-
-.scanline::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    rgba(59, 130, 246, 0.03),
-    transparent
-  );
-  animation: scanline 8s linear infinite;
-  pointer-events: none;
-}
-
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

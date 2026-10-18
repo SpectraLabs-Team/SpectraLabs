@@ -1,112 +1,80 @@
-import { RiskResult, BenchmarkResult, StressResult } from './types';
+import type {
+  BenchmarkResult,
+  CpuTelemetry,
+  EngineScenario,
+  HealthResponse,
+  RiskRequest,
+  RiskResult,
+  StressResult,
+} from './types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
+export const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
 
-export async function calculateRisk(
-  portfolioCsv: string,
-  metric: string = 'var',
-  confidence: number = 0.99,
-  simulations: number = 1000000
-): Promise<RiskResult> {
-  const response = await fetch(`${API_BASE}/api/risk`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      portfolio_csv: portfolioCsv,
-      metric,
-      confidence,
-      simulations,
-    }),
-  });
-
-  if (!response.ok) throw new Error(await readApiError(response, 'Failed to calculate risk'));
-
-  return response.json();
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
 }
 
-export async function runBenchmark(
-  portfolioCsv: string,
-  simulations: number = 100000,
-  repetitions: number = 5,
-  warmups: number = 1
-): Promise<BenchmarkResult> {
-  const response = await fetch(`${API_BASE}/api/benchmark`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      portfolio_csv: portfolioCsv,
-      simulations,
-      repetitions,
-      warmups,
-    }),
-  });
-
-  if (!response.ok) throw new Error(await readApiError(response, 'Failed to run benchmark'));
-
-  return response.json();
-}
-
-export async function runStressTest(
-  portfolioCsv: string,
-  scenario: string = 'market-crash'
-): Promise<StressResult> {
-  const response = await fetch(`${API_BASE}/api/stress`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      portfolio_csv: portfolioCsv,
-      scenario,
-    }),
-  });
-
-  if (!response.ok) throw new Error(await readApiError(response, 'Failed to run stress test'));
-
-  return response.json();
-}
-
-async function readApiError(response: Response, fallback: string): Promise<string> {
+async function request<T>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), init?.timeoutMs ?? 30_000);
+  let response: Response;
   try {
-    const body = await response.json();
-    return body.detail || fallback;
-  } catch {
-    return fallback;
+    response = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: init?.signal ?? controller.signal,
+      headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') throw new ApiError('The engine took too long to respond.', 0);
+    throw new ApiError(`Cannot reach the engine at ${API_BASE}. Start it with \`cargo run --release -p spectra-api\`.`, 0);
+  } finally {
+    clearTimeout(timer);
   }
-}
-
-async function getResource<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`);
-  if (!response.ok) throw new Error(await readApiError(response, `Could not load ${path}`));
-  return response.json();
-}
-
-export const getCpuTelemetry = () => getResource<{
-  cpu_utilization: number; cpu_cores: number; cpu_threads: number;
-  memory_utilization: number; memory_used_gb: number; memory_total_gb: number; source: string;
-}>('/api/telemetry/cpu');
-
-export const getWorkerTelemetry = () => getResource<{
-  workers: Array<{ worker_id: number; utilization: number }>;
-  total_workers: number; average_utilization: number; source: string;
-}>('/api/telemetry/workers');
-
-export const getGpuTelemetry = () => getResource<{
-  available: boolean; utilization: number; memory_used_mb: number;
-  memory_total_mb: number; temperature_c: number; message?: string;
-}>('/api/telemetry/gpu');
-
-export async function getSamplePortfolio(): Promise<string> {
-  const response = await fetch(`${API_BASE}/api/sample-portfolio`);
   if (!response.ok) {
-    throw new Error('Failed to get sample portfolio');
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === 'string') detail = body.detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(detail, response.status);
   }
-  const data = await response.json();
-  return data.csv;
+  return response.json() as Promise<T>;
 }
 
-export async function getHealth(): Promise<{ status: string; cli_exists: boolean }> {
-  const response = await fetch(`${API_BASE}/health`);
-  if (!response.ok) {
-    throw new Error('Failed to get health status');
-  }
-  return response.json();
-}
+const post = <T>(path: string, body: unknown, timeoutMs?: number) =>
+  request<T>(path, { method: 'POST', body: JSON.stringify(body), timeoutMs });
+
+export const getHealth = () => request<HealthResponse>('/health', { timeoutMs: 4_000 });
+
+export const getSamplePortfolio = () => request<{ csv: string }>('/api/sample-portfolio').then((r) => r.csv);
+
+export const getCpuTelemetry = () => request<CpuTelemetry>('/api/telemetry/cpu', { timeoutMs: 4_000 });
+
+export const calculateRisk = (body: RiskRequest) => post<RiskResult>('/api/risk', body);
+
+export const runStressTest = (body: {
+  portfolio_csv: string;
+  scenario: EngineScenario;
+  simulations: number;
+  horizon_days: number;
+  backend?: string;
+}) => post<StressResult>('/api/stress', body);
+
+/** The API refuses runs whose simulations × (repetitions + warmups) × 3 backends exceed 10M paths. */
+export const BENCHMARK_PATH_BUDGET = 10_000_000;
+
+export const benchmarkFits = (simulations: number, repetitions: number, warmups: number) =>
+  simulations * (repetitions + warmups) * 3 <= BENCHMARK_PATH_BUDGET;
+
+export const runBenchmark = (body: {
+  portfolio_csv: string;
+  simulations: number;
+  repetitions: number;
+  warmups: number;
+}) => post<BenchmarkResult>('/api/benchmark', body, 120_000);

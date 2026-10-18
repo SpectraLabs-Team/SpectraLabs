@@ -10,7 +10,9 @@ export interface Rect {
 
 /** The spiral, as a rotated ellipse in hero-backdrop.webp pixel coordinates (1672×941). */
 export const PLATE = { w: 1672, h: 941 };
-const SPIRAL = { cx: 1405, cy: 192, a: 292, b: 118, rot: (-21 * Math.PI) / 180 };
+// The plate's spiral was re-composited 150px left / 28px down of the original render so it sits
+// fully inside the frame (see web/frontend/public/images/hero-backdrop.webp).
+const SPIRAL = { cx: 1255, cy: 220, a: 292, b: 118, rot: (-21 * Math.PI) / 180 };
 /** Ambient drift (see tailwind `hero-drift`): scale 1 → 1.04 about 84%/22% of the plate, plus a -1%/-0.5% shift. */
 const DRIFT = { scale: 1.04, ox: 0.84, oy: 0.22, tx: -0.01, ty: -0.005 };
 
@@ -86,11 +88,24 @@ const FLOAT = 8;
 const STEP = 4;
 
 /**
- * Kernel: highest free spot, as far right as it can sit beside the galaxy (i.e. in the dark space
- * to its left). Risk: below Kernel with a 40px gap (24px if space is short). Ledger: far right,
- * below the galaxy, clear of both. A card that cannot be placed returns null and is not shown.
+ * Kernel: highest free spot, as far right as it can sit (beside the galaxy when there is room).
+ * Risk: 40px below Kernel (32/24px if short); if that cannot fit, stepped diagonally to Kernel's right.
+ * Ledger: far right, clear of both. Several "lanes" (space reserved right of Kernel) are tried and the
+ * arrangement that fits the most cards wins, preferring the earlier (more compact) one on ties.
+ * A card that cannot be placed returns null and is not shown.
  */
-export function layoutHeroCards({ sizes, ellipses, minX, maxX, minY, maxY }: LayoutInput): (Rect | null)[] {
+export function layoutHeroCards(input: LayoutInput): (Rect | null)[] {
+  const [, rk, lg] = input.sizes;
+  let best: (Rect | null)[] = [null, null, null];
+  for (const lane of [lg.w + 24, rk.w + lg.w + 48, 0]) {
+    const r = placeWithLane(input, lane);
+    if (r.filter(Boolean).length > best.filter(Boolean).length) best = r;
+    if (best.every(Boolean)) break;
+  }
+  return best;
+}
+
+function placeWithLane({ sizes, ellipses, minX, maxX, minY, maxY }: LayoutInput, lane: number): (Rect | null)[] {
   const free = (r: Rect, placed: (Rect | null)[], gap = 20) => {
     const hit = { ...r, y: r.y - FLOAT, h: r.h + FLOAT };
     if (r.x < minX || r.x + r.w > maxX || r.y < minY || r.y + r.h > maxY) return false;
@@ -99,35 +114,38 @@ export function layoutHeroCards({ sizes, ellipses, minX, maxX, minY, maxY }: Lay
   };
 
   const [k, rk, lg] = sizes;
-  // Kernel leaves a Ledger-wide lane on the right when it can, so reading order stays
-  // Kernel → Risk (below) → Ledger (right). Retry without the lane if nothing fits.
   let kernel: Rect | null = null;
-  for (const lane of [lg.w + 24, 0]) {
-    for (let y = minY; !kernel && y + k.h <= maxY; y += STEP)
-      for (let x = maxX - k.w - lane; x >= minX; x -= STEP) {
-        const r = { x, y, ...k };
-        if (free(r, [])) {
-          kernel = r;
+  for (let y = minY; !kernel && y + k.h <= maxY; y += STEP)
+    for (let x = maxX - k.w - lane; x >= minX; x -= STEP) {
+      const r = { x, y, ...k };
+      if (free(r, [])) {
+        kernel = r;
+        break;
+      }
+    }
+  if (!kernel) return [null, null, null];
+
+  let riskCard: Rect | null = null;
+  for (const gapV of [40, 32, 24]) {
+    for (let y = kernel.y + kernel.h + gapV; !riskCard && y + rk.h <= maxY; y += STEP)
+      for (let x = Math.min(maxX - rk.w, kernel.x + 48); x >= minX; x -= STEP) {
+        const r = { x, y, ...rk };
+        if (free(r, [kernel], gapV - FLOAT)) {
+          riskCard = r;
           break;
         }
       }
-    if (kernel) break;
+    if (riskCard) break;
   }
-
-  let riskCard: Rect | null = null;
-  if (kernel) {
-    for (const gapV of [40, 32, 24]) {
-      for (let y = kernel.y + kernel.h + gapV; !riskCard && y + rk.h <= maxY; y += STEP)
-        for (let x = Math.min(maxX - rk.w, kernel.x + 48); x >= minX; x -= STEP) {
-          const r = { x, y, ...rk };
-          if (free(r, [kernel], gapV - FLOAT)) {
-            riskCard = r;
-            break;
-          }
-        }
-      if (riskCard) break;
+  // Diagonal step to the right of Kernel when there is no room below it.
+  for (let y = kernel.y + 24; !riskCard && y + rk.h <= maxY; y += STEP)
+    for (let x = kernel.x + kernel.w + 16; x + rk.w <= maxX - (lane > rk.w ? lg.w + 16 : 0); x += STEP) {
+      const r = { x, y, ...rk };
+      if (free(r, [kernel], 16)) {
+        riskCard = r;
+        break;
+      }
     }
-  }
 
   // Ledger hugs the right edge: search a narrow right-hand band first, widening only if needed.
   let ledger: Rect | null = null;
@@ -136,13 +154,12 @@ export function layoutHeroCards({ sizes, ellipses, minX, maxX, minY, maxY }: Lay
     for (let y = minY; !ledger && y + lg.h <= maxY; y += STEP)
       for (let x = maxX - lg.w; x >= xMin; x -= STEP) {
         const r = { x, y, ...lg };
-        if (free(r, [kernel, riskCard], 24)) {
+        if (free(r, [kernel, riskCard], 16)) {
           ledger = r;
           break;
         }
       }
     if (ledger) break;
   }
-
   return [kernel, riskCard, ledger];
 }

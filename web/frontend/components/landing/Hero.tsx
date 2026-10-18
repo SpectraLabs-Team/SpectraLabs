@@ -119,9 +119,9 @@ export function Hero() {
         <Image src="/images/hero-backdrop.webp" alt="" fill priority sizes="100vw" className="object-cover object-right-top opacity-95" />
       </div>
       {/* Vignette + ambient glows so the plate blends into the page */}
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(90deg,#040711_0%,rgba(4,7,17,0.85)_22%,rgba(4,7,17,0.25)_48%,transparent_70%)]" />
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(4,7,17,0.72)_0%,rgba(4,7,17,0.45)_25%,rgba(4,7,17,0.12)_45%,transparent_60%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_120%_90%_at_60%_40%,transparent_55%,rgba(4,7,17,0.85)_100%)]" />
-      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(40%_35%_at_20%_30%,rgba(34,211,238,0.10),transparent_70%),radial-gradient(35%_30%_at_78%_22%,rgba(139,92,246,0.14),transparent_70%)]" />
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_18%_42%,rgba(0,240,255,0.12),transparent_60%),radial-gradient(35%_30%_at_70%_24%,rgba(139,92,246,0.12),transparent_70%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-20 bg-gradient-to-b from-[#040711]/70 to-transparent" />
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-24 bg-gradient-to-t from-canvas to-transparent" />
       {/* Foreground parallax layer: dust + holo cards move together against the drifting plate. */}
@@ -144,7 +144,7 @@ export function Hero() {
             <motion.h1 {...rise(0.06)} className="mt-4 text-[2.4rem] font-bold leading-[1.07] tracking-[-0.03em] text-white sm:text-[2.9rem] xl:text-[3.1rem] lg:[@media(max-height:760px)]:mt-3 lg:[@media(max-height:760px)]:text-[2.5rem]">
               Institutional Quantitative <br className="hidden lg:inline" />
               Research &amp;{' '}
-              <span className="bg-gradient-to-r from-[#00F2FE] via-[#38BDF8] to-[#22D3EE] bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-[#00F2FE] via-[#38BDF8] to-[#22D3EE] bg-clip-text text-transparent drop-shadow-[0_0_25px_rgba(0,242,254,0.4)]">
                 Real-Time <br className="hidden lg:inline" />
                 Portfolio Risk
               </span>
@@ -154,7 +154,7 @@ export function Hero() {
             </motion.p>
             <motion.div {...rise(0.16)} className="mt-5 flex flex-wrap gap-2 lg:[@media(max-height:760px)]:mt-4">
               {BADGES.map((b) => (
-                <span key={b.label} className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-[#06122a]/60 px-3 py-1.5 text-[12px] text-slate-200 backdrop-blur">
+                <span key={b.label} className="inline-flex items-center gap-2 rounded-full border border-cyan-500/25 bg-[#06122a]/80 px-3 py-1.5 text-[12px] text-slate-200 shadow-[0_0_12px_rgba(34,211,238,0.15)]">
                   <span className={`h-2 w-2 rounded-full ${b.dot}`} />
                   {b.label}
                 </span>
@@ -180,8 +180,12 @@ export function Hero() {
         </div>
 
         {/* Tickers riding the wave troughs */}
-        <div ref={tickerRef} className="mt-8 flex flex-wrap items-end justify-center gap-3 sm:gap-5 lg:mt-2 lg:justify-between lg:px-[6%]">
-          <TickerChips />
+        <div ref={tickerRef} className="relative mt-8 lg:mt-2">
+          <div className="flex flex-wrap items-end justify-center gap-3 sm:gap-5 lg:justify-between lg:px-[6%]">
+            <TickerChips />
+          </div>
+          {/* Out of flow so it costs the hero no height. */}
+          <p className="mt-2 text-center font-mono text-[10px] tracking-wide text-slate-500 lg:absolute lg:-bottom-5 lg:right-[6%] lg:mt-0">Illustrative quotes · no live market feed</p>
         </div>
       </div>
     </section>

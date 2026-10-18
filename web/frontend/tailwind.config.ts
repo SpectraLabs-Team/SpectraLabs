@@ -21,8 +21,8 @@ const config: Config = {
         onaccent: '#03131A',
       },
       fontFamily: {
-        sans: ['var(--font-sans, Inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['var(--font-mono, "JetBrains Mono")', 'SF Mono', 'ui-monospace', 'monospace'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'system-ui', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'SF Mono', 'ui-monospace', 'Menlo', 'monospace'],
       },
       boxShadow: {
         glow: '0 0 0 1px rgb(var(--accent) / 0.35), 0 0 24px -4px rgb(var(--accent) / 0.45)',

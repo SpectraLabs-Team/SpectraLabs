@@ -1,10 +1,6 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, JetBrains_Mono } from 'next/font/google';
 import { ThemeProvider, themeInitScript } from '@/lib/theme';
 import './globals.css';
-
-const sans = Inter({ subsets: ['latin'], variable: '--font-sans', display: 'swap' });
-const mono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap' });
 
 export const metadata: Metadata = {
   title: { default: 'Spectra Labs: Institutional quant research & real-time portfolio risk', template: '%s · Spectra Labs' },
@@ -22,7 +18,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     // `dark` is the default; the init script restores a stored "light" choice before paint.
-    <html lang="en" className={`dark ${sans.variable} ${mono.variable}`} suppressHydrationWarning>
+    <html lang="en" className="dark font-sans" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>

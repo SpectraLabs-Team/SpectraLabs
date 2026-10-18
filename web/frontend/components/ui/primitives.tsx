@@ -155,20 +155,27 @@ export function AnimatedValue({ value, className }: { value: string; className?:
 export function Logo({ className }: { className?: string }) {
   const gid = `sl-g-${useId().replace(/:/g, '')}`;
   return (
-    <span className={cn('flex items-center gap-2.5', className)}>
-      <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden>
+    <span className={cn('flex items-center gap-3', className)}>
+      <svg viewBox="0 0 36 36" className="h-8 w-8 drop-shadow-[0_0_12px_rgba(34,211,238,0.7)]" fill="none" aria-hidden>
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#00F2FE" />
-            <stop offset="1" stopColor="#4F8BFF" />
+            <stop offset="0%" stopColor="#00F0FF" />
+            <stop offset="50%" stopColor="#38BDF8" />
+            <stop offset="100%" stopColor="#818CF8" />
           </linearGradient>
         </defs>
-        <rect x="1" y="1" width="30" height="30" rx="8" className="fill-panel" stroke={`url(#${gid})`} strokeOpacity="0.6" />
-        <path d="M7 21 L12 14 L16 18 L21 9 L25 13" fill="none" stroke={`url(#${gid})`} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="21" cy="9" r="2" fill="#00F2FE" />
+        {/* Glowing interlocking prism loops */}
+        <path
+          d="M18 5 C24 13, 30 19, 30 24 C30 29, 25 32, 19 30 C13 28, 8 20, 11 14 C13 10, 17 6, 18 5 Z"
+          stroke={`url(#${gid})`}
+          strokeWidth="2.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="18" cy="19" r="2.5" fill="#00F0FF" />
       </svg>
-      <span className="whitespace-nowrap text-[15px] font-semibold tracking-tight text-ink">
-        Spectra <span className="text-ink/60">Labs</span>
+      <span className="whitespace-nowrap text-[16px] font-bold tracking-tight text-white">
+        Spectra <span className="font-semibold text-slate-100">Labs</span>
       </span>
     </span>
   );

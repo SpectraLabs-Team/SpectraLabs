@@ -38,7 +38,7 @@ export function Header() {
   }, []);
 
   return (
-    <header className={cn('fixed inset-x-0 top-0 z-50 transition-all duration-300', scrolled || open ? 'border-b border-ink/[0.07] bg-canvas/80 backdrop-blur-xl' : 'border-b border-transparent')}>
+    <header className={cn('fixed inset-x-0 top-0 z-50 transition-all duration-300', scrolled || open ? 'border-b border-ink/[0.07] bg-canvas/80 backdrop-blur-xl' : 'dark border-b border-transparent')}>
       <nav className="mx-auto flex h-16 max-w-[1320px] items-center gap-4 px-5 sm:px-8" aria-label="Main">
         <Link href="/" aria-label="Spectra Labs home" className="shrink-0">
           <Logo />

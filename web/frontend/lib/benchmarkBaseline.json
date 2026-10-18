@@ -1,0 +1,57 @@
+{
+  "measured": "2026-10-18",
+  "host": {
+    "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "threads": 2,
+    "os": "Linux",
+    "numpy": "2.5.3",
+    "python": "3.13.16",
+    "rustc": "rustc 1.97.0 (2d8144b78 2026-07-07)"
+  },
+  "method": {
+    "memory": "whole-process peak RSS, median of 3",
+    "repetitions": 5,
+    "warmups": 1,
+    "horizon_days": 1,
+    "confidence": 0.99,
+    "portfolio": "examples/sample_portfolio.csv"
+  },
+  "rows": [
+    {
+      "paths": 10000,
+      "rust_ms": 0.3993,
+      "rust_cpu_ms": 0.3993,
+      "rust_parallel_ms": 0.4515,
+      "numpy_ms": 0.5209,
+      "rust_mem_mb": 20.9,
+      "numpy_mem_mb": 34.7
+    },
+    {
+      "paths": 100000,
+      "rust_ms": 2.7054,
+      "rust_cpu_ms": 2.7661,
+      "rust_parallel_ms": 2.7054,
+      "numpy_ms": 4.2351,
+      "rust_mem_mb": 21.0,
+      "numpy_mem_mb": 37.8
+    },
+    {
+      "paths": 500000,
+      "rust_ms": 16.9685,
+      "rust_cpu_ms": 16.9685,
+      "rust_parallel_ms": 18.472,
+      "numpy_ms": 25.8245,
+      "rust_mem_mb": 21.0,
+      "numpy_mem_mb": 50.1
+    },
+    {
+      "paths": 1000000,
+      "rust_ms": 26.8159,
+      "rust_cpu_ms": 33.0637,
+      "rust_parallel_ms": 26.8159,
+      "numpy_ms": 35.047,
+      "rust_mem_mb": 25.7,
+      "numpy_mem_mb": 65.4
+    }
+  ]
+}

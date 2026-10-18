@@ -2,12 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme tokens as RGB triplets so Tailwind opacity modifiers work (bg-ink/10). */
 :root {
+  color-scheme: light;
+  --canvas: 248 250 252; /* #F8FAFC */
+  --panel: 255 255 255;
+  --ink: 15 23 42; /* slate-900 */
+  --accent: 8 145 178; /* cyan-600: readable on light */
+  --accent-ice: 2 132 199;
+  --violet: 99 102 241;
+  --profit: 5 150 105;
+  --loss: 225 29 72;
+  --caution: 217 119 6;
+  --grid-dot: rgba(15, 23, 42, 0.07);
+  --panel-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px -16px rgba(15, 23, 42, 0.18);
+}
+
+.dark {
   color-scheme: dark;
-  --bg: #07090e;
-  --bg-raised: #0b0f17;
+  --canvas: 5 8 17; /* #050811 */
+  --panel: 11 15 23;
+  --ink: 241 245 249;
+  --accent: 34 211 238; /* #22D3EE */
+  --accent-ice: 56 189 248;
+  --violet: 139 92 246;
+  --profit: 16 185 129;
+  --loss: 244 63 94;
+  --caution: 245 158 11;
   --grid-dot: rgba(148, 163, 184, 0.09);
-  --accent: #22d3ee;
+  --panel-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 24px 48px -24px rgba(0, 0, 0, 0.8);
 }
 
 @layer base {
@@ -16,57 +39,49 @@
     scroll-padding-top: 5rem;
   }
   body {
-    @apply bg-obsidian-950 font-sans text-slate-200 antialiased;
+    @apply bg-canvas font-sans text-ink/90 antialiased transition-colors duration-300;
     font-feature-settings: 'cv11', 'ss01';
   }
   ::selection {
-    background: rgba(34, 211, 238, 0.3);
-    color: #fff;
+    background: rgb(var(--accent) / 0.3);
   }
   :focus-visible {
-    @apply outline-none ring-2 ring-accent/70 ring-offset-2 ring-offset-obsidian-950;
+    @apply outline-none ring-2 ring-accent/70 ring-offset-2 ring-offset-canvas;
   }
 }
 
 @layer components {
-  /* Frosted glass surface */
   .glass {
-    @apply rounded-2xl border border-white/10 bg-slate-900/60 shadow-2xl backdrop-blur-md;
+    @apply rounded-2xl border border-ink/10 bg-panel/70 shadow-panel backdrop-blur-md dark:bg-slate-900/60;
   }
   .glass-subtle {
-    @apply rounded-xl border border-white/[0.07] bg-white/[0.02];
+    @apply rounded-xl border border-ink/[0.07] bg-ink/[0.02];
   }
-
-  /* All financial figures: monospace, tabular, slashed zero — no layout jitter. */
+  /* Financial figures: monospace, tabular, slashed zero — no layout jitter. */
   .num {
     @apply font-mono tabular-nums;
     font-feature-settings: 'tnum' 1, 'zero' 1;
   }
-
   .eyebrow {
     @apply font-mono text-[11px] font-medium uppercase tracking-[0.18em] text-accent;
   }
-
   .text-gradient {
-    @apply bg-gradient-to-r from-cyan-electric via-accent-ice to-[#7AA7FF] bg-clip-text text-transparent;
+    @apply bg-gradient-to-r from-cyan-500 via-sky-500 to-indigo-500 bg-clip-text text-transparent dark:from-[#00F2FE] dark:via-[#38BDF8] dark:to-[#7AA7FF];
   }
-
   .btn-primary {
-    @apply relative inline-flex items-center justify-center gap-2 rounded-lg bg-accent-gradient px-4 py-2.5 text-sm font-semibold text-obsidian-950 shadow-glow transition duration-200 hover:shadow-glow-lg hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none;
+    @apply relative inline-flex items-center justify-center gap-2 rounded-lg bg-accent-gradient px-4 py-2.5 text-sm font-semibold text-onaccent shadow-glow transition duration-200 hover:shadow-glow-lg hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none;
   }
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-slate-200 transition duration-200 hover:border-white/20 hover:bg-white/[0.06] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-ink/15 bg-ink/[0.03] px-4 py-2.5 text-sm font-medium text-ink/90 transition duration-200 hover:border-ink/25 hover:bg-ink/[0.06] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-ghost {
-    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-slate-400 transition hover:bg-white/5 hover:text-slate-100;
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-ink/60 transition hover:bg-ink/5 hover:text-ink;
   }
-
   .input {
-    @apply w-full rounded-lg border border-white/10 bg-obsidian-950/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 transition focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/20;
+    @apply w-full rounded-lg border border-ink/10 bg-canvas/70 px-3 py-2 text-sm text-ink placeholder:text-ink/35 transition focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/20;
   }
-
   .kbd {
-    @apply rounded border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-slate-400;
+    @apply rounded border border-ink/10 bg-ink/5 px-1.5 py-0.5 font-mono text-[10px] text-ink/60;
   }
 }
 
@@ -86,7 +101,7 @@
   }
 }
 
-/* Glowing hover border for bento cards: follows the cursor via --mx/--my set in JS. */
+/* Glowing hover border: follows the cursor via --mx/--my set in JS. */
 .glow-card {
   position: relative;
   isolation: isolate;
@@ -97,7 +112,7 @@
   inset: -1px;
   border-radius: inherit;
   padding: 1px;
-  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgba(34, 211, 238, 0.65), rgba(56, 189, 248, 0.15) 35%, transparent 60%);
+  background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgb(var(--accent) / 0.7), rgb(var(--accent-ice) / 0.15) 35%, transparent 60%);
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
@@ -116,7 +131,7 @@ input[type='range'].range {
   appearance: none;
   height: 6px;
   border-radius: 999px;
-  background: linear-gradient(to right, #22d3ee 0%, #38bdf8 var(--fill, 50%), rgba(255, 255, 255, 0.08) var(--fill, 50%));
+  background: linear-gradient(to right, rgb(var(--accent)) 0%, rgb(var(--accent-ice)) var(--fill, 50%), rgb(var(--ink) / 0.1) var(--fill, 50%));
   cursor: pointer;
 }
 input[type='range'].range::-webkit-slider-thumb {
@@ -124,9 +139,9 @@ input[type='range'].range::-webkit-slider-thumb {
   height: 18px;
   width: 18px;
   border-radius: 999px;
-  background: #e0faff;
-  border: 3px solid #22d3ee;
-  box-shadow: 0 0 0 4px rgba(34, 211, 238, 0.18), 0 0 16px rgba(34, 211, 238, 0.6);
+  background: rgb(var(--panel));
+  border: 3px solid rgb(var(--accent));
+  box-shadow: 0 0 0 4px rgb(var(--accent) / 0.18), 0 0 16px rgb(var(--accent) / 0.5);
   transition: transform 120ms ease;
 }
 input[type='range'].range:active::-webkit-slider-thumb {
@@ -136,26 +151,23 @@ input[type='range'].range::-moz-range-thumb {
   height: 14px;
   width: 14px;
   border-radius: 999px;
-  background: #e0faff;
-  border: 3px solid #22d3ee;
-  box-shadow: 0 0 16px rgba(34, 211, 238, 0.6);
+  background: rgb(var(--panel));
+  border: 3px solid rgb(var(--accent));
 }
 
-/* Scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
+  scrollbar-color: rgb(var(--ink) / 0.18) transparent;
 }
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.18);
+  background: rgb(var(--ink) / 0.16);
   border-radius: 8px;
 }
 
-/* Recharts: keep tooltips and axes on-brand */
 .recharts-cartesian-axis-tick-value {
   font-family: var(--font-mono), ui-monospace, monospace;
   font-variant-numeric: tabular-nums;

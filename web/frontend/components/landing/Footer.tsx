@@ -1,71 +1,40 @@
 import Link from 'next/link';
+import { Github } from 'lucide-react';
 import { Logo } from '@/components/ui/primitives';
-import { GITHUB_URL } from '@/lib/site';
-
-const cols = [
-  {
-    title: 'Product',
-    links: [
-      { label: 'Risk & Stress Lab', href: '/studio?tab=risk' },
-      { label: 'Portfolio Studio', href: '/studio?tab=portfolio' },
-      { label: 'Hardware Benchmarks', href: '/studio?tab=benchmark' },
-    ],
-  },
-  {
-    title: 'Platform',
-    links: [
-      { label: 'Features', href: '/#features' },
-      { label: 'Benchmarks', href: '/#benchmarks' },
-      { label: 'Architecture', href: '/#architecture' },
-    ],
-  },
-  {
-    title: 'Source',
-    links: [
-      { label: 'GitHub', href: GITHUB_URL },
-      { label: 'Porting notes', href: `${GITHUB_URL}/blob/main/PORTING.md` },
-      { label: 'Known issues', href: `${GITHUB_URL}/blob/main/KNOWN_ISSUES.md` },
-    ],
-  },
-];
+import { GITHUB_URL, NAV } from '@/lib/site';
 
 export function Footer() {
   return (
-    <footer className="border-t border-white/[0.06] bg-obsidian-900/40">
-      <div className="mx-auto grid max-w-7xl gap-10 px-5 py-14 sm:px-8 md:grid-cols-[1.4fr_repeat(3,1fr)]">
+    <footer className="border-t border-ink/[0.07] bg-panel/40">
+      <div className="mx-auto flex max-w-[1320px] flex-col gap-6 px-5 py-8 sm:px-8 lg:flex-row lg:items-center">
         <div>
           <Logo />
-          <p className="mt-4 max-w-xs text-sm leading-6 text-slate-500">Evidence-first quantitative research and portfolio risk, in pure Rust.</p>
-          <p className="mt-4 max-w-sm text-[11.5px] leading-5 text-slate-600">
-            Model note: the risk engine treats the book as one aggregate GBM position (zero drift, average volatility, no correlations). It is a defensible first model, not a production market-risk model.
-          </p>
+          <p className="mt-1.5 pl-[38px] text-xs text-ink/50">Evidence-First Quantitative Research</p>
         </div>
-        {cols.map((c) => (
-          <div key={c.title}>
-            <p className="font-mono text-[10.5px] uppercase tracking-[0.16em] text-slate-500">{c.title}</p>
-            <ul className="mt-4 space-y-2.5">
-              {c.links.map((l) => (
-                <li key={l.label}>
-                  {l.href.startsWith('http') ? (
-                    <a href={l.href} target="_blank" rel="noreferrer" className="text-sm text-slate-400 transition hover:text-white">
-                      {l.label}
-                    </a>
-                  ) : (
-                    <Link href={l.href} className="text-sm text-slate-400 transition hover:text-white">
-                      {l.label}
-                    </Link>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        <nav aria-label="Footer" className="flex flex-wrap gap-x-6 gap-y-2 lg:mx-auto">
+          {NAV.map((l) =>
+            l.external ? (
+              <a key={l.label} href={l.href} target="_blank" rel="noreferrer" className="text-[13px] text-ink/60 transition hover:text-ink">
+                {l.label}
+              </a>
+            ) : (
+              <Link key={l.label} href={l.href} className="text-[13px] text-ink/60 transition hover:text-ink">
+                {l.label}
+              </Link>
+            ),
+          )}
+        </nav>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 font-mono text-[12px] text-ink/50">
+          <span>v0.7.0</span>
+          <span>Proprietary · all rights reserved</span>
+          <span>Built with Rust</span>
+          <a href={GITHUB_URL} target="_blank" rel="noreferrer" aria-label="GitHub" className="text-ink/60 transition hover:text-ink">
+            <Github className="h-5 w-5" />
+          </a>
+        </div>
       </div>
-      <div className="border-t border-white/[0.05]">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-5 font-mono text-[11px] text-slate-600 sm:px-8">
-          <span>© {new Date().getFullYear()} Spectra Labs · Proprietary, all rights reserved</span>
-          <span>Rust 1.89+ · std only · unsafe forbidden</span>
-        </div>
+      <div className="border-t border-ink/[0.05] px-5 py-4 text-center text-[11px] leading-5 text-ink/40 sm:px-8">
+        Model note: the risk engine treats the book as one aggregate GBM position (zero drift, average volatility, no correlations). It is a defensible first model, not a production market-risk model.
       </div>
     </footer>
   );

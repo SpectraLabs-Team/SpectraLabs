@@ -92,6 +92,26 @@ export function tailProbability(input: ModelInput, l: number): number {
   return normCdf((Math.log(g) - m) / s);
 }
 
+export interface HistogramBin {
+  lo: number;
+  hi: number;
+  /** Probability mass of the bin under the model. */
+  p: number;
+}
+
+/** Exact bin probabilities of the loss distribution between its 0.05% and 99.95% quantiles. */
+export function lossHistogram(input: ModelInput, bins = 48): HistogramBin[] {
+  const lo = lossQuantile(input, 0.0005);
+  const hi = lossQuantile(input, 0.9995);
+  if (!(hi > lo)) return [];
+  const w = (hi - lo) / bins;
+  return Array.from({ length: bins }, (_, i) => {
+    const a = lo + i * w;
+    const b = a + w;
+    return { lo: a, hi: b, p: Math.max(0, tailProbability(input, a) - tailProbability(input, b)) };
+  });
+}
+
 export interface DensityPoint {
   loss: number;
   body: number | null;

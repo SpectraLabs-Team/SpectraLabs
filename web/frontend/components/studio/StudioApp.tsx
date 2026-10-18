@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BenchmarkLab } from './BenchmarkLab';
+import { MarketSettings } from './MarketSettings';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';
 import { RiskLab } from './RiskLab';
@@ -26,6 +27,7 @@ export function StudioApp() {
             {tab === 'risk' && <RiskLab />}
             {tab === 'portfolio' && <PortfolioStudio />}
             {tab === 'benchmark' && <BenchmarkLab />}
+            {tab === 'settings' && <MarketSettings />}
           </motion.div>
         </AnimatePresence>
       </StudioShell>

@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getSamplePortfolio } from '@/lib/api';
+import { DEFAULT_PAPER, paperAccount, type PaperAccount, type PaperSettings } from '@/lib/paperLedger';
 import { SAMPLE_CSV, parseCsv, portfolioStats, toCsv, type PortfolioStats } from '@/lib/portfolio';
 import type { Position } from '@/lib/types';
 import { useEngineHealth, type EngineState } from '@/lib/useEngineHealth';
@@ -16,18 +17,44 @@ interface PortfolioCtx {
   /** Bumps whenever positions change, so consumers can re-run engine calls. */
   revision: number;
   engine: EngineState;
+  paper: PaperSettings;
+  account: PaperAccount;
+  setPaper: (p: PaperSettings) => void;
   setPositions: (p: Position[], source: Source) => void;
   loadSample: () => Promise<void>;
   importCsv: (text: string, source: 'uploaded' | 'pasted') => string[];
 }
 
 const Ctx = createContext<PortfolioCtx | null>(null);
+const PAPER_KEY = 'spectra-paper';
 
 export function PortfolioProvider({ children }: { children: ReactNode }) {
   const engine = useEngineHealth();
   const [positions, setPos] = useState<Position[]>(() => parseCsv(SAMPLE_CSV).positions);
   const [source, setSource] = useState<Source>('bundled sample');
   const [revision, setRevision] = useState(0);
+  const [paper, setPaperState] = useState<PaperSettings>(DEFAULT_PAPER);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PAPER_KEY);
+      if (raw) {
+        const p = JSON.parse(raw) as Partial<PaperSettings>;
+        if (Number.isFinite(p.startingCapital) && Number.isFinite(p.leverageLimit)) setPaperState({ startingCapital: p.startingCapital!, leverageLimit: p.leverageLimit! });
+      }
+    } catch {
+      /* defaults */
+    }
+  }, []);
+
+  const setPaper = useCallback((p: PaperSettings) => {
+    setPaperState(p);
+    try {
+      localStorage.setItem(PAPER_KEY, JSON.stringify(p));
+    } catch {
+      /* not persisted */
+    }
+  }, []);
 
   const setPositions = useCallback((p: Position[], s: Source) => {
     setPos(p);
@@ -59,10 +86,10 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     [setPositions],
   );
 
-  const value = useMemo<PortfolioCtx>(
-    () => ({ positions, csv: toCsv(positions), stats: portfolioStats(positions), source, revision, engine, setPositions, loadSample, importCsv }),
-    [positions, source, revision, engine, setPositions, loadSample, importCsv],
-  );
+  const value = useMemo<PortfolioCtx>(() => {
+    const stats = portfolioStats(positions);
+    return { positions, csv: toCsv(positions), stats, source, revision, engine, paper, account: paperAccount(stats, paper), setPaper, setPositions, loadSample, importCsv };
+  }, [positions, source, revision, engine, paper, setPaper, setPositions, loadSample, importCsv]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

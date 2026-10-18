@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
-import { type ReactNode, useRef } from 'react';
+import { type ReactNode, useId, useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 export function GlassCard({ className, children, as: Tag = 'div', ...rest }: { className?: string; children: ReactNode; as?: 'div' | 'section' | 'article' } & React.HTMLAttributes<HTMLElement>) {
@@ -49,7 +49,7 @@ export function Segmented<T extends string | number>({
   className?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className={cn('inline-flex rounded-lg border border-white/10 bg-obsidian-950/70 p-0.5', className)}>
+    <div role="radiogroup" aria-label={label} className={cn('inline-flex rounded-lg border border-ink/10 bg-canvas/70 p-0.5', className)}>
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -62,7 +62,7 @@ export function Segmented<T extends string | number>({
             className={cn(
               'relative flex-1 whitespace-nowrap rounded-md font-medium transition-colors',
               size === 'sm' ? 'px-2.5 py-1 text-[11px]' : 'px-3 py-1.5 text-xs',
-              active ? 'text-obsidian-950' : 'text-slate-400 hover:text-slate-100',
+              active ? 'text-onaccent' : 'text-ink/60 hover:text-ink/90',
             )}
           >
             {active && <motion.span layoutId={`seg-${label}`} className="absolute inset-0 rounded-md bg-accent shadow-glow" transition={{ type: 'spring', stiffness: 500, damping: 38 }} />}
@@ -97,8 +97,8 @@ export function RangeSlider({
   return (
     <label className="block">
       <span className="mb-2 flex items-baseline justify-between gap-3">
-        <span className="text-xs font-medium text-slate-400">{label}</span>
-        <span className="num text-sm font-semibold text-slate-50">{display}</span>
+        <span className="text-xs font-medium text-ink/60">{label}</span>
+        <span className="num text-sm font-semibold text-ink/90">{display}</span>
       </span>
       <input
         type="range"
@@ -110,7 +110,7 @@ export function RangeSlider({
         onChange={(e) => onChange(Number(e.target.value))}
         style={{ '--fill': `${fill}%` } as React.CSSProperties}
       />
-      {hint && <span className="mt-1.5 flex justify-between text-[10px] text-slate-500 num">{hint}</span>}
+      {hint && <span className="mt-1.5 flex justify-between text-[10px] text-ink/50 num">{hint}</span>}
     </label>
   );
 }
@@ -126,7 +126,7 @@ export function StatusDot({ tone }: { tone: 'online' | 'offline' | 'checking' })
 
 export function Badge({ children, tone = 'neutral', className }: { children: ReactNode; tone?: 'neutral' | 'accent' | 'profit' | 'loss' | 'caution'; className?: string }) {
   const tones = {
-    neutral: 'border-white/10 bg-white/[0.04] text-slate-300',
+    neutral: 'border-ink/10 bg-ink/[0.04] text-ink/75',
     accent: 'border-accent/30 bg-accent/10 text-accent',
     profit: 'border-profit/30 bg-profit/10 text-profit',
     loss: 'border-loss/30 bg-loss/10 text-loss',
@@ -153,21 +153,22 @@ export function AnimatedValue({ value, className }: { value: string; className?:
 }
 
 export function Logo({ className }: { className?: string }) {
+  const gid = `sl-g-${useId().replace(/:/g, '')}`;
   return (
     <span className={cn('flex items-center gap-2.5', className)}>
       <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden>
         <defs>
-          <linearGradient id="sl-g" x1="0" y1="0" x2="1" y2="1">
+          <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stopColor="#00F2FE" />
             <stop offset="1" stopColor="#4F8BFF" />
           </linearGradient>
         </defs>
-        <rect x="1" y="1" width="30" height="30" rx="8" fill="#0B0F17" stroke="url(#sl-g)" strokeOpacity="0.6" />
-        <path d="M7 21 L12 14 L16 18 L21 9 L25 13" fill="none" stroke="url(#sl-g)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+        <rect x="1" y="1" width="30" height="30" rx="8" className="fill-panel" stroke={`url(#${gid})`} strokeOpacity="0.6" />
+        <path d="M7 21 L12 14 L16 18 L21 9 L25 13" fill="none" stroke={`url(#${gid})`} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
         <circle cx="21" cy="9" r="2" fill="#00F2FE" />
       </svg>
-      <span className="text-[15px] font-semibold tracking-tight text-white">
-        Spectra <span className="text-slate-400">Labs</span>
+      <span className="whitespace-nowrap text-[15px] font-semibold tracking-tight text-ink">
+        Spectra <span className="text-ink/60">Labs</span>
       </span>
     </span>
   );
@@ -175,7 +176,7 @@ export function Logo({ className }: { className?: string }) {
 
 export function ErrorNote({ children }: { children: ReactNode }) {
   return (
-    <div role="alert" className="rounded-lg border border-loss/30 bg-loss/[0.08] px-3 py-2.5 text-xs leading-5 text-rose-200">
+    <div role="alert" className="rounded-lg border border-loss/30 bg-loss/[0.08] px-3 py-2.5 text-xs leading-5 text-rose-700 dark:text-rose-200">
       {children}
     </div>
   );

@@ -20,3 +20,23 @@ env files. If the frontend runs on another origin, start the API with
 
 Backends shown in the benchmark are `CPU`, `Parallel` (multi-threaded, deterministic) and `CUDA`. This
 build has no CUDA backend, so CUDA runs show as a fallback to `Parallel`.
+
+## Pages
+
+- `/`: landing page. Live engine status, hero cards fed by the engine when it is running, the
+  metrics taxonomy (each metric marked Live, Backtest or Roadmap), and the Rust vs NumPy benchmark.
+- `/studio`: Risk & Stress Lab, Portfolio Studio, Hardware Benchmarks and Market Data & Alpaca
+  Settings. Paper trading is a simulated ledger kept in the browser; live trading stays disabled
+  while `/api/alpaca/*` returns 501.
+
+Dark mode is the default; the header and sidebar have a light/dark toggle (stored in `localStorage`).
+
+## Benchmark baseline
+
+The landing-page chart reads `frontend/lib/benchmarkBaseline.json`: Rust (`spectra-risk`) and NumPy
+running the same VaR kernel on the same machine. Regenerate it on your own hardware:
+
+```bash
+cargo build --release -p spectra-cli
+python3 web/bench/bench_baseline.py > web/frontend/lib/benchmarkBaseline.json
+```

@@ -126,7 +126,7 @@ export function Hero() {
           </div>
 
           {/* Holographic cards: their own column, stepped diagonally */}
-          <div className="hidden pt-6 lg:block xl:pl-6 [@media(max-height:760px)]:pt-2">
+          <div className="hidden pt-6 lg:block [@media(max-height:760px)]:pt-2">
             <HoloCards data={data} layout="stepped" />
           </div>
           <div className="lg:hidden">

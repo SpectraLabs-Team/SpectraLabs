@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { forwardRef, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { FileText, ShieldCheck, Zap } from 'lucide-react';
 import { calculateRisk } from '@/lib/api';
@@ -11,6 +11,7 @@ import { DEFAULT_PAPER, paperAccount } from '@/lib/paperLedger';
 import { SAMPLE_CSV, parseCsv, portfolioStats } from '@/lib/portfolio';
 import { useEngineHealth } from '@/lib/useEngineHealth';
 import { cn, formatCurrency, formatDuration, formatPercent } from '@/lib/utils';
+import type { Rect } from './heroLayout';
 
 const SAMPLE = parseCsv(SAMPLE_CSV).positions;
 const STATS = portfolioStats(SAMPLE);
@@ -53,17 +54,21 @@ export function useHeroData() {
   return { kernel, risk, ledger };
 }
 
-function Holo({ icon, title, children, className, delay, tone = 'cyan' }: { icon: ReactNode; title: string; children: ReactNode; className?: string; delay: number; tone?: 'cyan' | 'blue' }) {
+type HoloProps = { icon: ReactNode; title: string; children: ReactNode; className?: string; style?: React.CSSProperties; delay: number; tone?: 'cyan' | 'blue' };
+
+// No backdrop-filter: these cards sit over a moving backdrop, and Safari re-blurs every frame.
+const Holo = forwardRef<HTMLDivElement, HoloProps>(function Holo({ icon, title, children, className, style, delay, tone = 'cyan' }, ref) {
   const reduce = useReducedMotion();
   return (
     <motion.div
+      style={style}
       initial={reduce ? false : { opacity: 0, y: 16, scale: 0.97 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: 0.7, delay, ease: [0.22, 1, 0.36, 1] }}
       className={cn('w-[236px]', className)}
     >
       <div className="animate-float" style={{ animationDelay: `${delay * 3}s` }}>
-        <div className="relative rounded-xl border border-cyan-300/30 bg-[#06122a]/70 p-4 shadow-[0_0_0_1px_rgba(34,211,238,0.08),0_0_32px_-6px_rgba(34,211,238,0.55),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md">
+        <div ref={ref} className="relative rounded-xl border border-cyan-300/30 bg-[#06122a]/[0.88] p-4 shadow-[0_0_0_1px_rgba(34,211,238,0.08),0_0_32px_-6px_rgba(34,211,238,0.55),inset_0_1px_0_rgba(255,255,255,0.08)]">
           <div className="flex items-start gap-3">
             <span className={cn('mt-0.5 drop-shadow-[0_0_8px_currentColor]', tone === 'blue' ? 'text-sky-400' : 'text-cyan-300')}>{icon}</span>
             <div className="min-w-0">
@@ -75,27 +80,45 @@ function Holo({ icon, title, children, className, delay, tone = 'cyan' }: { icon
       </div>
     </motion.div>
   );
-}
+});
 
 /**
- * Three cards clustered against the right edge and stepped down-right beneath the galaxy core
- * (Kernel sits left of the core; Risk and Ledger below it). Right-anchored offsets keep the centre of
- * the hero open. Below xl (1024-1279px) the plate scales to height and the galaxy sits further left, so
- * the cluster starts below the core instead of beside it.
+ * `placed`: absolutely positioned at the rects computed by heroLayout (null = not shown; undefined =
+ * not measured yet, rendered invisible so it can be measured). `grid`: a simple row for small screens.
  */
-export function HoloCards({ data, layout }: { data: ReturnType<typeof useHeroData>; layout: 'stepped' | 'grid' }) {
+export function HoloCards({
+  data,
+  layout,
+  positions,
+  cardRefs,
+}: {
+  data: ReturnType<typeof useHeroData>;
+  layout: 'placed' | 'grid';
+  positions?: (Rect | null)[] | null;
+  cardRefs?: React.MutableRefObject<(HTMLDivElement | null)[]>;
+}) {
   const { kernel, risk, ledger } = data;
-  const step = (cls: string) => (layout === 'stepped' ? cls : '');
+  const place = (i: number): { className?: string; style?: React.CSSProperties } => {
+    if (layout !== 'placed') return {};
+    const r = positions?.[i];
+    // Unplaceable: keep it laid out (invisible) so its size stays measurable on the next pass.
+    if (r === null) return { className: 'absolute left-0 top-0 invisible' };
+    if (!r) return { className: 'absolute left-0 top-0 invisible' };
+    return { className: 'absolute pointer-events-auto', style: { left: r.x, top: r.y } }; // left/top: Framer owns transform here
+  };
+  const setRef = (i: number) => (el: HTMLDivElement | null) => {
+    if (cardRefs) cardRefs.current[i] = el;
+  };
   return (
-    <div className={layout === 'stepped' ? 'relative h-[505px] w-full xl:h-[440px]' : 'grid gap-3 sm:grid-cols-3'}>
-      <Holo icon={<Zap className="h-6 w-6" />} title="Pure Rust Kernel" delay={0.2} className={step('absolute right-[160px] top-[112px] xl:right-[220px] xl:top-0')}>
+    <div className={layout === 'placed' ? 'contents' : 'grid gap-3 sm:grid-cols-3'}>
+      <Holo ref={setRef(0)} icon={<Zap className="h-6 w-6" />} title="Pure Rust Kernel" delay={0.2} {...place(0)}>
         <p className="num text-[22px] font-semibold leading-7 text-white">{Math.round(kernel.pps).toLocaleString('en-US')}</p>
         <p>paths / sec {kernel.live ? <span className="text-slate-500">· live</span> : <span className="text-slate-500">· reference run</span>}</p>
         <p>
           Latency: <span className="num font-semibold text-emerald-400">{formatDuration(kernel.latency)}</span> <span className="text-slate-500">· 10k paths</span>
         </p>
       </Holo>
-      <Holo icon={<ShieldCheck className="h-6 w-6" />} title="Pre-Trade Risk Check" delay={0.35} tone="blue" className={step('absolute right-[80px] top-[252px] xl:right-[110px] xl:top-[154px]')}>
+      <Holo ref={setRef(1)} icon={<ShieldCheck className="h-6 w-6" />} title="Pre-Trade Risk Check" delay={0.35} tone="blue" {...place(1)}>
         <p>
           VaR (99%):{' '}
           <span className="num text-[17px] font-semibold text-rose-400">−{formatCurrency(risk.v)}</span>
@@ -106,7 +129,7 @@ export function HoloCards({ data, layout }: { data: ReturnType<typeof useHeroDat
           <span className="text-slate-500"> · paper</span>
         </p>
       </Holo>
-      <Holo icon={<FileText className="h-6 w-6" />} title="SHA-256 Ledger" delay={0.5} className={step('absolute right-0 top-[407px] xl:top-[308px]')}>
+      <Holo ref={setRef(2)} icon={<FileText className="h-6 w-6" />} title="SHA-256 Ledger" delay={0.5} {...place(2)}>
         <p className="num">Hash: {ledger ? `${ledger.head.slice(0, 6)}…${ledger.head.slice(-4)}` : '…'}</p>
         <p>
           Audit Status: <span className={cn('font-semibold', ledger?.verified ? 'text-emerald-400' : 'text-slate-500')}>{ledger ? (ledger.verified ? 'Verified' : 'Broken') : 'checking'}</span>
@@ -170,7 +193,7 @@ export function TickerChips() {
       {chips.map((c, i) => (
         <motion.div key={c.sym} initial={reduce ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 + i * 0.12, duration: 0.6 }} className={cn(i === 1 && 'lg:-translate-y-6')}>
           <div className="animate-float" style={{ animationDelay: `${i * 1.7}s` }}>
-            <div className="flex items-center gap-3 rounded-xl border border-cyan-300/25 bg-[#06122a]/70 py-2.5 pl-3 pr-4 shadow-[0_0_28px_-8px_rgba(34,211,238,0.6),inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md">
+            <div className="flex items-center gap-3 rounded-xl border border-cyan-300/25 bg-[#06122a]/[0.88] py-2.5 pl-3 pr-4 shadow-[0_0_28px_-8px_rgba(34,211,238,0.6),inset_0_1px_0_rgba(255,255,255,0.06)]">
               <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/[0.08] font-mono text-[11px] font-bold text-white">{c.sym.slice(0, 2)}</span>
               <div>
                 <p className="text-[13px] font-semibold leading-4 text-white">{c.sym}</p>

@@ -1,12 +1,16 @@
 'use client';
 
 import Image from 'next/image';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { motion, useReducedMotion } from 'framer-motion';
+import { motion, useMotionValue, useReducedMotion, useSpring, useTransform } from 'framer-motion';
 import { ArrowRight } from 'lucide-react';
 import { DustOverlay } from './HeroScene';
 import { HoloCards, TickerChips, useHeroData } from './HoloCards';
+import { layoutHeroCards, spiralEllipses, type Rect } from './heroLayout';
+
+// useLayoutEffect warns during SSR; this hero only measures in the browser.
+const useIsoLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 const BADGES = [
   { label: 'v0.7.0 Pure Rust', dot: 'bg-cyan-400 shadow-[0_0_8px_#22D3EE]' },
@@ -24,57 +28,95 @@ export function Hero() {
   const data = useHeroData();
   const sectionRef = useRef<HTMLElement>(null);
   const plateRef = useRef<HTMLDivElement>(null);
-  const dustRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLDivElement>(null);
+  const tickerRef = useRef<HTMLDivElement>(null);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [positions, setPositions] = useState<(Rect | null)[] | null>(null);
 
-  // Mouse parallax: the plate shifts up to ±12px and the dust ±22px against the cursor, eased per
-  // frame. Transform-only on GPU layers; off for touch devices and reduced motion.
+  // Mouse parallax on ONE foreground layer (dust + cards) via a continuous Framer spring: no manual
+  // RAF loop, no start/stop threshold. The backdrop only runs its CSS drift, so no element ever has
+  // two transform sources. Off for touch devices and reduced motion.
+  const mx = useMotionValue(0);
+  const my = useMotionValue(0);
+  const sx = useSpring(mx, { stiffness: 50, damping: 18, mass: 0.8 });
+  const sy = useSpring(my, { stiffness: 50, damping: 18, mass: 0.8 });
+  const fx = useTransform(sx, (v) => v * 10);
+  const fy = useTransform(sy, (v) => v * 7);
   useEffect(() => {
     const section = sectionRef.current;
     if (!section || reduce || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
-    const target = { x: 0, y: 0 };
-    const cur = { x: 0, y: 0 };
-    let raf = 0;
-    const tick = () => {
-      cur.x += (target.x - cur.x) * 0.06;
-      cur.y += (target.y - cur.y) * 0.06;
-      if (plateRef.current) plateRef.current.style.transform = `translate3d(${(-cur.x * 12).toFixed(2)}px, ${(-cur.y * 8).toFixed(2)}px, 0)`;
-      if (dustRef.current) dustRef.current.style.transform = `translate3d(${(-cur.x * 22).toFixed(2)}px, ${(-cur.y * 14).toFixed(2)}px, 0)`;
-      raf = Math.abs(target.x - cur.x) + Math.abs(target.y - cur.y) > 0.001 ? requestAnimationFrame(tick) : 0;
-    };
-    const kick = () => {
-      if (!raf) raf = requestAnimationFrame(tick);
-    };
     const onMove = (e: PointerEvent) => {
       const r = section.getBoundingClientRect();
-      target.x = ((e.clientX - r.left) / r.width) * 2 - 1;
-      target.y = ((e.clientY - r.top) / r.height) * 2 - 1;
-      kick();
+      mx.set(((e.clientX - r.left) / r.width) * 2 - 1);
+      my.set(((e.clientY - r.top) / r.height) * 2 - 1);
     };
     const onLeave = () => {
-      target.x = 0;
-      target.y = 0;
-      kick();
+      mx.set(0);
+      my.set(0);
     };
     section.addEventListener('pointermove', onMove, { passive: true });
     section.addEventListener('pointerleave', onLeave);
     return () => {
-      cancelAnimationFrame(raf);
       section.removeEventListener('pointermove', onMove);
       section.removeEventListener('pointerleave', onLeave);
     };
-  }, [reduce]);
+  }, [reduce, mx, my]);
+
+  // Card placement from measured geometry (fonts, card heights, plate scale). Re-runs on resize,
+  // card size changes and once web fonts finish loading.
+  const measure = useCallback(() => {
+    const sec = sectionRef.current;
+    const plate = plateRef.current;
+    const content = contentRef.current;
+    const text = textRef.current;
+    const ticker = tickerRef.current;
+    const cards = cardRefs.current;
+    if (!sec || !plate || !content || !text || !ticker || cards.length < 3 || cards.some((c) => !c)) return;
+    if (window.innerWidth < 1024) return setPositions(null);
+    if (cards.some((c) => !c!.offsetWidth || !c!.offsetHeight)) return;
+    const sr = sec.getBoundingClientRect();
+    // Widest rendered text line in the headline column.
+    let textRight = 0;
+    const range = document.createRange();
+    text.querySelectorAll('p, h1, a, span').forEach((el) => {
+      range.selectNodeContents(el);
+      for (const r of Array.from(range.getClientRects())) textRight = Math.max(textRight, r.right - sr.left);
+    });
+    const cr = content.getBoundingClientRect();
+    const padR = parseFloat(getComputedStyle(content).paddingRight) || 0;
+    const tr = text.getBoundingClientRect();
+    const kr = ticker.getBoundingClientRect();
+    setPositions(
+      layoutHeroCards({
+        sizes: cards.map((c) => ({ w: c!.offsetWidth, h: c!.offsetHeight })),
+        // Plate layout box (offset* ignore the drift transform); 14px = 10px parallax travel + 4px air.
+        ellipses: spiralEllipses({ x: plate.offsetLeft, y: plate.offsetTop, w: plate.offsetWidth, h: plate.offsetHeight }, 14),
+        minX: textRight + 28,
+        maxX: cr.right - sr.left - padR,
+        minY: tr.top - sr.top,
+        maxY: kr.top - sr.top - 16,
+      }),
+    );
+  }, []);
+
+  useIsoLayoutEffect(() => {
+    measure();
+    const ro = new ResizeObserver(() => measure());
+    [sectionRef.current, textRef.current, tickerRef.current, ...cardRefs.current].forEach((el) => el && ro.observe(el));
+    document.fonts?.ready.then(() => measure());
+    return () => ro.disconnect();
+  }, [measure]);
 
   const rise = (delay: number) => (reduce ? {} : { initial: { opacity: 0, y: 18 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.6, delay, ease: [0.22, 1, 0.36, 1] } });
 
   return (
     <section ref={sectionRef} className="dark relative isolate overflow-hidden bg-[#040711] text-slate-200">
-      {/* Backdrop plate. Outer layer: mouse parallax. Inner layer: 20s ambient drift, scaling about the
-          galaxy. Both are oversized past the section edges so movement never reveals an edge.
-          Anchored top-right (the spiral sits at the artwork's right edge) so it stays whole in frame. */}
-      <div ref={plateRef} aria-hidden className="pointer-events-none absolute -bottom-6 -left-8 -right-6 -top-4 -z-20 transform-gpu will-change-transform">
-        <div className="absolute inset-0 transform-gpu animate-hero-drift will-change-transform [transform-origin:84%_22%]">
-          <Image src="/images/hero-backdrop.webp" alt="" fill priority sizes="100vw" className="object-cover object-right-top opacity-95" />
-        </div>
+      {/* Backdrop plate: a single GPU layer running only the CSS ambient drift (20s, ease-in-out,
+          alternate), scaling about the galaxy. Oversized past the section edges so the drift never reveals
+          an edge; anchored top-right so the whole spiral stays in frame. */}
+      <div ref={plateRef} aria-hidden className="pointer-events-none absolute -bottom-6 -left-8 -right-6 -top-4 -z-20 transform-gpu animate-hero-drift will-change-transform [backface-visibility:hidden] [transform-origin:84%_22%]">
+        <Image src="/images/hero-backdrop.webp" alt="" fill priority sizes="100vw" className="object-cover object-right-top opacity-95" />
       </div>
       {/* Vignette + ambient glows so the plate blends into the page */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(90deg,#040711_0%,rgba(4,7,17,0.85)_22%,rgba(4,7,17,0.25)_48%,transparent_70%)]" />
@@ -82,18 +124,24 @@ export function Hero() {
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(40%_35%_at_20%_30%,rgba(34,211,238,0.10),transparent_70%),radial-gradient(35%_30%_at_78%_22%,rgba(139,92,246,0.14),transparent_70%)]" />
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-20 bg-gradient-to-b from-[#040711]/70 to-transparent" />
       <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-24 bg-gradient-to-t from-canvas to-transparent" />
-      <div ref={dustRef} aria-hidden className="pointer-events-none absolute -inset-6 -z-10 transform-gpu will-change-transform">
-        <DustOverlay className="h-full w-full" />
-      </div>
+      {/* Foreground parallax layer: dust + holo cards move together against the drifting plate. */}
+      <motion.div className="pointer-events-none absolute inset-0 transform-gpu will-change-transform" style={{ x: fx, y: fy }}>
+        <div aria-hidden className="absolute -inset-6">
+          <DustOverlay className="h-full w-full" />
+        </div>
+        <div className="hidden lg:block">
+          <HoloCards data={data} layout="placed" positions={positions} cardRefs={cardRefs} />
+        </div>
+      </motion.div>
 
-      <div className="mx-auto flex min-h-[640px] max-w-[1320px] flex-col px-5 pb-6 pt-24 sm:px-8 lg:h-[100svh] lg:max-h-[860px] lg:pt-[104px] [@media(max-height:760px)]:min-h-[600px] lg:[@media(max-height:760px)]:pt-[80px]">
+      <div ref={contentRef} className="relative mx-auto flex min-h-[640px] max-w-[1320px] flex-col px-5 pb-6 pt-24 sm:px-8 lg:h-[100svh] lg:max-h-[860px] lg:pt-[104px] [@media(max-height:760px)]:min-h-[600px] lg:[@media(max-height:760px)]:pt-[80px]">
         <div className="grid flex-1 items-start gap-10 lg:grid-cols-[minmax(0,520px)_minmax(0,1fr)] lg:gap-12 xl:grid-cols-[minmax(0,620px)_minmax(0,1fr)]">
           {/* Headline */}
-          <div className="relative z-10">
+          <div ref={textRef} className="relative z-10">
             <motion.p {...rise(0)} className="font-mono text-[11.5px] font-medium uppercase tracking-[0.24em] text-slate-300">
               The next generation quant platform
             </motion.p>
-            <motion.h1 {...rise(0.06)} className="mt-4 text-[2.4rem] font-bold leading-[1.07] tracking-[-0.03em] text-white sm:text-[2.9rem] xl:text-[3.25rem] lg:[@media(max-height:760px)]:mt-3 lg:[@media(max-height:760px)]:text-[2.5rem]">
+            <motion.h1 {...rise(0.06)} className="mt-4 text-[2.4rem] font-bold leading-[1.07] tracking-[-0.03em] text-white sm:text-[2.9rem] xl:text-[3.1rem] lg:[@media(max-height:760px)]:mt-3 lg:[@media(max-height:760px)]:text-[2.5rem]">
               Institutional Quantitative <br className="hidden lg:inline" />
               Research &amp;{' '}
               <span className="bg-gradient-to-r from-[#00F2FE] via-[#38BDF8] to-[#22D3EE] bg-clip-text text-transparent">
@@ -125,17 +173,14 @@ export function Hero() {
             </motion.div>
           </div>
 
-          {/* Holographic cards: their own column, stepped diagonally */}
-          <div className="hidden pt-6 lg:block [@media(max-height:760px)]:pt-2">
-            <HoloCards data={data} layout="stepped" />
-          </div>
+          {/* Holo cards: placed in the foreground layer above on lg+, a simple grid below lg. */}
           <div className="lg:hidden">
             <HoloCards data={data} layout="grid" />
           </div>
         </div>
 
         {/* Tickers riding the wave troughs */}
-        <div className="mt-8 flex flex-wrap items-end justify-center gap-3 sm:gap-5 lg:mt-2 lg:justify-between lg:px-[6%]">
+        <div ref={tickerRef} className="mt-8 flex flex-wrap items-end justify-center gap-3 sm:gap-5 lg:mt-2 lg:justify-between lg:px-[6%]">
           <TickerChips />
         </div>
       </div>

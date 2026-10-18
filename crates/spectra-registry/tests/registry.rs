@@ -481,7 +481,7 @@ fn reproduce_run_recreates_the_result_and_explains_mismatches() {
         reg.record_backtest(&e, &w.research.info.id, "sma", "src-v1", &sma(5.0, 20.0), &cfg, &r, "").unwrap();
     let ok = reproduce_run(&mut reg, &w.store, &id, &sma_factory, "src-v1").unwrap();
     assert!(ok.reproduced, "{:?}", ok.notes);
-    assert!(ok.notes.is_empty());
+    assert_eq!(ok.notes, Vec::<String>::new());
     let changed = reproduce_run(&mut reg, &w.store, &id, &sma_factory, "src-v2").unwrap();
     assert!(changed.notes.iter().any(|n| n.contains("strategy source has changed")));
     let other = |_: &ParamSet| -> Result<Box<dyn Strategy>> { Ok(Box::new(Sma(3, 10))) };

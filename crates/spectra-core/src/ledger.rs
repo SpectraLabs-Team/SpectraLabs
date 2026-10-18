@@ -284,10 +284,9 @@ impl Ledger {
         }
 
         let mut realized = Money::ZERO;
-        let new_cost;
         let opening = cur.qty.is_zero() || cur.qty.signum() == fq.signum();
-        if opening {
-            new_cost = cur.cost.checked_add(spend)?;
+        let new_cost = if opening {
+            cur.cost.checked_add(spend)?
         } else {
             // The fill closes part or all of the position and may open the
             // opposite side with whatever is left over.
@@ -307,8 +306,8 @@ impl Ledger {
             realized = close_value.checked_sub(released)?;
 
             let open_spend = if fq.signum() > 0 { n_open } else { n_open.checked_neg()? };
-            new_cost = cur.cost.checked_sub(released)?.checked_add(open_spend)?;
-        }
+            cur.cost.checked_sub(released)?.checked_add(open_spend)?
+        };
 
         if let Some(limit) = self.cfg.max_gross_leverage {
             if new_qty.checked_abs()? > cur.qty.checked_abs()? {

@@ -1,10 +1,10 @@
 'use client';
 
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowRight, Eye, EyeOff, KeyRound, Loader2, Lock, LogIn, Mail, Pencil, UserPlus, X } from 'lucide-react';
+import { ArrowRight, Check, Eye, EyeOff, KeyRound, Loader2, Lock, LogIn, Mail, Pencil, User, UserPlus, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { checkPasswordRules, EMAIL_RE, isPasswordValid, MIN_PASSWORD, roleForEmail, useAuth, type AuthMode, type Role } from '@/lib/auth';
+import { checkPasswordRules, cleanName, EMAIL_RE, isPasswordValid, MIN_NAME, MIN_PASSWORD, roleForEmail, useAuth, type AuthMode, type AuthUser, type Role } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 
 const LEN = 6;
@@ -12,11 +12,11 @@ const RESEND_SECONDS = 60;
 const empty = () => Array<string>(LEN).fill('');
 
 // ── Real API transport connecting to Gmail SMTP & session endpoints ──
-async function sendSignupCode(email: string, password: string) {
+async function sendSignupCode(email: string, password: string, name: string) {
   const res = await fetch('/api/auth/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, mode: 'signup' }),
+    body: JSON.stringify({ email, password, name, mode: 'signup' }),
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -36,7 +36,7 @@ async function resendCode(email: string) {
   }
 }
 
-async function verifySignupCode(email: string, code: string): Promise<{ ok: boolean; user?: { email: string; role: Role }; error?: string }> {
+async function verifySignupCode(email: string, code: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
   const res = await fetch('/api/auth/verify-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -49,7 +49,7 @@ async function verifySignupCode(email: string, code: string): Promise<{ ok: bool
   return { ok: true, user: data.user };
 }
 
-async function loginWithPassword(email: string, password: string): Promise<{ ok: boolean; user?: { email: string; role: Role }; error?: string }> {
+async function loginWithPassword(email: string, password: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -105,6 +105,9 @@ function PasswordInput({
   id, value, onChange, onBlur, invalid, autoComplete, placeholder,
 }: { id: string; value: string; onChange: (v: string) => void; onBlur: () => void; invalid: boolean; autoComplete: string; placeholder: string }) {
   const [show, setShow] = useState(false);
+  const [caps, setCaps] = useState(false);
+  // getModifierState reports the real Caps Lock state on every key event, including Caps Lock itself.
+  const readCaps = (e: KeyboardEvent<HTMLInputElement>) => setCaps(e.getModifierState?.('CapsLock') ?? false);
   return (
     <>
       <input
@@ -113,11 +116,26 @@ function PasswordInput({
         autoComplete={autoComplete}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onBlur={onBlur}
+        onKeyDown={readCaps}
+        onKeyUp={readCaps}
+        onBlur={() => {
+          setCaps(false);
+          onBlur();
+        }}
         placeholder={placeholder}
         aria-invalid={invalid}
-        className={cn(inputBase, 'pr-10', invalid ? inputBad : inputOk)}
+        aria-describedby={caps ? `${id}-caps` : undefined}
+        className={cn(inputBase, caps ? 'pr-[124px]' : 'pr-10', invalid ? inputBad : inputOk)}
       />
+      {caps && (
+        <span
+          id={`${id}-caps`}
+          role="status"
+          className="pointer-events-none absolute right-10 top-1/2 -translate-y-1/2 rounded-md border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+        >
+          Caps Lock On
+        </span>
+      )}
       <button
         type="button"
         onClick={() => setShow((s) => !s)}
@@ -135,6 +153,7 @@ export function AuthModal() {
   const { isAuthModalOpen, closeAuthModal, login, authMode, setAuthMode } = useAuth();
   const [step, setStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -152,7 +171,8 @@ export function AuthModal() {
   const passOk = signup ? isPasswordValid(password) : password.length >= MIN_PASSWORD;
   const confirmOk = confirm === password && confirm.length > 0;
   const role = roleForEmail(email);
-  const formOk = emailOk && passOk && (!signup || confirmOk);
+  const nameOk = cleanName(name) !== '';
+  const formOk = emailOk && passOk && (!signup || (confirmOk && nameOk));
   const touch = (k: string) => setTouched((t) => ({ ...t, [k]: true }));
 
   const focusEmail = () => setTimeout(() => emailRef.current?.focus(), 50);
@@ -188,12 +208,12 @@ export function AuthModal() {
   }, [left]);
 
   const finish = useCallback(
-    (r: Role) => {
-      login(email, r);
+    (u: AuthUser) => {
+      login(u);
       closeAuthModal();
-      router.push(r === 'admin' ? '/admin' : '/studio');
+      router.push(u.role === 'admin' ? '/admin' : '/studio');
     },
-    [email, login, closeAuthModal, router],
+    [login, closeAuthModal, router],
   );
 
   const switchMode = (m: AuthMode) => setAuthMode(m);
@@ -211,7 +231,7 @@ export function AuthModal() {
         setError(res.error || 'Incorrect email or password.');
         return;
       }
-      finish(res.user.role);
+      finish(res.user);
     } catch (err: any) {
       setError(err?.message || 'Could not log in. Try again.');
     } finally {
@@ -222,12 +242,12 @@ export function AuthModal() {
   // ── Sign Up, step 1 ──
   const submitSignup = async (e: FormEvent) => {
     e.preventDefault();
-    setTouched({ email: true, password: true, confirm: true });
+    setTouched({ name: true, email: true, password: true, confirm: true });
     if (!formOk || busy) return;
     setBusy(true);
     setError(null);
     try {
-      await sendSignupCode(email.trim(), password);
+      await sendSignupCode(email.trim(), password, cleanName(name));
       setStep(2);
       setDigits(empty());
       setLeft(RESEND_SECONDS);
@@ -269,7 +289,7 @@ export function AuthModal() {
           boxes.current[0]?.focus();
           return;
         }
-        finish(res.user.role);
+        finish(res.user);
       } catch (err: any) {
         setError(err?.message || 'Verification failed. Try again.');
       } finally {
@@ -401,6 +421,20 @@ export function AuthModal() {
                     {emailOk && <RoleBadge role={role} className="mt-1 shrink-0" />}
                   </div>
                   <p className="mt-1.5 text-sm text-ink/60">We&apos;ll email a 6-digit code to verify it&apos;s you.</p>
+                  <Field id="auth-name" label="Full Name" icon={<User className="h-4 w-4" />} error={touched.name && !nameOk && `At least ${MIN_NAME} characters.`}>
+                    <input
+                      id="auth-name"
+                      type="text"
+                      autoComplete="name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      onBlur={() => touch('name')}
+                      placeholder="e.g. Alex Vance"
+                      maxLength={80}
+                      aria-invalid={touched.name && !nameOk}
+                      className={cn(inputBase, touched.name && !nameOk ? inputBad : inputOk)}
+                    />
+                  </Field>
                   {emailField}
                   <Field id="auth-new-password" label="Password" icon={<Lock className="h-4 w-4" />} error={touched.password && !passOk && 'Password does not meet all requirements below.'}>
                     <PasswordInput id="auth-new-password" value={password} onChange={setPassword} onBlur={() => touch('password')} invalid={!!touched.password && !passOk} autoComplete="new-password" placeholder="Min. 8 characters" />
@@ -423,9 +457,14 @@ export function AuthModal() {
                       </span>
                     </div>
                   </Field>
-                  <Field id="auth-confirm" label="Confirm Password" icon={<Lock className="h-4 w-4" />} error={touched.confirm && !confirmOk && 'Passwords don’t match.'}>
-                    <PasswordInput id="auth-confirm" value={confirm} onChange={setConfirm} onBlur={() => touch('confirm')} invalid={!!touched.confirm && !confirmOk} autoComplete="new-password" placeholder="Repeat password" />
+                  <Field id="auth-confirm" label="Confirm Password" icon={<Lock className="h-4 w-4" />}>
+                    <PasswordInput id="auth-confirm" value={confirm} onChange={setConfirm} onBlur={() => touch('confirm')} invalid={confirm.length > 0 && !confirmOk} autoComplete="new-password" placeholder="Repeat password" />
                   </Field>
+                  {(confirm.length > 0 || touched.confirm) && (
+                    <p aria-live="polite" className={cn('mt-1.5 flex items-center gap-1.5 text-[12px] font-medium', confirmOk ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500')}>
+                      {confirmOk ? <><Check className="h-3.5 w-3.5" /> Passwords match</> : 'Passwords do not match'}
+                    </p>
+                  )}
                   {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
                   <button type="submit" disabled={busy} className={cn(primaryBtn, 'mt-6')}>
                     {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending code…</> : <>Send Verification Code <ArrowRight className="h-4 w-4" /></>}

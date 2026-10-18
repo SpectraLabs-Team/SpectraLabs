@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { EMAIL_RE } from '@/lib/auth-shared';
-import { ADMIN_EMAIL, createSessionToken, createUser, findUser, hashPassword, verifyPassword } from '@/lib/server/authStore';
+import { createSessionToken, findUser, publicUser, verifyPassword } from '@/lib/server/authStore';
 
 export async function POST(req: Request) {
   try {
@@ -13,18 +13,13 @@ export async function POST(req: Request) {
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    let user = findUser(cleanEmail);
+    const user = findUser(cleanEmail);
 
     if (!user) {
-      // First-time admin login bootstrapping: if the admin email logs in, provision automatically
-      if (cleanEmail === ADMIN_EMAIL) {
-        user = createUser(cleanEmail, hashPassword(password)) as any;
-      } else {
-        return NextResponse.json(
-          { ok: false, error: 'No account found with this email. Please click "Sign Up" to register.' },
-          { status: 404 },
-        );
-      }
+      return NextResponse.json(
+        { ok: false, error: 'No account found with this email. Please click "Sign Up" to register.' },
+        { status: 404 },
+      );
     }
 
     if (!user || !verifyPassword(password, user.passwordHash)) {
@@ -34,7 +29,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const userPayload = { email: user.email, role: user.role };
+    const userPayload = publicUser(user);
     const token = createSessionToken(userPayload);
     const cookieStore = cookies();
     cookieStore.set('spectra_session', token, {

@@ -6,9 +6,10 @@ import { useEffect, useState } from 'react';
 import { ArrowRight, LayoutDashboard, LogOut, Menu, X } from 'lucide-react';
 import { Logo } from '@/components/ui/primitives';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
-import { useAuth } from '@/lib/auth';
+import { displayName, useAuth, type AuthUser } from '@/lib/auth';
 import { NAV } from '@/lib/site';
 import { cn } from '@/lib/utils';
+import { NavLink } from './NavLink';
 
 const navLink =
   'rounded-lg px-3 py-1.5 text-[13.5px] font-medium transition text-slate-600 hover:text-slate-900 hover:bg-slate-100/80 dark:text-slate-300 dark:hover:text-white dark:hover:bg-white/5';
@@ -24,22 +25,25 @@ export function useLaunchStudio() {
   return () => (isAuthenticated ? router.push('/studio') : openAuthModal('signup'));
 }
 
-function RolePill({ email, role, className }: { email: string; role: 'admin' | 'user'; className?: string }) {
+/** Signed-in identity: display name + role badge (email in the tooltip). */
+export function RolePill({ user, className }: { user: AuthUser; className?: string }) {
+  const name = displayName(user);
   return (
     <span
+      title={`${name} · ${user.email}`}
       className={cn(
-        'flex max-w-[240px] items-center gap-2 rounded-full border border-slate-300/80 bg-slate-100/90 py-1 pl-3 pr-1 text-[12px] text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200',
+        'flex max-w-[240px] items-center gap-2 rounded-full border border-slate-300/80 bg-slate-100/90 py-1 pl-3 pr-1 text-[12px] font-medium text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200',
         className,
       )}
     >
-      <span className="truncate" title={email}>{email}</span>
+      <span className="truncate">{name}</span>
       <span
         className={cn(
           'shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold',
-          role === 'admin' ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300' : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
+          user.role === 'admin' ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300' : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300',
         )}
       >
-        {role === 'admin' ? 'Admin' : 'User'}
+        {user.role === 'admin' ? 'Admin' : 'User'}
       </span>
     </span>
   );
@@ -77,17 +81,11 @@ export function Header({ overHero = false }: { overHero?: boolean }) {
         </Link>
 
         <div className="mx-auto hidden items-center gap-1 lg:flex">
-          {NAV.map((l) =>
-            l.external ? (
-              <a key={l.label} href={l.href} target="_blank" rel="noreferrer" className={navLink}>
-                {l.label}
-              </a>
-            ) : (
-              <Link key={l.label} href={l.href} className={navLink}>
-                {l.label}
-              </Link>
-            ),
-          )}
+          {NAV.map((l) => (
+            <NavLink key={l.label} href={l.href} external={l.external} className={navLink}>
+              {l.label}
+            </NavLink>
+          ))}
         </div>
 
         <div className="ml-auto flex items-center gap-2 lg:ml-0">
@@ -97,7 +95,7 @@ export function Header({ overHero = false }: { overHero?: boolean }) {
             <span className="hidden h-9 w-[180px] sm:block" aria-hidden />
           ) : user ? (
             <div className="hidden items-center gap-1 lg:flex">
-              <RolePill email={user.email} role={user.role} className="mr-1" />
+              <RolePill user={user} className="mr-1" />
               {user.role === 'admin' && (
                 <Link href="/admin" className={cn(navLink, 'inline-flex items-center gap-1.5')}>
                   <LayoutDashboard className="h-3.5 w-3.5" /> Admin Dashboard
@@ -137,21 +135,21 @@ export function Header({ overHero = false }: { overHero?: boolean }) {
         <div className="border-t border-slate-200/80 bg-white/95 px-6 pb-6 pt-4 backdrop-blur-2xl dark:border-cyan-500/15 dark:bg-[#040711]/95 lg:hidden">
           <div className="grid gap-1">
             {NAV.map((l) => (
-              <Link
+              <NavLink
                 key={l.label}
                 href={l.href}
+                external={l.external}
                 onClick={close}
-                {...(l.external ? { target: '_blank', rel: 'noreferrer' } : {})}
                 className="rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100/80 dark:text-slate-200 dark:hover:bg-white/5"
               >
                 {l.label}
-              </Link>
+              </NavLink>
             ))}
           </div>
 
           {user ? (
             <div className="mt-4 grid gap-2">
-              <RolePill email={user.email} role={user.role} className="w-fit max-w-full" />
+              <RolePill user={user} className="w-fit max-w-full" />
               {user.role === 'admin' && (
                 <Link href="/admin" onClick={close} className="rounded-xl border border-slate-300 py-2.5 text-center text-sm font-semibold text-slate-700 dark:border-white/15 dark:text-slate-200">
                   Admin Dashboard

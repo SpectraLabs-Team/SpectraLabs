@@ -1,20 +1,24 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 export * from './auth-shared';
-import { type AuthMode, type AuthUser, type Role } from './auth-shared';
+import { type AuthMode, type AuthUser } from './auth-shared';
 
-// Frontend-stage session persistence so a refresh doesn't sign you out.
-// Replace with the server-issued session (HttpOnly cookie) once the SMTP/OTP endpoints land.
-const KEY = 'spectra-auth';
+/**
+ * The HttpOnly `spectra_session` cookie is the source of truth. sessionStorage only caches the
+ * user so a page shows the right header instantly; it is never trusted over the server.
+ */
+const CACHE_KEY = 'spectra-auth';
+/** localStorage key whose `storage` events tell other tabs to re-check the session. */
+const SYNC_KEY = 'spectra-auth-sync';
 
 type AuthCtx = {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, role: Role) => void;
-  logout: () => void;
+  login: (user: AuthUser) => void;
+  logout: () => Promise<void>;
   isAuthModalOpen: boolean;
   authMode: AuthMode;
   setAuthMode: (mode: AuthMode) => void;
@@ -24,69 +28,116 @@ type AuthCtx = {
 
 const Ctx = createContext<AuthCtx | null>(null);
 
+function isAuthUser(u: unknown): u is AuthUser {
+  const x = u as AuthUser;
+  return !!x && typeof x.email === 'string' && (x.role === 'admin' || x.role === 'user');
+}
+
+function normalize(u: AuthUser): AuthUser {
+  return { email: u.email, role: u.role, name: typeof u.name === 'string' ? u.name : '' };
+}
+
+function writeCache(u: AuthUser | null) {
+  try {
+    if (u) sessionStorage.setItem(CACHE_KEY, JSON.stringify(u));
+    else sessionStorage.removeItem(CACHE_KEY);
+  } catch {}
+}
+
+function readCache(): AuthUser | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    const u = raw ? JSON.parse(raw) : null;
+    return isAuthUser(u) ? normalize(u) : null;
+  } catch {
+    return null;
+  }
+}
+
+function broadcast(type: 'login' | 'logout') {
+  try {
+    // A unique value guarantees a `storage` event even for repeated identical actions.
+    localStorage.setItem(SYNC_KEY, JSON.stringify({ type, at: Date.now(), nonce: Math.random() }));
+  } catch {}
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthModalOpen, setModalOpen] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const reqId = useRef(0);
+
+  const apply = useCallback((u: AuthUser | null) => {
+    setUser(u);
+    writeCache(u);
+  }, []);
+
+  /** Ask the server who we are. Only a network failure falls back to the cached user. */
+  const refresh = useCallback(async () => {
+    const id = ++reqId.current;
+    try {
+      const res = await fetch('/api/auth/session', { cache: 'no-store', credentials: 'same-origin' });
+      const data = await res.json();
+      if (id !== reqId.current) return;
+      apply(data?.ok && isAuthUser(data.user) ? normalize(data.user) : null);
+    } catch {
+      if (id !== reqId.current) return;
+      setUser(readCache());
+    } finally {
+      if (id === reqId.current) setIsLoading(false);
+    }
+  }, [apply]);
 
   useEffect(() => {
-    let active = true;
-    // Check server-side HttpOnly session first, fallback to sessionStorage
-    fetch('/api/auth/session')
-      .then((res) => res.json())
-      .then((data) => {
-        if (!active) return;
-        if (data.ok && data.user) {
-          setUser(data.user);
-          try {
-            sessionStorage.setItem(KEY, JSON.stringify(data.user));
-          } catch {}
+    const cached = readCache();
+    if (cached) setUser(cached); // instant header; confirmed or cleared by refresh()
+    refresh();
+
+    // Multi-tab sync: another tab logged in or out → re-check the shared cookie.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== SYNC_KEY || !e.newValue) return;
+      try {
+        const msg = JSON.parse(e.newValue) as { type: 'login' | 'logout' };
+        if (msg.type === 'logout') {
+          reqId.current++; // drop any in-flight refresh
+          apply(null);
+          setIsLoading(false);
         } else {
-          // Check sessionStorage fallback
-          try {
-            const raw = sessionStorage.getItem(KEY);
-            if (raw) {
-              const u = JSON.parse(raw) as AuthUser;
-              if (u && typeof u.email === 'string' && (u.role === 'admin' || u.role === 'user')) setUser(u);
-            }
-          } catch {}
+          refresh();
         }
-      })
-      .catch(() => {
-        if (!active) return;
-        try {
-          const raw = sessionStorage.getItem(KEY);
-          if (raw) {
-            const u = JSON.parse(raw) as AuthUser;
-            if (u && typeof u.email === 'string') setUser(u);
-          }
-        } catch {}
-      })
-      .finally(() => {
-        if (active) setIsLoading(false);
-      });
-
-    return () => {
-      active = false;
+      } catch {}
     };
-  }, []);
+    // Returning to a tab is another good moment to catch an expired cookie.
+    const onVisible = () => document.visibilityState === 'visible' && refresh();
 
-  const login = useCallback((email: string, role: Role) => {
-    const u = { email: email.trim().toLowerCase(), role };
-    setUser(u);
-    try {
-      sessionStorage.setItem(KEY, JSON.stringify(u));
-    } catch {}
-  }, []);
+    window.addEventListener('storage', onStorage);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refresh, apply]);
 
-  const logout = useCallback(() => {
-    setUser(null);
+  /** Call with the user the server returned after it set the session cookie. */
+  const login = useCallback(
+    (u: AuthUser) => {
+      reqId.current++;
+      apply(normalize({ ...u, email: u.email.trim().toLowerCase() }));
+      setIsLoading(false);
+      broadcast('login');
+    },
+    [apply],
+  );
+
+  const logout = useCallback(async () => {
+    reqId.current++;
+    apply(null);
     try {
-      sessionStorage.removeItem(KEY);
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
     } catch {}
-    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-  }, []);
+    broadcast('logout');
+  }, [apply]);
 
   const openAuthModal = useCallback((mode: AuthMode = 'login') => {
     setAuthMode(mode);

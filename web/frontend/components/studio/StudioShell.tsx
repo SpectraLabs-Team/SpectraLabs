@@ -1,12 +1,15 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Briefcase, ChevronsLeft, ChevronsRight, Cpu, Lock, Menu, PlugZap, ShieldAlert, X } from 'lucide-react';
+import { Briefcase, ChevronsLeft, ChevronsRight, Cpu, LayoutDashboard, Lock, LogOut, Menu, PlugZap, ShieldAlert, X } from 'lucide-react';
+import { RolePill } from '@/components/landing/Header';
 import { StatusPills } from '@/components/ui/StatusPills';
 import { Logo } from '@/components/ui/primitives';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { displayName, initials, useAuth } from '@/lib/auth';
 import { cn, formatCompactCurrency, formatCurrency } from '@/lib/utils';
 import { usePortfolio } from './PortfolioContext';
 
@@ -23,6 +26,7 @@ const COLLAPSE_KEY = 'spectra-sidebar-collapsed';
 
 function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: StudioTab; onTab: (t: StudioTab) => void; collapsed: boolean; onCollapse?: () => void; onNavigate?: () => void }) {
   const { account, paper, engine } = usePortfolio();
+  const { user } = useAuth();
   const levPct = Math.min(1, account.grossLeverage / Math.max(paper.leverageLimit, 1e-9));
   const online = engine.status === 'online';
 
@@ -41,12 +45,19 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
 
       <div className="flex-1 space-y-5 overflow-y-auto p-3">
         {/* Profile */}
-        <div className={cn('flex items-center gap-3 rounded-xl border border-ink/[0.07] bg-ink/[0.02] p-2.5', collapsed && 'justify-center p-2')}>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-gradient font-mono text-xs font-bold text-onaccent">SL</span>
+        <div
+          className={cn('flex items-center gap-3 rounded-xl border border-ink/[0.07] bg-ink/[0.02] p-2.5', collapsed && 'justify-center p-2')}
+          title={user ? `${displayName(user)} · ${user.email}` : undefined}
+        >
+          <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-gradient font-mono text-xs font-bold text-onaccent shadow-glow">
+            {user ? initials(user) : 'SL'}
+          </span>
           {!collapsed && (
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-ink">Research Workspace</p>
-              <span className="mt-0.5 inline-flex items-center rounded-full border border-accent/30 bg-accent/10 px-1.5 py-px text-[10px] font-medium text-accent">Self-hosted · v0.7.0</span>
+              <p className="truncate text-sm font-medium text-ink">{user ? displayName(user) : 'Research Workspace'}</p>
+              <span className="mt-0.5 inline-flex items-center rounded-full border border-accent/30 bg-accent/10 px-1.5 py-px text-[10px] font-medium text-accent">
+                {user?.role === 'admin' ? 'Admin' : 'Quant'} · v0.7.0
+              </span>
             </div>
           )}
         </div>
@@ -166,6 +177,12 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
 
 export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (t: StudioTab) => void; children: ReactNode }) {
   const { stats, positions, source, engine } = usePortfolio();
+  const { user, logout } = useAuth();
+  const router = useRouter();
+  const signOut = async () => {
+    router.replace('/');
+    await logout();
+  };
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const current = TABS.find((t) => t.id === tab)!;
@@ -221,11 +238,27 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
             <h1 className="truncate text-sm font-semibold text-ink">{current.label}</h1>
           </div>
           <div className="ml-auto flex items-center gap-3">
-            <span className="hidden items-center gap-2 rounded-full border border-ink/10 bg-ink/[0.03] px-3 py-1 text-xs text-ink/60 xl:inline-flex">
+            <span className="hidden items-center gap-2 rounded-full border border-ink/10 bg-ink/[0.03] px-3 py-1 text-xs text-ink/60 2xl:inline-flex">
               <Briefcase className="h-3.5 w-3.5 text-ink/40" />
               <span className="num text-ink/90">{formatCompactCurrency(stats.netValue)}</span>· {positions.length} positions · {source}
             </span>
-            <StatusPills className="hidden md:flex" />
+            <StatusPills className="hidden xl:flex" />
+            {user && <RolePill user={user} className="hidden sm:flex" />}
+            {user?.role === 'admin' && (
+              <Link
+                href="/admin"
+                className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-ink/65 transition hover:bg-ink/[0.05] hover:text-ink md:inline-flex"
+              >
+                <LayoutDashboard className="h-4 w-4" /> Admin Dashboard
+              </Link>
+            )}
+            <button
+              type="button"
+              onClick={signOut}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ink/15 bg-ink/[0.03] px-3 py-1.5 text-[12.5px] font-semibold text-ink/80 transition hover:border-loss/40 hover:bg-loss/10 hover:text-loss"
+            >
+              <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Sign Out</span>
+            </button>
           </div>
         </header>
 

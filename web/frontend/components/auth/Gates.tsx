@@ -4,7 +4,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Lock, Mail, ShieldAlert } from 'lucide-react';
-import { useAuth } from '@/lib/auth';
+import { displayName, useAuth } from '@/lib/auth';
 
 function Screen({ children }: { children: ReactNode }) {
   return (
@@ -68,9 +68,15 @@ export function RequireAdmin({ children }: { children: ReactNode }) {
         </div>
         <h1 className="mt-5 text-xl font-bold tracking-tight text-ink">Unauthorized - Admin Privileges Required</h1>
         <p className="mt-2 text-sm leading-6 text-ink/60">
-          {user ? `${user.email} is signed in with User access.` : 'Sign in with an administrator account to continue.'}
+          {user ? (
+            <>
+              You&apos;re signed in as <span className="font-medium text-ink/85">{displayName(user)}</span> ({user.email}) with User access.
+            </>
+          ) : (
+            'Sign in with an administrator account to continue.'
+          )}
         </p>
-        {!user && <SignInButton />}
+        {user ? <SwitchToAdminButton /> : <SignInButton />}
       </Screen>
     );
   }
@@ -86,6 +92,23 @@ function SignInButton() {
       className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-500 py-3 text-sm font-bold text-white transition hover:brightness-110"
     >
       <Mail className="h-4 w-4" /> Log In with Email
+    </button>
+  );
+}
+
+/** A signed-in regular user: end their session, then open Log In for the admin account. */
+function SwitchToAdminButton() {
+  const { logout, openAuthModal } = useAuth();
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        await logout();
+        openAuthModal('login');
+      }}
+      className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-500 py-3 text-sm font-bold text-white transition hover:brightness-110"
+    >
+      <Mail className="h-4 w-4" /> Sign In with Admin Account
     </button>
   );
 }

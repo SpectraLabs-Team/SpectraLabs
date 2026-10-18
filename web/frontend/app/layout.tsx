@@ -17,7 +17,7 @@ export const viewport: Viewport = {
   ],
 };
 
-const scrollResetScript = `(function(){try{if('scrollRestoration' in history){history.scrollRestoration='manual'}}catch(e){}})();`;
+const scrollResetScript = `(function(){try{if('scrollRestoration' in history){history.scrollRestoration='manual'}if(window.location.hash){history.replaceState(null,'',window.location.pathname+window.location.search)}window.scrollTo(0,0)}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

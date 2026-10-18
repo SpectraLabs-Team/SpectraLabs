@@ -71,7 +71,7 @@ export function PortfolioStudio() {
       calculateRisk({ portfolio_csv: csv, metric: 'hhi', confidence: 0.99, simulations: 1_000, horizon_days: 1, backend: 'auto' })
         .then((r) => live && setEngineHhi(r.value))
         .catch(() => live && setEngineHhi(null));
-    }, 300);
+    }, 800); // debounced so editing a position doesn't hit the engine on every keystroke
     return () => {
       live = false;
       clearTimeout(t);

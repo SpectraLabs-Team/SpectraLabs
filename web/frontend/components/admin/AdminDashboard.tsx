@@ -1,10 +1,11 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { Activity, Cpu, Gauge, ScrollText, Server, Workflow } from 'lucide-react';
+import { Activity, ArrowRight, Cpu, Gauge, RefreshCw, ScrollText, Server, Users, Workflow } from 'lucide-react';
 import { StatusPills } from '@/components/ui/StatusPills';
-import { useAuth } from '@/lib/auth';
+import { displayName, initials, useAuth, type Role } from '@/lib/auth';
 import { useEngineHealth } from '@/lib/useEngineHealth';
 import { cn } from '@/lib/utils';
 
@@ -58,6 +59,84 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
+type Account = { email: string; name: string; role: Role; createdAt: number };
+
+const joined = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+
+/** Live list from /api/admin/users (admin-checked on the server). */
+function RegisteredUsers() {
+  const [users, setUsers] = useState<Account[] | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/admin/users', { cache: 'no-store', credentials: 'same-origin' });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Could not load accounts.');
+      setUsers(data.users);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load accounts.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <>
+      <div className="-mt-1 mb-3 flex items-center justify-between gap-3">
+        <p className="text-[12px] text-ink/50">{users ? `${users.length} account${users.length === 1 ? '' : 's'}` : loading ? 'Loading…' : ''}</p>
+        <button type="button" onClick={load} disabled={loading} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-ink/55 transition hover:bg-ink/5 hover:text-ink disabled:opacity-50">
+          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} /> Refresh
+        </button>
+      </div>
+      {error ? (
+        <p className="rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-3 py-2 text-[12.5px] text-rose-600 dark:text-rose-300">{error}</p>
+      ) : users && users.length === 0 ? (
+        <p className="py-6 text-center text-sm text-ink/50">No accounts registered yet.</p>
+      ) : (
+        <div className="-mx-1 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-[12.5px]">
+            <thead>
+              <tr className="border-b border-ink/[0.08] font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink/45">
+                <th className="px-1 pb-2 font-medium">Name</th>
+                <th className="px-1 pb-2 font-medium">Email</th>
+                <th className="px-1 pb-2 font-medium">Role</th>
+                <th className="px-1 pb-2 text-right font-medium">Joined</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ink/[0.06]">
+              {(users ?? []).map((u) => (
+                <tr key={u.email}>
+                  <td className="px-1 py-2.5">
+                    <span className="flex items-center gap-2.5">
+                      <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent-gradient font-mono text-[10px] font-bold text-onaccent">{initials(u)}</span>
+                      <span className="truncate font-medium text-ink/90">{displayName(u)}</span>
+                    </span>
+                  </td>
+                  <td className="truncate px-1 py-2.5 text-ink/65">{u.email}</td>
+                  <td className="px-1 py-2.5">
+                    <span className={cn('rounded-full px-2 py-0.5 text-[10.5px] font-semibold', u.role === 'admin' ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300' : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300')}>
+                      {u.role === 'admin' ? 'Admin' : 'User'}
+                    </span>
+                  </td>
+                  <td className="px-1 py-2.5 text-right font-mono tabular-nums text-ink/55">{joined.format(new Date(u.createdAt))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
 export function AdminDashboard() {
   const { user } = useAuth();
   const health = useEngineHealth();
@@ -71,6 +150,12 @@ export function AdminDashboard() {
           <h1 className="mt-3 text-3xl font-bold tracking-tight text-ink sm:text-[2.15rem]">Platform operations</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
+          <Link
+            href="/studio"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#00F2FE] via-[#38BDF8] to-[#0284C7] px-4 py-2 text-sm font-bold text-[#03131A] shadow-glow transition hover:brightness-110 active:scale-[0.98]"
+          >
+            Open Quant Studio <ArrowRight className="h-4 w-4" />
+          </Link>
           <StatusPills />
           <span className="flex items-center gap-3 rounded-full border border-slate-300/80 bg-slate-100/90 px-4 py-1.5 font-mono text-[12px] text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
             <span className="flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-accent" /> CPU 63%</span>
@@ -80,7 +165,7 @@ export function AdminDashboard() {
         </div>
       </div>
       <p className="mt-3 text-sm text-ink/60">
-        Signed in as <span className="font-medium text-ink/85">{user?.email}</span>. Figures below are placeholders until the telemetry API is wired up.
+        Signed in as <span className="font-medium text-ink/85">{user ? displayName(user) : ''}</span>. Figures below are placeholders until the telemetry API is wired up.
       </p>
 
       <div className="mt-10 grid auto-rows-[minmax(180px,auto)] gap-5 md:grid-cols-2 lg:grid-cols-4">
@@ -153,6 +238,10 @@ export function AdminDashboard() {
             ))}
           </ul>
           <p className="mt-3 flex items-center gap-1.5 text-[11px] text-ink/45"><Gauge className="h-3 w-3" /> SHA-256 hash-chained · tamper-evident</p>
+        </Card>
+
+        <Card i={5} title="Registered Quants & Fund Accounts" icon={<Users className="h-4 w-4" />} className="md:col-span-2 lg:col-span-4">
+          <RegisteredUsers />
         </Card>
       </div>
     </>

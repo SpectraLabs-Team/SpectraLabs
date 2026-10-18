@@ -58,7 +58,7 @@ const GROUPS: { title: string; icon: typeof Zap; color: string; dot: string; ite
 
 export function Taxonomy() {
   return (
-    <section className="py-10" aria-labelledby="taxonomy-title">
+    <section id="taxonomy" className="py-10" aria-labelledby="taxonomy-title">
       <div className="mx-auto max-w-[1320px] px-5 sm:px-8">
         <div className="glass rounded-2xl border-accent/20 p-5 sm:p-7">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">

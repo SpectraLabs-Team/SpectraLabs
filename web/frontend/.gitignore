@@ -1,0 +1,3 @@
+
+# Local auth store (password hashes); never commit
+.data/

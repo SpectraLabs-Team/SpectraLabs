@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useAuth } from '@/lib/auth';
 import { getSamplePortfolio } from '@/lib/api';
 import { DEFAULT_PAPER, paperAccount, type PaperAccount, type PaperSettings } from '@/lib/paperLedger';
 import { SAMPLE_CSV, parseCsv, portfolioStats, toCsv, type PortfolioStats } from '@/lib/portfolio';
@@ -26,35 +27,82 @@ interface PortfolioCtx {
 }
 
 const Ctx = createContext<PortfolioCtx | null>(null);
-const PAPER_KEY = 'spectra-paper';
+/** Per-account storage keys, so two people on one browser never see each other's book. */
+const portfolioKey = (email?: string) => `spectra-portfolio-${email || 'guest'}`;
+const paperKey = (email?: string) => `spectra-paper-${email || 'guest'}`;
+const SOURCES: Source[] = ['engine sample', 'bundled sample', 'uploaded', 'pasted', 'edited'];
 
 export function PortfolioProvider({ children }: { children: ReactNode }) {
   const engine = useEngineHealth();
+  const { user } = useAuth();
+  const email = user?.email;
   const [positions, setPos] = useState<Position[]>(() => parseCsv(SAMPLE_CSV).positions);
   const [source, setSource] = useState<Source>('bundled sample');
   const [revision, setRevision] = useState(0);
   const [paper, setPaperState] = useState<PaperSettings>(DEFAULT_PAPER);
 
+  /** Which account's draft is currently loaded; persistence waits until it matches. */
+  const hydratedFor = useRef<string | null>(null);
+
+  // Load this account's saved book and paper settings. Runs again when the account changes
+  // (sign-out, or another user signing in), and always starts from a clean in-memory state
+  // so nothing from the previous account survives.
   useEffect(() => {
+    hydratedFor.current = null;
+    let next = parseCsv(SAMPLE_CSV).positions;
+    let nextSource: Source = 'bundled sample';
+    let nextPaper: PaperSettings = DEFAULT_PAPER;
     try {
-      const raw = localStorage.getItem(PAPER_KEY);
+      const raw = localStorage.getItem(portfolioKey(email));
+      if (raw) {
+        const d = JSON.parse(raw) as { csv?: unknown; source?: unknown };
+        const parsed = typeof d.csv === 'string' ? parseCsv(d.csv) : null;
+        if (parsed && parsed.positions.length && !parsed.errors.length) {
+          next = parsed.positions;
+          nextSource = SOURCES.includes(d.source as Source) ? (d.source as Source) : 'edited';
+        }
+      }
+    } catch {
+      /* corrupted draft: start from the sample */
+    }
+    try {
+      const raw = localStorage.getItem(paperKey(email));
       if (raw) {
         const p = JSON.parse(raw) as Partial<PaperSettings>;
-        if (Number.isFinite(p.startingCapital) && Number.isFinite(p.leverageLimit)) setPaperState({ startingCapital: p.startingCapital!, leverageLimit: p.leverageLimit! });
+        if (Number.isFinite(p.startingCapital) && Number.isFinite(p.leverageLimit)) nextPaper = { startingCapital: p.startingCapital!, leverageLimit: p.leverageLimit! };
       }
     } catch {
       /* defaults */
     }
-  }, []);
+    setPos(next);
+    setSource(nextSource);
+    setPaperState(nextPaper);
+    setRevision((r) => r + 1);
+    hydratedFor.current = portfolioKey(email);
+  }, [email]);
 
-  const setPaper = useCallback((p: PaperSettings) => {
-    setPaperState(p);
+  // Save the draft under the current account only (never during the account switch itself).
+  useEffect(() => {
+    const key = portfolioKey(email);
+    if (hydratedFor.current !== key) return;
     try {
-      localStorage.setItem(PAPER_KEY, JSON.stringify(p));
+      localStorage.setItem(key, JSON.stringify({ csv: toCsv(positions), source }));
     } catch {
       /* not persisted */
     }
-  }, []);
+  }, [positions, source, email]);
+
+  const setPaper = useCallback(
+    (p: PaperSettings) => {
+      setPaperState(p);
+      try {
+        localStorage.setItem(paperKey(email), JSON.stringify(p));
+      } catch {
+        /* not persisted */
+      }
+    },
+    [email],
+  );
 
   const setPositions = useCallback((p: Position[], s: Source) => {
     setPos(p);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Info, Play, ShieldAlert, Sigma, TrendingDown, Wallet } from 'lucide-react';
+import { Activity, Info, Play, ShieldAlert, Sigma, Sparkles, TrendingDown, Wallet } from 'lucide-react';
 import { calculateRisk } from '@/lib/api';
 import { analyticCVaR, analyticLossStd, analyticVaR } from '@/lib/model';
 import type { BackendRequest, RiskResult } from '@/lib/types';
@@ -57,7 +57,9 @@ export function RiskLab() {
   const [simulations, setSimulations] = useState(100_000);
   const [horizon, setHorizon] = useState(1);
   const [backend, setBackend] = useState<BackendRequest>('auto');
-  const [auto, setAuto] = useState(true);
+  // Off by default: the Monte Carlo engine only runs when the user clicks "Run simulation"
+  // (or opts into Live mode with the switch).
+  const [auto, setAuto] = useState(false);
   const [results, setResults] = useState<Results | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -82,7 +84,8 @@ export function RiskLab() {
     }
   }, [csv, confidence, simulations, horizon, backend, revision]);
 
-  // Live mode: re-run (debounced) whenever an input or the portfolio changes.
+  // Live mode (opt-in): re-run (debounced) whenever an input or the portfolio changes.
+  // Nothing runs on mount; the first run is always an explicit click or switching Live on.
   useEffect(() => {
     if (!online || !auto) return;
     const t = setTimeout(run, simulations >= 500_000 ? 450 : 250);
@@ -188,7 +191,27 @@ export function RiskLab() {
             </div>
           </div>
           <div className="mt-4 h-[320px]">
-            <LossHistogram input={modelInput} varValue={shown.var} cvarValue={shown.cvar} confidenceLabel={confidenceLabel(confidence)} />
+            {results || loading ? (
+              <LossHistogram input={modelInput} varValue={shown.var} cvarValue={shown.cvar} confidenceLabel={confidenceLabel(confidence)} />
+            ) : (
+              <div className="relative flex h-full flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-ink/[0.12] bg-ink/[0.015] px-6 text-center">
+                <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,rgb(var(--accent)/0.10),transparent_65%)]" />
+                {/* Faint silhouette of the histogram that will appear */}
+                <div aria-hidden className="pointer-events-none absolute inset-x-10 bottom-6 flex h-24 items-end gap-1 opacity-[0.18]">
+                  {[4, 7, 12, 19, 28, 39, 52, 66, 80, 92, 100, 96, 86, 72, 57, 43, 31, 21, 13, 8, 5, 3].map((h, k) => (
+                    <div key={k} className={cn('flex-1 rounded-t', k >= 17 ? 'bg-loss' : 'bg-accent')} style={{ height: `${h}%` }} />
+                  ))}
+                </div>
+                <span className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-accent/30 bg-accent/10 text-accent shadow-glow">
+                  <Sparkles className="h-5 w-5" />
+                </span>
+                <p className="relative mt-4 text-sm font-semibold text-ink">Ready to simulate</p>
+                <p className="relative mt-1 max-w-sm text-[12.5px] leading-5 text-ink/55">
+                  Configure parameters on the left and click <span className="font-semibold text-ink/80">&lsquo;Run simulation&rsquo;</span>.
+                  {!online && ' The Rust engine must be running first.'}
+                </p>
+              </div>
+            )}
           </div>
           <p className="mt-3 flex items-start gap-2 text-[11px] leading-5 text-ink/40">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -222,7 +245,7 @@ export function RiskLab() {
                 ))}
               </dl>
             ) : (
-              <p className="mt-4 text-sm text-ink/50">{online ? 'Running the first simulation…' : 'Engine results and their reproducibility metadata show here once the API is running.'}</p>
+              <p className="mt-4 text-sm text-ink/50">{online ? 'No run yet. Click “Run simulation” to record backend, timings, seed and engine commit.' : 'Engine results and their reproducibility metadata show here once the API is running.'}</p>
             )}
           </GlassCard>
 

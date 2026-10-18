@@ -1,7 +1,11 @@
 import nodemailer from 'nodemailer';
 
-const user = process.env.GMAIL_USER || 'i.practice.java@gmail.com';
+const user = process.env.GMAIL_USER || '';
 const pass = process.env.GMAIL_APP_PASSWORD || '';
+
+if (process.env.NODE_ENV === 'production' && (!user || !pass)) {
+  throw new Error('FATAL: GMAIL_USER and GMAIL_APP_PASSWORD environment variables are required in production.');
+}
 
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',

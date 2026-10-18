@@ -1,8 +1,8 @@
 export const GITHUB_URL = 'https://github.com/SpectraLabs-Team/spectralabs';
 
 export const NAV: { href: string; label: string; external?: boolean }[] = [
-  { href: '/studio', label: 'Product' },
   { href: '/#features', label: 'Features' },
+  { href: '/#taxonomy', label: 'Taxonomy' },
   { href: '/#benchmarks', label: 'Benchmarks' },
   { href: '/architecture', label: 'Architecture' },
 ];

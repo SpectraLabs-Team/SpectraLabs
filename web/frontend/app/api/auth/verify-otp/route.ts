@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { clearPendingOtp, createSessionToken, createUser, findUser, getPendingOtp } from '@/lib/server/authStore';
+import { clearPendingOtp, createSessionToken, createUser, findUser, getPendingOtp, publicUser } from '@/lib/server/authStore';
 
 export async function POST(req: Request) {
   try {
@@ -40,14 +40,19 @@ export async function POST(req: Request) {
     // OTP matched!
     clearPendingOtp(cleanEmail);
 
-    // Register user or get existing
+    // Register user or get existing. Never issue a session for an email with no account.
     let userRecord = findUser(cleanEmail);
     if (!userRecord && pending.passwordHash) {
-      userRecord = createUser(cleanEmail, pending.passwordHash) as any;
+      userRecord = createUser(cleanEmail, pending.passwordHash, pending.name);
+    }
+    if (!userRecord) {
+      return NextResponse.json(
+        { ok: false, error: 'Your sign-up session expired. Please start again.' },
+        { status: 400 },
+      );
     }
 
-    const role = userRecord?.role || (cleanEmail === process.env.ADMIN_EMAIL ? 'admin' : 'user');
-    const userPayload = { email: cleanEmail, role };
+    const userPayload = publicUser(userRecord);
 
     // Create session token and set HttpOnly cookie
     const token = createSessionToken(userPayload);

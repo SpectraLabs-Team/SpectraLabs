@@ -1,0 +1,24 @@
+{
+  "id": "6ef4b9ea47e4432e8a3da967ed3142892b7b671f43604a54e379f58e0646acae",
+  "bars_sha256": "931f61d3cf5c3af9eb15abe687343a62398d5db1dc19ddb9cf31bb738cbefd33",
+  "source_sha256": "02eb6c0e6a85b81e0f2e2d69611ebf2e81919f719ca36ba713c6011b3298f35b",
+  "parent_id": "",
+  "note": "",
+  "engine_version": "0.6.0",
+  "bar_count": 300,
+  "first_ts_ns": 1704067260000000000,
+  "last_ts_ns": 1704085200000000000,
+  "first_ts": "2024-01-01T00:01:00Z",
+  "last_ts": "2024-01-01T05:00:00Z",
+  "symbols": ["AAA"],
+  "quality": {
+    "rows_total": 300,
+    "rows_accepted": 300,
+    "rows_rejected": 0,
+    "rejected_by_category": {},
+    "input_was_sorted": true,
+    "warnings": [],
+    "notes": ["Prices are used exactly as supplied: no split or dividend adjustment is applied.", "No exchange calendar is applied: gaps may be legitimate market closures.", "Timestamps are treated as bar start times in UTC."],
+    "symbols": [{"symbol": "AAA", "bars": 300, "gaps": 0, "outlier_returns": 0, "stale_runs": 0, "zero_volume_bars": 0}]
+  }
+}

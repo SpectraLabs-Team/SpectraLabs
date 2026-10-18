@@ -1,0 +1,12 @@
+skip=0
+delim=;
+offset=0
+tf=iso
+symbol=BTC-USD
+ts=WHEN
+open=px_o
+high=px_h
+low=px_l
+close=px_c
+volume=qty
+sym=

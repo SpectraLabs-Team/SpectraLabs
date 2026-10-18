@@ -1,0 +1,23 @@
+datasets 60f2b2b99916757a507a8d678c6550904b48ea6c3d22fa62e3a9b3927d83edf1 8179bd84381875a138a58e37168814aa2746f519e3964d93c97de919998b4198
+seal refused: dataset 8179bd84381875a138a58e37168814aa2746f519e3964d93c97de919998b4198 is already sealed as 'final-check'
+exp1 exp-d6e6b1c3f4557819 best fast=3;slow=15 0.2204374670681625
+v1 64 0.66944423101900496 0.29223248140948554
+v2 128 0.66944423101900496 0.26933722986188613
+lineage sma-premium sma-premium-v2
+artifact art-323e94e9e6c32feb FAIL
+refused: dataset 8179bd84381875a138a58e37168814aa2746f519e3964d93c97de919998b4198 is a sealed holdout; use Vault::evaluate
+checked_get research bars 1000
+holdout 1/2 rem 1 sharpe -0.39682186672224301 ret -0.00078028406928998262 sr -0.024997427955701729 n 499 psr 0.28817734120227323 dsr 0.28817734120227323 ems 0 deaf4e387b45f9c303ea825685a4304479c219fc8c12f4614dd57c216ac549a2
+  warning: Evaluation 1 of 2. Once you act on a holdout result the holdout is no longer fully out-of-sample.
+  warning: Only one evaluation so far: nothing to deflate by, so DSR equals PSR.
+holdout 2/2 rem 0 sharpe -0.39682186672224301 ret -0.00078028406928998262 sr -0.024997427955701729 n 499 psr 0.28817734120227323 dsr 0.28817734120227323 ems 0 deaf4e387b45f9c303ea825685a4304479c219fc8c12f4614dd57c216ac549a2
+  warning: Evaluation 2 of 2. Once you act on a holdout result the holdout is no longer fully out-of-sample.
+  warning: This was the last evaluation; the holdout is now exhausted.
+evaluate refused: holdout 'final-check' has no evaluations left (budget 2)
+evaluate refused: unknown holdout: nope
+status final-check 8179bd84381875a138a58e37168814aa2746f519e3964d93c97de919998b4198 budget 2 started 2 completed 2 failed 0 denied 1 remaining 0
+compare 1 1 0 1 1 0 0.026147267540932134 9.1355045479968311e-05
+  diff: parameters: fast=2;slow=15 vs fast=3;slow=20
+runs exp1 sharpe>=0: 8 of 128; trials 128
+verify 1 140 b1a6af92f326b0eeb155f4dee9ac35d0799c758de956c046c1c38d2a053b7774
+reproduce run-873fe9db41621739 1 0f7bab5e243cdd2c7af69252dac775e550b6484f8ca044d57ff1c3be1f1ca52c

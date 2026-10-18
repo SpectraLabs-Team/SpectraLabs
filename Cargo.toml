@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+repository = "https://github.com/SpectraLabs-Team/spectralabs"
+rust-version = "1.89"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Fixed-point code converts between i64/i128/f64 deliberately and checks ranges itself.
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+# Numeric constants are copied digit-for-digit from glibc/fdlibm for bit-exact parity.
+excessive_precision = "allow"
+# Parity code reproduces the C++ engine's exact float comparisons and NaN handling.
+float_cmp = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+# Style lints that fight a faithful port of numeric code.
+format_push_string = "allow"
+many_single_char_names = "allow"
+too_many_lines = "allow"
+too_many_arguments = "allow"
+struct_excessive_bools = "allow"
+items_after_statements = "allow"
+struct_field_names = "allow"
+missing_panics_doc = "allow"
+doc_markdown = "allow"
+# `a + (b + 1) / 2` reproduces the C++ rank formula exactly; it is not a midpoint.
+manual_midpoint = "allow"
+
+[profile.release]
+debug = 1

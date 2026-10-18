@@ -1,0 +1,1084 @@
+=== dup_conflict_skip
+Dataset 8b49dc1d5e139092f7825c86311fb01b25acf1b94b2f9d568c510045c74eed79
+  bars: 2   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-02T00:00:00Z
+  rows: 3 read, 2 accepted, 1 rejected
+    rejected duplicate_conflict: 1
+    line 3 [duplicate_conflict] CONFLICTS with the X bar at 2024-01-01T00:00:00Z (first seen on line 2)
+  per symbol:
+    X: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  warnings:
+    - 1 row(s) were rejected and skipped (see categories).
+    - 1 conflicting duplicate(s): rows with the same timestamp and symbol but different values. The FIRST row in the file was kept, so the dataset depends on file order; resolve the source data instead of relying on this.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 995313ef30aba7db4146bc48a7e52db1ad264e8dba43e5796c53f8a56be2ef60
+bar 1704067200000000000 0 100000000 200000000 50000000 150000000 1000000000
+bar 1704153600000000000 0 100000000 200000000 50000000 150000000 1000000000
+reloaded 8b49dc1d5e139092f7825c86311fb01b25acf1b94b2f9d568c510045c74eed79 3 1
+Dataset 8b49dc1d5e139092f7825c86311fb01b25acf1b94b2f9d568c510045c74eed79
+  bars: 2   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-02T00:00:00Z
+  rows: 3 read, 2 accepted, 1 rejected
+  per symbol:
+    X: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== dup_conflict_strict
+ERROR line 3 [duplicate_conflict]: CONFLICTS with the X bar at 2024-01-01T00:00:00Z (first seen on line 2)
+=== dup_exact_skip
+Dataset 7d835d08ebd758e5a888a4b0b4916772a48c94f03e247468830482551e79e76f
+  bars: 2   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-02T00:00:00Z
+  rows: 3 read, 2 accepted, 1 rejected
+    rejected duplicate: 1
+    line 4 [duplicate] exact duplicate of the X bar at 2024-01-01T00:00:00Z (first seen on line 3)
+  per symbol:
+    X: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  warnings:
+    - 1 row(s) were rejected and skipped (see categories).
+    - Input rows were not sorted by (timestamp, symbol); they were sorted on load.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 509971fa2209341c7f2ba644164279b39c7a1d586ade18d9d8990d44aceea5d2
+bar 1704067200000000000 0 100000000 200000000 50000000 150000000 1000000000
+bar 1704153600000000000 0 200000000 300000000 150000000 250000000 2000000000
+reloaded 7d835d08ebd758e5a888a4b0b4916772a48c94f03e247468830482551e79e76f 3 1
+Dataset 7d835d08ebd758e5a888a4b0b4916772a48c94f03e247468830482551e79e76f
+  bars: 2   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-02T00:00:00Z
+  rows: 3 read, 2 accepted, 1 rejected
+  per symbol:
+    X: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== empty
+ERROR CSV is empty
+=== epoch_ms
+Dataset e9969473a5a8539e677907eb9d6ce0102d90b78f130b3d9b3eb7681062781298
+  bars: 2   symbols: 1
+  range: 2023-11-14T22:13:20Z .. 2023-11-14T22:14:20Z
+  rows: 2 read, 2 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 2 bars, median interval 60 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source b25fd3d9591fcfbfd69d820c36efe4d94ad59f5e94ee2873ded602009919ce19
+bar 1700000000000000000 0 100000000 200000000 50000000 150000000 300000000
+bar 1700000060000000000 0 150000000 200000000 100000000 175000000 400000000
+reloaded e9969473a5a8539e677907eb9d6ce0102d90b78f130b3d9b3eb7681062781298 2 0
+Dataset e9969473a5a8539e677907eb9d6ce0102d90b78f130b3d9b3eb7681062781298
+  bars: 2   symbols: 1
+  range: 2023-11-14T22:13:20Z .. 2023-11-14T22:14:20Z
+  rows: 2 read, 2 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 2 bars, median interval 60 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== epoch_s_neg
+Dataset 16fa262fcf3c17d23c064cf89471b8e6ca0466870949bcac0df29b66d2696778
+  bars: 2   symbols: 1
+  range: 1969-12-31T00:00:00Z .. 1970-01-01T00:00:00Z
+  rows: 2 read, 2 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 927f23df1067df021db7ea10c7dcf755c3f3e6b22edcfb7201ece4a2047b48a3
+bar -86400000000000 0 100000000 200000000 50000000 150000000 300000000
+bar 0 0 150000000 200000000 100000000 175000000 400000000
+reloaded 16fa262fcf3c17d23c064cf89471b8e6ca0466870949bcac0df29b66d2696778 2 0
+Dataset 16fa262fcf3c17d23c064cf89471b8e6ca0466870949bcac0df29b66d2696778
+  bars: 2   symbols: 1
+  range: 1969-12-31T00:00:00Z .. 1970-01-01T00:00:00Z
+  rows: 2 read, 2 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== explicit_cols
+Dataset 97d793782b5c93fffa03edc3659b6d4b75d8fe4f00906c852b7a149f529e5ccd
+  bars: 1   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    BTC-USD: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 2b17c604d92f1d05787e1e802a46456c98d4f6bdf8f8daf1df620050ba181e16
+bar 1704067200000000000 0 100000000 200000000 50000000 150000000 1000000000
+reloaded 97d793782b5c93fffa03edc3659b6d4b75d8fe4f00906c852b7a149f529e5ccd 1 0
+Dataset 97d793782b5c93fffa03edc3659b6d4b75d8fe4f00906c852b7a149f529e5ccd
+  bars: 1   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    BTC-USD: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== explicit_missing
+ERROR missing required column: close
+=== header_only
+ERROR no valid data rows
+=== messy
+Dataset 25e8be1e7a2b1a65c2797687b29195ce90485eed28d90b6fbf5d665ad18b3b61
+  bars: 4   symbols: 2
+  range: 2024-01-02T00:00:00Z .. 2024-01-03T00:00:00Z
+  rows: 4 read, 4 accepted, 0 rejected
+  per symbol:
+    AAPL: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+    MSFT: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  warnings:
+    - Input rows were not sorted by (timestamp, symbol); they were sorted on load.
+    - 4 timestamp(s) carried no time zone and were read at UTC+0 minutes. Fixed offsets cannot model daylight-saving changes.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 84b36702f786b7110352d4fb26d82e5ae7c08789475e7a111ac5bb49ec3cb0c5
+bar 1704153600000000000 0 1000000000 1100000000 950000000 1050000000 100000000000
+bar 1704153600000000000 1 10000000000 10100000000 9950000000 10050000000 150000000000
+bar 1704240000000000000 0 1050000000 1100000000 1025000000 1075000000 90000000000
+bar 1704240000000000000 1 10050000000 10200000000 10000000000 10150000000 200000000000
+reloaded 25e8be1e7a2b1a65c2797687b29195ce90485eed28d90b6fbf5d665ad18b3b61 4 0
+Dataset 25e8be1e7a2b1a65c2797687b29195ce90485eed28d90b6fbf5d665ad18b3b61
+  bars: 4   symbols: 2
+  range: 2024-01-02T00:00:00Z .. 2024-01-03T00:00:00Z
+  rows: 4 read, 4 accepted, 0 rejected
+  per symbol:
+    AAPL: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+    MSFT: 2 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== missing_close
+ERROR missing required column: close
+=== naive_count
+Dataset 1d8766f02662a4587ca3a30d5986fe0cf74fdacb6074a0709ccb5b565b9c5414
+  bars: 3   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-03T00:00:00Z
+  rows: 4 read, 3 accepted, 1 rejected
+    rejected duplicate: 1
+    line 3 [duplicate] exact duplicate of the DEFAULT bar at 2024-01-01T00:00:00Z (first seen on line 2)
+  per symbol:
+    DEFAULT: 3 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 3
+  warnings:
+    - 1 row(s) were rejected and skipped (see categories).
+    - DEFAULT: 3 bar(s) with zero volume.
+    - No volume column: volume was set to zero (participation caps would block all fills).
+    - 2 timestamp(s) carried no time zone and were read at UTC+0 minutes. Fixed offsets cannot model daylight-saving changes.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source cbf851f381b86138f52f52929e71956abaf770f79ae23b5a8ba6c076f9c16c04
+bar 1704067200000000000 0 100000000 200000000 50000000 150000000 0
+bar 1704153600000000000 0 100000000 200000000 50000000 150000000 0
+bar 1704240000000000000 0 100000000 200000000 50000000 150000000 0
+reloaded 1d8766f02662a4587ca3a30d5986fe0cf74fdacb6074a0709ccb5b565b9c5414 4 1
+Dataset 1d8766f02662a4587ca3a30d5986fe0cf74fdacb6074a0709ccb5b565b9c5414
+  bars: 3   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-03T00:00:00Z
+  rows: 4 read, 3 accepted, 1 rejected
+  per symbol:
+    DEFAULT: 3 bars, median interval 86400 s, gaps 0, outliers 0, stale runs 0, zero-volume 3
+  warnings:
+    - DEFAULT: 3 bar(s) with zero volume.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== naive_negative_offset
+Dataset 56fb4d9ea88ec2b25ea936dcc480d0848d544ccca18d6627d98395b25711b5d5
+  bars: 1   symbols: 1
+  range: 2020-01-01T10:30:00Z .. 2020-01-01T10:30:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 1
+  warnings:
+    - DEFAULT: 1 bar(s) with zero volume.
+    - No volume column: volume was set to zero (participation caps would block all fills).
+    - 1 timestamp(s) carried no time zone and were read at UTC-300 minutes. Fixed offsets cannot model daylight-saving changes.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 7667103f46f6ec312a753db082ebb558265499cfda1b4b5d99d81db66ae58ad0
+bar 1577874600000000000 0 100000000 200000000 50000000 150000000 0
+reloaded 56fb4d9ea88ec2b25ea936dcc480d0848d544ccca18d6627d98395b25711b5d5 1 0
+Dataset 56fb4d9ea88ec2b25ea936dcc480d0848d544ccca18d6627d98395b25711b5d5
+  bars: 1   symbols: 1
+  range: 2020-01-01T10:30:00Z .. 2020-01-01T10:30:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 1
+  warnings:
+    - DEFAULT: 1 bar(s) with zero volume.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== naive_offset
+Dataset 31a2c8394e5276b34d544bdc71006ad95e019afa41759a70577be61d6d21c6fe
+  bars: 1   symbols: 1
+  range: 2020-01-01T00:00:00Z .. 2020-01-01T00:00:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 1
+  warnings:
+    - DEFAULT: 1 bar(s) with zero volume.
+    - No volume column: volume was set to zero (participation caps would block all fills).
+    - 1 timestamp(s) carried no time zone and were read at UTC+330 minutes. Fixed offsets cannot model daylight-saving changes.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 7667103f46f6ec312a753db082ebb558265499cfda1b4b5d99d81db66ae58ad0
+bar 1577836800000000000 0 100000000 200000000 50000000 150000000 0
+reloaded 31a2c8394e5276b34d544bdc71006ad95e019afa41759a70577be61d6d21c6fe 1 0
+Dataset 31a2c8394e5276b34d544bdc71006ad95e019afa41759a70577be61d6d21c6fe
+  bars: 1   symbols: 1
+  range: 2020-01-01T00:00:00Z .. 2020-01-01T00:00:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 1
+  warnings:
+    - DEFAULT: 1 bar(s) with zero volume.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== no_volume
+Dataset d5eda8b26801f7a9d8455eb1405f5c20cdf42a3708584a8a34c2a47272ded862
+  bars: 1   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 1
+  warnings:
+    - DEFAULT: 1 bar(s) with zero volume.
+    - No volume column: volume was set to zero (participation caps would block all fills).
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 2c392816914829e6c8161fb8da57ac4a5cb6c330d17eb2612db3ad62fbd48580
+bar 1704067200000000000 0 100000000 200000000 50000000 150000000 0
+reloaded d5eda8b26801f7a9d8455eb1405f5c20cdf42a3708584a8a34c2a47272ded862 1 0
+Dataset d5eda8b26801f7a9d8455eb1405f5c20cdf42a3708584a8a34c2a47272ded862
+  bars: 1   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    DEFAULT: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 1
+  warnings:
+    - DEFAULT: 1 bar(s) with zero volume.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== quoted
+Dataset c03f89caa72e4c08b9bad0ce050a22ba3d2469ccf29be4f2d7662cc12cb3bc30
+  bars: 2   symbols: 2
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 2 read, 2 accepted, 0 rejected
+  per symbol:
+    A,B: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+    say "hi": 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source c0a16c1b528420f94b318cf98e0ddbc7b9a010e3fe43ed7f56fe7ca082c9c3de
+bar 1704067200000000000 0 100000000 200000000 50000000 150000000 1000000000
+bar 1704067200000000000 1 100000000 200000000 50000000 150000000 1000000000
+reloaded c03f89caa72e4c08b9bad0ce050a22ba3d2469ccf29be4f2d7662cc12cb3bc30 2 0
+Dataset c03f89caa72e4c08b9bad0ce050a22ba3d2469ccf29be4f2d7662cc12cb3bc30
+  bars: 2   symbols: 2
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 2 read, 2 accepted, 0 rejected
+  per symbol:
+    A,B: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+    say "hi": 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== random_0
+Dataset 6ef4b9ea47e4432e8a3da967ed3142892b7b671f43604a54e379f58e0646acae
+  bars: 300   symbols: 1
+  range: 2024-01-01T00:01:00Z .. 2024-01-01T05:00:00Z
+  rows: 300 read, 300 accepted, 0 rejected
+  per symbol:
+    AAA: 300 bars, median interval 60 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 02eb6c0e6a85b81e0f2e2d69611ebf2e81919f719ca36ba713c6011b3298f35b
+bar 1704067260000000000 0 42910300000 43027040000 42877130000 42955720000 7143700000000
+bar 1704067320000000000 0 42955720000 42976520000 42800550000 42878970000 734200000000
+bar 1704067380000000000 0 42878970000 42901160000 42733410000 42830170000 9590100000000
+bar 1704067440000000000 0 42830170000 42924080000 42784210000 42808110000 3140300000000
+bar 1704067500000000000 0 42808110000 42854180000 42797280000 42837450000 2912400000000
+reloaded 6ef4b9ea47e4432e8a3da967ed3142892b7b671f43604a54e379f58e0646acae 300 0
+Dataset 6ef4b9ea47e4432e8a3da967ed3142892b7b671f43604a54e379f58e0646acae
+  bars: 300   symbols: 1
+  range: 2024-01-01T00:01:00Z .. 2024-01-01T05:00:00Z
+  rows: 300 read, 300 accepted, 0 rejected
+  per symbol:
+    AAA: 300 bars, median interval 60 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== random_1
+Dataset 371904f984021a020017f94212025e94ecc9dcd36832369c1483156cd4964bd2
+  bars: 1200   symbols: 3
+  range: 2024-01-01T00:01:00Z .. 2024-01-02T20:42:00Z
+  rows: 1200 read, 1200 accepted, 0 rejected
+  per symbol:
+    AAA: 400 bars, median interval 60 s, gaps 8, outliers 1, stale runs 2, zero-volume 2
+    BBB: 400 bars, median interval 60 s, gaps 6, outliers 4, stale runs 4, zero-volume 6
+    C: 400 bars, median interval 60 s, gaps 4, outliers 1, stale runs 5, zero-volume 7
+  warnings:
+    - AAA: 8 gap(s) longer than 5x the median interval (largest 30060 s). Missing bars or market closures?
+    - AAA: 1 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?
+    - AAA: 2 run(s) of 5+ frozen bars (stale prices).
+    - AAA: 2 bar(s) with zero volume.
+    - BBB: 6 gap(s) longer than 5x the median interval (largest 20160 s). Missing bars or market closures?
+    - BBB: 4 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?
+    - BBB: 4 run(s) of 5+ frozen bars (stale prices).
+    - BBB: 6 bar(s) with zero volume.
+    - C: 4 gap(s) longer than 5x the median interval (largest 23400 s). Missing bars or market closures?
+    - C: 1 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?
+    - C: 5 run(s) of 5+ frozen bars (stale prices).
+    - C: 7 bar(s) with zero volume.
+    - Input rows were not sorted by (timestamp, symbol); they were sorted on load.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 025b104d4093ab967f2c878cbc1e46aa15f310e4b7c70abba2eac324bfbcde8f
+bar 1704067260000000000 0 23985280000 23991130000 23896730000 23897580000 1418400000000
+bar 1704067260000000000 1 7797220000 7811760000 7781410000 7782310000 7679900000000
+bar 1704067260000000000 2 8469230000 8493990000 8445190000 8454100000 1740500000000
+bar 1704067320000000000 0 23897580000 23926610000 23833320000 23857940000 2685100000000
+bar 1704067320000000000 1 7782310000 7800740000 7776000000 7787960000 5192400000000
+reloaded 371904f984021a020017f94212025e94ecc9dcd36832369c1483156cd4964bd2 1200 0
+Dataset 371904f984021a020017f94212025e94ecc9dcd36832369c1483156cd4964bd2
+  bars: 1200   symbols: 3
+  range: 2024-01-01T00:01:00Z .. 2024-01-02T20:42:00Z
+  rows: 1200 read, 1200 accepted, 0 rejected
+  per symbol:
+    AAA: 400 bars, median interval 60 s, gaps 8, outliers 1, stale runs 2, zero-volume 2
+    BBB: 400 bars, median interval 60 s, gaps 6, outliers 4, stale runs 4, zero-volume 6
+    C: 400 bars, median interval 60 s, gaps 4, outliers 1, stale runs 5, zero-volume 7
+  warnings:
+    - AAA: 8 gap(s) longer than 5x the median interval (largest 30060 s). Missing bars or market closures?
+    - AAA: 1 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?
+    - AAA: 2 run(s) of 5+ frozen bars (stale prices).
+    - AAA: 2 bar(s) with zero volume.
+    - BBB: 6 gap(s) longer than 5x the median interval (largest 20160 s). Missing bars or market closures?
+    - BBB: 4 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?
+    - BBB: 4 run(s) of 5+ frozen bars (stale prices).
+    - BBB: 6 bar(s) with zero volume.
+    - C: 4 gap(s) longer than 5x the median interval (largest 23400 s). Missing bars or market closures?
+    - C: 1 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?
+    - C: 5 run(s) of 5+ frozen bars (stale prices).
+    - C: 7 bar(s) with zero volume.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== random_2
+Dataset 7596c467b6cc415c515c1a3f3d6c47465019130eab73d4f9ecabc5e5b342227f
+  bars: 500   symbols: 2
+  range: 2024-01-01T00:01:00Z .. 2024-01-02T06:05:00Z
+  rows: 500 read, 500 accepted, 0 rejected
+  per symbol:
+    X: 250 bars, median interval 60 s, gaps 6, outliers 1, stale runs 2, zero-volume 0
+    Y: 250 bars, median interval 60 s, gaps 4, outliers 0, stale runs 0, zero-volume 3
+  warnings:
+    - X: 6 gap(s) longer than 5x the median interval (largest 26100 s). Missing bars or market closures?
+    - X: 1 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?
+    - X: 2 run(s) of 5+ frozen bars (stale prices).
+    - Y: 4 gap(s) longer than 5x the median interval (largest 28560 s). Missing bars or market closures?
+    - Y: 3 bar(s) with zero volume.
+    - Input rows were not sorted by (timestamp, symbol); they were sorted on load.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 021befc0c2916e0c4403b113a5f8332d6451c39e26ceed7eb47ffb0c29fd1e97
+bar 1704067260000000000 0 32379990000 32460260000 32371460000 32430190000 9782100000000
+bar 1704067260000000000 1 37870370000 37957740000 37852840000 37914470000 6041500000000
+bar 1704067320000000000 0 32430190000 32441250000 32325420000 32359380000 2363200000000
+bar 1704067320000000000 1 37914470000 37949590000 37909430000 37936760000 964900000000
+bar 1704067380000000000 0 32359380000 32372610000 32334040000 32350470000 6640100000000
+reloaded 7596c467b6cc415c515c1a3f3d6c47465019130eab73d4f9ecabc5e5b342227f 500 0
+Dataset 7596c467b6cc415c515c1a3f3d6c47465019130eab73d4f9ecabc5e5b342227f
+  bars: 500   symbols: 2
+  range: 2024-01-01T00:01:00Z .. 2024-01-02T06:05:00Z
+  rows: 500 read, 500 accepted, 0 rejected
+  per symbol:
+    X: 250 bars, median interval 60 s, gaps 6, outliers 1, stale runs 2, zero-volume 0
+    Y: 250 bars, median interval 60 s, gaps 4, outliers 0, stale runs 0, zero-volume 3
+  warnings:
+    - X: 6 gap(s) longer than 5x the median interval (largest 26100 s). Missing bars or market closures?
+    - X: 1 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?
+    - X: 2 run(s) of 5+ frozen bars (stale prices).
+    - Y: 4 gap(s) longer than 5x the median interval (largest 28560 s). Missing bars or market closures?
+    - Y: 3 bar(s) with zero volume.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== skip_all_bad
+ERROR no valid data rows
+=== skip_reasons
+Dataset 2b9ed4abf8ad9326f5603e8234e712edee89e08800d5c9baf39be80b6e41a345
+  bars: 1   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 8 read, 1 accepted, 7 rejected
+    rejected bad_number: 1
+    rejected bad_timestamp: 1
+    rejected column_count: 1
+    rejected empty_symbol: 1
+    rejected negative_volume: 1
+    rejected non_positive_price: 1
+    rejected ohlc_inconsistent: 1
+    line 3 [bad_timestamp] cannot parse timestamp 'not-a-time' (formats must be explicit; see TimeFormat)
+    line 4 [ohlc_inconsistent] low/high do not bracket open and close
+    line 5 [negative_volume] volume is negative
+    line 6 [non_positive_price] prices must be greater than zero
+    line 7 [column_count] expected 7 fields, found 4
+    line 8 [empty_symbol] symbol is empty
+    line 9 [bad_number] cannot parse close 'zzz' (max 8 decimal places, no rounding)
+  per symbol:
+    X: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  warnings:
+    - 7 row(s) were rejected and skipped (see categories).
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 17494880f30ebd8ebd71a173d349647fbb1a09eb2177ff08987fbcf4e27d7cce
+bar 1704067200000000000 0 100000000 200000000 50000000 150000000 1000000000
+reloaded 2b9ed4abf8ad9326f5603e8234e712edee89e08800d5c9baf39be80b6e41a345 8 7
+Dataset 2b9ed4abf8ad9326f5603e8234e712edee89e08800d5c9baf39be80b6e41a345
+  bars: 1   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 8 read, 1 accepted, 7 rejected
+  per symbol:
+    X: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== strict_9dp
+ERROR line 2 [bad_number]: cannot parse close '1.123456789' (max 8 decimal places, no rounding)
+=== strict_bad_number
+ERROR line 3 [bad_number]: cannot parse close 'abc' (max 8 decimal places, no rounding)
+=== strict_bad_ts
+ERROR line 2 [bad_timestamp]: cannot parse timestamp 'garbage' (formats must be explicit; see TimeFormat)
+=== strict_colcount
+ERROR line 2 [column_count]: expected 7 fields, found 6
+=== strict_empty_sym
+ERROR line 2 [empty_symbol]: symbol is empty
+=== strict_negvol
+ERROR line 2 [negative_volume]: volume is negative
+=== strict_nonpos
+ERROR line 2 [non_positive_price]: prices must be greater than zero
+=== strict_ohlc
+ERROR line 2 [ohlc_inconsistent]: low/high do not bracket open and close
+=== tab_delim
+Dataset 53227753e71015b44ada929083c7f9dc4461b35117dacf74f25abec06cc244ec
+  bars: 1   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    Z: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  warnings:
+    - 1 timestamp(s) carried no time zone and were read at UTC+0 minutes. Fixed offsets cannot model daylight-saving changes.
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+source 68d63587f9d97e9a84be055fec96218dccca3c34906be8c530371663288fa21d
+bar 1704067200000000000 0 100000000 200000000 50000000 150000000 100000000000
+reloaded 53227753e71015b44ada929083c7f9dc4461b35117dacf74f25abec06cc244ec 1 0
+Dataset 53227753e71015b44ada929083c7f9dc4461b35117dacf74f25abec06cc244ec
+  bars: 1   symbols: 1
+  range: 2024-01-01T00:00:00Z .. 2024-01-01T00:00:00Z
+  rows: 1 read, 1 accepted, 0 rejected
+  per symbol:
+    Z: 1 bars, median interval 0 s, gaps 0, outliers 0, stale runs 0, zero-volume 0
+  notes:
+    - Prices are used exactly as supplied: no split or dividend adjustment is applied.
+    - No exchange calendar is applied: gaps may be legitimate market closures.
+    - Timestamps are treated as bar start times in UTC.
+    - Per-category rejection counts from ingestion are in meta.json.
+=== unterminated
+ERROR unterminated quoted field starting on line 2
+F [190.25] 19025000000
+F [ -0.00000001 ] -1
+F [1.5e2] 15000000000
+F [+3] 300000000
+F [0.000000001] none
+F [1.000000010] 100000001
+F [abc] none
+F [1.2.3] none
+F [1e] none
+F [.] none
+F [99999999999] none
+F [92233720368.54775807] 9223372036854775807
+F [92233720368.54775808] none
+F [-92233720368.54775807] -9223372036854775807
+F [0e99999] none
+F [0] 0
+F [00012.5000] 1250000000
+F [1E-8] 1
+F [1e-9] none
+F [123456789012345678901234567890] none
+F [1234567890123456789012345678901] none
+F [5.] 500000000
+F [.5] 50000000
+F [- 1] none
+F [1 2] none
+F [] none
+F [  ] none
+F [0.1e1] 100000000
+F [12e+3] 1200000000000
+F [7e-0008] 7
+T iso 0 [1970-01-01] 0 naive 1970-01-01T00:00:00Z
+T iso 330 [1970-01-01] -19800000000000 naive 1969-12-31T18:30:00Z
+T iso -90 [1970-01-01] 5400000000000 naive 1970-01-01T01:30:00Z
+T s 0 [1970-01-01] none
+T s 330 [1970-01-01] none
+T s -90 [1970-01-01] none
+T ms 0 [1970-01-01] none
+T ms 330 [1970-01-01] none
+T ms -90 [1970-01-01] none
+T us 0 [1970-01-01] none
+T us 330 [1970-01-01] none
+T us -90 [1970-01-01] none
+T ns 0 [1970-01-01] none
+T ns 330 [1970-01-01] none
+T ns -90 [1970-01-01] none
+T iso 0 [2020-01-01T00:00:00Z] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T iso 330 [2020-01-01T00:00:00Z] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T iso -90 [2020-01-01T00:00:00Z] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T s 0 [2020-01-01T00:00:00Z] none
+T s 330 [2020-01-01T00:00:00Z] none
+T s -90 [2020-01-01T00:00:00Z] none
+T ms 0 [2020-01-01T00:00:00Z] none
+T ms 330 [2020-01-01T00:00:00Z] none
+T ms -90 [2020-01-01T00:00:00Z] none
+T us 0 [2020-01-01T00:00:00Z] none
+T us 330 [2020-01-01T00:00:00Z] none
+T us -90 [2020-01-01T00:00:00Z] none
+T ns 0 [2020-01-01T00:00:00Z] none
+T ns 330 [2020-01-01T00:00:00Z] none
+T ns -90 [2020-01-01T00:00:00Z] none
+T iso 0 [2020-01-01T05:30:00+05:30] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T iso 330 [2020-01-01T05:30:00+05:30] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T iso -90 [2020-01-01T05:30:00+05:30] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T s 0 [2020-01-01T05:30:00+05:30] none
+T s 330 [2020-01-01T05:30:00+05:30] none
+T s -90 [2020-01-01T05:30:00+05:30] none
+T ms 0 [2020-01-01T05:30:00+05:30] none
+T ms 330 [2020-01-01T05:30:00+05:30] none
+T ms -90 [2020-01-01T05:30:00+05:30] none
+T us 0 [2020-01-01T05:30:00+05:30] none
+T us 330 [2020-01-01T05:30:00+05:30] none
+T us -90 [2020-01-01T05:30:00+05:30] none
+T ns 0 [2020-01-01T05:30:00+05:30] none
+T ns 330 [2020-01-01T05:30:00+05:30] none
+T ns -90 [2020-01-01T05:30:00+05:30] none
+T iso 0 [2020-01-01 05:30+0530] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T iso 330 [2020-01-01 05:30+0530] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T iso -90 [2020-01-01 05:30+0530] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T s 0 [2020-01-01 05:30+0530] none
+T s 330 [2020-01-01 05:30+0530] none
+T s -90 [2020-01-01 05:30+0530] none
+T ms 0 [2020-01-01 05:30+0530] none
+T ms 330 [2020-01-01 05:30+0530] none
+T ms -90 [2020-01-01 05:30+0530] none
+T us 0 [2020-01-01 05:30+0530] none
+T us 330 [2020-01-01 05:30+0530] none
+T us -90 [2020-01-01 05:30+0530] none
+T ns 0 [2020-01-01 05:30+0530] none
+T ns 330 [2020-01-01 05:30+0530] none
+T ns -90 [2020-01-01 05:30+0530] none
+T iso 0 [2020-01-01T00:00:00.5Z] 1577836800500000000 zoned 2020-01-01T00:00:00.5Z
+T iso 330 [2020-01-01T00:00:00.5Z] 1577836800500000000 zoned 2020-01-01T00:00:00.5Z
+T iso -90 [2020-01-01T00:00:00.5Z] 1577836800500000000 zoned 2020-01-01T00:00:00.5Z
+T s 0 [2020-01-01T00:00:00.5Z] none
+T s 330 [2020-01-01T00:00:00.5Z] none
+T s -90 [2020-01-01T00:00:00.5Z] none
+T ms 0 [2020-01-01T00:00:00.5Z] none
+T ms 330 [2020-01-01T00:00:00.5Z] none
+T ms -90 [2020-01-01T00:00:00.5Z] none
+T us 0 [2020-01-01T00:00:00.5Z] none
+T us 330 [2020-01-01T00:00:00.5Z] none
+T us -90 [2020-01-01T00:00:00.5Z] none
+T ns 0 [2020-01-01T00:00:00.5Z] none
+T ns 330 [2020-01-01T00:00:00.5Z] none
+T ns -90 [2020-01-01T00:00:00.5Z] none
+T iso 0 [2021-02-29] none
+T iso 330 [2021-02-29] none
+T iso -90 [2021-02-29] none
+T s 0 [2021-02-29] none
+T s 330 [2021-02-29] none
+T s -90 [2021-02-29] none
+T ms 0 [2021-02-29] none
+T ms 330 [2021-02-29] none
+T ms -90 [2021-02-29] none
+T us 0 [2021-02-29] none
+T us 330 [2021-02-29] none
+T us -90 [2021-02-29] none
+T ns 0 [2021-02-29] none
+T ns 330 [2021-02-29] none
+T ns -90 [2021-02-29] none
+T iso 0 [2020-02-29] 1582934400000000000 naive 2020-02-29T00:00:00Z
+T iso 330 [2020-02-29] 1582914600000000000 naive 2020-02-28T18:30:00Z
+T iso -90 [2020-02-29] 1582939800000000000 naive 2020-02-29T01:30:00Z
+T s 0 [2020-02-29] none
+T s 330 [2020-02-29] none
+T s -90 [2020-02-29] none
+T ms 0 [2020-02-29] none
+T ms 330 [2020-02-29] none
+T ms -90 [2020-02-29] none
+T us 0 [2020-02-29] none
+T us 330 [2020-02-29] none
+T us -90 [2020-02-29] none
+T ns 0 [2020-02-29] none
+T ns 330 [2020-02-29] none
+T ns -90 [2020-02-29] none
+T iso 0 [2020-13-01] none
+T iso 330 [2020-13-01] none
+T iso -90 [2020-13-01] none
+T s 0 [2020-13-01] none
+T s 330 [2020-13-01] none
+T s -90 [2020-13-01] none
+T ms 0 [2020-13-01] none
+T ms 330 [2020-13-01] none
+T ms -90 [2020-13-01] none
+T us 0 [2020-13-01] none
+T us 330 [2020-13-01] none
+T us -90 [2020-13-01] none
+T ns 0 [2020-13-01] none
+T ns 330 [2020-13-01] none
+T ns -90 [2020-13-01] none
+T iso 0 [2020-01-01T24:00] none
+T iso 330 [2020-01-01T24:00] none
+T iso -90 [2020-01-01T24:00] none
+T s 0 [2020-01-01T24:00] none
+T s 330 [2020-01-01T24:00] none
+T s -90 [2020-01-01T24:00] none
+T ms 0 [2020-01-01T24:00] none
+T ms 330 [2020-01-01T24:00] none
+T ms -90 [2020-01-01T24:00] none
+T us 0 [2020-01-01T24:00] none
+T us 330 [2020-01-01T24:00] none
+T us -90 [2020-01-01T24:00] none
+T ns 0 [2020-01-01T24:00] none
+T ns 330 [2020-01-01T24:00] none
+T ns -90 [2020-01-01T24:00] none
+T iso 0 [2020-01-01T23:59:59] 1577923199000000000 naive 2020-01-01T23:59:59Z
+T iso 330 [2020-01-01T23:59:59] 1577903399000000000 naive 2020-01-01T18:29:59Z
+T iso -90 [2020-01-01T23:59:59] 1577928599000000000 naive 2020-01-02T01:29:59Z
+T s 0 [2020-01-01T23:59:59] none
+T s 330 [2020-01-01T23:59:59] none
+T s -90 [2020-01-01T23:59:59] none
+T ms 0 [2020-01-01T23:59:59] none
+T ms 330 [2020-01-01T23:59:59] none
+T ms -90 [2020-01-01T23:59:59] none
+T us 0 [2020-01-01T23:59:59] none
+T us 330 [2020-01-01T23:59:59] none
+T us -90 [2020-01-01T23:59:59] none
+T ns 0 [2020-01-01T23:59:59] none
+T ns 330 [2020-01-01T23:59:59] none
+T ns -90 [2020-01-01T23:59:59] none
+T iso 0 [2020-01-01T00:00:00.1234567891Z] none
+T iso 330 [2020-01-01T00:00:00.1234567891Z] none
+T iso -90 [2020-01-01T00:00:00.1234567891Z] none
+T s 0 [2020-01-01T00:00:00.1234567891Z] none
+T s 330 [2020-01-01T00:00:00.1234567891Z] none
+T s -90 [2020-01-01T00:00:00.1234567891Z] none
+T ms 0 [2020-01-01T00:00:00.1234567891Z] none
+T ms 330 [2020-01-01T00:00:00.1234567891Z] none
+T ms -90 [2020-01-01T00:00:00.1234567891Z] none
+T us 0 [2020-01-01T00:00:00.1234567891Z] none
+T us 330 [2020-01-01T00:00:00.1234567891Z] none
+T us -90 [2020-01-01T00:00:00.1234567891Z] none
+T ns 0 [2020-01-01T00:00:00.1234567891Z] none
+T ns 330 [2020-01-01T00:00:00.1234567891Z] none
+T ns -90 [2020-01-01T00:00:00.1234567891Z] none
+T iso 0 [2020-01-01T00:00:00.123456789-08] 1577865600123456789 zoned 2020-01-01T08:00:00.123456789Z
+T iso 330 [2020-01-01T00:00:00.123456789-08] 1577865600123456789 zoned 2020-01-01T08:00:00.123456789Z
+T iso -90 [2020-01-01T00:00:00.123456789-08] 1577865600123456789 zoned 2020-01-01T08:00:00.123456789Z
+T s 0 [2020-01-01T00:00:00.123456789-08] none
+T s 330 [2020-01-01T00:00:00.123456789-08] none
+T s -90 [2020-01-01T00:00:00.123456789-08] none
+T ms 0 [2020-01-01T00:00:00.123456789-08] none
+T ms 330 [2020-01-01T00:00:00.123456789-08] none
+T ms -90 [2020-01-01T00:00:00.123456789-08] none
+T us 0 [2020-01-01T00:00:00.123456789-08] none
+T us 330 [2020-01-01T00:00:00.123456789-08] none
+T us -90 [2020-01-01T00:00:00.123456789-08] none
+T ns 0 [2020-01-01T00:00:00.123456789-08] none
+T ns 330 [2020-01-01T00:00:00.123456789-08] none
+T ns -90 [2020-01-01T00:00:00.123456789-08] none
+T iso 0 [2020-01-01T10:00-0130] 1577878200000000000 zoned 2020-01-01T11:30:00Z
+T iso 330 [2020-01-01T10:00-0130] 1577878200000000000 zoned 2020-01-01T11:30:00Z
+T iso -90 [2020-01-01T10:00-0130] 1577878200000000000 zoned 2020-01-01T11:30:00Z
+T s 0 [2020-01-01T10:00-0130] none
+T s 330 [2020-01-01T10:00-0130] none
+T s -90 [2020-01-01T10:00-0130] none
+T ms 0 [2020-01-01T10:00-0130] none
+T ms 330 [2020-01-01T10:00-0130] none
+T ms -90 [2020-01-01T10:00-0130] none
+T us 0 [2020-01-01T10:00-0130] none
+T us 330 [2020-01-01T10:00-0130] none
+T us -90 [2020-01-01T10:00-0130] none
+T ns 0 [2020-01-01T10:00-0130] none
+T ns 330 [2020-01-01T10:00-0130] none
+T ns -90 [2020-01-01T10:00-0130] none
+T iso 0 [1900-03-01] -2203891200000000000 naive 1900-03-01T00:00:00Z
+T iso 330 [1900-03-01] -2203911000000000000 naive 1900-02-28T18:30:00Z
+T iso -90 [1900-03-01] -2203885800000000000 naive 1900-03-01T01:30:00Z
+T s 0 [1900-03-01] none
+T s 330 [1900-03-01] none
+T s -90 [1900-03-01] none
+T ms 0 [1900-03-01] none
+T ms 330 [1900-03-01] none
+T ms -90 [1900-03-01] none
+T us 0 [1900-03-01] none
+T us 330 [1900-03-01] none
+T us -90 [1900-03-01] none
+T ns 0 [1900-03-01] none
+T ns 330 [1900-03-01] none
+T ns -90 [1900-03-01] none
+T iso 0 [2262-04-11T23:47:16.854775807Z] 9223372036854775807 zoned 2262-04-11T23:47:16.854775807Z
+T iso 330 [2262-04-11T23:47:16.854775807Z] 9223372036854775807 zoned 2262-04-11T23:47:16.854775807Z
+T iso -90 [2262-04-11T23:47:16.854775807Z] 9223372036854775807 zoned 2262-04-11T23:47:16.854775807Z
+T s 0 [2262-04-11T23:47:16.854775807Z] none
+T s 330 [2262-04-11T23:47:16.854775807Z] none
+T s -90 [2262-04-11T23:47:16.854775807Z] none
+T ms 0 [2262-04-11T23:47:16.854775807Z] none
+T ms 330 [2262-04-11T23:47:16.854775807Z] none
+T ms -90 [2262-04-11T23:47:16.854775807Z] none
+T us 0 [2262-04-11T23:47:16.854775807Z] none
+T us 330 [2262-04-11T23:47:16.854775807Z] none
+T us -90 [2262-04-11T23:47:16.854775807Z] none
+T ns 0 [2262-04-11T23:47:16.854775807Z] none
+T ns 330 [2262-04-11T23:47:16.854775807Z] none
+T ns -90 [2262-04-11T23:47:16.854775807Z] none
+T iso 0 [2262-04-11T23:47:16.854775808Z] none
+T iso 330 [2262-04-11T23:47:16.854775808Z] none
+T iso -90 [2262-04-11T23:47:16.854775808Z] none
+T s 0 [2262-04-11T23:47:16.854775808Z] none
+T s 330 [2262-04-11T23:47:16.854775808Z] none
+T s -90 [2262-04-11T23:47:16.854775808Z] none
+T ms 0 [2262-04-11T23:47:16.854775808Z] none
+T ms 330 [2262-04-11T23:47:16.854775808Z] none
+T ms -90 [2262-04-11T23:47:16.854775808Z] none
+T us 0 [2262-04-11T23:47:16.854775808Z] none
+T us 330 [2262-04-11T23:47:16.854775808Z] none
+T us -90 [2262-04-11T23:47:16.854775808Z] none
+T ns 0 [2262-04-11T23:47:16.854775808Z] none
+T ns 330 [2262-04-11T23:47:16.854775808Z] none
+T ns -90 [2262-04-11T23:47:16.854775808Z] none
+T iso 0 [0001-01-01] none
+T iso 330 [0001-01-01] none
+T iso -90 [0001-01-01] none
+T s 0 [0001-01-01] none
+T s 330 [0001-01-01] none
+T s -90 [0001-01-01] none
+T ms 0 [0001-01-01] none
+T ms 330 [0001-01-01] none
+T ms -90 [0001-01-01] none
+T us 0 [0001-01-01] none
+T us 330 [0001-01-01] none
+T us -90 [0001-01-01] none
+T ns 0 [0001-01-01] none
+T ns 330 [0001-01-01] none
+T ns -90 [0001-01-01] none
+T iso 0 [2020-1-01] none
+T iso 330 [2020-1-01] none
+T iso -90 [2020-1-01] none
+T s 0 [2020-1-01] none
+T s 330 [2020-1-01] none
+T s -90 [2020-1-01] none
+T ms 0 [2020-1-01] none
+T ms 330 [2020-1-01] none
+T ms -90 [2020-1-01] none
+T us 0 [2020-1-01] none
+T us 330 [2020-1-01] none
+T us -90 [2020-1-01] none
+T ns 0 [2020-1-01] none
+T ns 330 [2020-1-01] none
+T ns -90 [2020-1-01] none
+T iso 0 [2020-01-01X] none
+T iso 330 [2020-01-01X] none
+T iso -90 [2020-01-01X] none
+T s 0 [2020-01-01X] none
+T s 330 [2020-01-01X] none
+T s -90 [2020-01-01X] none
+T ms 0 [2020-01-01X] none
+T ms 330 [2020-01-01X] none
+T ms -90 [2020-01-01X] none
+T us 0 [2020-01-01X] none
+T us 330 [2020-01-01X] none
+T us -90 [2020-01-01X] none
+T ns 0 [2020-01-01X] none
+T ns 330 [2020-01-01X] none
+T ns -90 [2020-01-01X] none
+T iso 0 [2020-01-01T10] none
+T iso 330 [2020-01-01T10] none
+T iso -90 [2020-01-01T10] none
+T s 0 [2020-01-01T10] none
+T s 330 [2020-01-01T10] none
+T s -90 [2020-01-01T10] none
+T ms 0 [2020-01-01T10] none
+T ms 330 [2020-01-01T10] none
+T ms -90 [2020-01-01T10] none
+T us 0 [2020-01-01T10] none
+T us 330 [2020-01-01T10] none
+T us -90 [2020-01-01T10] none
+T ns 0 [2020-01-01T10] none
+T ns 330 [2020-01-01T10] none
+T ns -90 [2020-01-01T10] none
+T iso 0 [2020-01-01T10:00:] none
+T iso 330 [2020-01-01T10:00:] none
+T iso -90 [2020-01-01T10:00:] none
+T s 0 [2020-01-01T10:00:] none
+T s 330 [2020-01-01T10:00:] none
+T s -90 [2020-01-01T10:00:] none
+T ms 0 [2020-01-01T10:00:] none
+T ms 330 [2020-01-01T10:00:] none
+T ms -90 [2020-01-01T10:00:] none
+T us 0 [2020-01-01T10:00:] none
+T us 330 [2020-01-01T10:00:] none
+T us -90 [2020-01-01T10:00:] none
+T ns 0 [2020-01-01T10:00:] none
+T ns 330 [2020-01-01T10:00:] none
+T ns -90 [2020-01-01T10:00:] none
+T iso 0 [2020-01-01T10:00:00.] none
+T iso 330 [2020-01-01T10:00:00.] none
+T iso -90 [2020-01-01T10:00:00.] none
+T s 0 [2020-01-01T10:00:00.] none
+T s 330 [2020-01-01T10:00:00.] none
+T s -90 [2020-01-01T10:00:00.] none
+T ms 0 [2020-01-01T10:00:00.] none
+T ms 330 [2020-01-01T10:00:00.] none
+T ms -90 [2020-01-01T10:00:00.] none
+T us 0 [2020-01-01T10:00:00.] none
+T us 330 [2020-01-01T10:00:00.] none
+T us -90 [2020-01-01T10:00:00.] none
+T ns 0 [2020-01-01T10:00:00.] none
+T ns 330 [2020-01-01T10:00:00.] none
+T ns -90 [2020-01-01T10:00:00.] none
+T iso 0 [2020-01-01T10:00+24:00] none
+T iso 330 [2020-01-01T10:00+24:00] none
+T iso -90 [2020-01-01T10:00+24:00] none
+T s 0 [2020-01-01T10:00+24:00] none
+T s 330 [2020-01-01T10:00+24:00] none
+T s -90 [2020-01-01T10:00+24:00] none
+T ms 0 [2020-01-01T10:00+24:00] none
+T ms 330 [2020-01-01T10:00+24:00] none
+T ms -90 [2020-01-01T10:00+24:00] none
+T us 0 [2020-01-01T10:00+24:00] none
+T us 330 [2020-01-01T10:00+24:00] none
+T us -90 [2020-01-01T10:00+24:00] none
+T ns 0 [2020-01-01T10:00+24:00] none
+T ns 330 [2020-01-01T10:00+24:00] none
+T ns -90 [2020-01-01T10:00+24:00] none
+T iso 0 [2020-01-01T10:00+05:60] none
+T iso 330 [2020-01-01T10:00+05:60] none
+T iso -90 [2020-01-01T10:00+05:60] none
+T s 0 [2020-01-01T10:00+05:60] none
+T s 330 [2020-01-01T10:00+05:60] none
+T s -90 [2020-01-01T10:00+05:60] none
+T ms 0 [2020-01-01T10:00+05:60] none
+T ms 330 [2020-01-01T10:00+05:60] none
+T ms -90 [2020-01-01T10:00+05:60] none
+T us 0 [2020-01-01T10:00+05:60] none
+T us 330 [2020-01-01T10:00+05:60] none
+T us -90 [2020-01-01T10:00+05:60] none
+T ns 0 [2020-01-01T10:00+05:60] none
+T ns 330 [2020-01-01T10:00+05:60] none
+T ns -90 [2020-01-01T10:00+05:60] none
+T iso 0 [ 2020-01-01T10:00Z ] 1577872800000000000 zoned 2020-01-01T10:00:00Z
+T iso 330 [ 2020-01-01T10:00Z ] 1577872800000000000 zoned 2020-01-01T10:00:00Z
+T iso -90 [ 2020-01-01T10:00Z ] 1577872800000000000 zoned 2020-01-01T10:00:00Z
+T s 0 [ 2020-01-01T10:00Z ] none
+T s 330 [ 2020-01-01T10:00Z ] none
+T s -90 [ 2020-01-01T10:00Z ] none
+T ms 0 [ 2020-01-01T10:00Z ] none
+T ms 330 [ 2020-01-01T10:00Z ] none
+T ms -90 [ 2020-01-01T10:00Z ] none
+T us 0 [ 2020-01-01T10:00Z ] none
+T us 330 [ 2020-01-01T10:00Z ] none
+T us -90 [ 2020-01-01T10:00Z ] none
+T ns 0 [ 2020-01-01T10:00Z ] none
+T ns 330 [ 2020-01-01T10:00Z ] none
+T ns -90 [ 2020-01-01T10:00Z ] none
+T iso 0 [1577836800] none
+T iso 330 [1577836800] none
+T iso -90 [1577836800] none
+T s 0 [1577836800] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T s 330 [1577836800] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T s -90 [1577836800] 1577836800000000000 zoned 2020-01-01T00:00:00Z
+T ms 0 [1577836800] 1577836800000000 zoned 1970-01-19T06:17:16.8Z
+T ms 330 [1577836800] 1577836800000000 zoned 1970-01-19T06:17:16.8Z
+T ms -90 [1577836800] 1577836800000000 zoned 1970-01-19T06:17:16.8Z
+T us 0 [1577836800] 1577836800000 zoned 1970-01-01T00:26:17.8368Z
+T us 330 [1577836800] 1577836800000 zoned 1970-01-01T00:26:17.8368Z
+T us -90 [1577836800] 1577836800000 zoned 1970-01-01T00:26:17.8368Z
+T ns 0 [1577836800] 1577836800 zoned 1970-01-01T00:00:01.5778368Z
+T ns 330 [1577836800] 1577836800 zoned 1970-01-01T00:00:01.5778368Z
+T ns -90 [1577836800] 1577836800 zoned 1970-01-01T00:00:01.5778368Z
+T iso 0 [-5] none
+T iso 330 [-5] none
+T iso -90 [-5] none
+T s 0 [-5] -5000000000 zoned 1969-12-31T23:59:55Z
+T s 330 [-5] -5000000000 zoned 1969-12-31T23:59:55Z
+T s -90 [-5] -5000000000 zoned 1969-12-31T23:59:55Z
+T ms 0 [-5] -5000000 zoned 1969-12-31T23:59:59.995Z
+T ms 330 [-5] -5000000 zoned 1969-12-31T23:59:59.995Z
+T ms -90 [-5] -5000000 zoned 1969-12-31T23:59:59.995Z
+T us 0 [-5] -5000 zoned 1969-12-31T23:59:59.999995Z
+T us 330 [-5] -5000 zoned 1969-12-31T23:59:59.999995Z
+T us -90 [-5] -5000 zoned 1969-12-31T23:59:59.999995Z
+T ns 0 [-5] -5 zoned 1969-12-31T23:59:59.999999995Z
+T ns 330 [-5] -5 zoned 1969-12-31T23:59:59.999999995Z
+T ns -90 [-5] -5 zoned 1969-12-31T23:59:59.999999995Z
+T iso 0 [+7] none
+T iso 330 [+7] none
+T iso -90 [+7] none
+T s 0 [+7] 7000000000 zoned 1970-01-01T00:00:07Z
+T s 330 [+7] 7000000000 zoned 1970-01-01T00:00:07Z
+T s -90 [+7] 7000000000 zoned 1970-01-01T00:00:07Z
+T ms 0 [+7] 7000000 zoned 1970-01-01T00:00:00.007Z
+T ms 330 [+7] 7000000 zoned 1970-01-01T00:00:00.007Z
+T ms -90 [+7] 7000000 zoned 1970-01-01T00:00:00.007Z
+T us 0 [+7] 7000 zoned 1970-01-01T00:00:00.000007Z
+T us 330 [+7] 7000 zoned 1970-01-01T00:00:00.000007Z
+T us -90 [+7] 7000 zoned 1970-01-01T00:00:00.000007Z
+T ns 0 [+7] 7 zoned 1970-01-01T00:00:00.000000007Z
+T ns 330 [+7] 7 zoned 1970-01-01T00:00:00.000000007Z
+T ns -90 [+7] 7 zoned 1970-01-01T00:00:00.000000007Z
+T iso 0 [12.5] none
+T iso 330 [12.5] none
+T iso -90 [12.5] none
+T s 0 [12.5] none
+T s 330 [12.5] none
+T s -90 [12.5] none
+T ms 0 [12.5] none
+T ms 330 [12.5] none
+T ms -90 [12.5] none
+T us 0 [12.5] none
+T us 330 [12.5] none
+T us -90 [12.5] none
+T ns 0 [12.5] none
+T ns 330 [12.5] none
+T ns -90 [12.5] none
+T iso 0 [9223372036] none
+T iso 330 [9223372036] none
+T iso -90 [9223372036] none
+T s 0 [9223372036] 9223372036000000000 zoned 2262-04-11T23:47:16Z
+T s 330 [9223372036] 9223372036000000000 zoned 2262-04-11T23:47:16Z
+T s -90 [9223372036] 9223372036000000000 zoned 2262-04-11T23:47:16Z
+T ms 0 [9223372036] 9223372036000000 zoned 1970-04-17T18:02:52.036Z
+T ms 330 [9223372036] 9223372036000000 zoned 1970-04-17T18:02:52.036Z
+T ms -90 [9223372036] 9223372036000000 zoned 1970-04-17T18:02:52.036Z
+T us 0 [9223372036] 9223372036000 zoned 1970-01-01T02:33:43.372036Z
+T us 330 [9223372036] 9223372036000 zoned 1970-01-01T02:33:43.372036Z
+T us -90 [9223372036] 9223372036000 zoned 1970-01-01T02:33:43.372036Z
+T ns 0 [9223372036] 9223372036 zoned 1970-01-01T00:00:09.223372036Z
+T ns 330 [9223372036] 9223372036 zoned 1970-01-01T00:00:09.223372036Z
+T ns -90 [9223372036] 9223372036 zoned 1970-01-01T00:00:09.223372036Z
+T iso 0 [9223372037] none
+T iso 330 [9223372037] none
+T iso -90 [9223372037] none
+T s 0 [9223372037] none
+T s 330 [9223372037] none
+T s -90 [9223372037] none
+T ms 0 [9223372037] 9223372037000000 zoned 1970-04-17T18:02:52.037Z
+T ms 330 [9223372037] 9223372037000000 zoned 1970-04-17T18:02:52.037Z
+T ms -90 [9223372037] 9223372037000000 zoned 1970-04-17T18:02:52.037Z
+T us 0 [9223372037] 9223372037000 zoned 1970-01-01T02:33:43.372037Z
+T us 330 [9223372037] 9223372037000 zoned 1970-01-01T02:33:43.372037Z
+T us -90 [9223372037] 9223372037000 zoned 1970-01-01T02:33:43.372037Z
+T ns 0 [9223372037] 9223372037 zoned 1970-01-01T00:00:09.223372037Z
+T ns 330 [9223372037] 9223372037 zoned 1970-01-01T00:00:09.223372037Z
+T ns -90 [9223372037] 9223372037 zoned 1970-01-01T00:00:09.223372037Z
+T iso 0 [] none
+T iso 330 [] none
+T iso -90 [] none
+T s 0 [] none
+T s 330 [] none
+T s -90 [] none
+T ms 0 [] none
+T ms 330 [] none
+T ms -90 [] none
+T us 0 [] none
+T us 330 [] none
+T us -90 [] none
+T ns 0 [] none
+T ns 330 [] none
+T ns -90 [] none
+T iso 0 [--1] none
+T iso 330 [--1] none
+T iso -90 [--1] none
+T s 0 [--1] none
+T s 330 [--1] none
+T s -90 [--1] none
+T ms 0 [--1] none
+T ms 330 [--1] none
+T ms -90 [--1] none
+T us 0 [--1] none
+T us 330 [--1] none
+T us -90 [--1] none
+T ns 0 [--1] none
+T ns 330 [--1] none
+T ns -90 [--1] none

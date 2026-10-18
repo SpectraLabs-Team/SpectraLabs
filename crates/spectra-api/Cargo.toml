@@ -1,0 +1,15 @@
+[package]
+name = "spectra-api"
+description = "Spectra Labs HTTP API for the browser dashboard (std-only HTTP/1.1 server)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+spectra-core = { path = "../spectra-core" }
+spectra-risk = { path = "../spectra-risk" }
+
+[lints]
+workspace = true

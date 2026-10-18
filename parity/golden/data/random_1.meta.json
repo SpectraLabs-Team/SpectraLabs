@@ -1,0 +1,24 @@
+{
+  "id": "371904f984021a020017f94212025e94ecc9dcd36832369c1483156cd4964bd2",
+  "bars_sha256": "54fed657660c7c145c7cf10e8b23dc55323d38aff42a5876c6fe8fcbd25b4435",
+  "source_sha256": "025b104d4093ab967f2c878cbc1e46aa15f310e4b7c70abba2eac324bfbcde8f",
+  "parent_id": "",
+  "note": "",
+  "engine_version": "0.6.0",
+  "bar_count": 1200,
+  "first_ts_ns": 1704067260000000000,
+  "last_ts_ns": 1704228120000000000,
+  "first_ts": "2024-01-01T00:01:00Z",
+  "last_ts": "2024-01-02T20:42:00Z",
+  "symbols": ["AAA", "BBB", "C"],
+  "quality": {
+    "rows_total": 1200,
+    "rows_accepted": 1200,
+    "rows_rejected": 0,
+    "rejected_by_category": {},
+    "input_was_sorted": false,
+    "warnings": ["AAA: 8 gap(s) longer than 5x the median interval (largest 30060 s). Missing bars or market closures?", "AAA: 1 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?", "AAA: 2 run(s) of 5+ frozen bars (stale prices).", "AAA: 2 bar(s) with zero volume.", "BBB: 6 gap(s) longer than 5x the median interval (largest 20160 s). Missing bars or market closures?", "BBB: 4 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?", "BBB: 4 run(s) of 5+ frozen bars (stale prices).", "BBB: 6 bar(s) with zero volume.", "C: 4 gap(s) longer than 5x the median interval (largest 23400 s). Missing bars or market closures?", "C: 1 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?", "C: 5 run(s) of 5+ frozen bars (stale prices).", "C: 7 bar(s) with zero volume.", "Input rows were not sorted by (timestamp, symbol); they were sorted on load."],
+    "notes": ["Prices are used exactly as supplied: no split or dividend adjustment is applied.", "No exchange calendar is applied: gaps may be legitimate market closures.", "Timestamps are treated as bar start times in UTC."],
+    "symbols": [{"symbol": "AAA", "bars": 400, "gaps": 8, "outlier_returns": 1, "stale_runs": 2, "zero_volume_bars": 2}, {"symbol": "BBB", "bars": 400, "gaps": 6, "outlier_returns": 4, "stale_runs": 4, "zero_volume_bars": 6}, {"symbol": "C", "bars": 400, "gaps": 4, "outlier_returns": 1, "stale_runs": 5, "zero_volume_bars": 7}]
+  }
+}

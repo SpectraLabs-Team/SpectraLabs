@@ -1,0 +1,17 @@
+[package]
+name = "spectra-registry"
+description = "Spectra Labs experiment registry (hash-chained run log) and holdout vault"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+spectra-core = { path = "../spectra-core" }
+spectra-data = { path = "../spectra-data" }
+spectra-engine = { path = "../spectra-engine" }
+spectra-research = { path = "../spectra-research" }
+
+[lints]
+workspace = true

@@ -1,0 +1,3 @@
+timestamp,symbol,open,high,low,close,volume
+2024-01-01T00:00:00Z,"A,B",1,2,0.5,1.5,10
+2024-01-01T00:00:00Z,"say ""hi""",1,2,0.5,1.5,10

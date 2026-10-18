@@ -1,0 +1,24 @@
+{
+  "id": "56fb4d9ea88ec2b25ea936dcc480d0848d544ccca18d6627d98395b25711b5d5",
+  "bars_sha256": "e6a67504d5310595765f874325b593f87f266aeb8da8f7f9bc6f4b55c409d842",
+  "source_sha256": "7667103f46f6ec312a753db082ebb558265499cfda1b4b5d99d81db66ae58ad0",
+  "parent_id": "",
+  "note": "",
+  "engine_version": "0.6.0",
+  "bar_count": 1,
+  "first_ts_ns": 1577874600000000000,
+  "last_ts_ns": 1577874600000000000,
+  "first_ts": "2020-01-01T10:30:00Z",
+  "last_ts": "2020-01-01T10:30:00Z",
+  "symbols": ["DEFAULT"],
+  "quality": {
+    "rows_total": 1,
+    "rows_accepted": 1,
+    "rows_rejected": 0,
+    "rejected_by_category": {},
+    "input_was_sorted": true,
+    "warnings": ["DEFAULT: 1 bar(s) with zero volume.", "No volume column: volume was set to zero (participation caps would block all fills).", "1 timestamp(s) carried no time zone and were read at UTC-300 minutes. Fixed offsets cannot model daylight-saving changes."],
+    "notes": ["Prices are used exactly as supplied: no split or dividend adjustment is applied.", "No exchange calendar is applied: gaps may be legitimate market closures.", "Timestamps are treated as bar start times in UTC."],
+    "symbols": [{"symbol": "DEFAULT", "bars": 1, "gaps": 0, "outlier_returns": 0, "stale_runs": 0, "zero_volume_bars": 1}]
+  }
+}

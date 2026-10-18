@@ -1,0 +1,24 @@
+{
+  "id": "7596c467b6cc415c515c1a3f3d6c47465019130eab73d4f9ecabc5e5b342227f",
+  "bars_sha256": "9cdbfc406e613e2876cdc40ce8635fe0f6d930cd7f1bb719e2d789c8c19a66c7",
+  "source_sha256": "021befc0c2916e0c4403b113a5f8332d6451c39e26ceed7eb47ffb0c29fd1e97",
+  "parent_id": "",
+  "note": "",
+  "engine_version": "0.6.0",
+  "bar_count": 500,
+  "first_ts_ns": 1704067260000000000,
+  "last_ts_ns": 1704175500000000000,
+  "first_ts": "2024-01-01T00:01:00Z",
+  "last_ts": "2024-01-02T06:05:00Z",
+  "symbols": ["X", "Y"],
+  "quality": {
+    "rows_total": 500,
+    "rows_accepted": 500,
+    "rows_rejected": 0,
+    "rejected_by_category": {},
+    "input_was_sorted": false,
+    "warnings": ["X: 6 gap(s) longer than 5x the median interval (largest 26100 s). Missing bars or market closures?", "X: 1 close-to-close return(s) beyond 10 robust sigma. Bad ticks or unadjusted corporate actions?", "X: 2 run(s) of 5+ frozen bars (stale prices).", "Y: 4 gap(s) longer than 5x the median interval (largest 28560 s). Missing bars or market closures?", "Y: 3 bar(s) with zero volume.", "Input rows were not sorted by (timestamp, symbol); they were sorted on load."],
+    "notes": ["Prices are used exactly as supplied: no split or dividend adjustment is applied.", "No exchange calendar is applied: gaps may be legitimate market closures.", "Timestamps are treated as bar start times in UTC."],
+    "symbols": [{"symbol": "X", "bars": 250, "gaps": 6, "outlier_returns": 1, "stale_runs": 2, "zero_volume_bars": 0}, {"symbol": "Y", "bars": 250, "gaps": 4, "outlier_returns": 0, "stale_runs": 0, "zero_volume_bars": 3}]
+  }
+}

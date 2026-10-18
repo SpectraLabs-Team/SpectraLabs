@@ -1,0 +1,24 @@
+{
+  "id": "25e8be1e7a2b1a65c2797687b29195ce90485eed28d90b6fbf5d665ad18b3b61",
+  "bars_sha256": "d13a15ce2d2955c754d8088bb768c8a0daaf8827efaaedc80d500a7fdfc12e8b",
+  "source_sha256": "84b36702f786b7110352d4fb26d82e5ae7c08789475e7a111ac5bb49ec3cb0c5",
+  "parent_id": "",
+  "note": "",
+  "engine_version": "0.6.0",
+  "bar_count": 4,
+  "first_ts_ns": 1704153600000000000,
+  "last_ts_ns": 1704240000000000000,
+  "first_ts": "2024-01-02T00:00:00Z",
+  "last_ts": "2024-01-03T00:00:00Z",
+  "symbols": ["AAPL", "MSFT"],
+  "quality": {
+    "rows_total": 4,
+    "rows_accepted": 4,
+    "rows_rejected": 0,
+    "rejected_by_category": {},
+    "input_was_sorted": false,
+    "warnings": ["Input rows were not sorted by (timestamp, symbol); they were sorted on load.", "4 timestamp(s) carried no time zone and were read at UTC+0 minutes. Fixed offsets cannot model daylight-saving changes."],
+    "notes": ["Prices are used exactly as supplied: no split or dividend adjustment is applied.", "No exchange calendar is applied: gaps may be legitimate market closures.", "Timestamps are treated as bar start times in UTC."],
+    "symbols": [{"symbol": "AAPL", "bars": 2, "gaps": 0, "outlier_returns": 0, "stale_runs": 0, "zero_volume_bars": 0}, {"symbol": "MSFT", "bars": 2, "gaps": 0, "outlier_returns": 0, "stale_runs": 0, "zero_volume_bars": 0}]
+  }
+}

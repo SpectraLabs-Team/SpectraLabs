@@ -1,0 +1,35 @@
+[package]
+name = "spectra-cli"
+description = "Spectra Labs command-line tools (ingest, registry, risk) and demos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+spectra-core = { path = "../spectra-core" }
+spectra-data = { path = "../spectra-data" }
+spectra-engine = { path = "../spectra-engine" }
+spectra-research = { path = "../spectra-research" }
+spectra-registry = { path = "../spectra-registry" }
+spectra-risk = { path = "../spectra-risk" }
+
+[lints]
+workspace = true
+
+# The binaries share names with library crates; document the libraries only.
+[[bin]]
+name = "spectra-ingest"
+path = "src/bin/spectra-ingest.rs"
+doc = false
+
+[[bin]]
+name = "spectra-registry"
+path = "src/bin/spectra-registry.rs"
+doc = false
+
+[[bin]]
+name = "spectra-risk"
+path = "src/bin/spectra-risk.rs"
+doc = false

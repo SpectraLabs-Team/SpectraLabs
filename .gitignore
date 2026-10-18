@@ -1,0 +1,11 @@
+/target
+*.swp
+.env
+.env.*
+!.env.example
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+/store/
+/registry/

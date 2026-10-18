@@ -1,0 +1,15 @@
+[package]
+name = "spectra-research"
+description = "Spectra Labs research validation: sweeps, trial ledger, walk-forward, PSR/DSR, PBO, trade analysis, benchmark and the Strategy Survival Lab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+spectra-core = { path = "../spectra-core" }
+spectra-engine = { path = "../spectra-engine" }
+
+[lints]
+workspace = true

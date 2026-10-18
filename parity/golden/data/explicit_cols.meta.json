@@ -1,0 +1,24 @@
+{
+  "id": "97d793782b5c93fffa03edc3659b6d4b75d8fe4f00906c852b7a149f529e5ccd",
+  "bars_sha256": "e22248ea2109d4fedd97ff42781ab7ffb11e4fade29e20f135f70d24024f873d",
+  "source_sha256": "2b17c604d92f1d05787e1e802a46456c98d4f6bdf8f8daf1df620050ba181e16",
+  "parent_id": "",
+  "note": "",
+  "engine_version": "0.6.0",
+  "bar_count": 1,
+  "first_ts_ns": 1704067200000000000,
+  "last_ts_ns": 1704067200000000000,
+  "first_ts": "2024-01-01T00:00:00Z",
+  "last_ts": "2024-01-01T00:00:00Z",
+  "symbols": ["BTC-USD"],
+  "quality": {
+    "rows_total": 1,
+    "rows_accepted": 1,
+    "rows_rejected": 0,
+    "rejected_by_category": {},
+    "input_was_sorted": true,
+    "warnings": [],
+    "notes": ["Prices are used exactly as supplied: no split or dividend adjustment is applied.", "No exchange calendar is applied: gaps may be legitimate market closures.", "Timestamps are treated as bar start times in UTC."],
+    "symbols": [{"symbol": "BTC-USD", "bars": 1, "gaps": 0, "outlier_returns": 0, "stale_runs": 0, "zero_volume_bars": 0}]
+  }
+}

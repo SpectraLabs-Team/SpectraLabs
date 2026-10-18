@@ -1,0 +1,565 @@
+sample 1: a=1;b=1.5;c=20 a=3;b=0.5;c=30 a=3;b=1.5;c=50 a=4;b=1.5;c=40 a=5;b=1.5;c=10 a=5;b=1.5;c=20 a=5;b=2.5;c=30 a=7;b=0.5;c=30 a=7;b=2.5;c=20
+sample 2: a=1;b=1.5;c=30 a=2;b=1.5;c=50 a=2;b=2.5;c=10 a=4;b=0.5;c=10 a=4;b=2.5;c=20 a=5;b=1.5;c=40 a=6;b=0.5;c=10 a=7;b=1.5;c=20 a=7;b=2.5;c=30
+sample 99: a=2;b=0.5;c=40 a=2;b=1.5;c=40 a=2;b=2.5;c=10 a=3;b=1.5;c=30 a=5;b=0.5;c=10 a=5;b=0.5;c=30 a=5;b=1.5;c=40 a=6;b=1.5;c=50 a=7;b=2.5;c=50
+==== noise, long only
+trials 59 best 15 fast=3;slow=80
+trial 1 fast=2;slow=5 98e50a21173d88d0f2101189357804ae5c07a1a2984abba15d8fb231af70e35b 0.26501750206408942 999
+trial 2 fast=2;slow=15 772dc4afc874952c72c06b48863542c773a0d37c6fa9c871ec4e23f63476d151 0.34049753968865704 999
+trial 3 fast=2;slow=20 bf9b20335402391824515b01e3e6b9e68946d75055e30f1569de1eb7a35b4ce1 0.15446309973745892 999
+trial 4 fast=2;slow=25 a70b7725db3e75ccd159bb6f747e4362df3b2ffa1e7ff14f8567830120201878 0.21271116056618777 999
+trial 5 fast=2;slow=30 bd756a67d8ee5585ebab54c93f3e81f1e66b05075ef1cc65b9d81a2cf8abfa89 0.3850398306341315 999
+trial 6 fast=2;slow=40 eda8ec62d3cea228a4158dc74f59051cc8de73d7cf940afcdbfa410f1b34e92d 0.25168003145600987 999
+trial 7 fast=2;slow=60 2e755b5ea1ceb42d7ae9f3cbb97a5ac0ccc58a265a61104b47191628f93b9183 0.3743342347678616 999
+trial 8 fast=2;slow=80 e6afaebf80079f8d51009dfaaddbb21802d468bc012c46251ef7be7edcb15ce1 0.48749083790015973 999
+trial 9 fast=3;slow=5 06aacbc9b1f195a456270f3ef7690c37d6636e30cc48c9f3d9697bdf7f1c6f25 0.16295760142558649 999
+trial 10 fast=3;slow=15 30db604fc73cd35d4d18a382172479155f47b095eebddbbd59d5517b84d6a7e4 0.26512648239361208 999
+trial 11 fast=3;slow=20 31c3bb28a23d9c85b391c71ca70f792bdc1f763fd358aaed1fa0901592def8bc 0.20982784117321279 999
+trial 12 fast=3;slow=25 28876c6eadffcf8a2b62de08ee3c121a9a75a2186e84bcd632cb1ec55bbca0ac 0.33823064607767384 999
+trial 13 fast=3;slow=30 fc0e21c63c2b41f7e1e20c71f1f2a0e301bda4eeedd9259ede419588cb009e9f 0.338775154918937 999
+trial 14 fast=3;slow=40 767347a2645c93c7dda973b9404328cad3f5f679ea33c901ce64729caf1d6406 0.25673319839331643 999
+trial 15 fast=3;slow=60 bf37cb5a40a5df4947e573ade4f6eadb9f8928bb49250aa514a50896b3360f16 0.37706191069632944 999
+trial 16 fast=3;slow=80 805d221b86691da4572471df99d029d7e0f63685ca5aa90cf7797cb58a4d205b 0.56700380076512991 999
+trial 17 fast=4;slow=5 feb404f3d7ebf7873db59e898ee1c3b989025fe2b80fc676302ec4af4dd89d1d -0.086100648862979676 999
+trial 18 fast=4;slow=15 75c44aed37f917103ff1232aa611e4c96cdf52165df107f0f000a116d76e77a6 0.36676733771261999 999
+trial 19 fast=4;slow=20 8f0c9a528574cb0988e5dd1fee1d8f8c84978715ad383de5caa5c8f3973b3ac8 0.35948791887709741 999
+trial 20 fast=4;slow=25 0ef06c0843e0817d4066fda20929324bcb1690c9ba17c40e3ee132fbb607089f 0.53652371030648016 999
+trial 21 fast=4;slow=30 9b8a6afc8b610ff745a4c909c8e0ea93970f194e8d3118e981a436cc86ee7740 0.45773892817665784 999
+trial 22 fast=4;slow=40 7888912ad8d3157618367bd78c73cfc1c2cb1c161c98bca8098fc83878b2a6e4 0.42585633418883767 999
+trial 23 fast=4;slow=60 3de16c4402a4e7358a4030e1583a9723c611ad808555308fa7319887b8aa7649 0.41056384797633105 999
+trial 24 fast=4;slow=80 b1f7fde6fdb7361dd7763b2442ff30193e206b9e34b0e9957ca38a3669a6319e 0.48294569454312264 999
+trial 25 fast=5;slow=15 2957a89501ccac6c0cc80a263d381f70c627af79109b59b0d43f4d93904c06f7 0.2728572795697975 999
+trial 26 fast=5;slow=20 6b771aa88982d361d950c71b4b9d30914f482840f842cff108ce4f4ec8a97b46 0.34975040872499996 999
+trial 27 fast=5;slow=25 861a1f845968887d0183858083466934b161276afe0e49076c2fb0698ba0fedf 0.38053384806111296 999
+trial 28 fast=5;slow=30 b7d6b8b964c9faef5fcd6c9d2c146697b4cb6b9688235e828e21c330f18d2f7a 0.45201997863835319 999
+trial 29 fast=5;slow=40 257e5250eaebfa3aa34451e8ca86a6cb6238576c2f3b2ce0c0cd539abb073a6a 0.39848946672403773 999
+trial 30 fast=5;slow=60 afac479d2623b5989f51050c6941f84475e1c58fe672043dd48bf8a982357e58 0.51107691857378301 999
+trial 31 fast=5;slow=80 d7be5c62f61e8cac9335c43ed90d901487be7fbd2af900ce8c64d4c1511ec116 0.46571299733236782 999
+trial 32 fast=6;slow=15 f207086704a759b74050edaab6a3499e06a92157393cc20c958309869afd7495 0.44861491008453547 999
+trial 33 fast=6;slow=20 67f70787ca58441912e24a98fbcaf75e8884dee0a345d168cc825995c804f07f 0.45010654522860233 999
+trial 34 fast=6;slow=25 604c55445042cc4f61647aa8c1bdbdfdf0d5c1d60c89a891cb197c5715cbedfa 0.37136852006358706 999
+trial 35 fast=6;slow=30 a13f0d682f103fd436750adf85e4719342de46e6b0cfffd130a8ec3e76989692 0.40186320780144569 999
+trial 36 fast=6;slow=40 ac0cdd6f79f1dcbbd70cbd73030a56eff157c8a31945fdb749a1e0b23794ea72 0.39243883243988514 999
+trial 37 fast=6;slow=60 f241a191a4482ad38e8f5cb5e996bce1432f94179e3bb8e64931748b53345943 0.5479880703900174 999
+trial 38 fast=6;slow=80 f047823e6c7bac5286ced995ee55fa8bc5c88e7b79c565e8569acecdd711894c 0.56113139458385997 999
+trial 39 fast=8;slow=15 787f572aa9402f3e955fcc4d4a00823550b57683fce8c1eb4cbcd4b9db4e00ff 0.34043104706752297 999
+trial 40 fast=8;slow=20 01cf3d77f249f2f889f0a49eec392cfabb9f3567c1949e64a9987707c0114c3d 0.094770855773760806 999
+trial 41 fast=8;slow=25 6ab46d6b0a33b029d5cb09cefcf8bac4d0025791e54aa68daf20cf8f81d23dee 0.22772509647547881 999
+trial 42 fast=8;slow=30 39a7ef94d24b05c544282c7a01dfb63f9401552dfeb926fb3bf310b0904c213c 0.16505695317039282 999
+trial 43 fast=8;slow=40 4a74dfee88f2d5399f84a1eeddc60e45a9c382807f0f57502061954b3aa7565a 0.24274953732959384 999
+trial 44 fast=8;slow=60 fec69f60dd93f799facdf57014a9daaa48662545c8237c6bcc5e7447ec9bc694 0.44947370410467846 999
+trial 45 fast=8;slow=80 57940d0053372e7e9c4d4a30ec427ae468fa6c4932fc3ea22780534fd15fde97 0.33907868949312231 999
+trial 46 fast=10;slow=15 0af557ce5a5a1d20c6d20102ad4740785c1e40c6f5b1cd5642d0f6134a303a39 0.21854157608929473 999
+trial 47 fast=10;slow=20 9718013ac66076fb00d900d71c4a604d9dff4c9732c8890d111f827f331cc558 0.23495832238077838 999
+trial 48 fast=10;slow=25 180ba82325e77204d8b8e9e932e7559a3ffb6f55337b238d2943825512214498 0.14833856151320257 999
+trial 49 fast=10;slow=30 f85b014228c89cfc8b466ce91e3300f80e74003c49e43a55258812dbe4122e39 0.27425475964040846 999
+trial 50 fast=10;slow=40 051ac1bafbee05e543ea79d5bfc7d11981939c87f43cf6fbd975e1beba3fc168 0.22540711032494032 999
+trial 51 fast=10;slow=60 c46b25c6e91bc64bda120bcc17d303e5581663406f1957dbeb13de55f79787d2 0.49353868413377655 999
+trial 52 fast=10;slow=80 c2280affd10d41c6aaccba28340e8f20764f536329ddddd00ee5f50031788e92 0.23022446536303004 999
+trial 53 fast=12;slow=15 b5c86fe3927cf4504e9a71f8106c60fb6f677f6b1853a8e9b7de190def361472 0.37472950462777949 999
+trial 54 fast=12;slow=20 dbeb21cae81970444cdb69f1d663c5ad424a9f245ca95219a6cf09ebd6484ba0 0.35083690874350726 999
+trial 55 fast=12;slow=25 7475e5f23dd2220eacc4d83441dd92b1ce902f0f2901271f5f4ff108651b676d 0.038771344978613224 999
+trial 56 fast=12;slow=30 8fac8d7e8e1e26047631aeb7080bff051040d12c59bbb2a3bbb0e12f2b3a37e0 0.08584410721841465 999
+trial 57 fast=12;slow=40 bf6fb60ee0fc312adb0844a6edb410fc1d94888d4458fb15677deaca884712d0 0.23340818498453902 999
+trial 58 fast=12;slow=60 21b44b2af823b48f8a0a73ee2cb9dd7042543082db8de693b3bc8f306707a38d 0.43902361649739041 999
+trial 59 fast=12;slow=80 47d7fd342df2b0461e1bfd31b89868d98f34669ab01587557c8cfb9afc19e65c 0.21904308376370737 999
+sharpe_variance 7.4329297457458011e-05
+pbo 8 0.80000000000000004 0.40000000000000002 -1.5861230062740348 70 59 992
+pbo 16 0.85034965034965038 0.44250194250194252 -1.6343304159479815 12870 59 992
+Validation report
+-----------------
+trials recorded            59
+observations               999
+Sharpe (annualized)        0.567
+Sharpe (per period)        0.03572
+skew / kurtosis            -0.108 / 4.787
+Sharpe variance, trials    7.433e-05
+expected max Sharpe (N)    0.02017 per period
+PSR (vs 0)                 0.870
+DSR                        0.688
+min track record (obs)     11244
+PBO                        0.850
+
+Warnings
+  - DSR 0.69 is below the 0.95 confidence level: the result cannot be told apart, at that confidence, from the best of 59 random trials.
+  - Track record is shorter than the minimum needed for the requested confidence.
+  - PBO is 0.5 or higher: in-sample selection did not predict out-of-sample rank.
+  - PBO from a single dataset is a noisy estimate (standard deviation about 0.2 on pure noise); treat it as an indicator, not a precise probability.
+
+Assumptions
+  - Returns are treated as serially independent (no autocorrelation adjustment).
+  - PSR/DSR use only the first four moments of the returns.
+  - The multiple-testing benchmark treats trials as independent; grid neighbours are correlated, so the effective number of trials is smaller than the count.
+  - Sharpe ratios in PSR/DSR are per-period, not annualized.
+dsr 0.68795720447300823
+psr 0.86981775105227355
+mintrl 11243.732774163615
+walk-forward folds 7 trials 413 ledger 472
+fold 0 300 300 400 fast=5;slow=20 1.667922100129094 1.6165505483044051 44a3ce04ceff993a861daf2d8230f1607d250e72c3702744f33d934f022b0735
+fold 100 400 400 500 fast=4;slow=25 1.6304682705809606 -1.0836341157289251 adda50e0f839ef2ce68347d8df1a1586eecedaf78072b041eafe6c06aa87e39a
+fold 200 500 500 600 fast=12;slow=15 1.3905626112610223 -2.3415602646154778 c5bbf396c8fc594b9b1b0a007bdb0a3183545d5c6b13cdb9b0ff176728635599
+fold 300 600 600 700 fast=12;slow=40 0.74126159925209523 -1.1936726330100902 6f265c589947775482e5f3af52b399093c68a57b69b340615866df59d7d1cc2a
+fold 400 700 700 800 fast=12;slow=40 -0.12315664958922085 1.9571120453343727 fdec754cfca71b6218fc698289b5adfbdb7b3065269bddb5e10691471dd96d1f
+fold 500 800 800 900 fast=2;slow=5 0.8704927269606535 1.6868479085272126 68abbb676a5e7b7fdbc6a6f9d190f7e77a4a419fbd802f24fac0d7177427817b
+fold 600 900 900 1000 fast=2;slow=5 1.2157530759174107 -4.4123917825426995 ce8b1ed321bb0f295320fc588d3162d01fb0727fe8e8f924a9e3543db8a70fec
+wf_mean_is 1.0561862477874306
+wf_mean_oos -0.53867832767588608
+wf_oos_sharpe -0.33651304803254739
+wf_oos_return -0.001242616751297998
+Validation report
+-----------------
+trials recorded            472
+observations               999
+Sharpe (annualized)        0.567
+Sharpe (per period)        0.03572
+skew / kurtosis            -0.108 / 4.787
+Sharpe variance, trials    2.320e-03
+expected max Sharpe (N)    0.14619 per period
+PSR (vs 0)                 0.870
+DSR                        0.000
+min track record (obs)     inf
+
+Warnings
+  - DSR 0.00 is below the 0.90 confidence level: the result cannot be told apart, at that confidence, from the best of 472 random trials.
+  - Observed Sharpe does not exceed the benchmark: no track record length is long enough.
+
+Assumptions
+  - Returns are treated as serially independent (no autocorrelation adjustment).
+  - PSR/DSR use only the first four moments of the returns.
+  - The multiple-testing benchmark treats trials as independent; grid neighbours are correlated, so the effective number of trials is smaller than the count.
+  - Sharpe ratios in PSR/DSR are per-period, not annualized.
+Strategy Survival Report
+========================
+parameters: fast=3;slow=80
+baseline: Sharpe 0.57, total return 0.35%, max drawdown 0.18%, 24 fills
+baseline run: 805d221b86691da4572471df99d029d7e0f63685ca5aa90cf7797cb58a4d205b
+
+[PASS        ] Cost sensitivity
+    Sharpe 0.57 at baseline costs, 0.54 with +5.0 bps extra slippage; Sharpe reaches zero at about +122.9 bps.
+      +   0.0 bps   Sharpe   0.57   return    0.35%
+      +   1.0 bps   Sharpe   0.56   return    0.34%
+      +   2.0 bps   Sharpe   0.56   return    0.34%
+      +   5.0 bps   Sharpe   0.54   return    0.33%
+      +  10.0 bps   Sharpe   0.52   return    0.32%
+      +  20.0 bps   Sharpe   0.47   return    0.29%
+      +  50.0 bps   Sharpe   0.33   return    0.20%
+      + 100.0 bps   Sharpe   0.10   return    0.06%
+      + 200.0 bps   Sharpe  -0.34   return   -0.22%
+[PASS        ] Execution delay
+    Sharpe 0.57 on time, 0.51 when every fill is one bar late.
+      +0 bar(s)     Sharpe   0.57   return    0.35%
+      +1 bar(s)     Sharpe   0.51   return    0.62%
+      +2 bar(s)     Sharpe   0.36   return    0.64%
+      +5 bar(s)     Sharpe   0.22   return    0.71%
+[PASS        ] Parameter stability
+    6 neighbours: 100% have positive Sharpe; median 0.48 (baseline 0.57), worst 0.31.
+[WARN        ] Time-period robustness
+    50% of 4 sub-periods have positive Sharpe; first half 0.87, second half 0.22.
+      - .. -   Sharpe   0.76   return    0.10%   max dd   0.1%
+      - .. -   Sharpe   0.50   return    0.08%   max dd   0.1%
+      - .. -   Sharpe  -0.81   return   -0.09%   max dd   0.1%
+      - .. -   Sharpe  -0.07   return   -0.01%   max dd   0.1%
+[PASS        ] Trade bootstrap
+    6% of bootstrap resamples lose money (5th-95th percentile P&L -177 to 7559); observed max drawdown 0.1% is deeper than 95% of reshuffled orderings.
+      win rate 50%, payoff 4.03, profit factor 4.03, expectancy 289.10 per trade, 0 position(s) still open
+[WARN        ] Sample size & concentration
+    12 closed trades (10 needed to conclude anything, 30 for a clean pass); the best trade is 51% of all winning P&L.
+[PASS        ] Regime sensitivity
+    Mean return per period: 0.0007% low, 0.0003% medium, 0.0001% high volatility; 0 of 3 regimes lose money.
+[WARN        ] Benchmark-relative
+    Beta 0.01, annualized alpha 0.03%, information ratio -0.49, correlation 0.79; average net exposure 0.8% of equity (the benchmark is 100% invested, so a low exposure depresses alpha).
+[PASS        ] Drawdown & tail risk
+    Max drawdown 0.2%, longest time under water 378 periods; historical 95% VaR 0.02% and ES 0.02% per period.
+
+Most severe component verdict: WARN  (this is NOT a score; read each component above)
+
+Assumptions
+  - Every test re-runs the full event-driven backtest on the same bars; only the named input changes.
+  - Cost test adds slippage on top of the baseline cost model; the Sharpe verdict is judged at the configured stress level.
+  - Delay test postpones fills by whole bars; cancels still take effect immediately.
+  - Parameter test perturbs one parameter at a time, never several together, so interactions are not explored.
+  - Sub-periods and halves are run from a cold start with fresh capital; long look-backs lose their warm-up.
+  - Trade resampling treats trades as exchangeable fixed dollar amounts and measures drawdown on closed trades only.
+  - Regimes are terciles of trailing realized volatility of the equal-weight benchmark, labelled with full-sample thresholds (descriptive, not predictive). HMM regimes belong to the risk engine.
+  - The benchmark is an equal-weight buy-and-hold of the dataset's instruments, ignoring costs. A strategy that deploys only a small share of capital will look weak against a fully invested benchmark; weigh alpha and information ratio against the reported exposure.
+  - These tests stress ONE chosen configuration for fragility. They cannot detect that it was the luckiest of many tried; use the Deflated Sharpe Ratio, PBO and walk-forward validation for that.
+  - Verdict thresholds are conservative rules of thumb, not statistical tests, and no aggregate score is produced.
+tradestats 12 6 6 0.5 769.10039268666662 190.90339681666669 4.028741266585576 289.09849793500001 4.0287412665855769 3469.1819752199999 2370.63235145 -362.30935534000002 0.51372408032211236 51
+resampling 1 0.00089092889325880463 -176.6591683300002 7558.5534943000011 0.00059067702465003826 0.059999999999999998 0.00089078521196045836 0.050000000000000003
+benchmark 1 0.0076860570942174928 0.00027096336734717057 0.78930487896933943 0.15722206958242083 -0.49411550393695869 0.0078182746276922611 0.00754574521076586 0.0075557548508635771
+regime low volatility 327 0.33401430030643514 6.5310571203443743e-06 1.0398397953664662
+regime medium volatility 326 0.33299284984678246 2.9273006142072273e-06 0.48591004261041365
+regime high volatility 326 0.33299284984678246 1.1593311245487728e-06 0.18522785469870925
+risk 0.0017868955901317234 0.00074566232510327494 378 0.00017694211390184567 0.00023114630581841933 -0.00043182726512291936
+stability skipped 0 neighbours 6
+==== drift, long/short, two instruments
+trials 59 best 28 fast=5;slow=40
+trial 1 fast=2;slow=5 d1c5961d4ee5cdf0619f8b79349b262f76d14f38e683b00faf559257bc71b7e8 0.23242076377217541 599
+trial 2 fast=2;slow=15 0e047ee848185672840deec2dbccb4f75d02eb23da557a9869db08960a6fb2d3 0.57919145800983995 599
+trial 3 fast=2;slow=20 39c396bf860d521e490edd91cddc99ebd04d0dddc4ef60af5cf223095fdd52ac 0.11444040179109882 599
+trial 4 fast=2;slow=25 8e6c296318d38114bf656b996db3c082daa5e0ed327a95762f252f1dae49231a -0.18580518477728894 599
+trial 5 fast=2;slow=30 7e6fa18c2a16adbb119e9902b869c0f44b3e0bbaa49ce8c21b40be87bc44e9df 0.025095190099441691 599
+trial 6 fast=2;slow=40 564c91b9a31e93e6074e8710a494c57e28a8a7c163ad6833b80aa679dcb1e7e3 0.25520921599041574 599
+trial 7 fast=2;slow=60 1599da208f4795da39e7dba7ef02fb705cf4651013135d6cdb595b1a18bfba83 0.12854431921386536 599
+trial 8 fast=2;slow=80 c35e4730123c3d1c4dfcf01c65d7b07bd031141f5f940e2ef6db47666ad1e377 0.37658932248004245 599
+trial 9 fast=3;slow=5 9dd55f49675da325fe7b489bd85c839b79b2234aa321702573afb4365dbf35a9 -0.2247971664209856 599
+trial 10 fast=3;slow=15 78c5662b4d0aee7130d6d9dab11b9fd8e2e0efac08e845378d4b3a3febdf8ccd 0.093226046970359563 599
+trial 11 fast=3;slow=20 9a5dc935fa0a0a59b60917f3718663d7e9c54a449f9db8864427a50e0781d234 -0.18076579553607131 599
+trial 12 fast=3;slow=25 057d80219524e37ab60568e4b9f7a71a3b5fe2e287b9f70cd2b172bda873d882 -0.083525455688504377 599
+trial 13 fast=3;slow=30 f7e9884b5162acb1c01f8b6dbdf844d3ab407d438277b615ec3e8735e98b4816 0.10946549264354841 599
+trial 14 fast=3;slow=40 8b85b843dff3ba9a4c46efbbcae6dc4117f42a46df5bc5174e3045d38746fc81 0.31061113928345141 599
+trial 15 fast=3;slow=60 0c0a7f5502700e821fb9d9c111916cd26485e702aea0c970662a9f519615e627 0.21084692409021902 599
+trial 16 fast=3;slow=80 074585c13e118d1408f1532d3f80a71b708405a646ca3817ec7b67cabcbf492d 0.37264027483065448 599
+trial 17 fast=4;slow=5 760de22780e87ea9541063887f2bf843e917c306769f0b9e952c1cb3b0a213d3 0.16204918659694534 599
+trial 18 fast=4;slow=15 80c639c9a56210a27f1c57ac0b12559cc7fbc51e4912384b408becbf4a245f50 -0.1458614454022287 599
+trial 19 fast=4;slow=20 140d8e0d26362bc361db82d8f139f33e0612b52fb6b172d0a85233165f112c11 0.13349314417314381 599
+trial 20 fast=4;slow=25 af49ce5936d3ce98226f848c6174a3f6fbee7959178fe88b932405a7726a01a1 -0.16376846293816857 599
+trial 21 fast=4;slow=30 3c6caa0ad6f6b5eb8ed9db005c06b8ef3025cc9ee368380bfd14c5ab2c615e00 0.13629255639281318 599
+trial 22 fast=4;slow=40 e10ed406336bf6072812267c2b2f9c592ec6c715caa125ba696d3b37b92d030d 0.47518871831710857 599
+trial 23 fast=4;slow=60 643955700eb060ed50cec9a308e844df3c96476e889bfead6ff1355a35b8525a 0.043163098974303628 599
+trial 24 fast=4;slow=80 a01dae7303645d52492af15f963d3ea2ff96f7ebeed2fc7ba0cd71507aca476c 0.20835812195370715 599
+trial 25 fast=5;slow=15 7834ca8b73d0288722a7ba58deb7e3a1d037ef8c897c88ca1caa58badfdc13d6 0.21184763819164321 599
+trial 26 fast=5;slow=20 dab4b0a2b3c4d70b1bcd22c97056855c2f9f6f8c7e79e79e9dfb18ff91e764b8 -0.089275275052482658 599
+trial 27 fast=5;slow=25 a203b9bc877559ca4bd3b9a792bdfcae52ed52b637ff8fb0bf038c16ca0d5f24 -0.24631533966748928 599
+trial 28 fast=5;slow=30 bd1de5f6bb8018f60d75d8fdee0d00900f192405efbe654d8beaa233aafead1c 0.39310893541941982 599
+trial 29 fast=5;slow=40 a45067882ab291883299087feaeefea5506caf1c9d47ee84edd5d0cd37ec4a51 0.64397459485511344 599
+trial 30 fast=5;slow=60 632d879f03081b4d84a946c14efd344143aada8eec14ba4481b1e1736a02bf55 -0.052850293720399288 599
+trial 31 fast=5;slow=80 cc39db0467e6d5605e4bdaff0b271ffbdcb788b96b418bb031ca8dfe9efeddb7 0.1947193460725497 599
+trial 32 fast=6;slow=15 30a40659219ffbbfc6495615921f84669f2a8172a6a1194f1ad673db3a1060fc -0.18294632063212574 599
+trial 33 fast=6;slow=20 2d9e0b6ac15965662e2673c3547558b0dc5a21494f6695e56cf5ea4ef596f1f3 -0.13616634284338441 599
+trial 34 fast=6;slow=25 ec461f9901533ee6d18f06a2f40ec390828c6e63f4dd7d8cb37114b769d222a2 -0.11092007096550995 599
+trial 35 fast=6;slow=30 d5f68761e58261f0ad543f85c6a604335e3df3c68c8dd480bb08d60a553abb9c 0.17628546982280935 599
+trial 36 fast=6;slow=40 f80bdceab540f28dab6298549f6e5a0dcef056cb905cf6b0802104bffda21339 0.33451760058263807 599
+trial 37 fast=6;slow=60 385f101ac1bc17beca4a82b823751be425e7c38ed4e17c655e52b40e4246ad37 0.12373822237444689 599
+trial 38 fast=6;slow=80 f296fe32324b3d9ee9b2e2ebb5e14890a0b0eea84314cc30b7ca1f80f9b2a570 0.41550640598160626 599
+trial 39 fast=8;slow=15 91c3fb2b8204d117263186c14a39a4fde708d590254593878a25e7435362e3a1 -0.75167654881435475 599
+trial 40 fast=8;slow=20 4e6e005c827f2c248f7f3865c094506d87966b906c3c9879098ad06082068875 0.096531825737620758 599
+trial 41 fast=8;slow=25 3e1e76c264c6e3400cc1827a9d715f99b4a0b59bb58b8462cab39f4ad1f6bdd5 -0.13317208171004158 599
+trial 42 fast=8;slow=30 184768db5106e9f2f9b3c00567170e485f25c0cc536170516f18d6fa2c74da61 -0.041159662063211318 599
+trial 43 fast=8;slow=40 eda148927b7c6a3c6e4b20d60ef4988dc3d97dcaea1b51214e2e3c8c6b162aa9 0.088185043982416542 599
+trial 44 fast=8;slow=60 773cdb561c9d8a1c149b7222e31d6c781975f72412b2980a41bdcfca09f5b676 0.29133519782042383 599
+trial 45 fast=8;slow=80 6f898d7bfab4a4f0cc5292ccb8d1363e0741d1dfef618c827fff6f577a6f9e98 0.46186538221846368 599
+trial 46 fast=10;slow=15 a2447f9e185a2ee08c68945c5b0b020f8ef92e992e342daa4b0d8c14618b5faf -0.23383544031418194 599
+trial 47 fast=10;slow=20 ad025b401c8dc5aff88cc837e778e814e914a8e2377e59390ababe0568b9c753 0.061564451217648024 599
+trial 48 fast=10;slow=25 38e11562a2686dccbc6d5e5d66b5fbed9ff143fdbf36188ac253201470df1de4 -0.13309865848846364 599
+trial 49 fast=10;slow=30 d9fe818ae629106b1f8b23198265d926e1d9d3ec5519e94c7a586790dfba3c00 0.31635340585847088 599
+trial 50 fast=10;slow=40 c9977da8e1c2e0d664c0748409360cf84c4c5b49f275af17fc237746caf6818a -0.1464878325693364 599
+trial 51 fast=10;slow=60 f8d5b1c9fa9dd7b9c01777c0fd89d9e322666838b9d8dfd2a4d30f1eff7a9f85 0.3640127914355043 599
+trial 52 fast=10;slow=80 e417e1b49a0e7c2d1f690124346f103cbbca3e259d560921c9f233da11445739 0.5247076739543326 599
+trial 53 fast=12;slow=15 cf9464eeea2a887319d1d560033d8c9b932037a1eab7f376797419ea83f249ef -0.54241901011315929 599
+trial 54 fast=12;slow=20 5d1ed521683e7c5e612efa6b9200ddda15c3ccbff1a349a80c0fe767004d1356 -0.45478620775776735 599
+trial 55 fast=12;slow=25 731f6dc6b65e511396f04c28a761876d7bbcc8ab5e7d0f9aa0c518cf04e54a23 -0.25040212374038034 599
+trial 56 fast=12;slow=30 6b07c07774f0e14a685bb27662aa311da3d8600f5d5a4cea4a5ffe1d702511dc 0.20775425459111133 599
+trial 57 fast=12;slow=40 f4ab99ebeef0eb5940ccd7963a2e928496baa06f84c5403ed111ca5476efd4e8 0.17326511323118429 599
+trial 58 fast=12;slow=60 17f164a377e49ea6fa211d2834169262daf8cd92f6602a5ddf179d79abb2b997 0.34058061520712768 599
+trial 59 fast=12;slow=80 7f2a1f546d449de1da51b773afefc947364730cde99f7a6dfe57efc454afc935 0.36672967747594898 599
+sharpe_variance 0.00030621034375109027
+pbo 8 0.80000000000000004 0.62857142857142856 -1.096841287423159 70 59 592
+pbo 16 0.82657342657342658 0.65734265734265729 -1.2361545377097773 12870 59 592
+Validation report
+-----------------
+trials recorded            59
+observations               599
+Sharpe (annualized)        0.644
+Sharpe (per period)        0.04057
+skew / kurtosis            -0.099 / 3.261
+Sharpe variance, trials    3.062e-04
+expected max Sharpe (N)    0.04093 per period
+PSR (vs 0)                 0.839
+DSR                        0.496
+min track record (obs)     inf
+PBO                        0.827
+
+Warnings
+  - DSR 0.50 is below the 0.95 confidence level: the result cannot be told apart, at that confidence, from the best of 59 random trials.
+  - Observed Sharpe does not exceed the benchmark: no track record length is long enough.
+  - PBO is 0.5 or higher: in-sample selection did not predict out-of-sample rank.
+  - PBO from a single dataset is a noisy estimate (standard deviation about 0.2 on pure noise); treat it as an indicator, not a precise probability.
+
+Assumptions
+  - Returns are treated as serially independent (no autocorrelation adjustment).
+  - PSR/DSR use only the first four moments of the returns.
+  - The multiple-testing benchmark treats trials as independent; grid neighbours are correlated, so the effective number of trials is smaller than the count.
+  - Sharpe ratios in PSR/DSR are per-period, not annualized.
+dsr 0.49645769331355571
+psr 0.83881015205015741
+mintrl inf
+walk-forward folds 4 trials 236 ledger 295
+fold 0 200 205 285 fast=12;slow=30 0.86939186672237023 0.17199085736326813 266c83ce67ee31e01339ed7b7be65f83c5c35fc04ab494a1ffd1195553460ce4
+fold 0 280 285 365 fast=10;slow=80 1.1818708214141578 0 760fb376dd5c479db2be6ead540cc25c0df04dd710cd44f6608d672f78ffb7a2
+fold 0 360 365 445 fast=12;slow=25 0.73991791834671794 -0.83683231267199165 0b57c5b0ebf9926ffa05864b27aca573dd0687279b0c670704689f64bb18169f
+fold 0 440 445 525 fast=5;slow=30 0.68392411926457886 -1.1826020184315906 0b4d4172d1da334d32b6e58c38ec386200e3060f66cb16c6cf966790093ee860
+wf_mean_is 0.86877618143695623
+wf_mean_oos -0.46186086843507856
+wf_oos_sharpe -0.56883453338796885
+wf_oos_return -0.0017572638868494916
+Validation report
+-----------------
+trials recorded            295
+observations               599
+Sharpe (annualized)        0.644
+Sharpe (per period)        0.04057
+skew / kurtosis            -0.099 / 3.261
+Sharpe variance, trials    9.999e-04
+expected max Sharpe (N)    0.09139 per period
+PSR (vs 0)                 0.839
+DSR                        0.108
+min track record (obs)     inf
+
+Warnings
+  - DSR 0.11 is below the 0.90 confidence level: the result cannot be told apart, at that confidence, from the best of 295 random trials.
+  - Observed Sharpe does not exceed the benchmark: no track record length is long enough.
+
+Assumptions
+  - Returns are treated as serially independent (no autocorrelation adjustment).
+  - PSR/DSR use only the first four moments of the returns.
+  - The multiple-testing benchmark treats trials as independent; grid neighbours are correlated, so the effective number of trials is smaller than the count.
+  - Sharpe ratios in PSR/DSR are per-period, not annualized.
+Strategy Survival Report
+========================
+parameters: fast=5;slow=40
+baseline: Sharpe 0.64, total return 0.48%, max drawdown 0.24%, 40 fills
+baseline run: a45067882ab291883299087feaeefea5506caf1c9d47ee84edd5d0cd37ec4a51
+
+[PASS        ] Cost sensitivity
+    Sharpe 0.64 at baseline costs, 0.58 with +5.0 bps extra slippage; Sharpe reaches zero at about +47.7 bps.
+      +   0.0 bps   Sharpe   0.64   return    0.48%
+      +   1.0 bps   Sharpe   0.63   return    0.47%
+      +   2.0 bps   Sharpe   0.62   return    0.46%
+      +   5.0 bps   Sharpe   0.58   return    0.43%
+      +  10.0 bps   Sharpe   0.51   return    0.38%
+      +  20.0 bps   Sharpe   0.37   return    0.28%
+      +  50.0 bps   Sharpe  -0.03   return   -0.02%
+      + 100.0 bps   Sharpe  -0.67   return   -0.53%
+      + 200.0 bps   Sharpe  -1.71   return   -1.54%
+[PASS        ] Execution delay
+    Sharpe 0.64 on time, 0.35 when every fill is one bar late.
+      +0 bar(s)     Sharpe   0.64   return    0.48%
+      +1 bar(s)     Sharpe   0.35   return    5.59%
+      +2 bar(s)     Sharpe  -0.24   return   -8.27%
+      +5 bar(s)     Sharpe   0.58   return 2729.39%
+[PASS        ] Parameter stability
+    6 neighbours: 100% have positive Sharpe; median 0.40 (baseline 0.64), worst 0.33.
+[PASS        ] Time-period robustness
+    75% of 4 sub-periods have positive Sharpe; first half 0.71, second half 0.50.
+      - .. -   Sharpe  -1.15   return   -0.14%   max dd   0.2%
+      - .. -   Sharpe   2.38   return    0.39%   max dd   0.1%
+      - .. -   Sharpe   0.35   return    0.06%   max dd   0.2%
+      - .. -   Sharpe   0.75   return    0.13%   max dd   0.2%
+[FAIL        ] Trade bootstrap
+    25% of bootstrap resamples lose money (5th-95th percentile P&L -4179 to 9000); observed max drawdown 0.2% is deeper than 28% of reshuffled orderings.
+      win rate 34%, payoff 2.62, profit factor 1.36, expectancy 67.19 per trade, 2 position(s) still open
+[PASS        ] Sample size & concentration
+    38 closed trades (10 needed to conclude anything, 30 for a clean pass); the best trade is 25% of all winning P&L.
+[WARN        ] Regime sensitivity
+    Mean return per period: -0.0002% low, 0.0004% medium, 0.0023% high volatility; 1 of 3 regimes lose money.
+[WARN        ] Benchmark-relative
+    Beta 0.01, annualized alpha -0.06%, information ratio -2.13, correlation 0.39; average net exposure 1.7% of equity (the benchmark is 100% invested, so a low exposure depresses alpha).
+[PASS        ] Drawdown & tail risk
+    Max drawdown 0.2%, longest time under water 184 periods; historical 95% VaR 0.03% and ES 0.04% per period.
+
+Most severe component verdict: FAIL  (this is NOT a score; read each component above)
+
+Assumptions
+  - Every test re-runs the full event-driven backtest on the same bars; only the named input changes.
+  - Cost test adds slippage on top of the baseline cost model; the Sharpe verdict is judged at the configured stress level.
+  - Delay test postpones fills by whole bars; cancels still take effect immediately.
+  - Parameter test perturbs one parameter at a time, never several together, so interactions are not explored.
+  - Sub-periods and halves are run from a cold start with fresh capital; long look-backs lose their warm-up.
+  - Trade resampling treats trades as exchangeable fixed dollar amounts and measures drawdown on closed trades only.
+  - Regimes are terciles of trailing realized volatility of the equal-weight benchmark, labelled with full-sample thresholds (descriptive, not predictive). HMM regimes belong to the risk engine.
+  - The benchmark is an equal-weight buy-and-hold of the dataset's instruments, ignoring costs. A strategy that deploys only a small share of capital will look weak against a fully invested benchmark; weigh alpha and information ratio against the reported exposure.
+  - These tests stress ONE chosen configuration for fragility. They cannot detect that it was the luckiest of many tried; use the Deflated Sharpe Ratio, PBO and walk-forward validation for that.
+  - Verdict thresholds are conservative rules of thumb, not statistical tests, and no aggregate score is produced.
+tradestats 38 13 25 0.34210526315789475 740.12783180846168 282.74284988600004 2.6176712589084961 67.18659385157892 1.3611890546324179 2553.0905663599988 2425.3048003499998 -674.37696319999998 0.25206714259532303 28.026315789473685
+resampling 1 0.0022443667562000919 -4179.4362640600011 8999.8946420600005 0.0027041638181888239 0.252 0.0040029100647813046 0.71799999999999997
+benchmark 1 0.010705271315800041 -0.0006029829595608448 0.39358528393240311 0.11439262533035158 -2.1280432639543205 0.010795515489176916 0.011808286707636229 0.017125311423345644
+regime low volatility 193 0.33333333333333331 -1.9907014167206911e-06 -0.1525078832836734
+regime medium volatility 193 0.33333333333333331 4.0904995469392798e-06 0.31331104345185079
+regime high volatility 193 0.33333333333333331 2.2836397431300763e-05 1.9121851631494386
+risk 0.0024156548283726874 0.0010045378903352836 184 0.00032235732165997177 0.00042125947994151589 -0.00066593706871076463
+stability skipped 0 neighbours 6
+==== short sample
+trials 59 best 0 fast=2;slow=5
+trial 1 fast=2;slow=5 9cc78a0e7f00a8347784d8c52216803ed7c3c72f1b9854c38cf66bb019cc0f46 1.0513944803701198 159
+trial 2 fast=2;slow=15 d937367e61de47be3d77f23782e04a870bbc734176beaa94481fd079e415b908 -0.91532541368857678 159
+trial 3 fast=2;slow=20 bb0194ecb0cd066e23ca42e5836072de652eedb5aa98ac3a879f9d80395170f5 -1.1015168100706427 159
+trial 4 fast=2;slow=25 f13bfb9c37e457d806fb49fd20322df153d7d0c168410e96a8228524249973b5 -1.5466383344342405 159
+trial 5 fast=2;slow=30 98f96f86905f1e4bcca32346604a61e0c5b63538e32330b752d8301abc843fea -1.5483670631003157 159
+trial 6 fast=2;slow=40 9bd83ff452e200992d0716ba6568276e4a0e18eac3fdec7355e0f272c94960df -1.3674419308625145 159
+trial 7 fast=2;slow=60 beabb09f311824092be22e01c47a83bc876696098c24f906baafb7bafb0551e3 -2.0385279810476371 159
+trial 8 fast=2;slow=80 4cd397e1db8ed5d1d057851a559540983330374ff6d2ab105c001b76b8ed1818 -0.75970230904351954 159
+trial 9 fast=3;slow=5 c9bc3909d2a1f1654c9453ee6f625ada488d1a4cd46359f2f351184880af874f 0.66735749376049169 159
+trial 10 fast=3;slow=15 8de4492082e7c237703e9311329cbd5d16f9a479466d48cbe4c71abc2422a6c3 -0.67561588303439224 159
+trial 11 fast=3;slow=20 cebfdd7bb316a8da5b03ca7aa5e2c1bfdd3c8a2fced3543163a5b56cf9a7fc6d -1.6207002197785321 159
+trial 12 fast=3;slow=25 fc03f4cd40c415b874385bc73a77f4446e143f8a408f70dfebaf7583f47e340a -2.0588191356041419 159
+trial 13 fast=3;slow=30 60cfbf587cfff8fdec8f50336e172859547880765d01c328bf1f6f9627d41d24 -2.1849016500163256 159
+trial 14 fast=3;slow=40 7dd0681a2d06fa26a66ce274fe36d9858a547f8da31fe8032afa28d96d8ff12c -1.4896619125884716 159
+trial 15 fast=3;slow=60 dc4e5bade5db323a51491324c934e0a5b2107b5f6727082064bb05884f564570 -2.2500631868108196 159
+trial 16 fast=3;slow=80 77b03fc21e63fd19c27396761ad72b8d41c27cd0e340218796369cce538d3d79 -0.70159106473495303 159
+trial 17 fast=4;slow=5 2eeaacc130f170883ec82f5d89a14475db92f05e93c7499a2fb81963096ed326 -0.46681443430734454 159
+trial 18 fast=4;slow=15 b4483da9f09e669f1c4dd81737254064070d63e7a8b252480746fb72d6526edd -1.8264891005426371 159
+trial 19 fast=4;slow=20 9edb8972f47e9527e9c934367f84283e781805430451a765579e14b3f058b071 -1.7620875274214707 159
+trial 20 fast=4;slow=25 244a6e46c13fe66a2440bc5804917206074d4793a257862b36166a72dd82026a -1.9202803130406503 159
+trial 21 fast=4;slow=30 3da2115c75768553d2c4cc5f27e51f09b86fa2c9a09e7af5d5c004fd32cd8e5c -2.7426362073327994 159
+trial 22 fast=4;slow=40 2cade2b1fac4fbf00c62e31147e232ca3d026036f576fcfd89ccb126a39f94a3 -1.6768235056443801 159
+trial 23 fast=4;slow=60 ece6ec2a67593868aa0d7c47518290a2d044f211564372d40e38992035dba908 -1.6186749316459466 159
+trial 24 fast=4;slow=80 4b6cafd2b6d008e5a98a4c2ba8f557bec8e4541b374e905554ae5e2cacb5e51b -1.1542931979163686 159
+trial 25 fast=5;slow=15 2625c85822eab00fcdf48c7796348ab5474f9aa49258712f9f190cc08351077b -1.1003739143601021 159
+trial 26 fast=5;slow=20 5915603fad9d6bc2196b84e8ddd09326b4d983bdd3024bfc66ccf378be60fe79 -1.7631995362182704 159
+trial 27 fast=5;slow=25 7b1f6e00f331f89b70cd1252f7b28ddd8aa7d687a0e6caf28ec9ce705435f256 -2.2554176151552063 159
+trial 28 fast=5;slow=30 818c85c408c39c697e65e1b23aa9f2d1797546f33dc3d9d818bbee2f5f895ecb -1.8501386465117053 159
+trial 29 fast=5;slow=40 8db078b6a73b8d0d72303a3486a470c26aaec7b670a60420f72c19c92961d92a -1.7731299902017073 159
+trial 30 fast=5;slow=60 6516bdca1bd43a2664f8398ee28db16bf33b59a270d1cd727f76319a917f29df -1.9724696798367218 159
+trial 31 fast=5;slow=80 d94bd8b19b303aa9b36c2c3f837584fe3be1c70b299a1e65cdc8a566f32c3d4d -1.0401205857660976 159
+trial 32 fast=6;slow=15 fc5d5ef18ed4de5fc814ee082e10c24be6f20fb468f86eebb2b81bca877248ee -1.1783485589618321 159
+trial 33 fast=6;slow=20 528153bd147df41e06e93fb299bd7b2c5e68e7c59ab56f9a1be6c42614cbc69c -2.1520452787177593 159
+trial 34 fast=6;slow=25 30669aaf49e637b0f37e6cb8768b646f8995b3ff9ab01bce07b0b7723237cfbf -2.9509770825818493 159
+trial 35 fast=6;slow=30 ec3b4ea2004e7abb0e9853254c498e9a3af22b9137884311511dea6dc875ab11 -1.9522773312201043 159
+trial 36 fast=6;slow=40 dcaace101a534f43fb22edd11dac1ec7a6723b37d68add485631544dc2bcd249 -2.0118540929315629 159
+trial 37 fast=6;slow=60 f6d3722f67923fd16485c805cb48917fcf233c373290d29fd75ebe44fc235844 -2.0718137720341088 159
+trial 38 fast=6;slow=80 dfc2e854ec85bc7d5983dc6c09b0b360a38731120e0e25d14d408251339ebc2a -0.66483135785930558 159
+trial 39 fast=8;slow=15 b6011c3d469748cc12c9abb85a01d7c4ca05d67aca28338b62ae7034fe45e8bd -1.3684299390363517 159
+trial 40 fast=8;slow=20 0012993de746db8025d3b579d0b9a2ce1aa4a5a5b8c22d64b25e1daa24ddfacf -2.9307709451816213 159
+trial 41 fast=8;slow=25 f58f81d3f04626e08092d1ea57ab9aef8fd14bb43e58ac85cdbb375be30d4b2d -3.1113579630506574 159
+trial 42 fast=8;slow=30 73b1fd702c16a0bb5dbf0dd12cfe15e85605dd68138ec36414baa9e1bb778b4e -1.6867009810251161 159
+trial 43 fast=8;slow=40 fc4aa0a70c60c5e1678e3598e7eb43d06150681f3a0bbbc9c499cd637c508fc1 -1.5541730197994321 159
+trial 44 fast=8;slow=60 54371d44eb5e17f4238294e5bd679c86c60c99dd15efe075105e869dba574076 -1.6424318549053665 159
+trial 45 fast=8;slow=80 fc19ea819200c30c94c245288cc2dfeae9300eeeb8adf87dd97c272fbad95840 -0.74864675005696479 159
+trial 46 fast=10;slow=15 0c61d9c7b91507967ce65d572154dfe76a1adc80b4054d5f3b9402cd797b7008 -2.0230802227012257 159
+trial 47 fast=10;slow=20 c48792f9226de17d48ac22d1a618fe70e5ead6890ceb2497d7539740855984ed -2.6792223302985767 159
+trial 48 fast=10;slow=25 27c4434892601875bdc7e567719254d21fdc4f09866f11c8b521cc44f3872615 -2.1910424338874015 159
+trial 49 fast=10;slow=30 066cb27b267f8fe06df65570bc490e55f369a1d5a389d408c7f9110a58276de7 -1.5856404766423495 159
+trial 50 fast=10;slow=40 171cdfba6b0ef4c48f3b7d5a61041c8e2a16e8ae93a5446e58b07e6129dae75d -1.0710212459728894 159
+trial 51 fast=10;slow=60 20cfc7507e854435e253633c45236e4c4a58fea6540e2ff5df95c236e2fd29a3 -1.4320191371934476 159
+trial 52 fast=10;slow=80 fc19ea819200c30c94c245288cc2dfeae9300eeeb8adf87dd97c272fbad95840 -0.74864675005696479 159
+trial 53 fast=12;slow=15 478262db52a4ecea8cb1181e571949f9323348849e94a8aa9a15ff343e3db539 -0.55729552045232866 159
+trial 54 fast=12;slow=20 81acd22968efb6fe1ba24613e11029933c55df92ef6832ca81e5baba276445fb -1.1250824305182383 159
+trial 55 fast=12;slow=25 af4be6c8d672620f45bffa78c1eb7973bf8958038f4385c1d2090858c9fe060b -1.362542181663067 159
+trial 56 fast=12;slow=30 b508fccded8cf74b4d260db2ed0732ddeef1db9647151b52c02db64ac1d01234 -0.44116991850803466 159
+trial 57 fast=12;slow=40 c0f027f43b800fd89a5ef3b3425671b1b8c70c4ba919c8cb5992b265e1dbf698 -0.35012284848064495 159
+trial 58 fast=12;slow=60 f2fc64ee2a5e3d1d03b38450e6f1749e7e61a4813a966011046ef6c5c2f6699d -1.0714721547387491 159
+trial 59 fast=12;slow=80 dafd33304332de2b218ef5c7e560931503bd0991b8fe74c446fd16494a1fc7c5 -0.84333806847553305 159
+sharpe_variance 0.002475425030992507
+pbo 8 0.38571428571428573 0.62857142857142856 0.57547133237324688 70 59 152
+pbo 16 0.45353535353535351 0.65749805749805745 0.37170220611157245 12870 59 144
+Validation report
+-----------------
+trials recorded            59
+observations               159
+Sharpe (annualized)        1.051
+Sharpe (per period)        0.06623
+skew / kurtosis            0.153 / 2.645
+Sharpe variance, trials    2.475e-03
+expected max Sharpe (N)    0.11638 per period
+PSR (vs 0)                 0.798
+DSR                        0.263
+min track record (obs)     inf
+PBO                        0.454
+
+Warnings
+  - DSR 0.26 is below the 0.95 confidence level: the result cannot be told apart, at that confidence, from the best of 59 random trials.
+  - Observed Sharpe does not exceed the benchmark: no track record length is long enough.
+  - PBO from a single dataset is a noisy estimate (standard deviation about 0.2 on pure noise); treat it as an indicator, not a precise probability.
+
+Assumptions
+  - Returns are treated as serially independent (no autocorrelation adjustment).
+  - PSR/DSR use only the first four moments of the returns.
+  - The multiple-testing benchmark treats trials as independent; grid neighbours are correlated, so the effective number of trials is smaller than the count.
+  - Sharpe ratios in PSR/DSR are per-period, not annualized.
+dsr 0.26338800575597793
+psr 0.79842110131806476
+mintrl inf
+walk-forward folds 3 trials 177 ledger 236
+fold 0 60 60 90 fast=2;slow=5 1.3995067880114087 4.5558102536456655 d11fd08131d4490f42070371f4a715183fb5a4fc6d700df5f5251e779bd8b331
+fold 30 90 90 120 fast=5;slow=15 2.4372350500964921 -5.1502849202504652 9273d3328a4cc45765cae6986c506aa748ae1e1ca998722657b7962ae6127b4e
+fold 60 120 120 150 fast=2;slow=5 2.8090660349275729 0.59578605245279159 cdd9d8938fe518b513a94d3653b3225cb3135d6eb1b02fc279e3572d032770c0
+wf_mean_is 2.2152692910118246
+wf_mean_oos 0.00043712861599728053
+wf_oos_sharpe 0.18381818673269607
+wf_oos_return 7.0467063572721145e-05
+Validation report
+-----------------
+trials recorded            236
+observations               159
+Sharpe (annualized)        1.051
+Sharpe (per period)        0.06623
+skew / kurtosis            0.153 / 2.645
+Sharpe variance, trials    8.549e-03
+expected max Sharpe (N)    0.26066 per period
+PSR (vs 0)                 0.798
+DSR                        0.007
+min track record (obs)     inf
+
+Warnings
+  - DSR 0.01 is below the 0.90 confidence level: the result cannot be told apart, at that confidence, from the best of 236 random trials.
+  - Observed Sharpe does not exceed the benchmark: no track record length is long enough.
+
+Assumptions
+  - Returns are treated as serially independent (no autocorrelation adjustment).
+  - PSR/DSR use only the first four moments of the returns.
+  - The multiple-testing benchmark treats trials as independent; grid neighbours are correlated, so the effective number of trials is smaller than the count.
+  - Sharpe ratios in PSR/DSR are per-period, not annualized.
+Strategy Survival Report
+========================
+parameters: fast=2;slow=5
+baseline: Sharpe 1.05, total return 0.10%, max drawdown 0.05%, 33 fills
+baseline run: 9cc78a0e7f00a8347784d8c52216803ed7c3c72f1b9854c38cf66bb019cc0f46
+
+[PASS        ] Cost sensitivity
+    Sharpe 1.05 at baseline costs, 0.70 with +5.0 bps extra slippage; Sharpe reaches zero at about +15.1 bps.
+      +   0.0 bps   Sharpe   1.05   return    0.10%
+      +   1.0 bps   Sharpe   0.98   return    0.09%
+      +   2.0 bps   Sharpe   0.91   return    0.08%
+      +   5.0 bps   Sharpe   0.70   return    0.06%
+      +  10.0 bps   Sharpe   0.35   return    0.03%
+      +  20.0 bps   Sharpe  -0.34   return   -0.03%
+      +  50.0 bps   Sharpe  -2.23   return   -0.22%
+      + 100.0 bps   Sharpe  -4.47   return   -0.54%
+      + 200.0 bps   Sharpe  -6.43   return   -1.17%
+[FAIL        ] Execution delay
+    Sharpe 1.05 on time, -0.59 when every fill is one bar late.
+      +0 bar(s)     Sharpe   1.05   return    0.10%
+      +1 bar(s)     Sharpe  -0.59   return   -0.43%
+      +2 bar(s)     Sharpe  -0.18   return   -1.30%
+      +5 bar(s)     Sharpe   1.71   return   15.48%
+[INSUFFICIENT] Parameter stability
+    Only 3 valid neighbouring parameter sets could be run (0 rejected by the strategy); too few to judge stability.
+[WARN        ] Time-period robustness
+    75% of 4 sub-periods have positive Sharpe; first half 1.26, second half 0.53.
+      - .. -   Sharpe  -0.78   return   -0.02%   max dd   0.1%
+      - .. -   Sharpe   3.00   return    0.07%   max dd   0.0%
+      - .. -   Sharpe   1.51   return    0.03%   max dd   0.0%
+      - .. -   Sharpe   0.64   return    0.01%   max dd   0.0%
+[WARN        ] Trade bootstrap
+    14% of bootstrap resamples lose money (5th-95th percentile P&L -382 to 2245); observed max drawdown 0.0% is deeper than 55% of reshuffled orderings.
+      win rate 44%, payoff 2.25, profit factor 1.75, expectancy 26.34 per trade, 1 position(s) still open
+[PASS        ] Sample size & concentration
+    32 closed trades (10 needed to conclude anything, 30 for a clean pass); the best trade is 23% of all winning P&L.
+[PASS        ] Regime sensitivity
+    Mean return per period: 0.0007% low, 0.0011% medium, 0.0008% high volatility; 0 of 3 regimes lose money.
+[PASS        ] Benchmark-relative
+    Beta -0.00, annualized alpha 0.14%, information ratio 0.68, correlation -0.16; average net exposure 0.9% of equity (the benchmark is 100% invested, so a low exposure depresses alpha).
+[PASS        ] Drawdown & tail risk
+    Max drawdown 0.1%, longest time under water 47 periods; historical 95% VaR 0.01% and ES 0.02% per period.
+
+Most severe component verdict: FAIL  (this is NOT a score; read each component above)
+
+Assumptions
+  - Every test re-runs the full event-driven backtest on the same bars; only the named input changes.
+  - Cost test adds slippage on top of the baseline cost model; the Sharpe verdict is judged at the configured stress level.
+  - Delay test postpones fills by whole bars; cancels still take effect immediately.
+  - Parameter test perturbs one parameter at a time, never several together, so interactions are not explored.
+  - Sub-periods and halves are run from a cold start with fresh capital; long look-backs lose their warm-up.
+  - Trade resampling treats trades as exchangeable fixed dollar amounts and measures drawdown on closed trades only.
+  - Regimes are terciles of trailing realized volatility of the equal-weight benchmark, labelled with full-sample thresholds (descriptive, not predictive). HMM regimes belong to the risk engine.
+  - The benchmark is an equal-weight buy-and-hold of the dataset's instruments, ignoring costs. A strategy that deploys only a small share of capital will look weak against a fully invested benchmark; weigh alpha and information ratio against the reported exposure.
+  - These tests stress ONE chosen configuration for fragility. They cannot detect that it was the luckiest of many tried; use the Deflated Sharpe Ratio, PBO and walk-forward validation for that.
+  - Verdict thresholds are conservative rules of thumb, not statistical tests, and no aggregate score is produced.
+tradestats 32 14 18 0.4375 140.82983422785711 62.700806553888889 2.24606096744257 26.343848788125005 1.7469363080108877 843.00316122000015 444.09516271000001 -176.52176219 0.22524405588229854 4.8125
+resampling 1 0.00042786856746895781 -382.34726502000001 2244.5867283099997 0.00040571610376076856 0.14199999999999999 0.00068484285068840921 0.45400000000000001
+benchmark 1 -0.0015675488815124719 0.0013514432193672224 -0.16443463547070841 0.15095632843219942 0.68254077031792715 -4.9192075335762977e-05 -0.0015143826211197861 0.00940013647816469
+regime low volatility 47 0.33812949640287771 7.2641577468023516e-06 1.3180239457084368
+regime medium volatility 46 0.33093525179856115 1.1372203568652104e-05 1.7250267237244603
+regime high volatility 46 0.33093525179856115 8.4357453046318938e-06 1.5384634473347358
+risk 0.00053524022756809781 0.00024509987500261429 47 0.00014899980907379096 0.00016639832672291077 -0.00018393829658691629
+stability skipped 0 neighbours 3

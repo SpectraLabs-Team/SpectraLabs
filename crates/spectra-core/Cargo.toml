@@ -1,0 +1,13 @@
+[package]
+name = "spectra-core"
+description = "Spectra Labs core: exact fixed-point money and the accounting ledger"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

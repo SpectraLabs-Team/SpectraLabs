@@ -1,0 +1,24 @@
+{
+  "id": "16fa262fcf3c17d23c064cf89471b8e6ca0466870949bcac0df29b66d2696778",
+  "bars_sha256": "4cc43d94ca54f578fe5bac003d1ad2a02ce49e6db477fb186f02c1086f36e997",
+  "source_sha256": "927f23df1067df021db7ea10c7dcf755c3f3e6b22edcfb7201ece4a2047b48a3",
+  "parent_id": "",
+  "note": "",
+  "engine_version": "0.6.0",
+  "bar_count": 2,
+  "first_ts_ns": -86400000000000,
+  "last_ts_ns": 0,
+  "first_ts": "1969-12-31T00:00:00Z",
+  "last_ts": "1970-01-01T00:00:00Z",
+  "symbols": ["DEFAULT"],
+  "quality": {
+    "rows_total": 2,
+    "rows_accepted": 2,
+    "rows_rejected": 0,
+    "rejected_by_category": {},
+    "input_was_sorted": true,
+    "warnings": [],
+    "notes": ["Prices are used exactly as supplied: no split or dividend adjustment is applied.", "No exchange calendar is applied: gaps may be legitimate market closures.", "Timestamps are treated as bar start times in UTC."],
+    "symbols": [{"symbol": "DEFAULT", "bars": 2, "gaps": 0, "outlier_returns": 0, "stale_runs": 0, "zero_volume_bars": 0}]
+  }
+}

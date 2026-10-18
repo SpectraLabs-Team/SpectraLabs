@@ -1,0 +1,4 @@
+# Keep line endings exact everywhere: golden files and CSV fixtures are compared byte for byte.
+* text=auto eol=lf
+parity/** -text
+*.qfb binary

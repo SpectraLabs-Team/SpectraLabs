@@ -1,0 +1,24 @@
+{
+  "id": "53227753e71015b44ada929083c7f9dc4461b35117dacf74f25abec06cc244ec",
+  "bars_sha256": "e1841f5daec8561e1056c8437240d6f9c9fac6d556d895cc12a694d2669d599b",
+  "source_sha256": "68d63587f9d97e9a84be055fec96218dccca3c34906be8c530371663288fa21d",
+  "parent_id": "",
+  "note": "",
+  "engine_version": "0.6.0",
+  "bar_count": 1,
+  "first_ts_ns": 1704067200000000000,
+  "last_ts_ns": 1704067200000000000,
+  "first_ts": "2024-01-01T00:00:00Z",
+  "last_ts": "2024-01-01T00:00:00Z",
+  "symbols": ["Z"],
+  "quality": {
+    "rows_total": 1,
+    "rows_accepted": 1,
+    "rows_rejected": 0,
+    "rejected_by_category": {},
+    "input_was_sorted": true,
+    "warnings": ["1 timestamp(s) carried no time zone and were read at UTC+0 minutes. Fixed offsets cannot model daylight-saving changes."],
+    "notes": ["Prices are used exactly as supplied: no split or dividend adjustment is applied.", "No exchange calendar is applied: gaps may be legitimate market closures.", "Timestamps are treated as bar start times in UTC."],
+    "symbols": [{"symbol": "Z", "bars": 1, "gaps": 0, "outlier_returns": 0, "stale_runs": 0, "zero_volume_bars": 0}]
+  }
+}

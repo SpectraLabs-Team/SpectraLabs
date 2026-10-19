@@ -2742,9 +2742,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "spectra-backtest"
+version = "0.1.0"
+dependencies = [
+ "spectra-core",
+ "spectra-engine",
+ "spectra-registry",
+ "spectra-research",
+]
+
+[[package]]
 name = "spectra-cli"
 version = "0.1.0"
 dependencies = [
+ "spectra-backtest",
  "spectra-core",
  "spectra-data",
  "spectra-engine",

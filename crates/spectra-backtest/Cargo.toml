@@ -1,0 +1,18 @@
+[package]
+name = "spectra-backtest"
+description = "Backtests as data: user-facing configuration, built-in strategies, controlled runs and result serialization, for the backtest job"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Standard-library only, like the engine crates it wraps.
+[dependencies]
+spectra-core = { path = "../spectra-core" }
+spectra-engine = { path = "../spectra-engine" }
+spectra-research = { path = "../spectra-research" }
+spectra-registry = { path = "../spectra-registry" }
+
+[lints]
+workspace = true

@@ -9,8 +9,9 @@ pub mod metrics;
 pub mod performance;
 
 pub use backtest::{
-    canonical_config, config_fingerprint, run_backtest, BacktestConfig, BacktestResult, Context,
-    ExecutionConfig, Order, OrderId, OrderState, OrderType, RunRecord, Strategy,
+    canonical_config, config_fingerprint, run_backtest, run_backtest_controlled, BacktestConfig,
+    BacktestResult, Context, ExecutionConfig, Order, OrderId, OrderState, OrderType, Progress, RunControl,
+    RunError, RunLimits, RunRecord, Strategy,
 };
 pub use costs::{commission_fee, slipped_price, CommissionModel, CostModel};
 pub use metrics::{

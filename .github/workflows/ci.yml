@@ -47,6 +47,9 @@ jobs:
         run: cargo test --workspace
       - name: Test (release)
         run: cargo test --workspace --release
+      - name: Backtest throughput floor
+        # A normal run is ~1.8M bars/s; the floor only catches order-of-magnitude regressions.
+        run: cargo run --release -p spectra-cli --example backtest_throughput -- --min-bars-per-sec 150000
       - name: Parity scripts are reproducible
         run: |
           python3 parity/gen_ops.py parity/ops

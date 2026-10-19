@@ -42,7 +42,8 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
     let detail = `${response.status} ${response.statusText}`;
     try {
       const body = await response.json();
-      if (typeof body?.detail === 'string') detail = body.detail;
+      if (typeof body?.message === 'string') detail = body.message;
+      else if (typeof body?.detail === 'string') detail = body.detail;
     } catch {
       /* non-JSON error body */
     }

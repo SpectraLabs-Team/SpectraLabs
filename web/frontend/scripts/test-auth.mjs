@@ -32,6 +32,7 @@ const shared = load('lib/auth-shared.ts');
 const store = load('lib/server/authStore.ts');
 const edge = load('lib/sessionEdge.ts');
 const rl = load('lib/server/rateLimit.ts');
+const engineSign = load('lib/server/engineSign.ts');
 
 test('display helpers', () => {
   assert.equal(shared.initials({ email: 'x@y.z', name: 'Amogh R Gowda' }), 'AG');
@@ -137,3 +138,30 @@ test('rate limiter', () => {
 });
 
 process.on('exit', () => fs.rmSync(work, { recursive: true, force: true }));
+
+test('engine request signing matches the Rust verifier', () => {
+  const secret = 'test-secret-test-secret-test-secret!';
+  const body = '{"metric":"var","note":"ünïcødé"}';
+  const h = engineSign.signEngineRequest(
+    secret,
+    { method: 'post', pathAndQuery: '/api/v1/risk', body, requestId: '6f1c0e5e-1111-4222-8333-444455556666' },
+    { user: 'alice@example.com' },
+    1700000000 * 1000 + 999,
+  );
+  assert.equal(h['X-Spectra-Timestamp'], '1700000000');
+  assert.equal(h['X-Spectra-Workspace'], '');
+  // Same vector as the cross-check against crates/spectra-api/src/auth.rs.
+  assert.equal(h['X-Spectra-Signature'], 'd218123bb0b8ba8ada3e81710dbe967c4ac2909055a55063b60ae03815ddd989');
+  // Pinned canonical string, identical to the_canonical_string_is_stable in auth.rs.
+  assert.equal(
+    engineSign.canonical('post', '/api/v1/risk?x=1', '1700000000', 'u', '', 'r', ''),
+    'spectra-v1\nPOST\n/api/v1/risk?x=1\n1700000000\nu\n\nr\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  );
+  const before = process.env.ENGINE_SECRET;
+  process.env.ENGINE_SECRET = 'too-short';
+  assert.equal(engineSign.engineSecret(), null, 'short secrets are refused');
+  process.env.ENGINE_SECRET = secret;
+  assert.equal(engineSign.engineSecret(), secret);
+  if (before === undefined) delete process.env.ENGINE_SECRET;
+  else process.env.ENGINE_SECRET = before;
+});

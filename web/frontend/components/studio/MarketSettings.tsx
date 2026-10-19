@@ -21,7 +21,8 @@ function useAlpacaProbe() {
       let detail = r.statusText;
       try {
         const body = await r.json();
-        if (typeof body?.detail === 'string') detail = body.detail;
+        if (typeof body?.message === 'string') detail = body.message;
+        else if (typeof body?.detail === 'string') detail = body.detail;
       } catch {
         /* keep status text */
       }

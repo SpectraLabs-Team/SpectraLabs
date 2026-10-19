@@ -9,6 +9,18 @@ license = "UNLICENSED"
 repository = "https://github.com/SpectraLabs-Team/spectralabs"
 rust-version = "1.89"
 
+# Third-party crates are allowed only in the service crates (spectra-api, and later the worker and
+# storage crates). spectra-core, -engine, -risk, -research and the other library crates stay
+# standard-library only, so parity results cannot drift with a dependency upgrade.
+[workspace.dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+tower-http = { version = "0.6", features = ["set-header"] }
+http-body-util = "0.1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "postgres", "macros", "migrate", "uuid", "json"] }
+uuid = { version = "1", features = ["v7"] }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"

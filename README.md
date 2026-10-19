@@ -10,8 +10,10 @@ This repository combines and ports the two earlier C++ codebases into one Rust w
   backend benchmark, with its FastAPI backend and Next.js dashboard.
 
 CUDA is not part of this port. Everything else is, with the exceptions listed in
-[KNOWN_ISSUES.md](KNOWN_ISSUES.md). The workspace uses the Rust standard library only (no third-party
-crates).
+[KNOWN_ISSUES.md](KNOWN_ISSUES.md). The engine and research crates (`spectra-core`, `-data`, `-engine`,
+`-research`, `-registry`, `-risk`) use the Rust standard library only, so parity results cannot drift with
+a dependency upgrade. Third-party crates are allowed only in the service crates: `spectra-api` runs on
+`axum` and `tokio`.
 
 ## Layout
 
@@ -24,7 +26,8 @@ crates).
 | `crates/spectra-registry` | Hash-chained experiment registry, holdout vault, run reproduction | research engine |
 | `crates/spectra-risk` | Monte Carlo risk engine (CPU and parallel backends), metrics, stress, benchmark, plugins | risk engine |
 | `crates/spectra-cli` | `spectra-ingest`, `spectra-registry`, `spectra-risk` binaries and three demos | both |
-| `crates/spectra-api` | HTTP API for the dashboard (replaces the FastAPI backend) | risk engine `web/backend` |
+| `crates/spectra-api` | HTTP API for the dashboard on axum + tokio (replaces the FastAPI backend) | risk engine `web/backend` |
+| `crates/spectra-db` | Postgres schema (migrations), connection pool, dev seed; `spectra-db` CLI | new |
 | `web/frontend` | Next.js dashboard | risk engine `web/frontend` |
 | `parity/` | C++ golden-output programs, inputs and recorded outputs | new |
 | `examples/` | Sample portfolio CSV | risk engine |
@@ -61,14 +64,31 @@ cargo fmt --all --check
 cargo run --release -p spectra-cli --example sma_cross
 cargo run --release -p spectra-cli --example overfitting
 cargo run --release -p spectra-cli --example research_workflow
-
-# Dashboard: API, then the frontend
-./target/release/spectra-api                   # http://127.0.0.1:8000
-cd web/frontend && cp .env.example .env.local && npm install && npm run dev   # http://localhost:3000
 ```
 
-API settings: `SPECTRA_API_ADDR` (default `127.0.0.1:8000`) and `SPECTRA_CORS_ORIGINS` (default
-`http://localhost:3000`). Set `SPECTRA_GIT_COMMIT` at build time to stamp reports with a commit.
+## Running the platform
+
+One command, with Docker:
+
+```bash
+cp .env.example .env                                  # set POSTGRES_PASSWORD, ENGINE_SECRET, ADMIN_EMAIL
+cp web/frontend/.env.example web/frontend/.env.local  # set AUTH_SECRET, the same ENGINE_SECRET, Gmail
+docker compose up --build                             # http://localhost:3000
+```
+
+This starts Postgres, applies the migrations (and seeds a `dev` workspace owned by `ADMIN_EMAIL`),
+then the engine API and the dashboard. Only the dashboard (and Postgres, for `psql`) are published,
+on 127.0.0.1. The engine stays inside the compose network and accepts only requests signed by the
+dashboard's server with `ENGINE_SECRET`.
+
+To run the API and dashboard natively against the containerised database, with
+[`just`](https://just.systems): `just db`, `just seed`, then `just api` and `just web` in two
+terminals. `just` lists every task; `just check` runs what CI runs.
+
+API settings are read once at startup, and the API refuses to start until every problem is fixed:
+`DATABASE_URL` and `ENGINE_SECRET` are required; `SPECTRA_API_ADDR` (default `127.0.0.1:8000`),
+`SPECTRA_CORS_ORIGINS` (default `http://localhost:3000`), `SPECTRA_DB_MAX_CONNECTIONS` (default 10) and
+`SPECTRA_MIGRATE_ON_START` (default false) are optional. The API stops cleanly on Ctrl-C or SIGTERM, letting in-flight requests finish. Set `SPECTRA_GIT_COMMIT` at build time to stamp reports with a commit.
 
 ## Portfolio CSV
 

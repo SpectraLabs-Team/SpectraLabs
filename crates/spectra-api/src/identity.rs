@@ -229,6 +229,7 @@ const K: [u32; 64] = [
 ];
 
 /// SHA-256 of `data`.
+#[allow(clippy::chunks_exact_to_as_chunks)]
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut h: [u32; 8] = [
         0x6a09_e667,

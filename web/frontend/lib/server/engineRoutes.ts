@@ -8,7 +8,15 @@ import type { WorkspaceRole } from './workspaces';
  *   viewer → reads (sample data, telemetry)
  *   editor → computations ("create and run") and broker account data
  */
-export type EngineRoute = { method: 'GET' | 'POST'; public?: boolean; minRole: WorkspaceRole; timeoutMs: number; heavy?: boolean };
+export type EngineMethod = 'GET' | 'POST';
+export type EngineRoute = {
+  method: EngineMethod | EngineMethod[];
+  public?: boolean;
+  minRole: WorkspaceRole;
+  methodRoles?: Partial<Record<EngineMethod, WorkspaceRole>>;
+  timeoutMs: number;
+  heavy?: boolean;
+};
 
 export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   health: { method: 'GET', public: true, minRole: 'viewer', timeoutMs: 4_000 },
@@ -18,4 +26,22 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/stress': { method: 'POST', minRole: 'editor', timeoutMs: 60_000 },
   'api/benchmark': { method: 'POST', minRole: 'editor', timeoutMs: 130_000, heavy: true },
   'api/alpaca/account': { method: 'GET', minRole: 'editor', timeoutMs: 10_000 },
+  'api/v1/jobs': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/jobs/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  'api/v1/jobs/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
 };
+
+/** Map UUID job URLs to their allowlist policy while preserving the real path for signing. */
+export function routePolicyKey(path: string): string {
+  if (/^api\/v1\/jobs\/[0-9a-f-]{36}\/cancel$/i.test(path)) return 'api/v1/jobs/{id}/cancel';
+  if (/^api\/v1\/jobs\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/jobs/{id}';
+  return path;
+}
+
+export function allowsMethod(route: EngineRoute, method: EngineMethod): boolean {
+  return Array.isArray(route.method) ? route.method.includes(method) : route.method === method;
+}
+
+export function minimumRole(route: EngineRoute, method: EngineMethod): WorkspaceRole {
+  return route.methodRoles?.[method] ?? route.minRole;
+}

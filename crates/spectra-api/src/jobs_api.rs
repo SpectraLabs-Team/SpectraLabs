@@ -122,6 +122,7 @@ fn db_error(e: &spectra_db::Error) -> Response {
 }
 
 /// The pool and the caller's workspace, or the response explaining why not.
+#[allow(clippy::result_large_err)] // the error is the finished response
 fn context(st: &AppState, id: &Identity) -> Result<(spectra_db::PgPool, Uuid), Response> {
     let Some(pool) = st.db.clone() else {
         return Err(error_response(503, "Jobs need the database, which this server was started without."));

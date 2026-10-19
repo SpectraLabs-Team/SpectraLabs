@@ -7,6 +7,7 @@ use spectra_db::PoolConfig;
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    spectra_api::observability::init_observability();
     let cfg = match Config::from_env() {
         Ok(c) => c,
         Err(e) => {

@@ -5,7 +5,9 @@
 //! | route | auth | |
 //! |---|---|---|
 //! | `GET /`, `GET /health` | none | liveness: the process is up |
-//! | `GET /ready` | none | readiness: the database answers |
+//! | `GET /ready` | none | readiness: the database answers (live workers are reported, not required) |
+//! | `GET /metrics` | none | Prometheus text format |
+//! | `GET /api/v1/openapi.json` | none | the OpenAPI description |
 //! | `POST /api/v1/risk` | signed | `{portfolio_csv, metric, confidence, simulations[, seed, backend, horizon_days]}` |
 //! | `POST /api/v1/benchmark` | signed | `{portfolio_csv, simulations, repetitions, warmups}` |
 //! | `POST /api/v1/stress` | signed | `{portfolio_csv, scenario[, simulations, seed]}` |
@@ -13,8 +15,10 @@
 //! | `GET /api/v1/sample-portfolio` | signed | `{csv}` |
 //! | `GET /api/v1/telemetry/{cpu,workers,gpu}` | signed | host readings |
 //! | `/api/v1/alpaca/*` | signed | 501: not ported yet |
+//! | `POST /api/v1/jobs`, `GET /api/v1/jobs[/{id}]`, `POST /api/v1/jobs/{id}/cancel` | signed | queued work; see [`jobs_api`] |
 //!
-//! Every `/api/v1/...` route is also served at its old `/api/...` path. Those
+//! Every engine route is also served at its old `/api/...` path (the jobs
+//! routes are `/api/v1` only). Those
 //! aliases are temporary: remove them once nothing calls them.
 //!
 //! **Conventions** (docs/api-conventions.md): errors are
@@ -33,16 +37,18 @@ pub mod auth;
 pub mod config;
 pub mod engine;
 pub mod identity;
+pub mod jobs_api;
 pub mod observability;
+pub mod openapi;
 pub mod telemetry;
 
 use std::future::Future;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::{Body, Bytes};
 use axum::extract::rejection::BytesRejection;
-use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -71,6 +77,10 @@ pub const MAX_CONCURRENT_COMPUTE: usize = 32;
 
 /// How long `/ready` waits for the database.
 pub const READY_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// A worker counts as alive in `/ready` if it sent a heartbeat this recently
+/// (workers beat every few seconds).
+pub const WORKER_ALIVE_WITHIN: Duration = Duration::from_secs(30);
 
 /// Router settings.
 #[derive(Debug, Clone)]
@@ -153,6 +163,14 @@ fn error_response(status: u16, message: impl Into<String>) -> Response {
     resp
 }
 
+/// An error with a specific `code` rather than the status's default (for
+/// example `no_workspace`).
+fn error_with_code(status: u16, code: &'static str, message: impl Into<String>) -> Response {
+    let mut resp = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR).into_response();
+    resp.extensions_mut().insert(ErrorBody { code, message: message.into() });
+    resp
+}
+
 fn render_error(resp: Response, err: ErrorBody, request_id: &str) -> Response {
     let (mut parts, _) = resp.into_parts();
     let body = Json::object()
@@ -215,6 +233,26 @@ async fn reject_oversized(req: Request, next: Next) -> Response {
         return error_response(413, "Request body exceeds the 12 MB limit.");
     }
     next.run(req).await
+}
+
+/// Records each request's latency and status for `/metrics`. The path label
+/// is the matched route pattern (`/api/v1/jobs/{id}`), never the raw path, so
+/// ids cannot blow up the number of series.
+async fn track_metrics(req: Request, next: Next) -> Response {
+    let method = req.method().as_str().to_owned();
+    let path = req
+        .extensions()
+        .get::<MatchedPath>()
+        .map_or_else(|| "unmatched".to_owned(), |m| m.as_str().to_owned());
+    let start = Instant::now();
+    let resp = next.run(req).await;
+    observability::RequestMetrics::request_duration(
+        &method,
+        &path,
+        resp.status().as_u16(),
+        start.elapsed().as_secs_f64(),
+    );
+    resp
 }
 
 /// CORS: headers only for configured origins, a 403 for preflights from any
@@ -331,6 +369,8 @@ async fn root() -> Response {
         .with("version", Json::string(ENGINE_VERSION))))
 }
 
+/// Liveness.
+#[utoipa::path(get, path = "/health", tag = "probes", responses((status = 200, description = "The process is up")))]
 #[allow(clippy::unused_async)] // axum handlers are async fns
 async fn health() -> Response {
     respond(Ok(Json::object()
@@ -340,40 +380,89 @@ async fn health() -> Response {
         .with("cli_exists", Json::boolean(true))))
 }
 
-/// Readiness: 200 when every dependency answers, else 503. The worker check
-/// joins this once the worker exists (M20 step 6).
+/// Readiness: 200 when both the database and at least one worker answer,
+/// otherwise 503. Compose starts the API and worker together after migrations.
+#[utoipa::path(get, path = "/ready", tag = "probes", responses(
+    (status = 200, description = "The database and a worker are available"),
+    (status = 503, description = "The database or worker is unavailable or not configured"),
+))]
 async fn ready(State(st): State<AppState>) -> Response {
-    let database = match &st.db {
-        None => "not_configured",
+    let (database, worker) = match &st.db {
+        None => ("not_configured", "not_configured"),
         Some(pool) => match tokio::time::timeout(READY_TIMEOUT, spectra_db::ping(pool)).await {
-            Ok(Ok(())) => "ok",
-            _ => "unavailable",
+            Ok(Ok(())) => {
+                let alive = tokio::time::timeout(
+                    READY_TIMEOUT,
+                    spectra_db::jobs::workers_alive(pool, WORKER_ALIVE_WITHIN),
+                )
+                .await;
+                let worker = match alive {
+                    Ok(Ok(n)) if n > 0 => "ok",
+                    Ok(Ok(_)) => "none_alive",
+                    _ => "unavailable",
+                };
+                ("ok", worker)
+            }
+            _ => ("unavailable", "unavailable"),
         },
     };
-    let ok = database == "ok";
-    let body = Json::object()
-        .with("status", Json::string(if ok { "ready" } else { "not_ready" }))
-        .with("checks", Json::object().with("database", Json::string(database)));
+    let ok = database == "ok" && worker == "ok";
+    let body = Json::object().with("status", Json::string(if ok { "ready" } else { "not_ready" })).with(
+        "checks",
+        Json::object().with("database", Json::string(database)).with("worker", Json::string(worker)),
+    );
     json_response(if ok { 200 } else { 503 }, body.dump())
 }
 
+/// Prometheus metrics (request latency by route and status, job counts and
+/// durations). Unsigned like `/health`: keep the port private.
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn prometheus_metrics() -> Response {
+    match observability::render_metrics() {
+        Some(text) => {
+            (StatusCode::OK, [(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], text)
+                .into_response()
+        }
+        None => error_response(503, "Metrics are not initialised in this process."),
+    }
+}
+
+/// The OpenAPI description, for generating clients.
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn openapi_json() -> Response {
+    json_response(200, openapi::spec_json())
+}
+
+/// A risk metric for a portfolio.
+#[utoipa::path(post, path = "/api/v1/risk", tag = "engine", request_body = crate::openapi::RiskRequest,
+    responses((status = 200, description = "Risk report"), (status = 422, body = crate::openapi::ErrorDoc)))]
 async fn risk_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
     post_json(&st, body, engine::risk).await
 }
 
+/// Benchmark the engine on a portfolio.
+#[utoipa::path(post, path = "/api/v1/benchmark", tag = "engine", request_body = crate::openapi::BenchmarkRequest,
+    responses((status = 200, description = "Benchmark report"), (status = 422, body = crate::openapi::ErrorDoc)))]
 async fn benchmark_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
     post_json(&st, body, engine::benchmark_route).await
 }
 
+/// Run a stress scenario on a portfolio.
+#[utoipa::path(post, path = "/api/v1/stress", tag = "engine", request_body = crate::openapi::StressRequest,
+    responses((status = 200, description = "Stress report"), (status = 422, body = crate::openapi::ErrorDoc)))]
 async fn stress_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
     post_json(&st, body, engine::stress).await
 }
 
+/// Which risk metric names are computable (not the Prometheus metrics).
+#[utoipa::path(get, path = "/api/v1/metrics", tag = "engine", responses((status = 200, description = "Metric names")))]
 #[allow(clippy::unused_async)] // axum handlers are async fns
 async fn metrics_handler() -> Response {
     respond(Ok(engine::metrics_route()))
 }
 
+/// A sample portfolio CSV.
+#[utoipa::path(get, path = "/api/v1/sample-portfolio", tag = "engine", responses((status = 200, description = "`{csv}`")))]
 #[allow(clippy::unused_async)] // axum handlers are async fns
 async fn sample_portfolio() -> Response {
     respond(Ok(Json::object().with("csv", Json::string(SAMPLE_PORTFOLIO))))
@@ -432,23 +521,35 @@ fn engine_routes(prefix: &str) -> Router<AppState> {
         .route(&format!("{prefix}/alpaca/{{*rest}}"), any(alpaca))
 }
 
+/// The queued-job routes (`/api/v1` only; there was never an `/api` version).
+fn job_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/jobs", only(get(jobs_api::list_jobs).post(jobs_api::create_job)))
+        .route("/api/v1/jobs/{id}", only(get(jobs_api::get_job)))
+        .route("/api/v1/jobs/{id}/cancel", only(post(jobs_api::cancel_job)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
     let st = AppState { cfg: Arc::new(cfg), compute: Arc::new(Semaphore::new(MAX_CONCURRENT_COMPUTE)), db };
     let signed = engine_routes("/api/v1")
         .merge(engine_routes("/api"))
+        .merge(job_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .route("/", only(get(root)))
         .route("/health", only(get(health)))
         .route("/ready", only(get(ready)))
+        .route("/metrics", only(get(prometheus_metrics)))
+        .route("/api/v1/openapi.json", only(get(openapi_json)))
         .merge(signed)
         .fallback(not_found)
         .layer(DefaultBodyLimit::max(MAX_BODY))
         .layer(middleware::from_fn(reject_oversized))
         .layer(middleware::from_fn_with_state(st.clone(), cors))
         .layer(middleware::from_fn(request_id))
+        .layer(middleware::from_fn(track_metrics))
         .layer(SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),

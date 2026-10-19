@@ -24,7 +24,19 @@ db:
 seed:
     cargo run -p spectra-db -- seed
 
-# The API, natively, against the database in DATABASE_URL.
+# Run the background job worker against DATABASE_URL.
+worker:
+    cargo run --release -p spectra-api --bin spectra-worker
+
+# Import legacy web/frontend/.data/users.json into Postgres.
+import-users:
+    cd web/frontend && npm run db:import-users
+
+# Preview the legacy-user import without changing the database.
+import-users-dry-run:
+    cd web/frontend && npm run db:import-users -- --dry-run
+
+# The API, natively, against the database in DATABASE_URL. Run `just worker` in another terminal.
 api:
     cargo run --release -p spectra-api
 

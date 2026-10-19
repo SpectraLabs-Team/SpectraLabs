@@ -5,7 +5,7 @@ import { record as audit, requestMeta } from '@/lib/server/audit';
 import { hasRole } from '@/lib/server/authz';
 import { clientIp, hit, tooMany } from '@/lib/server/rateLimit';
 import { ENGINE_IDENTITY_HEADER, signEngineIdentity } from '@/lib/server/engineIdentity';
-import { ENGINE_ROUTES } from '@/lib/server/engineRoutes';
+import { allowsMethod, ENGINE_ROUTES, minimumRole, routePolicyKey } from '@/lib/server/engineRoutes';
 import { requireWorkspace } from '@/lib/server/requireUser';
 import { engineSecret, signEngineRequest } from '@/lib/server/engineSign';
 
@@ -21,10 +21,13 @@ const MAX_BODY = 2 * 1024 * 1024;
 
 async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
   const key = path.join('/');
-  const route = Object.prototype.hasOwnProperty.call(ENGINE_ROUTES, key) ? ENGINE_ROUTES[key] : undefined;
-  if (!route || route.method !== method) {
+  const pathAndQuery = `/${key}${new URL(req.url).search}`;
+  const policyKey = routePolicyKey(key);
+  const route = Object.prototype.hasOwnProperty.call(ENGINE_ROUTES, policyKey) ? ENGINE_ROUTES[policyKey] : undefined;
+  if (!route || !allowsMethod(route, method)) {
     return NextResponse.json({ detail: 'Not found.' }, { status: 404 });
   }
+  const minRole = minimumRole(route, method);
 
   const headers: Record<string, string> = {};
   let signedUser = '';
@@ -48,8 +51,8 @@ async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
       workspaceId: caller.workspace.id,
       target: { type: 'api_token', id: caller.token.id },
     };
-    const scope = scopeFor(route.minRole);
-    if (!scope || !caller.token.scopes.includes(scope) || !hasRole(caller.workspace.role, route.minRole)) {
+    const scope = scopeFor(minRole);
+    if (!scope || !caller.token.scopes.includes(scope) || !hasRole(caller.workspace.role, minRole)) {
       await audit({ ...used, outcome: 'denied', details: { method, path: key, needs: scope ?? 'owner' } }, meta);
       return NextResponse.json(
         { detail: scope ? `This token can't ${scope === 'run' ? 'run computations' : 'read'} here (needs the "${scope}" scope and a high enough role).` : 'Not available to API tokens.' },
@@ -75,7 +78,7 @@ async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
     });
     if (identity) headers[ENGINE_IDENTITY_HEADER] = identity;
   } else if (!route.public) {
-    const { auth, workspace, res } = await requireWorkspace(route.minRole, undefined, 'detail');
+    const { auth, workspace, res } = await requireWorkspace(minRole, undefined, 'detail');
     if (res) return res;
 
     const limit = route.heavy
@@ -117,7 +120,7 @@ async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
       headers,
       signEngineRequest(
         secret,
-        { method, pathAndQuery: `/${key}`, body, requestId },
+        { method, pathAndQuery, body, requestId },
         { user: signedUser, workspace: signedWorkspace },
       ),
     );
@@ -128,7 +131,7 @@ async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), route.timeoutMs);
   try {
-    const upstream = await fetch(`${ENGINE_URL}/${key}`, {
+    const upstream = await fetch(`${ENGINE_URL}${pathAndQuery}`, {
       method,
       body,
       headers,

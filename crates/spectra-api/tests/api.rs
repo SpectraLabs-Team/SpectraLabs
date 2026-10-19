@@ -384,3 +384,58 @@ async fn ready_reports_503_without_a_database() {
     assert_eq!(j.at("status").unwrap().as_str().unwrap(), "not_ready");
     assert_eq!(j.at("checks").unwrap().at("database").unwrap().as_str().unwrap(), "not_configured");
 }
+
+#[tokio::test]
+async fn ready_reports_the_worker_check() {
+    let (_, j) = call(unsigned("GET", "/ready")).await;
+    assert_eq!(j.at("checks").unwrap().at("worker").unwrap().as_str().unwrap(), "not_configured");
+}
+
+#[tokio::test]
+async fn job_routes_need_a_signature() {
+    for (method, path) in [
+        ("GET", "/api/v1/jobs"),
+        ("POST", "/api/v1/jobs"),
+        ("GET", "/api/v1/jobs/0192f3a4-0000-7000-8000-000000000002"),
+        ("POST", "/api/v1/jobs/0192f3a4-0000-7000-8000-000000000002/cancel"),
+    ] {
+        assert_eq!(call(unsigned(method, path)).await.0, 401, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn job_routes_report_503_without_a_database() {
+    let job = Json::object()
+        .with("kind", Json::string("risk"))
+        .with("payload", Json::object().with("portfolio_csv", Json::string(SAMPLE_PORTFOLIO)));
+    let (status, j) = call(post("/api/v1/jobs", &job)).await;
+    assert_eq!(status, 503, "{}", j.dump());
+    assert_eq!(j.at("code").unwrap().as_str().unwrap(), "unavailable");
+    assert_eq!(call(get("/api/v1/jobs")).await.0, 503);
+    assert_eq!(call(get("/api/v1/jobs/0192f3a4-0000-7000-8000-000000000002")).await.0, 503);
+}
+
+#[tokio::test]
+async fn job_routes_are_not_served_at_the_old_paths() {
+    assert_eq!(call(get("/api/jobs")).await.0, 404);
+}
+
+#[tokio::test]
+async fn openapi_spec_is_served_unsigned() {
+    let (status, j) = call(unsigned("GET", "/api/v1/openapi.json")).await;
+    assert_eq!(status, 200);
+    let paths = j.at("paths").unwrap();
+    for path in ["/api/v1/jobs", "/api/v1/jobs/{id}", "/api/v1/jobs/{id}/cancel", "/api/v1/risk", "/ready"] {
+        assert!(paths.at(path).is_ok(), "missing {path}");
+    }
+}
+
+#[tokio::test]
+async fn prometheus_metrics_are_served_unsigned() {
+    spectra_api::observability::init_observability();
+    // One request first, so there is a series to render.
+    let _ = call(unsigned("GET", "/health")).await;
+    let (status, headers, _) = send(cfg(), unsigned("GET", "/metrics")).await;
+    assert_eq!(status, 200);
+    assert!(headers.get("content-type").unwrap().to_str().unwrap().starts_with("text/plain"));
+}

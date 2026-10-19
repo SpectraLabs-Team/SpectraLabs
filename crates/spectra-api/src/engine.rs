@@ -187,6 +187,53 @@ pub fn stress(j: &Json) -> Reply {
     Ok(stress_test(&RiskEngine::new(), &p, &scenario, &cfg).map_err(|e| engine_error(&e))?.to_json_value())
 }
 
+/// Job kinds supported by the background worker.
+pub const JOB_KINDS: [&str; 3] = ["benchmark", "risk", "stress"];
+
+/// Execute the computation associated with a queued job.
+///
+/// # Errors
+/// Returns the same HTTP-style error as the corresponding synchronous route.
+pub fn run_job(kind: &str, payload: &Json) -> Reply {
+    match kind {
+        "benchmark" => benchmark_route(payload),
+        "risk" => risk(payload),
+        "stress" => stress(payload),
+        _ => Err(unprocessable(format!("Unknown job kind {kind:?}."))),
+    }
+}
+
+/// Maximum duration allowed for a job before its result is discarded.
+pub fn job_timeout(kind: &str) -> std::time::Duration {
+    std::time::Duration::from_secs(if kind == "benchmark" { 600 } else { 300 })
+}
+
+/// Seed recorded for a job run, when the payload explicitly provides one.
+pub fn job_seed(kind: &str, payload: &Json) -> Option<i64> {
+    if !matches!(kind, "risk" | "stress") {
+        return None;
+    }
+    int_field(payload, "seed", RiskConfig::default().seed as i64, "Seed must be a non-negative integer.").ok()
+}
+
+/// Run parameters with potentially large CSV content replaced by its digest.
+pub fn run_params(payload: &Json) -> Json {
+    let mut params = Json::object();
+    if let Ok(entries) = payload.entries() {
+        for (key, value) in entries {
+            if key == "portfolio_csv" {
+                if let Json::String(csv) = value {
+                    let _ = params
+                        .set("portfolio_sha256", Json::string(spectra_core::sha256_hex(csv.as_bytes())));
+                }
+            } else {
+                let _ = params.set(key.clone(), value.clone());
+            }
+        }
+    }
+    params
+}
+
 pub fn metrics_route() -> Json {
     Json::Array(
         Metric::all()

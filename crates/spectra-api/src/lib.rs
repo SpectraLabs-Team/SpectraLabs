@@ -33,6 +33,7 @@ pub mod auth;
 pub mod config;
 pub mod engine;
 pub mod identity;
+pub mod observability;
 pub mod telemetry;
 
 use std::future::Future;

@@ -26,7 +26,7 @@ use spectra_db::{PgPool, PoolConfig};
 use std::time::Instant;
 use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 /// Heartbeat interval for running jobs and for the worker itself.
@@ -338,7 +338,7 @@ async fn finish(ctx: &Ctx, job: &Job, report: &Json) -> Result<(), spectra_db::E
         "artifact_error": artifact_error,
     });
     if jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await?.is_none() {
-        log(&format!("{} finished, but another worker had taken it over", job.id));
+        warn!(job_id = %job.id, "job finished, but another worker had taken it over");
     }
     Ok(())
 }

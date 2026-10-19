@@ -170,6 +170,98 @@ impl Config {
     }
 }
 
+/// Configuration used by the background job worker.
+#[derive(Debug, Clone)]
+pub struct WorkerConfig {
+    /// Postgres URL.
+    pub database_url: Secret,
+    /// Directory for content-addressed artifacts.
+    pub artifact_dir: std::path::PathBuf,
+    /// Number of jobs this worker may run concurrently.
+    pub concurrency: usize,
+    /// Maximum jobs one workspace may run across all workers.
+    pub workspace_max_running: i64,
+    /// Job kinds this worker claims.
+    pub kinds: Vec<String>,
+    /// Default artifact quota per workspace.
+    pub artifact_quota_bytes: i64,
+}
+
+impl WorkerConfig {
+    /// Read worker settings from the process environment.
+    ///
+    /// # Errors
+    /// Returns every missing or invalid worker setting.
+    pub fn from_env() -> Result<Self, ConfigError> {
+        Self::from_lookup(|k| std::env::var(k).ok())
+    }
+
+    /// Read worker settings from a lookup function, useful for tests.
+    ///
+    /// # Errors
+    /// Returns every missing or invalid worker setting.
+    pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigError> {
+        let mut problems = Vec::new();
+        let val = |k: &str| get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+        let mut number = |k: &str, default: i64, range: std::ops::RangeInclusive<i64>| match val(k) {
+            None => default,
+            Some(v) => match v.parse::<i64>() {
+                Ok(n) if range.contains(&n) => n,
+                _ => {
+                    problems.push(format!(
+                        "{k} must be a whole number from {} to {}",
+                        range.start(),
+                        range.end()
+                    ));
+                    default
+                }
+            },
+        };
+        let concurrency = number("SPECTRA_WORKER_CONCURRENCY", 2, 1..=64) as usize;
+        let workspace_max_running = number("SPECTRA_WORKSPACE_MAX_RUNNING", 2, 1..=1000);
+        let artifact_quota_bytes = number("SPECTRA_ARTIFACT_QUOTA_BYTES", 1 << 30, 0..=i64::MAX);
+        let all: Vec<String> = crate::engine::JOB_KINDS.iter().map(|kind| (*kind).to_string()).collect();
+        let kinds = match val("SPECTRA_WORKER_KINDS") {
+            None => all,
+            Some(value) => {
+                let selected: Vec<String> = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|kind| !kind.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                if selected.is_empty() || selected.iter().any(|kind| !all.contains(kind)) {
+                    problems.push(format!("SPECTRA_WORKER_KINDS must list kinds from: {}", all.join(", ")));
+                }
+                selected
+            }
+        };
+        let database_url = match val("DATABASE_URL") {
+            Some(url) if url.starts_with("postgres://") || url.starts_with("postgresql://") => {
+                Secret::new(url)
+            }
+            _ => {
+                problems.push("DATABASE_URL must be set to a postgres:// URL".into());
+                Secret::new("")
+            }
+        };
+        let artifact_dir =
+            val("ARTIFACT_DIR").map_or_else(|| std::path::PathBuf::from("artifacts"), Into::into);
+        if problems.is_empty() {
+            Ok(Self {
+                database_url,
+                artifact_dir,
+                concurrency,
+                workspace_max_running,
+                kinds,
+                artifact_quota_bytes,
+            })
+        } else {
+            Err(ConfigError(problems))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

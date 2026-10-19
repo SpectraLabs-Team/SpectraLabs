@@ -188,8 +188,8 @@ pub async fn store_for_run(
         return Err(ArtifactError::QuotaExceeded { quota, used, needed });
     }
 
-    let (bytes, store2) = (a.bytes.to_vec(), store.clone());
-    let stored = tokio::task::spawn_blocking(move || store2.put(&bytes))
+    let (bytes, artifact_store) = (a.bytes.to_vec(), store.clone());
+    let stored = tokio::task::spawn_blocking(move || artifact_store.put(&bytes))
         .await
         .map_err(|e| ArtifactError::Io(io::Error::other(e)))?
         .map_err(ArtifactError::Io)?;

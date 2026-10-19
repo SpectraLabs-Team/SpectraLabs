@@ -9,7 +9,7 @@ issue for anything that could be exploited.
 
 | Where | What | Fails when |
 | --- | --- | --- |
-| `.github/workflows/security.yml` (every push, pull request, and weekly) | **gitleaks** over the whole git history | A key, token or password is committed anywhere, even if a later commit removed it |
+| `.github/workflows/security.yml` (pull requests, pushes to main, and weekly) | **gitleaks** over the whole git history | A key, token or password is committed anywhere, even if a later commit removed it |
 | | **npm audit** on `web/frontend/package-lock.json` | A production dependency has a high or critical advisory, or any dependency has a critical one |
 | | **cargo audit** on `Cargo.lock` | Any RustSec advisory, including unmaintained, yanked or unsound crates |
 | `.github/workflows/ci.yml` → `web` | Typecheck and `npm test` against Postgres | Any auth or security test fails, including the permission rule for every API route |

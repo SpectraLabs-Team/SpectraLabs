@@ -16,6 +16,16 @@ const retryAfter = (ms: number) => Math.max(1, Math.ceil(ms / 1000));
 
 /** Count one hit against `key`; refuse once more than `max` hits land within `windowMs`. */
 export async function hit(key: string, max: number, windowMs: number): Promise<Limit> {
+  const row = await bump(key, windowMs);
+  return row.count <= max ? { ok: true } : { ok: false, retryAfter: retryAfter(row.retry_ms) };
+}
+
+/** Count one hit against `key` and return the count in the current window (no limit applied). */
+export async function count(key: string, windowMs: number): Promise<number> {
+  return (await bump(key, windowMs)).count;
+}
+
+async function bump(key: string, windowMs: number): Promise<Row> {
   const [row] = await query<Row>(
     `INSERT INTO rate_limits AS r (key, count, reset_at)
      VALUES ($1, 1, now() + $2 * interval '1 millisecond')
@@ -29,7 +39,7 @@ export async function hit(key: string, max: number, windowMs: number): Promise<L
   if (Math.random() < 0.01) {
     query(`DELETE FROM rate_limits WHERE reset_at < now() - interval '1 hour'`).catch(() => {});
   }
-  return row.count <= max ? { ok: true } : { ok: false, retryAfter: retryAfter(row.retry_ms) };
+  return row;
 }
 
 /** Check without counting (e.g. "is this already over the limit?"). */

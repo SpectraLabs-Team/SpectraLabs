@@ -55,7 +55,7 @@ const build = path.join(root, 'node_modules', '.cache', 'spectra-auth-test');
 fs.rmSync(build, { recursive: true, force: true });
 fs.mkdirSync(build, { recursive: true });
 fs.writeFileSync(path.join(build, 'package.json'), '{"type":"commonjs"}');
-for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts']) {
+for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts']) {
   const { outputText } = ts.transpileModule(fs.readFileSync(path.join(root, rel), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
   });
@@ -1822,6 +1822,309 @@ test('audit: the routes that change security state write events', () => {
   for (const [file, actions] of Object.entries(expect)) {
     const src = fs.readFileSync(path.join(root, file), 'utf8');
     for (const a of actions) assert.ok(src.includes(`'${a}'`), `${file} records ${a}`);
+  }
+});
+
+// ── M19 task 18: permission rules for every API route ──
+
+/**
+ * Every exported handler under app/api, with the guard it must call first. A new route (or a new
+ * method on an old one) fails this test until it is added here, so nobody ships an unguarded route
+ * by accident. Guards: public (no sign-in; must be rate-limited if it does anything), session
+ * (optional sign-in via getSession), user (requireUser), admin (requireAdmin), engine (role from
+ * the engine route table), or a workspace role; "@url" = checked against the workspace in the URL.
+ */
+const ROUTE_RULES = {
+  'admin/audit GET': 'admin',
+  'admin/audit/verify GET': 'admin',
+  'admin/users GET': 'admin',
+  'admin/users/[id] GET': 'admin',
+  'admin/users/[id] PATCH': 'admin',
+  'auth/2fa GET': 'user',
+  'auth/2fa POST': 'user',
+  'auth/account GET': 'user',
+  'auth/account PATCH': 'user',
+  'auth/account DELETE': 'user',
+  'auth/forgot POST': 'public',
+  'auth/login POST': 'public',
+  'auth/login/verify POST': 'public',
+  'auth/logout POST': 'session',
+  'auth/password POST': 'user',
+  'auth/reauth POST': 'user',
+  'auth/reset POST': 'public',
+  'auth/send-otp POST': 'public',
+  'auth/session GET': 'session',
+  'auth/sessions GET': 'user',
+  'auth/sessions DELETE': 'user',
+  'auth/totp GET': 'user',
+  'auth/totp POST': 'user',
+  'auth/totp DELETE': 'user',
+  'auth/verify-otp POST': 'public',
+  'csp-report POST': 'public',
+  'engine/[...path] GET': 'engine',
+  'engine/[...path] POST': 'engine',
+  'invites/[token] GET': 'public',
+  'invites/[token] POST': 'session',
+  'secrets GET': 'viewer',
+  'secrets/[kind] PUT': 'owner',
+  'secrets/[kind] DELETE': 'owner',
+  'workspaces GET': 'user',
+  'workspaces POST': 'user',
+  'workspaces/active PUT': 'viewer',
+  'workspaces/[id] GET': 'viewer@url',
+  'workspaces/[id] PATCH': 'owner@url',
+  'workspaces/[id] DELETE': 'owner@url',
+  'workspaces/[id]/audit GET': 'owner@url',
+  'workspaces/[id]/invites GET': 'owner@url',
+  'workspaces/[id]/invites POST': 'owner@url',
+  'workspaces/[id]/invites/[inviteId] DELETE': 'owner@url',
+  'workspaces/[id]/members/[userId] PATCH': 'owner@url',
+  'workspaces/[id]/members/[userId] DELETE': 'viewer@url', // leaving; removing others is owner-only (checked below)
+  'workspaces/[id]/transfer POST': 'owner@url',
+};
+// Workspace routes that change something yet only need viewer: switching your own active
+// workspace, and leaving one. Everything else that changes workspace data needs editor or more.
+const VIEWER_WRITES = new Set(['workspaces/active PUT', 'workspaces/[id]/members/[userId] DELETE']);
+const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/** Every route handler: { key: 'path METHOD', file, body } where body includes local helpers it calls. */
+function apiHandlers() {
+  const apiRoot = path.join(root, 'app/api');
+  const files = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name === 'route.ts' || e.name === 'route.js') files.push(p);
+    }
+  };
+  walk(apiRoot);
+  const out = [];
+  for (const file of files) {
+    const src = fs.readFileSync(file, 'utf8');
+    const route = path.relative(apiRoot, path.dirname(file)).split(path.sep).join('/');
+    // Top-level declarations: from one "\n(export )?(async )?function|const" to the next.
+    const decls = [...src.matchAll(/^(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|const\s+(\w+)\s*=)/gm)].map((m, i, all) => ({
+      name: m[1] || m[2],
+      exported: m[0].startsWith('export'),
+      text: src.slice(m.index, all[i + 1]?.index ?? src.length),
+    }));
+    const local = new Map(decls.map((d) => [d.name, d.text]));
+    for (const d of decls) {
+      if (!d.exported || !['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(d.name)) continue;
+      let body = d.text;
+      for (const [, callee] of d.text.matchAll(/\b(\w+)\(/g)) if (callee !== d.name && local.has(callee)) body += '\n' + local.get(callee);
+      out.push({ key: `${route} ${d.name}`, method: d.name, file: path.relative(root, file), body });
+    }
+    assert.ok(!/export\s+\{/.test(src) && !/export\s+const\s+(GET|POST|PUT|PATCH|DELETE)\b/.test(src), `${route}: export handlers as plain functions so this test can see them`);
+  }
+  return out;
+}
+
+/** The first guard a handler calls, in ROUTE_RULES form. */
+function guardOf(body) {
+  const guards = [
+    [/requireAdmin\(/, () => 'admin'],
+    [/requireWorkspace\(route\.minRole/, () => 'engine'],
+    [/requireWorkspace\('(\w+)'(?:,\s*(params\.id))?/, (m) => m[1] + (m[2] ? '@url' : '')],
+    [/requireUser\(/, () => 'user'],
+    [/getSession\(/, () => 'session'],
+  ];
+  let best = null;
+  for (const [re, name] of guards) {
+    const m = re.exec(body);
+    if (m && (!best || m.index < best.index)) best = { index: m.index, name: name(m) };
+  }
+  return best?.name ?? 'public';
+}
+
+test('permissions: every API route has a rule, and its handler calls that guard first', () => {
+  const handlers = apiHandlers();
+  const seen = new Set(handlers.map((h) => h.key));
+  const unlisted = [...seen].filter((k) => !(k in ROUTE_RULES));
+  assert.deepEqual(unlisted, [], 'new API route(s): add a rule to ROUTE_RULES in scripts/test-auth.mjs');
+  const stale = Object.keys(ROUTE_RULES).filter((k) => !seen.has(k));
+  assert.deepEqual(stale, [], 'ROUTE_RULES lists routes that no longer exist');
+  for (const h of handlers) assert.equal(guardOf(h.body), ROUTE_RULES[h.key], `${h.key} (${h.file})`);
+});
+
+test('permissions: viewer = read only, editor = create and run, owner = members, settings, delete', () => {
+  const rank = { viewer: 1, editor: 2, owner: 3 };
+  for (const [key, rule] of Object.entries(ROUTE_RULES)) {
+    const role = rule.replace('@url', '');
+    if (!(role in rank)) continue;
+    const method = key.split(' ').pop();
+    if (STATE_CHANGING.has(method) && !VIEWER_WRITES.has(key)) assert.ok(rank[role] >= rank.editor, `${key}: changes workspace data, so it needs editor or owner (has ${role})`);
+    if (/^workspaces\/\[id\]/.test(key)) assert.ok(rule.endsWith('@url'), `${key}: must check the workspace named in the URL, not the active one`);
+    const ownerOnly = /^workspaces\/\[id\]\/(invites|members|transfer|audit)/.test(key) || (/^(secrets|workspaces\/\[id\] )/.test(key) && STATE_CHANGING.has(method));
+    if (ownerOnly && key !== 'workspaces/[id]/members/[userId] DELETE') {
+      assert.equal(role, 'owner', `${key}: members, broker keys, settings and the activity log are owner-only`);
+    }
+  }
+  // Engine: computations need editor, reads need viewer (the table itself is tested in task 4's tests).
+  for (const [p, r] of Object.entries(engineRoutes.ENGINE_ROUTES)) if (r.method === 'POST' && !r.public) assert.ok(rank[r.minRole] >= rank.editor, `engine ${p}`);
+
+  // The two viewer-level writes stay narrow.
+  const handlers = Object.fromEntries(apiHandlers().map((h) => [h.key, h.body]));
+  const leave = handlers['workspaces/[id]/members/[userId] DELETE'];
+  assert.match(leave, /const leaving = params\.userId === auth\.user\.id/);
+  assert.match(leave, /if \(!leaving\) \{\s*if \(workspace\.role !== 'owner'\)/, 'removing someone else is owner-only');
+  assert.match(handlers['workspaces/active PUT'], /setActiveWorkspace\(auth\.session\.id, auth\.user\.id/, 'switching only moves your own session');
+});
+
+test('permissions: admin routes, public routes and sensitive changes', () => {
+  const handlers = apiHandlers();
+  for (const h of handlers) {
+    const rule = ROUTE_RULES[h.key];
+    if (h.key.startsWith('admin/')) assert.equal(rule, 'admin', `${h.key}: everything under /api/admin is admin-only`);
+    if (rule === 'admin' && STATE_CHANGING.has(h.method)) assert.match(h.body, /requireRecentAuth\(/, `${h.key}: admin changes need a fresh confirm`);
+    // Anything reachable without an account must be rate-limited (except CSP reports, which only log).
+    if ((rule === 'public' || rule === 'session') && h.key !== 'csp-report POST' && h.key !== 'auth/session GET' && h.key !== 'auth/logout POST') {
+      assert.match(h.body, /\bhit(All)?\(/, `${h.key}: public route without a rate limit`);
+    }
+    // Owner-level changes to members, keys and workspaces ask for a fresh confirm.
+    // (Exempt: renaming a workspace and cancelling an invite only reduce or don't change access.)
+    if (/^owner/.test(rule) && STATE_CHANGING.has(h.method) && !['workspaces/[id] PATCH', 'workspaces/[id]/invites/[inviteId] DELETE'].includes(h.key)) {
+      assert.match(h.body, /requireRecentAuth\(auth\.session\)/, `${h.key}: needs a fresh confirm`);
+    }
+  }
+  const csp = handlers.find((h) => h.key === 'csp-report POST').body;
+  assert.doesNotMatch(csp, /query\(|record\(|audit\(/, 'CSP reports touch nothing but the log');
+});
+
+// ── M19 task 18: spike alerts ──
+
+test('spikes: thresholds come from "count/minutes", "off", or the defaults', () => {
+  const spikes = load('lib/server/spikes.js');
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.deepEqual(spikes.spikeThreshold('failed_login', {}), { max: 50, windowMs: 600_000 });
+    assert.deepEqual(spikes.spikeThreshold('code_request', {}), { max: 100, windowMs: 600_000 });
+    assert.deepEqual(spikes.spikeThreshold('failed_login', { ALERT_FAILED_LOGINS: ' 20 / 5 ' }), { max: 20, windowMs: 300_000 });
+    assert.deepEqual(spikes.spikeThreshold('code_request', { ALERT_CODE_REQUESTS: '30/15m' }), { max: 30, windowMs: 900_000 });
+    assert.equal(spikes.spikeThreshold('failed_login', { ALERT_FAILED_LOGINS: 'OFF' }), null);
+    for (const bad of ['0/10', '10/0', 'lots', '-5/10', '10'])
+      assert.deepEqual(spikes.spikeThreshold('failed_login', { ALERT_FAILED_LOGINS: bad }), { max: 50, windowMs: 600_000 }, bad);
+  } finally {
+    console.warn = warn;
+  }
+});
+
+test('spikes: one alert when failed sign-ins cross the line, with sources; then quiet for an hour', async () => {
+  const spikes = load('lib/server/spikes.js');
+  const sent = [];
+  spikes.setAlertNotifier(async (alert, to) => void sent.push({ alert, to }));
+  const env = { ...process.env };
+  process.env.ALERT_FAILED_LOGINS = '5/10';
+  delete process.env.ALERT_EMAIL;
+  const warn = console.warn;
+  const logged = [];
+  console.warn = (...a) => logged.push(a.join(' '));
+  try {
+    await sql.query(`DELETE FROM rate_limits WHERE key LIKE 'spike:%'`);
+    const meta = (ip) => ({ ip, userAgent: 'test', requestId: crypto.randomUUID() });
+    for (let i = 0; i < 3; i++) await auditLog.record({ action: 'auth.login.failure', outcome: 'failure', actor: { email: `spike${i}@x.com` }, details: { reason: 'wrong_password' } }, meta('198.51.100.7'));
+    await auditLog.record({ action: 'auth.login.failure', outcome: 'failure', actor: { email: 'spike9@x.com' } }, meta('203.0.113.9'));
+
+    for (let i = 1; i < 5; i++) assert.equal(await spikes.noteSpike('failed_login'), null, `event ${i} is under the threshold`);
+    const alert = await spikes.noteSpike('failed_login');
+    assert.ok(alert, 'the 5th event alerts');
+    assert.equal(alert.kind, 'failed_login');
+    assert.equal(alert.count, 5);
+    assert.equal(alert.windowMinutes, 10);
+    assert.deepEqual(alert.topIps.find((t) => t.ip === '198.51.100.7'), { ip: '198.51.100.7', count: 3 });
+    assert.ok(alert.accounts >= 4);
+    assert.match(spikes.summarize(alert), /^5 failed sign-ins in the last 10 minutes \(site-wide\)\. \d+ accounts targeted\. Top sources: .*198\.51\.100\.7 \(3\)/);
+
+    for (let i = 0; i < 10; i++) assert.equal(await spikes.noteSpike('failed_login'), null, 'no repeat within the hour');
+    assert.equal(sent.length, 1);
+    const admins = (await sql.query(`SELECT email FROM users WHERE platform_role = 'admin' AND status = 'active' ORDER BY email`)).rows.map((r) => r.email);
+    assert.ok(admins.length > 0);
+    assert.deepEqual(sent[0].to, admins, 'goes to every active admin by default');
+    assert.match(logged.join('\n'), /\[SECURITY ALERT\] 5 failed sign-ins/);
+
+    const [ev] = (await sql.query(`SELECT outcome, details FROM audit_events WHERE action = 'security.alert' ORDER BY seq DESC LIMIT 1`)).rows;
+    assert.equal(ev.outcome, 'failure');
+    assert.equal(ev.details.kind, 'failed_login');
+    assert.equal(ev.details.count, 5);
+
+    // After the cooldown, a new spike alerts again.
+    await sql.query(`UPDATE rate_limits SET reset_at = now() - interval '1 second' WHERE key LIKE 'spike:failed_login%'`);
+    for (let i = 1; i < 5; i++) await spikes.noteSpike('failed_login');
+    assert.ok(await spikes.noteSpike('failed_login'));
+    assert.equal(sent.length, 2);
+  } finally {
+    console.warn = warn;
+    spikes.setAlertNotifier(null);
+    for (const k of ['ALERT_FAILED_LOGINS', 'ALERT_EMAIL']) env[k] === undefined ? delete process.env[k] : (process.env[k] = env[k]);
+  }
+});
+
+test('spikes: code requests, ALERT_EMAIL, "off", and failures never reach the caller', async () => {
+  const spikes = load('lib/server/spikes.js');
+  const env = { ...process.env };
+  const warn = console.warn;
+  const err = console.error;
+  const errors = [];
+  console.warn = () => {};
+  console.error = (...a) => errors.push(a.join(' '));
+  try {
+    assert.deepEqual(await spikes.alertRecipients({ ALERT_EMAIL: ' Sec@X.com, not-an-email, sec@x.com,ops@x.com ' }), ['sec@x.com', 'ops@x.com']);
+
+    await sql.query(`DELETE FROM rate_limits WHERE key LIKE 'spike:%'`);
+    process.env.ALERT_CODE_REQUESTS = '3/10';
+    process.env.ALERT_EMAIL = 'oncall@x.com';
+    let to = null;
+    spikes.setAlertNotifier(async (_a, r) => {
+      to = r;
+      throw new Error('smtp down');
+    });
+    await spikes.noteSpike('code_request');
+    await spikes.noteSpike('code_request');
+    const alert = await spikes.noteSpike('code_request');
+    assert.equal(alert.kind, 'code_request');
+    assert.equal(alert.topIps, undefined, 'no per-IP data for code requests');
+    assert.deepEqual(to, ['oncall@x.com']);
+    assert.match(errors.join('\n'), /notification failed: smtp down/, 'a failed notification is logged, not thrown');
+
+    process.env.ALERT_CODE_REQUESTS = 'off';
+    await sql.query(`DELETE FROM rate_limits WHERE key LIKE 'spike:%'`);
+    for (let i = 0; i < 5; i++) assert.equal(await spikes.noteSpike('code_request'), null);
+    assert.equal((await sql.query(`SELECT count(*)::int AS n FROM rate_limits WHERE key LIKE 'spike:%'`)).rows[0].n, 0, '"off" counts nothing');
+
+    // A broken database never breaks sign-in.
+    process.env.ALERT_CODE_REQUESTS = '3/10';
+    await sql.query('ALTER TABLE rate_limits RENAME TO rate_limits_away');
+    try {
+      assert.equal(await spikes.noteSpike('code_request'), null);
+    } finally {
+      await sql.query('ALTER TABLE rate_limits_away RENAME TO rate_limits');
+    }
+    assert.match(errors.join('\n'), /spike counter \(code_request\) failed/);
+  } finally {
+    console.warn = warn;
+    console.error = err;
+    spikes.setAlertNotifier(null);
+    for (const k of ['ALERT_CODE_REQUESTS', 'ALERT_EMAIL']) env[k] === undefined ? delete process.env[k] : (process.env[k] = env[k]);
+  }
+});
+
+test('spikes: every failed sign-in and every code request is counted', () => {
+  const src = (f) => fs.readFileSync(path.join(root, f), 'utf8');
+  for (const f of ['app/api/auth/login/route.ts', 'app/api/auth/login/verify/route.ts']) {
+    const s = src(f);
+    const failures = s.match(/action: 'auth\.login\.failure'[^\n]*\n\s*await noteSpike\('failed_login'\);/g)?.length ?? 0;
+    assert.equal(failures, s.match(/action: 'auth\.login\.failure'/g).length, `${f}: each failed sign-in is followed by noteSpike`);
+  }
+  for (const [f, before] of [
+    ['app/api/auth/send-otp/route.ts', '`otp:ip:'],
+    ['app/api/auth/forgot/route.ts', '`reset:ip:'],
+    ['app/api/auth/login/route.ts', '`login-otp:email:burst:'],
+  ]) {
+    const s = src(f);
+    const i = s.indexOf("await noteSpike('code_request');");
+    assert.ok(i > 0 && i < s.indexOf(before), `${f}: code requests are counted before the per-user limits (refused ones count too)`);
   }
 });
 

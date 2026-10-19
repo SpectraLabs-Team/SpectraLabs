@@ -58,6 +58,8 @@ export const AUDIT_ACTIONS = [
   'kill_switch.used',
   // The audit log itself
   'audit.exported',
+  // Site-wide spikes of failed sign-ins or code emails (lib/server/spikes.ts)
+  'security.alert',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type AuditOutcome = 'success' | 'failure' | 'denied';

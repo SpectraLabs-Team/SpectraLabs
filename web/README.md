@@ -51,6 +51,10 @@ Rate-limit counters and login lockouts live in Postgres, so restarts don't reset
 Schema changes go in a new numbered file (`db/migrations/002_….sql`); never edit one that has been
 applied.
 
+## Security
+
+Scanning in CI, spike alerts (`ALERT_*` in `.env.example`) and the pre-real-money checklist are in [SECURITY.md](../SECURITY.md).
+
 ## Pages
 
 - `/`: landing page. Live engine status, hero cards fed by the engine when it is running, the

@@ -4,6 +4,7 @@ import { findUser, generateOtp, getPendingOtp, hashPassword, setPendingOtp } fro
 import { isBreachedPassword } from '@/lib/server/breached';
 import { sendOtpEmail } from '@/lib/server/email';
 import { clientIp, hitAll, tooMany } from '@/lib/server/rateLimit';
+import { noteSpike } from '@/lib/server/spikes';
 
 export async function POST(req: Request) {
   try {
@@ -64,6 +65,7 @@ export async function POST(req: Request) {
 
     // Stop inbox flooding and SMTP quota burn: one code per email every 45s, 5 an hour,
     // and 20 an hour from one IP across all emails.
+    await noteSpike('code_request');
     const limit = await hitAll([
       [`otp:ip:${clientIp(req)}`, 20, 60 * 60_000, 'verification emails from this network'],
       [`otp:email:burst:${cleanEmail}`, 1, 45_000, 'code requests'],

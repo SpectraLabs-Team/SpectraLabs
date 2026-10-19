@@ -8,6 +8,7 @@ import { clearFailedLogins, lockedUntil, lockMessage, LOCK_DURATION_MS, recordFa
 import { sendLockoutEmail } from '@/lib/server/email';
 import { createMfaChallenge, hasTotp } from '@/lib/server/mfa';
 import { clientIp, hit, hitAll, peek, tooMany } from '@/lib/server/rateLimit';
+import { noteSpike } from '@/lib/server/spikes';
 
 const WINDOW = 15 * 60_000;
 const IP_MAX = 30; // login requests per IP per window
@@ -46,6 +47,7 @@ export async function POST(req: Request) {
     if (!user) {
       await hit(ipFailKey, IP_FAIL_MAX, WINDOW);
       await audit({ action: 'auth.login.failure', outcome: 'failure', actor: { email: cleanEmail }, details: { reason: 'unknown_email' } }, meta);
+      await noteSpike('failed_login');
       return NextResponse.json(
         { ok: false, error: 'No account found with this email. Please click "Sign Up" to register.' },
         { status: 404 },
@@ -56,6 +58,7 @@ export async function POST(req: Request) {
     const until = await lockedUntil(user.id);
     if (until) {
       await audit({ action: 'auth.login.failure', outcome: 'denied', actor: user, details: { reason: 'locked' } }, meta);
+      await noteSpike('failed_login');
       return locked(until);
     }
 
@@ -64,6 +67,7 @@ export async function POST(req: Request) {
       await hit(ipFailKey, IP_FAIL_MAX, WINDOW);
       const failure = await recordFailedLogin(user.id);
       await audit({ action: 'auth.login.failure', outcome: 'failure', actor: user, details: { reason: 'wrong_password', failures: failure.failures } }, meta);
+      await noteSpike('failed_login');
       if (failure.justLocked) {
         await audit({ action: 'auth.login.locked', outcome: 'denied', actor: user, target: { type: 'user', id: user.id }, details: { until: new Date(failure.lockedUntil ?? Date.now()).toISOString() } }, meta);
       }
@@ -94,6 +98,7 @@ export async function POST(req: Request) {
 
     if (user.status !== 'active') {
       await audit({ action: 'auth.login.failure', outcome: 'denied', actor: user, details: { reason: 'disabled' } }, meta);
+      await noteSpike('failed_login');
       return NextResponse.json({ ok: false, error: 'This account has been disabled. Contact support.' }, { status: 403 });
     }
 
@@ -106,6 +111,7 @@ export async function POST(req: Request) {
         const challenge = await createMfaChallenge(cleanEmail);
         return NextResponse.json({ ok: true, twoFactor: true, method: 'totp', challenge });
       }
+      await noteSpike('code_request');
       const codeLimit = await hitAll([
         [`login-otp:email:burst:${cleanEmail}`, 1, 45_000, 'code requests'],
         [`login-otp:email:hour:${cleanEmail}`, 10, 60 * 60_000, 'login codes for this email'],

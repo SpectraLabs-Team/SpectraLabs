@@ -4,6 +4,7 @@ import { EMAIL_RE } from '@/lib/auth-shared';
 import { findUser, generateOtp, setResetCode } from '@/lib/server/authStore';
 import { sendOtpEmail } from '@/lib/server/email';
 import { clientIp, hitAll, tooMany } from '@/lib/server/rateLimit';
+import { noteSpike } from '@/lib/server/spikes';
 
 /** Step 1 of password reset: email a 6-digit code to the account owner. */
 export async function POST(req: Request) {
@@ -14,6 +15,7 @@ export async function POST(req: Request) {
     }
     const cleanEmail = email.trim().toLowerCase();
 
+    await noteSpike('code_request');
     const limit = await hitAll([
       [`reset:ip:${clientIp(req)}`, 10, 60 * 60_000, 'reset requests from this network'],
       [`reset:email:burst:${cleanEmail}`, 1, 45_000, 'reset requests'],

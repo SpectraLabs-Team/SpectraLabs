@@ -1,0 +1,64 @@
+name: security
+
+# M19 task 18: dependency and secret scanning. Runs on every push and pull request, and weekly,
+# because new advisories land against code that hasn't changed.
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '23 3 * * 1' # Mondays 03:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    env:
+      GITLEAKS_VERSION: 8.21.2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the whole history: a secret removed in a later commit is still leaked
+      - name: Install gitleaks (checksum verified)
+        run: |
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          tarball="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfLO "$base/$tarball"
+          curl -sSfLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " $tarball\$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "$tarball" gitleaks
+          sudo mv gitleaks /usr/local/bin/
+      - name: Scan every commit
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose --no-banner
+
+  npm-audit:
+    name: npm audit (web)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Reads package-lock.json only; nothing is installed or run.
+      - name: Production dependencies (fail on high or critical)
+        run: npm audit --omit=dev --audit-level=high
+      - name: All dependencies, including dev tools (fail on critical)
+        run: npm audit --audit-level=critical
+
+  cargo-audit:
+    name: cargo audit (engine)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      # RustSec advisories against Cargo.lock; warnings (unmaintained, yanked, unsound) fail too.
+      - name: Audit Cargo.lock
+        run: cargo audit --deny warnings

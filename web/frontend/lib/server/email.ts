@@ -276,3 +276,45 @@ export async function sendInviteEmail({ to, inviter, workspace, role, link }: { 
 </html>`;
   return transporter.sendMail({ from: `"Spectra Labs" <${user}>`, to, subject: `${inviter} invited you to ${workspace} on Spectra Labs`, text, html });
 }
+
+/**
+ * Site-wide security alert to the team (M19 task 18; see lib/server/spikes.ts): a spike of failed
+ * sign-ins or emailed codes. Plain facts only; the audit log has the detail.
+ */
+export async function sendSecurityAlertEmail({ to, summary, alert }: { to: string[]; summary: string; alert: { kind: string; topIps?: { ip: string; count: number }[] } }) {
+  const what = alert.kind === 'failed_login' ? 'failed sign-ins' : 'code email requests';
+  const advice =
+    alert.kind === 'failed_login'
+      ? 'Check Admin → Activity for auth.login.failure. Many accounts from a few addresses suggests credential stuffing: consider blocking those addresses at the proxy.'
+      : 'Check whether sign-up, reset or login codes are being requested for addresses that never asked: the code emails may be used to spam people or to burn the sending quota.';
+  const rows = (alert.topIps ?? [])
+    .map((t) => `<tr><td style="padding:2px 12px 2px 0;font-family:'JetBrains Mono',monospace;font-size:12px;color:#E2E8F0;">${escapeHtml(t.ip)}</td><td style="font-size:12px;color:#94A3B8;">${t.count}</td></tr>`)
+    .join('');
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Security alert</title></head>
+<body style="margin:0;padding:0;background-color:#040711;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#F1F5F9;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#040711;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background-color:#0B0F19;border:1px solid rgba(244,63,94,0.4);border-radius:16px;padding:32px;">
+        <tr><td style="padding-bottom:16px;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:0.2em;color:#FB7185;text-transform:uppercase;">Spectra Labs · Ops alert</span>
+        </td></tr>
+        <tr><td style="padding-bottom:12px;"><h1 style="margin:0;font-size:20px;color:#FFFFFF;">Spike in ${what}</h1></td></tr>
+        <tr><td style="padding-bottom:16px;"><p style="margin:0;font-size:14px;line-height:22px;color:#94A3B8;">${escapeHtml(summary)}</p></td></tr>
+        ${rows ? `<tr><td style="padding-bottom:16px;"><table cellpadding="0" cellspacing="0">${rows}</table></td></tr>` : ''}
+        <tr><td><p style="margin:0;font-size:13px;line-height:20px;color:#94A3B8;">${escapeHtml(advice)} You won't get another alert of this kind for an hour.</p></td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return transporter.sendMail({
+    from: `"Spectra Labs Security" <${user}>`,
+    to: to.join(', '),
+    subject: `[Spectra Labs] Security alert: spike in ${what}`,
+    text: `${summary}\n\n${advice}\nYou won't get another alert of this kind for an hour.`,
+    html,
+  });
+}

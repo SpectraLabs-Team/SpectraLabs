@@ -1,0 +1,13 @@
+# gitleaks configuration (M19 task 18). Uses gitleaks' built-in rules; the allowlist only names
+# exact fake values from the test suite, never whole files, so a real key pasted anywhere is caught.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake broker keys used by the vault tests (web/frontend/scripts/test-auth.mjs)"
+regexTarget = "secret"
+regexes = [
+  '''^sEcReTkEy0123456789abcdefghijklmnopqrstuv$''',
+  '''^b-secret-0123456789abcdef$''',
+  '''^another-secret-key-0123456789$''',
+]

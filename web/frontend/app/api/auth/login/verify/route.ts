@@ -4,6 +4,7 @@ import { checkLoginCode, findUser, publicUser } from '@/lib/server/authStore';
 import { checkMfaChallenge, consumeMfaChallenge, verifySecondFactor } from '@/lib/server/mfa';
 import { clientIp, hitAll, tooMany } from '@/lib/server/rateLimit';
 import { startSession } from '@/lib/server/session';
+import { noteSpike } from '@/lib/server/spikes';
 
 /**
  * Second step of a two-step login. Reached only after the password was correct:
@@ -31,6 +32,7 @@ export async function POST(req: Request) {
     const { result } = await checkLoginCode(cleanEmail, code);
     if (result === 'wrong' || result === 'locked') {
       await audit({ action: 'auth.login.failure', outcome: result === 'locked' ? 'denied' : 'failure', actor: { email: cleanEmail }, details: { reason: result === 'locked' ? 'code_locked' : 'wrong_code', step: 'email_code' } }, meta);
+      await noteSpike('failed_login');
     }
     if (result === 'missing') {
       return NextResponse.json({ ok: false, error: 'This login code has expired. Please log in again.' }, { status: 400 });
@@ -57,7 +59,10 @@ export async function POST(req: Request) {
 async function verifyWithAuthenticator(req: Request, email: string, code: string, challenge: string, meta: RequestMeta) {
   const state = await checkMfaChallenge(email, challenge);
   if (state !== 'ok') {
-    if (state === 'locked') await audit({ action: 'auth.login.failure', outcome: 'denied', actor: { email }, details: { reason: 'challenge_locked', step: 'authenticator' } }, meta);
+    if (state === 'locked') {
+      await audit({ action: 'auth.login.failure', outcome: 'denied', actor: { email }, details: { reason: 'challenge_locked', step: 'authenticator' } }, meta);
+      await noteSpike('failed_login');
+    }
     return NextResponse.json(
       { ok: false, error: state === 'locked' ? 'Too many incorrect attempts. Please log in again.' : 'This sign-in has expired. Please log in again.' },
       { status: state === 'locked' ? 429 : 400 },
@@ -69,6 +74,7 @@ async function verifyWithAuthenticator(req: Request, email: string, code: string
   const second = await verifySecondFactor(record.id, code);
   if (!second.ok) {
     await audit({ action: 'auth.login.failure', outcome: 'failure', actor: record, details: { reason: 'wrong_code', step: 'authenticator' } }, meta);
+    await noteSpike('failed_login');
     return NextResponse.json({ ok: false, error: 'That code doesn’t match. Use the newest code from your app, or a recovery code.' }, { status: 400 });
   }
   if (!(await consumeMfaChallenge(email, challenge))) {

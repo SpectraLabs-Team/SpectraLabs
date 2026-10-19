@@ -56,7 +56,6 @@ async fn main() -> ExitCode {
         cfg.addr,
         cfg.cors_origins.join(", ")
     );
-<<<<<<< HEAD
     let result = serve(listener, ApiConfig::from(&cfg), Some(pool.clone()), shutdown_signal()).await;
     pool.close().await;
     match result {
@@ -77,17 +76,4 @@ fn is_private(ip: std::net::IpAddr) -> bool {
         std::net::IpAddr::V4(v4) => v4.is_private(),
         std::net::IpAddr::V6(v6) => (v6.segments()[0] & 0xfe00) == 0xfc00,
     }
-=======
-    if cfg.shared_secret.is_some() {
-        eprintln!("spectra-api: caller identity checks are ON (ENGINE_SHARED_SECRET)");
-    } else {
-        eprintln!(
-            "spectra-api: ENGINE_SHARED_SECRET is not set (or shorter than {} characters): identity checks are OFF and any \
-             process that can reach this port can use the engine",
-            spectra_api::identity::MIN_SECRET_LEN
-        );
-    }
-    http::serve(&listener, Arc::new(move |req| handle(&cfg, req)));
-    ExitCode::SUCCESS
->>>>>>> origin/main
 }

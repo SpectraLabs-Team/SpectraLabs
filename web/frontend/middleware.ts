@@ -1,56 +1,74 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { verifySessionEdge } from '@/lib/sessionEdge';
+import { buildCsp, CSP_REPORT_PATH, cspMode, isCrossSite, newNonce } from '@/lib/csp';
+import { looksLikeSessionToken } from '@/lib/sessionEdge';
 
-const UNSAFE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
-/**
- * CSRF guard for the API. Browsers always send `Origin` on cross-site POSTs, so a state-changing
- * request whose Origin isn't this site is refused. (Without this, another site could submit a
- * form to /api/auth/login and sign a visitor into the attacker's account.) Requests with no
- * Origin come from non-browser clients, which can't ride a victim's cookies, so they pass.
- */
-function crossSiteBlocked(req: NextRequest): boolean {
-  if (!UNSAFE_METHODS.has(req.method)) return false;
-  const origin = req.headers.get('origin');
-  if (!origin) return false;
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
-  try {
-    return new URL(origin).host !== host;
-  } catch {
-    return true; // malformed / "null" origin
-  }
-}
+const PROTECTED = ['/studio', '/admin', '/account'];
+const isProtected = (p: string) => PROTECTED.some((base) => p === base || p.startsWith(`${base}/`));
 
 /**
- * - /api/*: CSRF guard (each route still does its own session and role checks).
- * - /studio, /admin, /account: a request without a valid session never receives the page; it is
- *   redirected to the landing page, which opens Log In. (Admin *role* is enforced by
- *   /admin's UI and, for data, by /api/admin/* on the server.)
+ * - /api/*: cross-site request guard (CSRF; see lib/csp.ts isCrossSite). Each route still does its
+ *   own session and role checks. CSP violation reports are exempt (browsers send them without a
+ *   usable Origin and they change nothing).
+ * - Pages: a per-request nonce and the Content-Security-Policy header (report-only by default;
+ *   CSP_MODE=enforce to block). Next adds the nonce to its own scripts; app/layout.tsx adds it to ours.
+ * - /studio, /admin, /account: a request without a session cookie never receives the page; it is
+ *   redirected to the landing page, which opens Log In. (The real session and role checks are
+ *   database lookups in the API routes.)
  */
-export async function middleware(req: NextRequest) {
+export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (pathname.startsWith('/api/')) {
-    if (crossSiteBlocked(req)) {
-      return NextResponse.json({ ok: false, error: 'Cross-site request blocked.' }, { status: 403 });
-    }
+    const blocked =
+      pathname !== CSP_REPORT_PATH &&
+      isCrossSite({
+        method: req.method,
+        origin: req.headers.get('origin'),
+        host: req.headers.get('x-forwarded-host') || req.headers.get('host'),
+        secFetchSite: req.headers.get('sec-fetch-site'),
+      });
+    if (blocked) return NextResponse.json({ ok: false, error: 'Cross-site request blocked.' }, { status: 403 });
     return NextResponse.next();
   }
 
-  const session = await verifySessionEdge(req.cookies.get('spectra_session')?.value);
-  if (session) return NextResponse.next();
+  if (isProtected(pathname)) {
+    // Cheap check only (Edge runtime has no database): is there a cookie shaped like a session
+    // token? A page reached with a dead session gets no data, and its client gate shows Log In.
+    const token = req.cookies.get('spectra_session')?.value;
+    if (!looksLikeSessionToken(token)) {
+      const url = req.nextUrl.clone();
+      url.pathname = '/';
+      url.search = '';
+      url.searchParams.set('auth', 'login');
+      url.searchParams.set('next', pathname);
+      const res = NextResponse.redirect(url);
+      // A malformed cookie (e.g. an old signed-JSON one) is useless; clear it.
+      if (req.cookies.get('spectra_session')) res.cookies.delete('spectra_session');
+      return res;
+    }
+  }
 
-  const url = req.nextUrl.clone();
-  url.pathname = '/';
-  url.search = '';
-  url.searchParams.set('auth', 'login');
-  url.searchParams.set('next', pathname);
-  const res = NextResponse.redirect(url);
-  // A bad or expired cookie is useless; clear it so the client doesn't keep sending it.
-  if (req.cookies.get('spectra_session')) res.cookies.delete('spectra_session');
+  const mode = cspMode();
+  if (mode === 'off') return NextResponse.next();
+
+  const nonce = newNonce();
+  const csp = buildCsp({
+    nonce,
+    dev: process.env.NODE_ENV !== 'production',
+    https: req.nextUrl.protocol === 'https:' || req.headers.get('x-forwarded-proto') === 'https',
+  });
+  // Next reads the nonce from the request's CSP header and puts it on its own <script> tags;
+  // x-nonce is for our inline scripts (app/layout.tsx).
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('content-security-policy', csp);
+  const res = NextResponse.next({ request: { headers: requestHeaders } });
+  res.headers.set(mode === 'enforce' ? 'Content-Security-Policy' : 'Content-Security-Policy-Report-Only', csp);
+  res.headers.set('Reporting-Endpoints', `csp="${CSP_REPORT_PATH}"`);
   return res;
 }
 
 export const config = {
-  matcher: ['/studio/:path*', '/admin/:path*', '/account/:path*', '/api/:path*'],
+  // Every page and API route; not Next's static files, images or the favicon (no HTML there).
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|woff2?|txt|xml|json)$).*)'],
 };

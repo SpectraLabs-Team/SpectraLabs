@@ -8,6 +8,9 @@ import { useAuth } from '@/lib/auth';
 const PENDING_KEY = 'spectra-scroll-to';
 /** Where to go after the next successful sign-in (set when middleware bounced a visitor). */
 export const NEXT_KEY = 'spectra-auth-next';
+/** Where a sign-in may send the visitor next: app pages, or an invite page. */
+export const isSafeNext = (next: string | null): next is string =>
+  next === '/studio' || next === '/admin' || next === '/account' || (!!next && /^\/invite\/[A-Za-z0-9_-]{43}$/.test(next));
 
 /** "/#features" → "features"; anything else → null. */
 function homeAnchor(href: string): string | null {
@@ -87,7 +90,7 @@ export function AuthRedirectPrompt() {
     const mode = params.get('auth');
     if (mode !== 'login' && mode !== 'signup') return;
     const next = params.get('next');
-    const safeNext = next === '/studio' || next === '/admin' || next === '/account' ? next : null;
+    const safeNext = isSafeNext(next) ? next : null;
     window.history.replaceState(null, '', window.location.pathname);
     if (isAuthenticated && safeNext) router.replace(safeNext);
     else if (!isAuthenticated) {

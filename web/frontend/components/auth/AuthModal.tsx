@@ -4,9 +4,9 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowRight, Check, Eye, EyeOff, KeyRound, Loader2, Lock, LogIn, Mail, Pencil, User, UserPlus, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { checkPasswordRules, cleanName, EMAIL_RE, isPasswordValid, MIN_NAME, MIN_PASSWORD, roleForEmail, useAuth, type AuthMode, type AuthUser, type Role } from '@/lib/auth';
+import { checkPasswordRules, cleanName, EMAIL_RE, isPasswordValid, MIN_NAME, MIN_PASSWORD, useAuth, type AuthMode, type AuthUser } from '@/lib/auth';
 import { cn } from '@/lib/utils';
-import { NEXT_KEY } from '@/components/landing/NavLink';
+import { isSafeNext, NEXT_KEY } from '@/components/landing/NavLink';
 
 const LEN = 6;
 const RESEND_SECONDS = 60;
@@ -50,7 +50,10 @@ async function verifySignupCode(email: string, code: string): Promise<{ ok: bool
   return { ok: true, user: data.user };
 }
 
-async function loginWithPassword(email: string, password: string): Promise<{ ok: boolean; user?: AuthUser; twoFactor?: boolean; error?: string }> {
+async function loginWithPassword(
+  email: string,
+  password: string,
+): Promise<{ ok: boolean; user?: AuthUser; twoFactor?: boolean; method?: 'email' | 'totp'; challenge?: string; error?: string }> {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -60,7 +63,7 @@ async function loginWithPassword(email: string, password: string): Promise<{ ok:
   if (!res.ok || !data.ok) {
     return { ok: false, error: data.error || 'Incorrect email or password.' };
   }
-  return { ok: true, user: data.user, twoFactor: data.twoFactor === true };
+  return { ok: true, user: data.user, twoFactor: data.twoFactor === true, method: data.method === 'totp' ? 'totp' : 'email', challenge: data.challenge };
 }
 
 async function requestReset(email: string): Promise<string> {
@@ -85,32 +88,15 @@ async function resetPassword(email: string, code: string, password: string): Pro
   return { ok: true, user: data.user };
 }
 
-async function verifyLoginCode(email: string, code: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
+async function verifyLoginCode(email: string, code: string, challenge?: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
   const res = await fetch('/api/auth/login/verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, code }),
+    body: JSON.stringify({ email, code, challenge }),
   });
   const data = await res.json();
   if (!res.ok || !data.ok) return { ok: false, error: data.error || 'Invalid or expired code.' };
   return { ok: true, user: data.user };
-}
-
-export function RoleBadge({ role, className }: { role: Role; className?: string }) {
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold',
-        role === 'admin'
-          ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'
-          : 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-        className,
-      )}
-    >
-      <span className={cn('h-1.5 w-1.5 rounded-full', role === 'admin' ? 'bg-cyan-500' : 'bg-emerald-500')} />
-      {role === 'admin' ? 'Admin Access' : 'User Access'}
-    </span>
-  );
 }
 
 const inputBase =
@@ -198,6 +184,12 @@ export function AuthModal() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [left, setLeft] = useState(0);
+  // Second step of a two-step login: emailed code, or authenticator app (with a challenge from the
+  // password step; a recovery code also works there).
+  const [mfaMethod, setMfaMethod] = useState<'email' | 'totp'>('email');
+  const [challenge, setChallenge] = useState('');
+  const [useRecovery, setUseRecovery] = useState(false);
+  const [recovery, setRecovery] = useState('');
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
   const emailRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -208,7 +200,6 @@ export function AuthModal() {
   const passRules = checkPasswordRules(password);
   const passOk = signup ? isPasswordValid(password) : password.length >= MIN_PASSWORD;
   const confirmOk = confirm === password && confirm.length > 0;
-  const role = roleForEmail(email);
   const nameOk = cleanName(name) !== '';
   const formOk = emailOk && passOk && (!signup || (confirmOk && nameOk));
   const touch = (k: string) => setTouched((t) => ({ ...t, [k]: true }));
@@ -279,7 +270,7 @@ export function AuthModal() {
         next = sessionStorage.getItem(NEXT_KEY);
         sessionStorage.removeItem(NEXT_KEY);
       } catch {}
-      const allowed = next === '/studio' || next === '/account' || (next === '/admin' && u.role === 'admin');
+      const allowed = isSafeNext(next) && (next !== '/admin' || u.role === 'admin');
       router.push(allowed && next ? next : u.role === 'admin' ? '/admin' : '/studio');
     },
     [login, closeAuthModal, router],
@@ -297,10 +288,14 @@ export function AuthModal() {
     try {
       const res = await loginWithPassword(email.trim(), password);
       if (res.ok && res.twoFactor) {
-        // Password accepted; this account also wants the emailed code.
+        // Password accepted; this account also wants a second factor (emailed code or authenticator app).
+        setMfaMethod(res.method ?? 'email');
+        setChallenge(res.challenge ?? '');
+        setUseRecovery(false);
+        setRecovery('');
         setStep(2);
         setDigits(empty());
-        setLeft(RESEND_SECONDS);
+        setLeft(res.method === 'totp' ? 0 : RESEND_SECONDS);
         setTimeout(() => boxes.current[0]?.focus(), 50);
         return;
       }
@@ -324,7 +319,7 @@ export function AuthModal() {
     setBusy(true);
     setError(null);
     try {
-      await sendSignupCode(email.trim(), password, cleanName(name), role === 'admin' || twoFactor);
+      await sendSignupCode(email.trim(), password, cleanName(name), twoFactor);
       setStep(2);
       setDigits(empty());
       setLeft(RESEND_SECONDS);
@@ -378,11 +373,11 @@ export function AuthModal() {
 
   // ── Log In, step 2 (2FA accounts) ──
   const verifyLogin = async (code: string) => {
-    if (code.length !== LEN || verifying) return;
+    if ((useRecovery ? code.trim().length < 10 : code.length !== LEN) || verifying) return;
     setVerifying(true);
     setError(null);
     try {
-      const res = await verifyLoginCode(email.trim(), code);
+      const res = await verifyLoginCode(email.trim(), code, mfaMethod === 'totp' ? challenge : undefined);
       if (!res.ok || !res.user) {
         setError(res.error || 'That code is incorrect or expired.');
         setDigits(empty());
@@ -404,6 +399,7 @@ export function AuthModal() {
     try {
       const res = await loginWithPassword(email.trim(), password);
       if (!res.ok) throw new Error(res.error || 'Could not resend the code.');
+      if (res.challenge) setChallenge(res.challenge);
       setDigits(empty());
       setLeft(RESEND_SECONDS);
       boxes.current[0]?.focus();
@@ -652,7 +648,6 @@ export function AuthModal() {
                 <motion.form key="signup" onSubmit={submitSignup} noValidate initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} transition={{ duration: 0.16 }}>
                   <div className="mt-4 flex items-start justify-between gap-3">
                     <h2 id="auth-title" className="text-xl font-bold tracking-tight text-ink">Create your Account</h2>
-                    {emailOk && <RoleBadge role={role} className="mt-1 shrink-0" />}
                   </div>
                   <p className="mt-1.5 text-sm text-ink/60">We&apos;ll email a 6-digit code to verify it&apos;s you.</p>
                   <Field id="auth-name" label="Full Name" icon={<User className="h-4 w-4" />} error={touched.name && !nameOk && `At least ${MIN_NAME} characters.`}>
@@ -681,23 +676,20 @@ export function AuthModal() {
                   <label
                     className={cn(
                       'mt-5 flex items-start gap-3 rounded-xl border p-3 transition',
-                      role === 'admin' || twoFactor ? 'border-cyan-500/35 bg-cyan-500/[0.06]' : 'border-ink/10 bg-ink/[0.02]',
-                      role === 'admin' ? 'cursor-not-allowed' : 'cursor-pointer',
+                      twoFactor ? 'border-cyan-500/35 bg-cyan-500/[0.06]' : 'border-ink/10 bg-ink/[0.02]',
+                      'cursor-pointer',
                     )}
                   >
                     <input
                       type="checkbox"
-                      checked={role === 'admin' || twoFactor}
-                      disabled={role === 'admin'}
+                      checked={twoFactor}
                       onChange={(e) => setTwoFactor(e.target.checked)}
                       className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-500"
                     />
                     <span className="min-w-0">
                       <span className="block text-[13px] font-semibold text-ink">Two-factor login (recommended)</span>
                       <span className="mt-0.5 block text-[11.5px] leading-4 text-ink/55">
-                        {role === 'admin'
-                          ? 'Always on for admin accounts.'
-                          : 'Ask for a code from your email every time you log in, so a leaked password alone isn\u2019t enough. You can change this later in Settings.'}
+                        Ask for a code from your email every time you log in, so a leaked password alone isn{'\u2019'}t enough. You can change this later in Settings.
                       </span>
                     </span>
                   </label>
@@ -749,9 +741,17 @@ export function AuthModal() {
               )}
               {view === 'login-otp' && (
                 <motion.div key="login-otp" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.16 }}>
-                  <h2 id="auth-title" className="mt-4 text-xl font-bold tracking-tight text-ink">Check your email</h2>
+                  <h2 id="auth-title" className="mt-4 text-xl font-bold tracking-tight text-ink">{mfaMethod === 'totp' ? 'Enter your authenticator code' : 'Check your email'}</h2>
                   <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-sm text-ink/60">
-                    Two-factor login is on. Enter the code sent to <span className="font-medium text-ink/90">{email.trim()}</span>
+                    {mfaMethod === 'totp' ? (
+                      useRecovery ? (
+                        <>Enter one of your recovery codes for <span className="font-medium text-ink/90">{email.trim()}</span></>
+                      ) : (
+                        <>Open your authenticator app and enter the 6-digit code for <span className="font-medium text-ink/90">Spectra Labs</span></>
+                      )
+                    ) : (
+                      <>Two-factor login is on. Enter the code sent to <span className="font-medium text-ink/90">{email.trim()}</span></>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -764,21 +764,57 @@ export function AuthModal() {
                       <Pencil className="h-3 w-3" /> Back
                     </button>
                   </p>
-                  {codeBoxes}
+                  {useRecovery ? (
+                    <input
+                      autoFocus
+                      value={recovery}
+                      onChange={(e) => setRecovery(e.target.value.toUpperCase())}
+                      onKeyDown={(e) => e.key === 'Enter' && verifyLogin(recovery)}
+                      placeholder="XXXXX-XXXXX"
+                      autoComplete="one-time-code"
+                      spellCheck={false}
+                      aria-label="Recovery code"
+                      className="mt-6 w-full rounded-xl border border-ink/15 bg-white px-3 py-2.5 text-center font-mono text-lg tracking-[0.2em] text-slate-900 outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/25 dark:bg-canvas/70 dark:text-slate-100"
+                    />
+                  ) : (
+                    codeBoxes
+                  )}
                   {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
-                  <button type="button" onClick={() => verifyLogin(code)} disabled={code.length !== LEN || verifying} className={cn(primaryBtn, 'mt-6')}>
+                  <button
+                    type="button"
+                    onClick={() => verifyLogin(useRecovery ? recovery : code)}
+                    disabled={(useRecovery ? recovery.replace(/[^A-Z0-9]/gi, '').length !== 10 : code.length !== LEN) || verifying}
+                    className={cn(primaryBtn, 'mt-6')}
+                  >
                     {verifying ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying…</> : <>Verify &amp; Log In <ArrowRight className="h-4 w-4" /></>}
                   </button>
-                  <p className="mt-4 text-center text-[12.5px] text-ink/55">
-                    Didn&apos;t get it?{' '}
-                    {left > 0 ? (
-                      <span className="font-mono tabular-nums">Resend in 0:{String(left).padStart(2, '0')}</span>
-                    ) : (
-                      <button type="button" onClick={resendLogin} disabled={busy} className="font-semibold text-cyan-600 hover:underline disabled:opacity-50 dark:text-cyan-300">
-                        {busy ? 'Sending…' : 'Resend Code'}
+                  {mfaMethod === 'totp' ? (
+                    <p className="mt-4 text-center text-[12.5px] text-ink/55">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUseRecovery((r) => !r);
+                          setRecovery('');
+                          setDigits(empty());
+                          setError(null);
+                        }}
+                        className="font-semibold text-cyan-600 hover:underline dark:text-cyan-300"
+                      >
+                        {useRecovery ? 'Use the authenticator app instead' : 'Lost your phone? Use a recovery code'}
                       </button>
-                    )}
-                  </p>
+                    </p>
+                  ) : (
+                    <p className="mt-4 text-center text-[12.5px] text-ink/55">
+                      Didn&apos;t get it?{' '}
+                      {left > 0 ? (
+                        <span className="font-mono tabular-nums">Resend in 0:{String(left).padStart(2, '0')}</span>
+                      ) : (
+                        <button type="button" onClick={resendLogin} disabled={busy} className="font-semibold text-cyan-600 hover:underline disabled:opacity-50 dark:text-cyan-300">
+                          {busy ? 'Sending…' : 'Resend Code'}
+                        </button>
+                      )}
+                    </p>
+                  )}
                 </motion.div>
               )}
 

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { ArrowRight, Check, KeyRound, LogOut, MonitorSmartphone, Pencil, Trash2, User, X } from 'lucide-react';
 import { AccountSecurity } from '@/components/studio/AccountSecurity';
+import { AuthenticatorApp } from './AuthenticatorApp';
 import { GlassCard, Spinner } from '@/components/ui/primitives';
 import { checkPasswordRules, cleanName, displayName, initials, isPasswordValid, MAX_NAME, MIN_NAME, useAuth, type Role } from '@/lib/auth';
 import { cn } from '@/lib/utils';
@@ -215,29 +216,103 @@ function ChangePassword({ onChanged }: { onChanged: () => void }) {
   );
 }
 
-// ── Sessions ────────────────────────────────────────────────────────────────
+// ── Sessions & devices ──────────────────────────────────────────────────────
+type SessionRow = {
+  id: string;
+  current: boolean;
+  createdAt: number;
+  lastSeenAt: number;
+  ip: string | null;
+  device: { browser: string; os: string; kind: 'desktop' | 'mobile' | 'tablet'; label: string };
+  deviceFirstSeenAt: number | null;
+};
+
+const ago = (ms: number) => {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 90) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86_400) return `${Math.round(s / 3600)} h ago`;
+  return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+};
+
 function Sessions() {
-  const [busy, setBusy] = useState(false);
+  const [rows, setRows] = useState<SessionRow[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const run = async () => {
-    setBusy(true);
+
+  const load = () =>
+    api<{ sessions: SessionRow[] }>('/api/auth/sessions', 'GET')
+      .then((d) => setRows(d.sessions))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load your devices.'));
+  useEffect(() => {
+    load();
+  }, []);
+
+  const run = async (key: string, url: string, done: (ended: number) => string) => {
+    setBusy(key);
     setError('');
     setNotice('');
     try {
-      await api('/api/auth/sessions', 'DELETE');
-      setNotice('Signed out on every other device and browser. This one stays signed in.');
+      const d = await api<{ ended: number }>(url, 'DELETE');
+      setNotice(done(d.ended));
+      await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not sign out other devices.');
+      setError(err instanceof Error ? err.message : 'Could not sign out.');
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
+
+  const others = rows?.filter((r) => !r.current).length ?? 0;
+
   return (
-    <Section icon={<MonitorSmartphone className="h-4 w-4" />} title="Sessions" desc="Lost a laptop or signed in on a shared computer? End every other session at once.">
-      <button type="button" onClick={run} disabled={busy} className="btn-ghost border border-ink/10 px-3 py-2 text-xs">
-        {busy ? <Spinner className="h-3.5 w-3.5" /> : <LogOut className="h-3.5 w-3.5" />} Sign out of all other devices
-      </button>
+    <Section
+      icon={<MonitorSmartphone className="h-4 w-4" />}
+      title="Devices"
+      desc="Everywhere you're signed in. Don't recognise one? Sign it out, then change your password. You get an email when a new device signs in."
+    >
+      {!rows && !error && <Spinner className="h-4 w-4" />}
+      {rows && (
+        <ul className="divide-y divide-ink/[0.06] rounded-xl border border-ink/[0.08]">
+          {rows.map((r) => (
+            <li key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3.5 py-3">
+              <MonitorSmartphone className={cn('h-4 w-4 shrink-0', r.current ? 'text-accent' : 'text-ink/40')} />
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium text-ink">
+                  {r.device.label}
+                  {r.current && <span className="ml-2 rounded-full bg-accent/10 px-2 py-0.5 text-[10.5px] font-semibold text-accent">This device</span>}
+                </p>
+                <p className="mt-0.5 text-[11.5px] text-ink/50">
+                  {r.ip ?? 'unknown IP'} · {r.current ? 'active now' : `last active ${ago(r.lastSeenAt)}`} · signed in {ago(r.createdAt)}
+                  {r.deviceFirstSeenAt ? ` · first seen ${new Date(r.deviceFirstSeenAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+                </p>
+              </div>
+              {!r.current && (
+                <button
+                  type="button"
+                  className="btn-ghost border border-ink/10 hover:text-loss"
+                  disabled={busy !== null}
+                  onClick={() => run(r.id, `/api/auth/sessions?id=${encodeURIComponent(r.id)}`, () => `Signed out ${r.device.label}.`)}
+                >
+                  {busy === r.id ? <Spinner className="h-3.5 w-3.5" /> : <LogOut className="h-3.5 w-3.5" />} Sign out
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {rows && others > 0 && (
+        <button
+          type="button"
+          onClick={() => run('all', '/api/auth/sessions', (n) => `Signed out of ${n} other device${n === 1 ? '' : 's'}. This one stays signed in.`)}
+          disabled={busy !== null}
+          className="btn-ghost mt-3 border border-ink/10 px-3 py-2 text-xs"
+        >
+          {busy === 'all' ? <Spinner className="h-3.5 w-3.5" /> : <LogOut className="h-3.5 w-3.5" />} Sign out of all other devices
+        </button>
+      )}
+      {rows && others === 0 && <p className="mt-3 text-[12px] text-ink/45">You&apos;re only signed in here.</p>}
       <Feedback error={error} notice={notice} />
     </Section>
   );
@@ -360,6 +435,7 @@ export function AccountPage() {
           />
           <ChangePassword onChanged={load} />
           <AccountSecurity />
+          <AuthenticatorApp />
           <Sessions />
           <DeleteAccount profile={profile} />
         </div>

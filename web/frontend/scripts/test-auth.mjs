@@ -657,12 +657,20 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   const routes = engineRoutes.ENGINE_ROUTES;
   for (const [path, r] of Object.entries(routes)) {
     assert.ok(['viewer', 'editor', 'owner'].includes(r.minRole), `${path} has a minimum role`);
-    if (r.method === 'POST') assert.ok(authz.hasRole(r.minRole, 'editor'), `${path}: running a computation needs editor`);
+    const methods = Array.isArray(r.method) ? r.method : [r.method];
+    for (const method of methods) {
+      const role = engineRoutes.minimumRole(r, method);
+      if (method === 'POST') assert.ok(authz.hasRole(role, 'editor'), `${path}: running a computation needs editor`);
+    }
   }
   for (const p of ['api/risk', 'api/stress', 'api/benchmark', 'api/alpaca/account']) assert.equal(routes[p].minRole, 'editor', p);
   for (const p of ['api/sample-portfolio', 'api/telemetry/cpu']) assert.equal(routes[p].minRole, 'viewer', p);
   assert.equal(Object.entries(routes).filter(([, r]) => r.public).map(([p]) => p).join(), 'health', 'only health is public');
   assert.ok(!Object.prototype.hasOwnProperty.call(routes, 'constructor'), 'no prototype keys');
+  assert.equal(engineRoutes.routePolicyKey('api/v1/jobs/0192f3a4-0000-7000-8000-000000000002'), 'api/v1/jobs/{id}');
+  assert.equal(engineRoutes.routePolicyKey('api/v1/jobs/0192f3a4-0000-7000-8000-000000000002/cancel'), 'api/v1/jobs/{id}/cancel');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/jobs'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/jobs'], 'POST'), 'editor');
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {
@@ -1969,7 +1977,12 @@ test('permissions: viewer = read only, editor = create and run, owner = members,
     }
   }
   // Engine: computations need editor, reads need viewer (the table itself is tested in task 4's tests).
-  for (const [p, r] of Object.entries(engineRoutes.ENGINE_ROUTES)) if (r.method === 'POST' && !r.public) assert.ok(rank[r.minRole] >= rank.editor, `engine ${p}`);
+  for (const [p, r] of Object.entries(engineRoutes.ENGINE_ROUTES)) {
+    const methods = Array.isArray(r.method) ? r.method : [r.method];
+    for (const method of methods) {
+      if (method === 'POST' && !r.public) assert.ok(rank[engineRoutes.minimumRole(r, method)] >= rank.editor, `engine ${p}`);
+    }
+  }
 
   // The viewer-level writes stay narrow.
   const handlers = Object.fromEntries(apiHandlers().map((h) => [h.key, h.body]));

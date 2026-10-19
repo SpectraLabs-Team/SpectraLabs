@@ -125,13 +125,8 @@ fn run_options(j: &Json, base: RiskConfig) -> Result<RiskConfig, (u16, String)> 
     Ok(cfg)
 }
 
-/// Calculate the requested portfolio risk metric from a JSON request.
-///
-/// # Errors
-///
-/// Returns an HTTP-style error when request fields are invalid, the portfolio
-/// cannot be parsed, or the risk engine cannot calculate the requested metric.
-pub fn risk(j: &Json) -> Reply {
+/// The validated arguments of a risk request: metric name, portfolio, settings.
+fn risk_args(j: &Json) -> Result<(String, Portfolio, RiskConfig), (u16, String)> {
     let metric = str_field(j, "metric", "var")?.trim().to_ascii_lowercase();
     if metric.is_empty() || !metric.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return Err(unprocessable("Metric name is invalid."));
@@ -143,18 +138,24 @@ pub fn risk(j: &Json) -> Reply {
     }
     let p = portfolio(j)?;
     let cfg = run_options(j, RiskConfig { confidence, simulations: sims, ..RiskConfig::default() })?;
+    Ok((metric, p, cfg))
+}
+
+/// Calculate the requested portfolio risk metric from a JSON request.
+///
+/// # Errors
+///
+/// Returns an HTTP-style error when request fields are invalid, the portfolio
+/// cannot be parsed, or the risk engine cannot calculate the requested metric.
+pub fn risk(j: &Json) -> Reply {
+    let (metric, p, cfg) = risk_args(j)?;
     let report = RiskEngine::new().calculate_named(&metric, &p, &cfg).map_err(|e| engine_error(&e))?;
     Ok(report.to_json_value())
 }
 
-/// Benchmark risk calculations for the portfolio described by a JSON request.
-///
-/// # Errors
-///
-/// Returns an HTTP-style error when benchmark settings are invalid, the
-/// requested work exceeds the path budget, the portfolio cannot be parsed,
-/// or the benchmark fails.
-pub fn benchmark_route(j: &Json) -> Reply {
+/// The validated arguments of a benchmark request: portfolio, simulations,
+/// repetitions, warmups.
+fn benchmark_args(j: &Json) -> Result<(Portfolio, u64, usize, usize), (u16, String)> {
     let sims = simulations(j, 100_000)?;
     let reps = int_field(j, "repetitions", 5, "Repetitions and warmups must be integers.")?;
     let warm = int_field(j, "warmups", 1, "Repetitions and warmups must be integers.")?;
@@ -167,7 +168,31 @@ pub fn benchmark_route(j: &Json) -> Reply {
         ));
     }
     let p = portfolio(j)?;
-    benchmark(&p, sims, reps as usize, warm as usize).map_err(|e| engine_error(&e))
+    Ok((p, sims, reps as usize, warm as usize))
+}
+
+/// Benchmark risk calculations for the portfolio described by a JSON request.
+///
+/// # Errors
+///
+/// Returns an HTTP-style error when benchmark settings are invalid, the
+/// requested work exceeds the path budget, the portfolio cannot be parsed,
+/// or the benchmark fails.
+pub fn benchmark_route(j: &Json) -> Reply {
+    let (p, sims, reps, warm) = benchmark_args(j)?;
+    benchmark(&p, sims, reps, warm).map_err(|e| engine_error(&e))
+}
+
+/// The validated arguments of a stress request: scenario, portfolio, settings.
+fn stress_args(j: &Json) -> Result<(String, Portfolio, RiskConfig), (u16, String)> {
+    let scenario = str_field(j, "scenario", "market-crash")?;
+    if !SCENARIOS.iter().any(|s| s.name == scenario) {
+        return Err(unprocessable("Unknown stress scenario."));
+    }
+    let p = portfolio(j)?;
+    let sims = simulations(j, 1_000_000)?;
+    let cfg = run_options(j, RiskConfig { simulations: sims, ..RiskConfig::default() })?;
+    Ok((scenario, p, cfg))
 }
 
 /// Run a named stress scenario for the portfolio described by a JSON request.
@@ -177,14 +202,27 @@ pub fn benchmark_route(j: &Json) -> Reply {
 /// Returns an HTTP-style error when the scenario or request fields are invalid,
 /// the portfolio cannot be parsed, or the stress calculation fails.
 pub fn stress(j: &Json) -> Reply {
-    let scenario = str_field(j, "scenario", "market-crash")?;
-    if !SCENARIOS.iter().any(|s| s.name == scenario) {
-        return Err(unprocessable("Unknown stress scenario."));
-    }
-    let p = portfolio(j)?;
-    let sims = simulations(j, 1_000_000)?;
-    let cfg = run_options(j, RiskConfig { simulations: sims, ..RiskConfig::default() })?;
+    let (scenario, p, cfg) = stress_args(j)?;
     Ok(stress_test(&RiskEngine::new(), &p, &scenario, &cfg).map_err(|e| engine_error(&e))?.to_json_value())
+}
+
+/// Checks a job's kind and payload the way the matching synchronous route
+/// would, without running the computation. Used when a job is queued, so a bad
+/// request fails at once instead of on the worker.
+///
+/// # Errors
+/// A 422 (or the route's own status) and a message, as the synchronous route
+/// would return.
+pub fn validate_job(kind: &str, payload: &Json) -> Result<(), (u16, String)> {
+    if payload.entries().is_err() {
+        return Err(unprocessable("payload must be a JSON object."));
+    }
+    match kind {
+        "benchmark" => benchmark_args(payload).map(|_| ()),
+        "risk" => risk_args(payload).map(|_| ()),
+        "stress" => stress_args(payload).map(|_| ()),
+        _ => Err(unprocessable(format!("Unknown job kind {kind:?}; use benchmark, risk or stress."))),
+    }
 }
 
 /// Job kinds supported by the background worker.

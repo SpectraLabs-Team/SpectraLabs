@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-# Rust services: spectra-api and spectra-db (spectra-worker joins in M20 step 6).
+# Rust services: spectra-api, spectra-worker and spectra-db.
 # Build from the repository root:  docker build -f docker/engine.Dockerfile .
 
 FROM rust:1-bookworm AS build
@@ -12,7 +12,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p spectra-api -p spectra-db \
  && mkdir -p /out \
- && cp target/release/spectra-api target/release/spectra-db /out/
+ && cp target/release/spectra-api target/release/spectra-worker target/release/spectra-db /out/
 
 FROM debian:bookworm-slim AS runtime
 # curl is only for the container health check.
@@ -22,7 +22,7 @@ RUN apt-get update \
  && useradd --system --uid 10001 --home /var/lib/spectra --create-home spectra \
  && mkdir -p /var/lib/spectra/artifacts \
  && chown -R spectra /var/lib/spectra
-COPY --from=build /out/spectra-api /out/spectra-db /usr/local/bin/
+COPY --from=build /out/spectra-api /out/spectra-worker /out/spectra-db /usr/local/bin/
 USER spectra
 WORKDIR /var/lib/spectra
 # Inside the compose network only; the port is never published.

@@ -66,7 +66,7 @@ pub struct StressRequest {
     pub seed: Option<u64>,
 }
 
-#[derive(OpenApi)]
+#[derive(Debug, OpenApi)]
 #[openapi(
     info(
         title = "Spectra Labs engine API",

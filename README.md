@@ -86,8 +86,10 @@ on 127.0.0.1. The engine stays inside the compose network and accepts only reque
 dashboard's server with `ENGINE_SECRET`.
 
 To run the API and dashboard natively against the containerised database, with
-[`just`](https://just.systems): `just db`, `just seed`, then `just api` and `just web` in two
-terminals. `just` lists every task; `just check` runs what CI runs.
+[`just`](https://just.systems): `just db`, `just seed`, then run `just api`, `just worker` and
+`just web` in separate terminals. `just import-users-dry-run` previews importing the old
+`web/frontend/.data/users.json`; `just import-users` runs the import. `just` lists every task;
+`just check` runs what CI runs.
 
 API settings are read once at startup, and the API refuses to start until every problem is fixed:
 `DATABASE_URL` and `ENGINE_SECRET` are required; `SPECTRA_API_ADDR` (default `127.0.0.1:8000`),

@@ -1,28 +1,42 @@
 //! Structured logging with tracing and Prometheus metrics for observability (M20b step 11).
 
+use std::sync::OnceLock;
+
 use metrics::{counter, histogram};
+use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use tracing_subscriber::fmt;
 use tracing_subscriber::prelude::*;
 
+/// The installed Prometheus recorder, rendered by `GET /metrics`.
+static PROMETHEUS: OnceLock<PrometheusHandle> = OnceLock::new();
+
 /// Initialize JSON structured logging with tracing and Prometheus metrics.
-/// Logs include request_id and job_id context.
+/// Safe to call more than once (later calls change nothing).
 pub fn init_observability() {
-    // Initialize structured logging
     let json_layer =
         fmt::layer().json().with_target(true).with_thread_ids(true).with_file(true).with_line_number(true);
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
-    tracing_subscriber::registry().with(env_filter).with(json_layer).init();
+    // Fails only if a subscriber is already set, which is fine.
+    let _ = tracing_subscriber::registry().with(env_filter).with(json_layer).try_init();
 
-    // Initialize Prometheus metrics recorder
-    match metrics_exporter_prometheus::PrometheusBuilder::new().install_recorder() {
-        Ok(_) => tracing::info!("prometheus metrics initialized"),
-        Err(e) => tracing::warn!("failed to initialize prometheus: {}", e),
+    if PROMETHEUS.get().is_none() {
+        match PrometheusBuilder::new().install_recorder() {
+            Ok(handle) => {
+                let _ = PROMETHEUS.set(handle);
+                tracing::info!("prometheus metrics initialized");
+            }
+            Err(e) => tracing::warn!("failed to initialize prometheus: {}", e),
+        }
     }
+}
 
-    tracing::info!("observability initialized (tracing + prometheus)");
+/// The current metrics in the Prometheus text format, or `None` before
+/// [`init_observability`] has run.
+pub fn render_metrics() -> Option<String> {
+    PROMETHEUS.get().map(PrometheusHandle::render)
 }
 
 /// Metrics for request handling.
@@ -84,8 +98,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tracing_initializes() {
+    fn init_is_idempotent_and_metrics_render() {
         init_observability();
-        tracing::info!("test log");
+        init_observability();
+        JobMetrics::job_claimed("risk");
+        let text = render_metrics().expect("recorder installed");
+        assert!(text.contains("jobs_claimed_total"), "{text}");
     }
 }

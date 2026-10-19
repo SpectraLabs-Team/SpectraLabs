@@ -125,6 +125,12 @@ fn run_options(j: &Json, base: RiskConfig) -> Result<RiskConfig, (u16, String)> 
     Ok(cfg)
 }
 
+/// Calculate the requested portfolio risk metric from a JSON request.
+///
+/// # Errors
+///
+/// Returns an HTTP-style error when request fields are invalid, the portfolio
+/// cannot be parsed, or the risk engine cannot calculate the requested metric.
 pub fn risk(j: &Json) -> Reply {
     let metric = str_field(j, "metric", "var")?.trim().to_ascii_lowercase();
     if metric.is_empty() || !metric.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
@@ -141,6 +147,13 @@ pub fn risk(j: &Json) -> Reply {
     Ok(report.to_json_value())
 }
 
+/// Benchmark risk calculations for the portfolio described by a JSON request.
+///
+/// # Errors
+///
+/// Returns an HTTP-style error when benchmark settings are invalid, the
+/// requested work exceeds the path budget, the portfolio cannot be parsed,
+/// or the benchmark fails.
 pub fn benchmark_route(j: &Json) -> Reply {
     let sims = simulations(j, 100_000)?;
     let reps = int_field(j, "repetitions", 5, "Repetitions and warmups must be integers.")?;
@@ -157,6 +170,12 @@ pub fn benchmark_route(j: &Json) -> Reply {
     benchmark(&p, sims, reps as usize, warm as usize).map_err(|e| engine_error(&e))
 }
 
+/// Run a named stress scenario for the portfolio described by a JSON request.
+///
+/// # Errors
+///
+/// Returns an HTTP-style error when the scenario or request fields are invalid,
+/// the portfolio cannot be parsed, or the stress calculation fails.
 pub fn stress(j: &Json) -> Reply {
     let scenario = str_field(j, "scenario", "market-crash")?;
     if !SCENARIOS.iter().any(|s| s.name == scenario) {

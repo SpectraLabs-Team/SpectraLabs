@@ -1,6 +1,7 @@
 //! API tests: routing, validation and the JSON shapes the dashboard reads,
 //! plus round trips over a real socket and a graceful shutdown.
 
+use std::fmt::Write as FmtWrite;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -246,10 +247,10 @@ fn roundtrip(addr: SocketAddr, raw: &[u8]) -> String {
 
 fn risk_request(metric: &str, sims: i64) -> Vec<u8> {
     let b = body(metric, sims).dump();
-    let sig: String = signature_headers("POST", "/api/v1/risk", b.as_bytes())
-        .iter()
-        .map(|(k, v)| format!("{k}: {v}\r\n"))
-        .collect();
+    let mut sig = String::new();
+    for (k, v) in signature_headers("POST", "/api/v1/risk", b.as_bytes()) {
+        writeln!(&mut sig, "{k}: {v}\r").unwrap();
+    }
     format!(
         "POST /api/v1/risk HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\n\
          {sig}Content-Length: {}\r\n\r\n{b}",

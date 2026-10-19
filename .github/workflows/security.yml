@@ -25,7 +25,7 @@ jobs:
     env:
       GITLEAKS_VERSION: 8.21.2
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the whole history: a secret removed in a later commit is still leaked
       - name: Install gitleaks (checksum verified)
@@ -48,7 +48,7 @@ jobs:
       run:
         working-directory: web/frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit

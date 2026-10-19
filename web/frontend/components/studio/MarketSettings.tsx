@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, CircleSlash, Database, KeyRound, PlugZap, RefreshCw, Server, ShieldCheck, Wallet } from 'lucide-react';
+import { CheckCircle2, CircleSlash, Database, KeyRound, PlugZap, RefreshCw, ScrollText, Server, ShieldCheck, Users, Wallet } from 'lucide-react';
 import { API_BASE } from '@/lib/api';
 import { DEFAULT_PAPER } from '@/lib/paperLedger';
 import { cn, formatCurrency } from '@/lib/utils';
 import { Badge, GlassCard, Spinner } from '@/components/ui/primitives';
+import { WorkspaceActivity } from '@/components/audit/WorkspaceActivity';
+import { BrokerKeys } from './BrokerKeys';
+import { WorkspaceMembers } from './WorkspaceMembers';
 import { usePortfolio } from './PortfolioContext';
 
 type Probe = { status: 'idle' | 'checking' } | { status: 'done'; code: number; detail: string } | { status: 'error'; detail: string };
@@ -129,13 +132,15 @@ export function MarketSettings() {
         </div>
         <div className="mt-4 space-y-2.5 text-[12.5px]">
           <div className="flex items-center gap-2.5">
-            <KeyRound className="h-4 w-4 text-ink/40" />
-            <span className="text-ink/70">API keys belong in the engine&apos;s environment, never in the browser.</span>
-          </div>
-          <div className="flex items-center gap-2.5">
             {probe.status === 'done' && probe.code === 200 ? <CheckCircle2 className="h-4 w-4 text-profit" /> : <CircleSlash className="h-4 w-4 text-caution" />}
             <span className="text-ink/70">Live Trading stays disabled in the sidebar until this route returns 200.</span>
           </div>
+        </div>
+        <div className="mt-5 border-t border-ink/[0.06] pt-4">
+          <h3 className="mb-2.5 flex items-center gap-2 text-[12.5px] font-semibold text-ink">
+            <KeyRound className="h-3.5 w-3.5 text-ink/50" /> Broker API keys
+          </h3>
+          <BrokerKeys />
         </div>
       </GlassCard>
 
@@ -168,6 +173,20 @@ export function MarketSettings() {
             </div>
           ))}
         </dl>
+      </GlassCard>
+      <GlassCard as="section" className="p-5 xl:col-span-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <Users className="h-4 w-4 text-accent" /> Members
+        </h2>
+        <p className="mb-4 mt-1 text-xs leading-5 text-ink/50">Who can use this workspace. Viewers read; editors create and run; owners manage members, keys and settings.</p>
+        <WorkspaceMembers />
+      </GlassCard>
+      <GlassCard as="section" className="p-5 xl:col-span-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <ScrollText className="h-4 w-4 text-accent" /> Workspace activity
+        </h2>
+        <p className="mb-4 mt-1 text-xs leading-5 text-ink/50">Key changes, settings and membership in this workspace, from the append-only audit log.</p>
+        <WorkspaceActivity />
       </GlassCard>
     </div>
   );

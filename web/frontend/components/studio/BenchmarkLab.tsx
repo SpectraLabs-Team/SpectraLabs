@@ -138,7 +138,7 @@ export function BenchmarkLab() {
                   <CartesianGrid stroke={cc.grid} vertical={false} />
                   <XAxis dataKey="label" tick={{ fill: '#64748B', fontSize: 11 }} tickLine={false} axisLine={{ stroke: cc.axis }} />
                   <YAxis scale={scale} domain={scale === 'log' ? ['auto', 'auto'] : [0, 'auto']} allowDataOverflow tickFormatter={(v: number) => (v < 1 ? `${(v * 1000).toFixed(0)}µs` : `${v.toFixed(v < 10 ? 1 : 0)}ms`)} tick={{ fill: '#64748B', fontSize: 11 }} tickLine={false} axisLine={false} width={52} />
-                  <Tooltip contentStyle={cc.tooltip} formatter={(v: number, name) => [formatDuration(v), name]} labelFormatter={(l) => `${l} paths`} />
+                  <Tooltip contentStyle={cc.tooltip} formatter={(v, name) => [formatDuration(Number(v)), name]} labelFormatter={(l) => `${l} paths`} />
                   <Legend iconType="circle" wrapperStyle={{ fontSize: 12, color: cc.tick }} />
                   <Line type="monotone" dataKey="CPU" name="CPU · 1 thread" stroke={COLORS.CPU} strokeWidth={2} strokeDasharray="5 4" dot={{ r: 3 }} isAnimationActive={false} />
                   <Line type="monotone" dataKey="Parallel" name="Parallel · all cores" stroke={COLORS.Parallel} strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} style={{ filter: 'drop-shadow(0 0 4px #00F2FE88)' }} />

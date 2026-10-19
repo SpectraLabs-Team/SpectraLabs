@@ -10,6 +10,11 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # tailwind-merge 3 is for Tailwind CSS v4; on Tailwind 3 it merges classes wrongly without
+      # any build error. Upgrade both together.
+      - dependency-name: tailwind-merge
+        update-types: [version-update:semver-major]
   - package-ecosystem: cargo
     directory: /
     schedule:

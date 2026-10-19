@@ -140,12 +140,12 @@ export function Benchmarks() {
                   width={56}
                   tickFormatter={(v: number) => fmt(metric, v)}
                 />
-                <Tooltip cursor={{ fill: 'rgba(127,127,127,0.06)' }} contentStyle={cc.tooltip} formatter={(v: number, n) => [fmt(metric, v), n === 'rust' ? rustLabel : 'NumPy']} labelFormatter={(l) => `${l} paths`} />
+                <Tooltip cursor={{ fill: 'rgba(127,127,127,0.06)' }} contentStyle={cc.tooltip} formatter={(v, n) => [fmt(metric, Number(v)), n === 'rust' ? rustLabel : 'NumPy']} labelFormatter={(l) => `${l} paths`} />
                 <Bar dataKey="rust" fill="url(#bm-rust)" radius={[5, 5, 0, 0]} animationDuration={700}>
-                  <LabelList dataKey="rust" position="top" formatter={(v: number) => fmt(metric, v)} style={{ fill: cc.accent, fontSize: 11, fontWeight: 600 }} />
+                  <LabelList dataKey="rust" position="top" formatter={(v: unknown) => fmt(metric, Number(v))} style={{ fill: cc.accent, fontSize: 11, fontWeight: 600 }} />
                 </Bar>
                 <Bar dataKey="numpy" fill="url(#bm-np)" radius={[5, 5, 0, 0]} animationDuration={700}>
-                  <LabelList dataKey="numpy" position="top" formatter={(v: number) => fmt(metric, v)} style={{ fill: cc.label, fontSize: 11 }} />
+                  <LabelList dataKey="numpy" position="top" formatter={(v: unknown) => fmt(metric, Number(v))} style={{ fill: cc.label, fontSize: 11 }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>

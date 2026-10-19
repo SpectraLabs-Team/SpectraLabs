@@ -137,7 +137,12 @@ test('rate limiter', () => {
   assert.ok(rl.peek('t', 3).ok);
 });
 
-process.on('exit', () => fs.rmSync(work, { recursive: true, force: true }));
+// Windows cannot remove a directory while it is the process's current working
+// directory, so leave the isolated test directory before cleaning it up.
+process.on('exit', () => {
+  process.chdir(root);
+  fs.rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+});
 
 test('engine request signing matches the Rust verifier', () => {
   const secret = 'test-secret-test-secret-test-secret!';

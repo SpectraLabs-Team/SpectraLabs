@@ -1,6 +1,6 @@
 export type Role = 'admin' | 'user';
 export type AuthUser = { email: string; role: Role; name: string };
-export type AuthMode = 'login' | 'signup';
+export type AuthMode = 'login' | 'signup' | 'forgot';
 
 export const ADMIN_EMAIL = 'spectralabs.team@gmail.com';
 export const MIN_PASSWORD = 8;

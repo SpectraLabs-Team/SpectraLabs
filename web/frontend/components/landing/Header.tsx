@@ -104,7 +104,7 @@ export function Header({ overHero = false }: { overHero?: boolean }) {
               <Link href="/studio" className={primaryBtn}>
                 Quant Studio <ArrowRight className="h-4 w-4" />
               </Link>
-              <button type="button" onClick={logout} className={cn(ghostBtn, 'inline-flex items-center gap-1.5')}>
+              <button type="button" onClick={() => logout()} className={cn(ghostBtn, 'inline-flex items-center gap-1.5')}>
                 <LogOut className="h-3.5 w-3.5" /> Sign Out
               </button>
             </div>

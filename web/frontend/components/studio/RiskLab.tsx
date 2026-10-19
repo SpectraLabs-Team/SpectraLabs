@@ -1,14 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Info, Play, ShieldAlert, Sigma, Sparkles, TrendingDown, Wallet } from 'lucide-react';
+import { Activity, Download, Info, Play, ShieldAlert, Sigma, SlidersHorizontal, Sparkles, TrendingDown, Wallet } from 'lucide-react';
 import { calculateRisk } from '@/lib/api';
 import { analyticCVaR, analyticLossStd, analyticVaR } from '@/lib/model';
-import type { BackendRequest, RiskResult } from '@/lib/types';
+import type { BackendRequest } from '@/lib/types';
+import { parseCsv, portfolioStats } from '@/lib/portfolio';
 import { cn, confidenceLabel, formatCompact, formatCurrency, formatDuration, formatPercent } from '@/lib/utils';
 import { AnimatedValue, Badge, ErrorNote, GlassCard, RangeSlider, Segmented, Spinner } from '@/components/ui/primitives';
 import { LossHistogram } from './LossHistogram';
-import { usePortfolio } from './PortfolioContext';
+import { usePortfolio, type RiskRun } from './PortfolioContext';
 import { StressPanel } from './StressPanel';
 
 const SIMS = [10_000, 25_000, 50_000, 100_000, 250_000, 500_000, 1_000_000];
@@ -26,12 +27,50 @@ const BACKENDS: { value: BackendRequest; label: string }[] = [
   { value: 'parallel', label: 'Parallel' },
 ];
 
-interface Results {
-  var: RiskResult;
-  cvar: RiskResult;
-  vol: RiskResult;
-  /** Portfolio revision the run was made against. */
-  rev: number;
+
+/**
+ * Audit report of the last run, as JSON. Every figure comes from the run itself (its own book
+ * snapshot and engine outputs), never from inputs edited afterwards; `matchesCurrentInputs`
+ * says whether the screen still shows the same parameters.
+ */
+function exportRiskReport(run: RiskRun, matchesCurrentInputs: boolean) {
+  const positions = parseCsv(run.csv).positions;
+  const book = portfolioStats(positions);
+  const stamp = new Date(run.at);
+  const report = {
+    reportType: 'spectra-labs.risk-report',
+    schemaVersion: 1,
+    timestamp: stamp.toISOString(),
+    matchesCurrentInputs,
+    portfolioValue: run.var.portfolio_value,
+    modelVolatility: run.var.model_volatility,
+    confidence: run.var.confidence,
+    horizonDays: Math.round(run.var.horizon_years * 252),
+    simulations: run.var.simulations_run,
+    valueAtRisk: run.var.value,
+    conditionalVaR: run.cvar.value,
+    pnlStdDev: run.vol.value,
+    hhiConcentration: book.hhi,
+    effectiveNumberOfPositions: book.effectiveN,
+    engineBackend: run.var.backend,
+    requestedBackend: run.var.requested_backend,
+    computeDurationMs: run.var.compute_ms,
+    wallDurationMs: run.var.total_ms,
+    engineVersion: run.var.library_version,
+    engineCommitSha: run.var.git_commit,
+    randomSeed: run.var.seed,
+    model: run.var.model,
+    positions,
+  };
+  const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `spectra-risk-report-${stamp.toISOString().replace(/[:.]/g, '-')}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function MetricCard({ icon: Icon, label, value, sub, tone = 'neutral', loading }: { icon: typeof Activity; label: string; value: string; sub: React.ReactNode; tone?: 'neutral' | 'loss' | 'accent'; loading?: boolean }) {
@@ -51,16 +90,16 @@ function MetricCard({ icon: Icon, label, value, sub, tone = 'neutral', loading }
 }
 
 export function RiskLab() {
-  const { csv, stats, revision, engine } = usePortfolio();
+  const { csv, stats, revision, engine, riskParams, setRiskParams, riskRun: results, setRiskRun: setResults } = usePortfolio();
   const online = engine.status === 'online';
-  const [confidence, setConfidence] = useState(0.99);
-  const [simulations, setSimulations] = useState(100_000);
-  const [horizon, setHorizon] = useState(1);
-  const [backend, setBackend] = useState<BackendRequest>('auto');
-  // Off by default: the Monte Carlo engine only runs when the user clicks "Run simulation"
-  // (or opts into Live mode with the switch).
-  const [auto, setAuto] = useState(false);
-  const [results, setResults] = useState<Results | null>(null);
+  // Inputs and the last run live in PortfolioContext, so they survive switching Studio tabs.
+  // `auto` (Live mode) is off by default: the engine only runs on an explicit click.
+  const { confidence, simulations, horizon, backend, auto } = riskParams;
+  const setConfidence = (confidence: number) => setRiskParams({ confidence });
+  const setSimulations = (simulations: number) => setRiskParams({ simulations });
+  const setHorizon = (horizon: number) => setRiskParams({ horizon });
+  const setBackend = (backend: BackendRequest) => setRiskParams({ backend });
+  const setAuto = (f: (a: boolean) => boolean) => setRiskParams((p) => ({ auto: f(p.auto) }));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const reqId = useRef(0);
@@ -76,13 +115,13 @@ export function RiskLab() {
         calculateRisk({ ...base, metric: 'cvar' }),
         calculateRisk({ ...base, metric: 'volatility' }),
       ]);
-      if (id === reqId.current) setResults({ var: v, cvar: c, vol, rev: revision });
+      if (id === reqId.current) setResults({ var: v, cvar: c, vol, rev: revision, simulations, backend, at: Date.now(), csv });
     } catch (e) {
       if (id === reqId.current) setError(e instanceof Error ? e.message : 'Risk calculation failed');
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [csv, confidence, simulations, horizon, backend, revision]);
+  }, [csv, confidence, simulations, horizon, backend, revision, setResults]);
 
   // Live mode (opt-in): re-run (debounced) whenever an input or the portfolio changes.
   // Nothing runs on mount; the first run is always an explicit click or switching Live on.
@@ -95,7 +134,15 @@ export function RiskLab() {
   // Closed-form values: instant preview offline, and a sanity check next to the Monte Carlo result.
   const modelInput = useMemo(() => ({ value: stats.netValue, volatility: stats.modelVolatility, horizonDays: horizon }), [stats.netValue, stats.modelVolatility, horizon]);
   const cf = { var: analyticVaR(modelInput, confidence), cvar: analyticCVaR(modelInput, confidence), std: analyticLossStd(modelInput) };
-  const fresh = results && results.rev === revision && results.var.confidence === confidence && Math.round(results.var.horizon_years * 252) === horizon;
+  // A run is "fresh" only if every input still matches: book, confidence, horizon, paths and backend.
+  const fresh =
+    !!results &&
+    results.rev === revision &&
+    results.var.confidence === confidence &&
+    Math.round(results.var.horizon_years * 252) === horizon &&
+    results.simulations === simulations &&
+    results.backend === backend;
+  const dirty = !!results && !fresh;
   const shown = {
     value: fresh ? results!.var.portfolio_value : stats.netValue,
     var: fresh ? results!.var.value : cf.var,
@@ -160,6 +207,17 @@ export function RiskLab() {
               {loading ? <Spinner /> : <Play className="h-4 w-4" />} {loading ? 'Simulating' : 'Run simulation'}
             </button>
           </div>
+          {dirty && !loading && (
+            <p role="status" className="-mt-3 flex items-center gap-2 rounded-lg border border-caution/30 bg-caution/[0.07] px-3 py-2 text-[11.5px] font-medium text-amber-800 dark:text-amber-200">
+              <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
+              Parameters modified · Re-run simulation to update
+            </p>
+          )}
+          {results && (
+            <button type="button" onClick={() => exportRiskReport(results, fresh)} className="btn-ghost -mt-2 w-full justify-center border border-ink/10 text-xs">
+              <Download className="h-3.5 w-3.5" /> Export Risk Report
+            </button>
+          )}
           {error && <ErrorNote>{error}</ErrorNote>}
         </div>
       </GlassCard>

@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Briefcase, ChevronsLeft, ChevronsRight, Cpu, LayoutDashboard, Lock, LogOut, Menu, PlugZap, ShieldAlert, X } from 'lucide-react';
@@ -19,7 +18,7 @@ export const TABS: { id: StudioTab; label: string; short: string; icon: typeof C
   { id: 'risk', label: 'Risk & Stress Lab', short: 'Risk', icon: ShieldAlert },
   { id: 'portfolio', label: 'Portfolio Studio', short: 'Portfolio', icon: Briefcase },
   { id: 'benchmark', label: 'Hardware Benchmarks', short: 'Benchmarks', icon: Cpu },
-  { id: 'settings', label: 'Market Data & Alpaca Settings', short: 'Settings', icon: PlugZap },
+  { id: 'settings', label: 'Account & Market Settings', short: 'Settings', icon: PlugZap },
 ];
 
 const COLLAPSE_KEY = 'spectra-sidebar-collapsed';
@@ -178,11 +177,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
 export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (t: StudioTab) => void; children: ReactNode }) {
   const { stats, positions, source, engine } = usePortfolio();
   const { user, logout } = useAuth();
-  const router = useRouter();
-  const signOut = async () => {
-    router.replace('/');
-    await logout();
-  };
+  const signOut = () => logout('/');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const current = TABS.find((t) => t.id === tab)!;

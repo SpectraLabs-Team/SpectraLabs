@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { Activity, ArrowRight, Cpu, Gauge, RefreshCw, ScrollText, Server, Users, Workflow } from 'lucide-react';
+import { Activity, ArrowRight, Check, Copy, Cpu, Gauge, RefreshCw, ScrollText, Search, Server, Users, Workflow, X } from 'lucide-react';
 import { StatusPills } from '@/components/ui/StatusPills';
+import { getCpuTelemetry } from '@/lib/api';
+import type { CpuTelemetry } from '@/lib/types';
 import { displayName, initials, useAuth, type Role } from '@/lib/auth';
 import { useEngineHealth } from '@/lib/useEngineHealth';
 import { cn } from '@/lib/utils';
@@ -24,7 +26,7 @@ const LEDGER = [
   ['20:33:04', 'data.ingest', 'SPY 1d · 5,031 bars', 'a8c6…1d70'],
 ];
 
-function Card({ title, icon, className, children, i }: { title: string; icon: ReactNode; className?: string; children: ReactNode; i: number }) {
+function Card({ title, icon, className, children, i, demo }: { title: string; icon: ReactNode; className?: string; children: ReactNode; i: number; demo?: boolean }) {
   const reduce = useReducedMotion();
   return (
     <motion.section
@@ -36,6 +38,11 @@ function Card({ title, icon, className, children, i }: { title: string; icon: Re
       <div className="flex items-center gap-2 text-sm font-semibold text-ink">
         <span className="text-accent">{icon}</span>
         {title}
+        {demo && (
+          <span title="Placeholder figures until this metric has an engine endpoint" className="ml-auto rounded-full border border-amber-500/35 bg-amber-500/10 px-2 py-0.5 font-mono text-[9.5px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+            Demo data
+          </span>
+        )}
       </div>
       <div className="mt-4 flex-1">{children}</div>
     </motion.section>
@@ -59,15 +66,69 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-type Account = { email: string; name: string; role: Role; createdAt: number };
+/** Live host load from the engine (GET /api/telemetry/cpu via the signed-in proxy), every 5s. */
+function useHostTelemetry(intervalMs = 5_000) {
+  const [host, setHost] = useState<CpuTelemetry | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    const tick = () =>
+      getCpuTelemetry()
+        .then((t) => live && (setHost(t), setFailed(false)))
+        .catch(() => live && setFailed(true));
+    tick();
+    const id = window.setInterval(tick, intervalMs);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, [intervalMs]);
+  return { host, failed };
+}
+
+const pct = (n: number) => `${n.toFixed(n < 10 ? 1 : 0)}%`;
+
+type Account = { email: string; name: string; role: Role; createdAt: number; twoFactor?: boolean };
 
 const joined = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
 /** Live list from /api/admin/users (admin-checked on the server). */
+/** Copies an email to the clipboard and confirms with a tick for a moment. */
+function CopyEmail({ email }: { email: string }) {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(email);
+      setDone(true);
+      setTimeout(() => setDone(false), 1500);
+    } catch {
+      /* clipboard blocked (insecure context): the email is still selectable */
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={done ? `Copied ${email}` : `Copy ${email}`}
+      title={done ? 'Copied' : 'Copy email'}
+      className={cn('rounded-md p-1.5 transition', done ? 'text-profit' : 'text-ink/40 hover:bg-ink/[0.06] hover:text-ink')}
+    >
+      {done ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
 function RegisteredUsers() {
   const [users, setUsers] = useState<Account[] | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!users || !q) return users ?? [];
+    return users.filter((u) => u.email.includes(q) || displayName(u).toLowerCase().includes(q));
+  }, [users, query]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,8 +151,32 @@ function RegisteredUsers() {
 
   return (
     <>
-      <div className="-mt-1 mb-3 flex items-center justify-between gap-3">
-        <p className="text-[12px] text-ink/50">{users ? `${users.length} account${users.length === 1 ? '' : 's'}` : loading ? 'Loading…' : ''}</p>
+      <div className="-mt-1 mb-3 flex flex-wrap items-center gap-3">
+        <label className="relative min-w-[200px] flex-1 sm:max-w-xs">
+          <span className="sr-only">Search accounts</span>
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink/40" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name or email"
+            className="w-full rounded-lg border border-ink/10 bg-canvas/60 py-1.5 pl-8 pr-7 text-[12.5px] text-ink outline-none transition placeholder:text-ink/35 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 [&::-webkit-search-cancel-button]:hidden"
+          />
+          {query && (
+            <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink/40 hover:text-ink">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </label>
+        <p className="text-[12px] text-ink/50" aria-live="polite">
+          {users
+            ? query.trim()
+              ? `Showing ${shown.length} of ${users.length} registered quant${users.length === 1 ? '' : 's'}`
+              : `${users.length} registered quant${users.length === 1 ? '' : 's'}`
+            : loading
+              ? 'Loading…'
+              : ''}
+        </p>
         <button type="button" onClick={load} disabled={loading} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-ink/55 transition hover:bg-ink/5 hover:text-ink disabled:opacity-50">
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} /> Refresh
         </button>
@@ -100,19 +185,22 @@ function RegisteredUsers() {
         <p className="rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-3 py-2 text-[12.5px] text-rose-600 dark:text-rose-300">{error}</p>
       ) : users && users.length === 0 ? (
         <p className="py-6 text-center text-sm text-ink/50">No accounts registered yet.</p>
+      ) : users && shown.length === 0 ? (
+        <p className="py-6 text-center text-sm text-ink/50">No accounts match &ldquo;{query.trim()}&rdquo;.</p>
       ) : (
         <div className="-mx-1 overflow-x-auto">
-          <table className="w-full min-w-[560px] text-left text-[12.5px]">
+          <table className="w-full min-w-[640px] text-left text-[12.5px]">
             <thead>
               <tr className="border-b border-ink/[0.08] font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink/45">
                 <th className="px-1 pb-2 font-medium">Name</th>
                 <th className="px-1 pb-2 font-medium">Email</th>
                 <th className="px-1 pb-2 font-medium">Role</th>
+                <th className="px-1 pb-2 font-medium">Login</th>
                 <th className="px-1 pb-2 text-right font-medium">Joined</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink/[0.06]">
-              {(users ?? []).map((u) => (
+              {shown.map((u) => (
                 <tr key={u.email}>
                   <td className="px-1 py-2.5">
                     <span className="flex items-center gap-2.5">
@@ -120,11 +208,19 @@ function RegisteredUsers() {
                       <span className="truncate font-medium text-ink/90">{displayName(u)}</span>
                     </span>
                   </td>
-                  <td className="truncate px-1 py-2.5 text-ink/65">{u.email}</td>
+                  <td className="px-1 py-1.5 text-ink/65">
+                    <span className="flex items-center gap-1">
+                      <span className="truncate">{u.email}</span>
+                      <CopyEmail email={u.email} />
+                    </span>
+                  </td>
                   <td className="px-1 py-2.5">
                     <span className={cn('rounded-full px-2 py-0.5 text-[10.5px] font-semibold', u.role === 'admin' ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300' : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300')}>
                       {u.role === 'admin' ? 'Admin' : 'User'}
                     </span>
+                  </td>
+                  <td className="px-1 py-2.5 font-mono text-[11px]">
+                    {u.twoFactor ? <span className="text-profit">2FA</span> : <span className="text-caution">Password only</span>}
                   </td>
                   <td className="px-1 py-2.5 text-right font-mono tabular-nums text-ink/55">{joined.format(new Date(u.createdAt))}</td>
                 </tr>
@@ -141,6 +237,7 @@ export function AdminDashboard() {
   const { user } = useAuth();
   const health = useEngineHealth();
   const online = health.status === 'online';
+  const { host, failed } = useHostTelemetry();
 
   return (
     <>
@@ -158,18 +255,18 @@ export function AdminDashboard() {
           </Link>
           <StatusPills />
           <span className="flex items-center gap-3 rounded-full border border-slate-300/80 bg-slate-100/90 px-4 py-1.5 font-mono text-[12px] text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
-            <span className="flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-accent" /> CPU 63%</span>
+            <span className="flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-accent" /> CPU {host ? pct(host.cpu_utilization) : '—'}</span>
             <span className="h-3 w-px bg-slate-300 dark:bg-white/15" />
-            <span>MEM 3.1/8 GB</span>
+            <span>MEM {host ? `${host.memory_used_gb.toFixed(1)}/${host.memory_total_gb.toFixed(0)} GB` : '—'}</span>
           </span>
         </div>
       </div>
       <p className="mt-3 text-sm text-ink/60">
-        Signed in as <span className="font-medium text-ink/85">{user ? displayName(user) : ''}</span>. Figures below are placeholders until the telemetry API is wired up.
+        Signed in as <span className="font-medium text-ink/85">{user ? displayName(user) : ''}</span>. Engine health, CPU/memory and accounts are live; cards marked Demo data are placeholders.
       </p>
 
       <div className="mt-10 grid auto-rows-[minmax(180px,auto)] gap-5 md:grid-cols-2 lg:grid-cols-4">
-        <Card i={0} title="System Telemetry" icon={<Activity className="h-4 w-4" />} className="lg:col-span-2">
+        <Card i={0} demo title="System Telemetry" icon={<Activity className="h-4 w-4" />} className="lg:col-span-2">
           <div className="grid grid-cols-3 gap-4">
             <Stat label="Req / min" value="1,284" />
             <Stat label="p50 latency" value="0.42ms" />
@@ -195,23 +292,24 @@ export function AdminDashboard() {
         </Card>
 
         <Card i={2} title="Memory & CPU" icon={<Cpu className="h-4 w-4" />}>
-          <div className="space-y-4">
-            <div>
-              <div className="mb-1.5 flex justify-between text-[12px]"><span className="text-ink/60">CPU</span><span className="font-mono text-ink/85">63%</span></div>
-              <Bar pct={63} />
+          {host ? (
+            <div className="space-y-4">
+              <div>
+                <div className="mb-1.5 flex justify-between text-[12px]"><span className="text-ink/60">CPU</span><span className="font-mono text-ink/85">{pct(host.cpu_utilization)}</span></div>
+                <Bar pct={Math.min(100, host.cpu_utilization)} tone={host.cpu_utilization > 85 ? 'caution' : 'accent'} />
+              </div>
+              <div>
+                <div className="mb-1.5 flex justify-between text-[12px]"><span className="text-ink/60">Memory</span><span className="font-mono text-ink/85">{host.memory_used_gb.toFixed(1)} / {host.memory_total_gb.toFixed(1)} GB</span></div>
+                <Bar pct={Math.min(100, host.memory_utilization)} tone={host.memory_utilization > 85 ? 'caution' : 'profit'} />
+              </div>
+              <p className="font-mono text-[10.5px] text-ink/45">{host.cpu_cores} cores · {host.cpu_threads} threads · {host.source}</p>
             </div>
-            <div>
-              <div className="mb-1.5 flex justify-between text-[12px]"><span className="text-ink/60">Memory</span><span className="font-mono text-ink/85">3.1 / 8 GB</span></div>
-              <Bar pct={39} tone="profit" />
-            </div>
-            <div>
-              <div className="mb-1.5 flex justify-between text-[12px]"><span className="text-ink/60">Disk</span><span className="font-mono text-ink/85">81%</span></div>
-              <Bar pct={81} tone="caution" />
-            </div>
-          </div>
+          ) : (
+            <p className="text-[12.5px] leading-5 text-ink/50">{failed ? 'Telemetry unavailable: the engine is offline or does not report host load on this OS.' : 'Reading host telemetry…'}</p>
+          )}
         </Card>
 
-        <Card i={3} title="Active Simulation Workers" icon={<Workflow className="h-4 w-4" />} className="lg:col-span-2">
+        <Card i={3} demo title="Active Simulation Workers" icon={<Workflow className="h-4 w-4" />} className="lg:col-span-2">
           <ul className="space-y-3">
             {WORKERS.map((w) => (
               <li key={w.id} className="grid grid-cols-[52px_1fr_44px] items-center gap-3 text-[12px]">
@@ -226,7 +324,7 @@ export function AdminDashboard() {
           </ul>
         </Card>
 
-        <Card i={4} title="Audit Ledger" icon={<ScrollText className="h-4 w-4" />} className="lg:col-span-2">
+        <Card i={4} demo title="Audit Ledger" icon={<ScrollText className="h-4 w-4" />} className="lg:col-span-2">
           <ul className="divide-y divide-ink/[0.06] font-mono text-[11.5px]">
             {LEDGER.map(([t, ev, msg, hash]) => (
               <li key={t} className="grid grid-cols-[64px_1fr] gap-x-3 py-2 sm:grid-cols-[64px_120px_1fr_88px]">

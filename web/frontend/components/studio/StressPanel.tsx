@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Cpu, Flame, Play } from 'lucide-react';
 import { calculateRisk, runStressTest } from '@/lib/api';
@@ -9,36 +9,41 @@ import { SCENARIOS, STRESS_CONFIDENCE, type Scenario } from '@/lib/scenarios';
 import type { BackendRequest } from '@/lib/types';
 import { cn, formatCurrency, formatDuration, formatPercent } from '@/lib/utils';
 import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
-import { usePortfolio } from './PortfolioContext';
+import { usePortfolio, type StressOutcome } from './PortfolioContext';
 
-interface Outcome {
-  valueAfter: number;
-  immediateLoss: number;
-  postVaR: number;
-  backend: string;
-  computeMs: number;
-}
+type Outcome = StressOutcome;
 
 /** Scenario cards: immediate P&L of a uniform shock, then the engine's 99% VaR of the shocked book. */
 export function StressPanel({ simulations, horizonDays, backend }: { simulations: number; horizonDays: number; backend: BackendRequest }) {
-  const { positions, csv, stats, engine, revision } = usePortfolio();
+  const { positions, csv, stats, engine, revision, stress, setStress } = usePortfolio();
   const online = engine.status === 'online';
-  const [results, setResults] = useState<Record<string, Outcome>>({});
   const [running, setRunning] = useState<Set<string>>(new Set());
-  const [baseVaR, setBaseVaR] = useState<number | null>(null);
   const [error, setError] = useState('');
 
-  // Results depend on the book and run settings.
-  useEffect(() => {
-    setResults({});
-    setBaseVaR(null);
-  }, [revision, simulations, horizonDays, backend]);
+  // Completed scenarios live in PortfolioContext so they survive switching Studio tabs.
+  // They're only valid for the book + settings they were run with, identified by this key.
+  const key = `${revision}|${simulations}|${horizonDays}|${backend}`;
+  const keyRef = useRef(key);
+  keyRef.current = key;
+  const results: Record<string, Outcome> = stress.key === key ? stress.results : {};
+  const baseVaR = stress.key === key ? stress.baseVaR : null;
+
+  /** Store a finished scenario, unless the inputs changed while it was running (then it's stale). */
+  const saveOutcome = (runKey: string, id: string, outcome: Outcome) => {
+    if (runKey !== keyRef.current) return;
+    setStress((s) => ({ key: runKey, results: { ...(s.key === runKey ? s.results : {}), [id]: outcome }, baseVaR: s.key === runKey ? s.baseVaR : null }));
+  };
+  const setBaseVaR = (runKey: string, v: number) => {
+    if (runKey !== keyRef.current) return;
+    setStress((s) => (s.key === runKey ? { ...s, baseVaR: v } : { key: runKey, results: {}, baseVaR: v }));
+  };
 
   const ensureBase = async () => {
     if (baseVaR !== null) return;
+    const runKey = key;
     try {
       const r = await calculateRisk({ portfolio_csv: csv, metric: 'var', confidence: STRESS_CONFIDENCE, simulations, horizon_days: horizonDays, backend });
-      setBaseVaR(r.value);
+      setBaseVaR(runKey, r.value);
     } catch {
       /* surfaced by scenario runs */
     }
@@ -47,16 +52,17 @@ export function StressPanel({ simulations, horizonDays, backend }: { simulations
   const runOne = async (s: Scenario) => {
     setRunning((r) => new Set(r).add(s.id));
     setError('');
+    const runKey = key;
     ensureBase();
     try {
       if (s.source.kind === 'engine') {
         const r = await runStressTest({ portfolio_csv: csv, scenario: s.source.scenario, simulations, horizon_days: horizonDays, backend });
-        setResults((x) => ({ ...x, [s.id]: { valueAfter: r.value_after, immediateLoss: r.scenario_loss, postVaR: r.value, backend: r.backend, computeMs: r.compute_ms } }));
+        saveOutcome(runKey, s.id, { valueAfter: r.value_after, immediateLoss: r.scenario_loss, postVaR: r.value, backend: r.backend, computeMs: r.compute_ms });
       } else {
         const shocked = shockPositions(positions, s.priceFactor, s.volMultiplier);
         const after = portfolioStats(shocked).netValue;
         const r = await calculateRisk({ portfolio_csv: toCsv(shocked), metric: 'var', confidence: STRESS_CONFIDENCE, simulations, horizon_days: horizonDays, backend });
-        setResults((x) => ({ ...x, [s.id]: { valueAfter: after, immediateLoss: stats.netValue - after, postVaR: r.value, backend: r.backend, computeMs: r.compute_ms } }));
+        saveOutcome(runKey, s.id, { valueAfter: after, immediateLoss: stats.netValue - after, postVaR: r.value, backend: r.backend, computeMs: r.compute_ms });
       }
     } catch (e) {
       setError(`${s.name}: ${e instanceof Error ? e.message : 'failed'}`);

@@ -6,6 +6,7 @@ import { API_BASE } from '@/lib/api';
 import { DEFAULT_PAPER } from '@/lib/paperLedger';
 import { cn, formatCurrency } from '@/lib/utils';
 import { Badge, GlassCard, Spinner } from '@/components/ui/primitives';
+import { AccountSecurity } from './AccountSecurity';
 import { usePortfolio } from './PortfolioContext';
 
 type Probe = { status: 'idle' | 'checking' } | { status: 'done'; code: number; detail: string } | { status: 'error'; detail: string };
@@ -51,6 +52,7 @@ export function MarketSettings() {
 
   return (
     <div className="grid gap-5 xl:grid-cols-2">
+      <AccountSecurity />
       <GlassCard as="section" className="p-5">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
           <Wallet className="h-4 w-4 text-profit" /> Paper trading ledger
@@ -147,10 +149,10 @@ export function MarketSettings() {
         </h2>
         <dl className="mt-4 space-y-2.5 text-[12.5px]">
           {[
-            ['API base URL', API_BASE],
+            ['API route', `${API_BASE}/* → Rust engine`],
             ['Status', engine.status === 'online' ? `online · ${engine.health.engine} v${engine.health.engine_version}` : engine.status],
             ['Round trip', engine.status === 'online' ? `${engine.latencyMs.toFixed(0)} ms` : '—'],
-            ['Configured by', 'NEXT_PUBLIC_API_URL in .env.local'],
+            ['Configured by', 'ENGINE_URL (server-side) · signed-in proxy'],
           ].map(([k, v]) => (
             <div key={k} className="flex justify-between gap-4">
               <dt className="text-ink/50">{k}</dt>

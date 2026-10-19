@@ -3,7 +3,7 @@ import { Capabilities } from '@/components/landing/Capabilities';
 import { Footer } from '@/components/landing/Footer';
 import { Header } from '@/components/landing/Header';
 import { Hero } from '@/components/landing/Hero';
-import { PendingSectionScroll } from '@/components/landing/NavLink';
+import { AuthRedirectPrompt, PendingSectionScroll } from '@/components/landing/NavLink';
 import { Taxonomy } from '@/components/landing/Taxonomy';
 import { TrustBar } from '@/components/landing/TrustBar';
 
@@ -12,6 +12,7 @@ export default function LandingPage() {
     <>
       <Header overHero />
       <PendingSectionScroll />
+      <AuthRedirectPrompt />
       <main>
         <Hero />
         <Capabilities />

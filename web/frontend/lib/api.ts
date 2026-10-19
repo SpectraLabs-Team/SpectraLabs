@@ -8,8 +8,11 @@ import type {
   StressResult,
 } from './types';
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:8000';
+/**
+ * All engine calls go through the authenticated Next.js proxy (app/api/engine/[...path]).
+ * The Rust API's own address is server-side config: ENGINE_URL, default http://127.0.0.1:8000.
+ */
+export const API_BASE = '/api/engine';
 
 export class ApiError extends Error {
   constructor(message: string, public status: number) {
@@ -27,10 +30,11 @@ async function request<T>(path: string, init?: RequestInit & { timeoutMs?: numbe
       ...init,
       signal: init?.signal ?? controller.signal,
       headers: init?.body ? { 'Content-Type': 'application/json' } : undefined,
+      credentials: 'same-origin',
     });
   } catch (e) {
     if (e instanceof DOMException && e.name === 'AbortError') throw new ApiError('The engine took too long to respond.', 0);
-    throw new ApiError(`Cannot reach the engine at ${API_BASE}. Start it with \`cargo run --release -p spectra-api\`.`, 0);
+    throw new ApiError('Cannot reach the Spectra server. Check your connection and try again.', 0);
   } finally {
     clearTimeout(timer);
   }

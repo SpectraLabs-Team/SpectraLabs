@@ -53,7 +53,7 @@ function SignInScreen({ title }: { title: string }) {
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
   if (isLoading) return <Loading />;
-  if (!isAuthenticated) return <SignInScreen title="Sign in with 2FA to access Quant Studio" />;
+  if (!isAuthenticated) return <SignInScreen title="Log in to access Quant Studio" />;
   return <>{children}</>;
 }
 

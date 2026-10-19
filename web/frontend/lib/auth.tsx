@@ -18,7 +18,8 @@ type AuthCtx = {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (user: AuthUser) => void;
-  logout: () => Promise<void>;
+  /** Ends the session. With `redirectTo`, does a full page load there once the cookie is cleared. */
+  logout: (redirectTo?: string) => Promise<void>;
   isAuthModalOpen: boolean;
   authMode: AuthMode;
   setAuthMode: (mode: AuthMode) => void;
@@ -130,14 +131,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [apply],
   );
 
-  const logout = useCallback(async () => {
-    reqId.current++;
-    apply(null);
-    try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
-    } catch {}
-    broadcast('logout');
-  }, [apply]);
+  const logout = useCallback(
+    async (redirectTo?: string) => {
+      reqId.current++;
+      // When leaving a protected page, keep it rendered until the browser navigates away,
+      // so the sign-in gate never flashes; the full reload also drops all in-memory state.
+      if (!redirectTo) apply(null);
+      else writeCache(null);
+      try {
+        await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      } catch {}
+      broadcast('logout');
+      if (redirectTo) window.location.replace(redirectTo);
+    },
+    [apply],
+  );
 
   const openAuthModal = useCallback((mode: AuthMode = 'login') => {
     setAuthMode(mode);

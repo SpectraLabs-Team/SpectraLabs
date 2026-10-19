@@ -6,17 +6,18 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { checkPasswordRules, cleanName, EMAIL_RE, isPasswordValid, MIN_NAME, MIN_PASSWORD, roleForEmail, useAuth, type AuthMode, type AuthUser, type Role } from '@/lib/auth';
 import { cn } from '@/lib/utils';
+import { NEXT_KEY } from '@/components/landing/NavLink';
 
 const LEN = 6;
 const RESEND_SECONDS = 60;
 const empty = () => Array<string>(LEN).fill('');
 
 // ── Real API transport connecting to Gmail SMTP & session endpoints ──
-async function sendSignupCode(email: string, password: string, name: string) {
+async function sendSignupCode(email: string, password: string, name: string, twoFactor: boolean) {
   const res = await fetch('/api/auth/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, name, mode: 'signup' }),
+    body: JSON.stringify({ email, password, name, twoFactor, mode: 'signup' }),
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -49,7 +50,7 @@ async function verifySignupCode(email: string, code: string): Promise<{ ok: bool
   return { ok: true, user: data.user };
 }
 
-async function loginWithPassword(email: string, password: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
+async function loginWithPassword(email: string, password: string): Promise<{ ok: boolean; user?: AuthUser; twoFactor?: boolean; error?: string }> {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -59,6 +60,39 @@ async function loginWithPassword(email: string, password: string): Promise<{ ok:
   if (!res.ok || !data.ok) {
     return { ok: false, error: data.error || 'Incorrect email or password.' };
   }
+  return { ok: true, user: data.user, twoFactor: data.twoFactor === true };
+}
+
+async function requestReset(email: string): Promise<string> {
+  const res = await fetch('/api/auth/forgot', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || 'Could not send the reset code.');
+  return data.message as string;
+}
+
+async function resetPassword(email: string, code: string, password: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
+  const res = await fetch('/api/auth/reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code, password }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) return { ok: false, error: data.error || 'Could not reset the password.' };
+  return { ok: true, user: data.user };
+}
+
+async function verifyLoginCode(email: string, code: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
+  const res = await fetch('/api/auth/login/verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, code }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) return { ok: false, error: data.error || 'Invalid or expired code.' };
   return { ok: true, user: data.user };
 }
 
@@ -154,6 +188,7 @@ export function AuthModal() {
   const [step, setStep] = useState<1 | 2>(1);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [twoFactor, setTwoFactor] = useState(true);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -161,11 +196,14 @@ export function AuthModal() {
   const [verifying, setVerifying] = useState(false);
   const [digits, setDigits] = useState<string[]>(empty);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
   const [left, setLeft] = useState(0);
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
   const emailRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const signup = authMode === 'signup';
+  const forgot = authMode === 'forgot';
   const emailOk = EMAIL_RE.test(email.trim());
   const passRules = checkPasswordRules(password);
   const passOk = signup ? isPasswordValid(password) : password.length >= MIN_PASSWORD;
@@ -185,19 +223,42 @@ export function AuthModal() {
     setConfirm('');
     setDigits(empty());
     setError(null);
+    setInfo(null);
+    setLeft(0);
     setTouched({});
     focusEmail();
   }, [isAuthModalOpen, authMode]);
 
   useEffect(() => {
     if (!isAuthModalOpen) return;
-    const onKey = (e: globalThis.KeyboardEvent) => e.key === 'Escape' && closeAuthModal();
+    // Remember what had focus so it gets it back when the modal closes.
+    const opener = document.activeElement as HTMLElement | null;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') return closeAuthModal();
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      // Focus trap: Tab / Shift+Tab cycle inside the dialog instead of escaping to the page.
+      const focusables = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+      ).filter((el) => el.offsetParent !== null);
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !dialogRef.current.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !dialogRef.current.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     window.addEventListener('keydown', onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
+      if (opener && document.contains(opener)) opener.focus();
     };
   }, [isAuthModalOpen, closeAuthModal]);
 
@@ -211,7 +272,15 @@ export function AuthModal() {
     (u: AuthUser) => {
       login(u);
       closeAuthModal();
-      router.push(u.role === 'admin' ? '/admin' : '/studio');
+      // Honour the page the visitor was headed to (set when middleware bounced them),
+      // unless their role can't open it; otherwise admins land on /admin, everyone else /studio.
+      let next: string | null = null;
+      try {
+        next = sessionStorage.getItem(NEXT_KEY);
+        sessionStorage.removeItem(NEXT_KEY);
+      } catch {}
+      const allowed = next === '/studio' || (next === '/admin' && u.role === 'admin');
+      router.push(allowed && next ? next : u.role === 'admin' ? '/admin' : '/studio');
     },
     [login, closeAuthModal, router],
   );
@@ -227,6 +296,14 @@ export function AuthModal() {
     setError(null);
     try {
       const res = await loginWithPassword(email.trim(), password);
+      if (res.ok && res.twoFactor) {
+        // Password accepted; this account also wants the emailed code.
+        setStep(2);
+        setDigits(empty());
+        setLeft(RESEND_SECONDS);
+        setTimeout(() => boxes.current[0]?.focus(), 50);
+        return;
+      }
       if (!res.ok || !res.user) {
         setError(res.error || 'Incorrect email or password.');
         return;
@@ -247,7 +324,7 @@ export function AuthModal() {
     setBusy(true);
     setError(null);
     try {
-      await sendSignupCode(email.trim(), password, cleanName(name));
+      await sendSignupCode(email.trim(), password, cleanName(name), role === 'admin' || twoFactor);
       setStep(2);
       setDigits(empty());
       setLeft(RESEND_SECONDS);
@@ -299,6 +376,98 @@ export function AuthModal() {
     [email, verifying, finish],
   );
 
+  // ── Log In, step 2 (2FA accounts) ──
+  const verifyLogin = async (code: string) => {
+    if (code.length !== LEN || verifying) return;
+    setVerifying(true);
+    setError(null);
+    try {
+      const res = await verifyLoginCode(email.trim(), code);
+      if (!res.ok || !res.user) {
+        setError(res.error || 'That code is incorrect or expired.');
+        setDigits(empty());
+        boxes.current[0]?.focus();
+        return;
+      }
+      finish(res.user);
+    } catch (err: any) {
+      setError(err?.message || 'Verification failed. Try again.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const resendLogin = async () => {
+    if (left > 0 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await loginWithPassword(email.trim(), password);
+      if (!res.ok) throw new Error(res.error || 'Could not resend the code.');
+      setDigits(empty());
+      setLeft(RESEND_SECONDS);
+      boxes.current[0]?.focus();
+    } catch (err: any) {
+      setError(err?.message || 'Could not resend the code.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ── Forgot password ──
+  const sendReset = async (isResend = false) => {
+    if (busy || (isResend && left > 0)) return;
+    setTouched((t) => ({ ...t, email: true }));
+    if (!emailOk) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setInfo(await requestReset(email.trim()));
+      setStep(2);
+      setDigits(empty());
+      setLeft(RESEND_SECONDS);
+      setTimeout(() => boxes.current[0]?.focus(), 50);
+    } catch (err: any) {
+      setError(err?.message || 'Could not send the reset code.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitForgot = (e: FormEvent) => {
+    e.preventDefault();
+    sendReset();
+  };
+
+  const resetOk = digits.every(Boolean) && isPasswordValid(password) && confirmOk;
+
+  async function submitReset(e?: FormEvent) {
+    e?.preventDefault();
+    setTouched((t) => ({ ...t, password: true, confirm: true }));
+    if (!resetOk || verifying) return;
+    setVerifying(true);
+    setError(null);
+    try {
+      const res = await resetPassword(email.trim(), digits.join(''), password);
+      if (!res.ok || !res.user) {
+        setError(res.error || 'Could not reset the password.');
+        return;
+      }
+      finish(res.user);
+    } catch (err: any) {
+      setError(err?.message || 'Could not reset the password.');
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  /** All 6 digits entered: sign-up verifies at once; reset moves on to the new password. */
+  function codeComplete(code: string) {
+    if (view === 'otp') verify(code);
+    else if (view === 'login-otp') verifyLogin(code);
+    else if (view === 'reset') setTimeout(() => document.getElementById('auth-reset-password')?.focus(), 30);
+  }
+
   const fill = (text: string, start = 0) => {
     const chars = text.replace(/\D/g, '').slice(0, LEN - start).split('');
     if (!chars.length) return;
@@ -306,7 +475,7 @@ export function AuthModal() {
     chars.forEach((c, k) => (next[start + k] = c));
     setDigits(next);
     boxes.current[Math.min(start + chars.length, LEN - 1)]?.focus();
-    if (next.every(Boolean)) verify(next.join(''));
+    if (next.every(Boolean)) codeComplete(next.join(''));
   };
 
   const setDigit = (i: number, raw: string) => {
@@ -316,7 +485,7 @@ export function AuthModal() {
     next[i] = only;
     setDigits(next);
     if (only && i < LEN - 1) boxes.current[i + 1]?.focus();
-    if (only && next.every(Boolean)) verify(next.join(''));
+    if (only && next.every(Boolean)) codeComplete(next.join(''));
   };
 
   const onKeyDown = (i: number, e: KeyboardEvent<HTMLInputElement>) => {
@@ -331,7 +500,7 @@ export function AuthModal() {
       setDigits(next);
     } else if (e.key === 'ArrowLeft' && i > 0) boxes.current[i - 1]?.focus();
     else if (e.key === 'ArrowRight' && i < LEN - 1) boxes.current[i + 1]?.focus();
-    else if (e.key === 'Enter') verify(digits.join(''));
+    else if (e.key === 'Enter') (view === 'reset' ? submitReset() : view === 'login-otp' ? verifyLogin(digits.join('')) : verify(digits.join('')));
   };
 
   const onPaste = (i: number, e: ClipboardEvent<HTMLInputElement>) => {
@@ -341,8 +510,9 @@ export function AuthModal() {
   };
 
   const code = digits.join('');
-  const view = signup ? (step === 1 ? 'signup' : 'otp') : 'login';
+  const view = forgot ? (step === 1 ? 'forgot' : 'reset') : signup ? (step === 1 ? 'signup' : 'otp') : step === 1 ? 'login' : 'login-otp';
   const icon = view === 'login' ? <LogIn className="h-5 w-5" /> : view === 'signup' ? <UserPlus className="h-5 w-5" /> : <KeyRound className="h-5 w-5" />;
+  const busyCode = verifying;
 
   const emailField = (
     <Field id="auth-email" label="Email" icon={<Mail className="h-4 w-4" />} error={touched.email && email.length > 0 && !emailOk && 'Enter a valid email address.'}>
@@ -362,6 +532,64 @@ export function AuthModal() {
     </Field>
   );
 
+  const rulesChecklist = (
+    <div className="mt-2.5 grid grid-cols-2 gap-1.5 rounded-lg border border-ink/[0.06] bg-ink/[0.02] p-2.5 text-[11px]">
+      <span className={cn('flex items-center gap-1.5 transition-colors', passRules.length ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-ink/40')}>
+        <span className={cn('h-1.5 w-1.5 rounded-full', passRules.length ? 'bg-emerald-500 shadow-[0_0_6px_#10B981]' : 'bg-ink/30')} />
+        8+ characters
+      </span>
+      <span className={cn('flex items-center gap-1.5 transition-colors', passRules.letter ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-ink/40')}>
+        <span className={cn('h-1.5 w-1.5 rounded-full', passRules.letter ? 'bg-emerald-500 shadow-[0_0_6px_#10B981]' : 'bg-ink/30')} />
+        1 letter (a-z)
+      </span>
+      <span className={cn('flex items-center gap-1.5 transition-colors', passRules.number ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-ink/40')}>
+        <span className={cn('h-1.5 w-1.5 rounded-full', passRules.number ? 'bg-emerald-500 shadow-[0_0_6px_#10B981]' : 'bg-ink/30')} />
+        1 number (0-9)
+      </span>
+      <span className={cn('flex items-center gap-1.5 transition-colors', passRules.special ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-ink/40')}>
+        <span className={cn('h-1.5 w-1.5 rounded-full', passRules.special ? 'bg-emerald-500 shadow-[0_0_6px_#10B981]' : 'bg-ink/30')} />
+        1 special char (!@#$)
+      </span>
+    </div>
+  );
+
+  const codeBoxes = (
+    <div className="mt-6 flex justify-between gap-2" role="group" aria-label="6-digit code">
+      {digits.map((d, i) => (
+        <input
+          key={i}
+          ref={(el) => {
+            boxes.current[i] = el;
+          }}
+          value={d}
+          onChange={(e) => setDigit(i, e.target.value)}
+          onKeyDown={(e) => onKeyDown(i, e)}
+          onPaste={(e) => onPaste(i, e)}
+          onFocus={(e) => e.target.select()}
+          inputMode="numeric"
+          autoComplete={i === 0 ? 'one-time-code' : 'off'}
+          maxLength={LEN}
+          disabled={busyCode}
+          aria-label={`Digit ${i + 1}`}
+          className={cn(
+            'h-12 w-full min-w-0 rounded-xl border bg-white text-center font-mono text-lg font-semibold text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/25 disabled:opacity-60 dark:bg-canvas/70 dark:text-white sm:h-14',
+            error ? 'border-rose-400' : d ? 'border-cyan-500/50' : 'border-slate-300 dark:border-white/10',
+          )}
+        />
+      ))}
+    </div>
+  );
+
+  const matchLine = (
+    <>
+    {(confirm.length > 0 || touched.confirm) && (
+      <p aria-live="polite" className={cn('mt-1.5 flex items-center gap-1.5 text-[12px] font-medium', confirmOk ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500')}>
+        {confirmOk ? <><Check className="h-3.5 w-3.5" /> Passwords match</> : 'Passwords do not match'}
+      </p>
+    )}
+    </>
+  );
+
   const switcher = (text: string, label: string, to: AuthMode) => (
     <p className="mt-5 text-center text-[13px] text-ink/60">
       {text}{' '}
@@ -377,6 +605,7 @@ export function AuthModal() {
         <motion.div className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.18 }}>
           <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm" onClick={closeAuthModal} aria-hidden />
           <motion.div
+            ref={dialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby="auth-title"
@@ -406,6 +635,11 @@ export function AuthModal() {
                   <Field id="auth-password" label="Password" icon={<Lock className="h-4 w-4" />} error={touched.password && !passOk && `At least ${MIN_PASSWORD} characters.`}>
                     <PasswordInput id="auth-password" value={password} onChange={setPassword} onBlur={() => touch('password')} invalid={!!touched.password && !passOk} autoComplete="current-password" placeholder="••••••••" />
                   </Field>
+                  <div className="mt-2 flex justify-end">
+                    <button type="button" onClick={() => switchMode('forgot')} className="text-[12.5px] font-medium text-cyan-600 hover:underline dark:text-cyan-300">
+                      Forgot password?
+                    </button>
+                  </div>
                   {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
                   <button type="submit" disabled={busy} className={cn(primaryBtn, 'mt-6')}>
                     {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Logging in…</> : <>Log In <ArrowRight className="h-4 w-4" /></>}
@@ -438,33 +672,35 @@ export function AuthModal() {
                   {emailField}
                   <Field id="auth-new-password" label="Password" icon={<Lock className="h-4 w-4" />} error={touched.password && !passOk && 'Password does not meet all requirements below.'}>
                     <PasswordInput id="auth-new-password" value={password} onChange={setPassword} onBlur={() => touch('password')} invalid={!!touched.password && !passOk} autoComplete="new-password" placeholder="Min. 8 characters" />
-                    <div className="mt-2.5 grid grid-cols-2 gap-1.5 rounded-lg border border-ink/[0.06] bg-ink/[0.02] p-2.5 text-[11px]">
-                      <span className={cn('flex items-center gap-1.5 transition-colors', passRules.length ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-ink/40')}>
-                        <span className={cn('h-1.5 w-1.5 rounded-full', passRules.length ? 'bg-emerald-500 shadow-[0_0_6px_#10B981]' : 'bg-ink/30')} />
-                        8+ characters
-                      </span>
-                      <span className={cn('flex items-center gap-1.5 transition-colors', passRules.letter ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-ink/40')}>
-                        <span className={cn('h-1.5 w-1.5 rounded-full', passRules.letter ? 'bg-emerald-500 shadow-[0_0_6px_#10B981]' : 'bg-ink/30')} />
-                        1 letter (a-z)
-                      </span>
-                      <span className={cn('flex items-center gap-1.5 transition-colors', passRules.number ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-ink/40')}>
-                        <span className={cn('h-1.5 w-1.5 rounded-full', passRules.number ? 'bg-emerald-500 shadow-[0_0_6px_#10B981]' : 'bg-ink/30')} />
-                        1 number (0-9)
-                      </span>
-                      <span className={cn('flex items-center gap-1.5 transition-colors', passRules.special ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-ink/40')}>
-                        <span className={cn('h-1.5 w-1.5 rounded-full', passRules.special ? 'bg-emerald-500 shadow-[0_0_6px_#10B981]' : 'bg-ink/30')} />
-                        1 special char (!@#$)
-                      </span>
-                    </div>
+                    {rulesChecklist}
                   </Field>
                   <Field id="auth-confirm" label="Confirm Password" icon={<Lock className="h-4 w-4" />}>
                     <PasswordInput id="auth-confirm" value={confirm} onChange={setConfirm} onBlur={() => touch('confirm')} invalid={confirm.length > 0 && !confirmOk} autoComplete="new-password" placeholder="Repeat password" />
                   </Field>
-                  {(confirm.length > 0 || touched.confirm) && (
-                    <p aria-live="polite" className={cn('mt-1.5 flex items-center gap-1.5 text-[12px] font-medium', confirmOk ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500')}>
-                      {confirmOk ? <><Check className="h-3.5 w-3.5" /> Passwords match</> : 'Passwords do not match'}
-                    </p>
-                  )}
+                  {matchLine}
+                  <label
+                    className={cn(
+                      'mt-5 flex items-start gap-3 rounded-xl border p-3 transition',
+                      role === 'admin' || twoFactor ? 'border-cyan-500/35 bg-cyan-500/[0.06]' : 'border-ink/10 bg-ink/[0.02]',
+                      role === 'admin' ? 'cursor-not-allowed' : 'cursor-pointer',
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={role === 'admin' || twoFactor}
+                      disabled={role === 'admin'}
+                      onChange={(e) => setTwoFactor(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-cyan-500"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-semibold text-ink">Two-factor login (recommended)</span>
+                      <span className="mt-0.5 block text-[11.5px] leading-4 text-ink/55">
+                        {role === 'admin'
+                          ? 'Always on for admin accounts.'
+                          : 'Ask for a code from your email every time you log in, so a leaked password alone isn\u2019t enough. You can change this later in Settings.'}
+                      </span>
+                    </span>
+                  </label>
                   {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
                   <button type="submit" disabled={busy} className={cn(primaryBtn, 'mt-6')}>
                     {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending code…</> : <>Send Verification Code <ArrowRight className="h-4 w-4" /></>}
@@ -491,30 +727,7 @@ export function AuthModal() {
                     </button>
                   </p>
 
-                  <div className="mt-6 flex justify-between gap-2" role="group" aria-label="6-digit code">
-                    {digits.map((d, i) => (
-                      <input
-                        key={i}
-                        ref={(el) => {
-                          boxes.current[i] = el;
-                        }}
-                        value={d}
-                        onChange={(e) => setDigit(i, e.target.value)}
-                        onKeyDown={(e) => onKeyDown(i, e)}
-                        onPaste={(e) => onPaste(i, e)}
-                        onFocus={(e) => e.target.select()}
-                        inputMode="numeric"
-                        autoComplete={i === 0 ? 'one-time-code' : 'off'}
-                        maxLength={LEN}
-                        disabled={verifying}
-                        aria-label={`Digit ${i + 1}`}
-                        className={cn(
-                          'h-12 w-full min-w-0 rounded-xl border bg-white text-center font-mono text-lg font-semibold text-slate-900 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/25 disabled:opacity-60 dark:bg-canvas/70 dark:text-white sm:h-14',
-                          error ? 'border-rose-400' : d ? 'border-cyan-500/50' : 'border-slate-300 dark:border-white/10',
-                        )}
-                      />
-                    ))}
-                  </div>
+                  {codeBoxes}
 
                   {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
 
@@ -533,6 +746,101 @@ export function AuthModal() {
                     )}
                   </p>
                 </motion.div>
+              )}
+              {view === 'login-otp' && (
+                <motion.div key="login-otp" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.16 }}>
+                  <h2 id="auth-title" className="mt-4 text-xl font-bold tracking-tight text-ink">Check your email</h2>
+                  <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-sm text-ink/60">
+                    Two-factor login is on. Enter the code sent to <span className="font-medium text-ink/90">{email.trim()}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep(1);
+                        setError(null);
+                        focusEmail();
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-semibold text-cyan-600 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                    >
+                      <Pencil className="h-3 w-3" /> Back
+                    </button>
+                  </p>
+                  {codeBoxes}
+                  {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
+                  <button type="button" onClick={() => verifyLogin(code)} disabled={code.length !== LEN || verifying} className={cn(primaryBtn, 'mt-6')}>
+                    {verifying ? <><Loader2 className="h-4 w-4 animate-spin" /> Verifying…</> : <>Verify &amp; Log In <ArrowRight className="h-4 w-4" /></>}
+                  </button>
+                  <p className="mt-4 text-center text-[12.5px] text-ink/55">
+                    Didn&apos;t get it?{' '}
+                    {left > 0 ? (
+                      <span className="font-mono tabular-nums">Resend in 0:{String(left).padStart(2, '0')}</span>
+                    ) : (
+                      <button type="button" onClick={resendLogin} disabled={busy} className="font-semibold text-cyan-600 hover:underline disabled:opacity-50 dark:text-cyan-300">
+                        {busy ? 'Sending…' : 'Resend Code'}
+                      </button>
+                    )}
+                  </p>
+                </motion.div>
+              )}
+
+              {view === 'forgot' && (
+                <motion.form key="forgot" onSubmit={submitForgot} noValidate initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} transition={{ duration: 0.16 }}>
+                  <h2 id="auth-title" className="mt-4 text-xl font-bold tracking-tight text-ink">Reset your password</h2>
+                  <p className="mt-1.5 text-sm text-ink/60">Enter your account email and we&apos;ll send you a 6-digit reset code.</p>
+                  {emailField}
+                  {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
+                  <button type="submit" disabled={busy} className={cn(primaryBtn, 'mt-6')}>
+                    {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending code…</> : <>Send Reset Code <ArrowRight className="h-4 w-4" /></>}
+                  </button>
+                  {switcher('Remembered it?', 'Back to Log In', 'login')}
+                </motion.form>
+              )}
+
+              {view === 'reset' && (
+                <motion.form key="reset" onSubmit={submitReset} noValidate initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.16 }}>
+                  <h2 id="auth-title" className="mt-4 text-xl font-bold tracking-tight text-ink">Choose a new password</h2>
+                  <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 text-sm text-ink/60">
+                    {info || 'Code sent to'} <span className="font-medium text-ink/90">{email.trim()}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep(1);
+                        setError(null);
+                        focusEmail();
+                      }}
+                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-semibold text-cyan-600 transition hover:bg-cyan-500/10 dark:text-cyan-300"
+                    >
+                      <Pencil className="h-3 w-3" /> Edit
+                    </button>
+                  </p>
+
+                  <p className="mt-5 text-[12px] font-medium text-ink/70">Reset code</p>
+                  <div className="-mt-4">{codeBoxes}</div>
+
+                  <Field id="auth-reset-password" label="New Password" icon={<Lock className="h-4 w-4" />}>
+                    <PasswordInput id="auth-reset-password" value={password} onChange={setPassword} onBlur={() => touch('password')} invalid={!!touched.password && !isPasswordValid(password)} autoComplete="new-password" placeholder="Min. 8 characters" />
+                    {rulesChecklist}
+                  </Field>
+                  <Field id="auth-reset-confirm" label="Confirm New Password" icon={<Lock className="h-4 w-4" />}>
+                    <PasswordInput id="auth-reset-confirm" value={confirm} onChange={setConfirm} onBlur={() => touch('confirm')} invalid={confirm.length > 0 && !confirmOk} autoComplete="new-password" placeholder="Repeat new password" />
+                  </Field>
+                  {matchLine}
+
+                  {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
+                  <button type="submit" disabled={!resetOk || verifying} className={cn(primaryBtn, 'mt-6')}>
+                    {verifying ? <><Loader2 className="h-4 w-4 animate-spin" /> Updating…</> : <>Reset Password &amp; Log In <ArrowRight className="h-4 w-4" /></>}
+                  </button>
+                  <p className="mt-3 text-center text-[11.5px] leading-5 text-ink/45">This signs you out everywhere else.</p>
+                  <p className="mt-2 text-center text-[12.5px] text-ink/55">
+                    Didn&apos;t get it?{' '}
+                    {left > 0 ? (
+                      <span className="font-mono tabular-nums">Resend in 0:{String(left).padStart(2, '0')}</span>
+                    ) : (
+                      <button type="button" onClick={() => sendReset(true)} disabled={busy} className="font-semibold text-cyan-600 hover:underline disabled:opacity-50 dark:text-cyan-300">
+                        {busy ? 'Sending…' : 'Resend Code'}
+                      </button>
+                    )}
+                  </p>
+                </motion.form>
               )}
             </AnimatePresence>
           </motion.div>

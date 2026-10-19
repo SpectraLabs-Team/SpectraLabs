@@ -9,6 +9,7 @@ import { positionValue } from '@/lib/portfolio';
 import type { Position } from '@/lib/types';
 import { cn, formatCurrency, formatNumber, formatPercent } from '@/lib/utils';
 import { Badge, ErrorNote, GlassCard } from '@/components/ui/primitives';
+import { PresetMenu } from './PresetMenu';
 import { usePortfolio } from './PortfolioContext';
 
 const PALETTE = ['#22D3EE', '#38BDF8', '#818CF8', '#34D399', '#F472B6', '#FBBF24', '#A78BFA', '#2DD4BF'];
@@ -54,7 +55,7 @@ function NumberCell({ value, onCommit, placeholder, decimals, className }: { val
 }
 
 export function PortfolioStudio() {
-  const { positions, stats, csv, source, engine, setPositions, loadSample, importCsv, revision } = usePortfolio();
+  const { positions, stats, csv, source, engine, setPositions, loadSample, loadPreset, importCsv, revision } = usePortfolio();
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'value', dir: -1 });
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
@@ -197,6 +198,7 @@ export function PortfolioStudio() {
             <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => { setErrors([]); loadSample(); }}>
               <RotateCcw className="h-3.5 w-3.5" /> Load sample
             </button>
+            <PresetMenu onSelect={(id) => { setErrors([]); loadPreset(id); }} />
             <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => fileRef.current?.click()}>
               <FileUp className="h-3.5 w-3.5" /> Upload CSV
             </button>

@@ -18,8 +18,30 @@ const legacy = [
   ['/system/:path*', null],
 ];
 
+// Baseline security headers for every response. (A full Content-Security-Policy is a later
+// step: the theme/scroll init scripts in app/layout.tsx are inline and would need nonces.)
+const securityHeaders = [
+  { key: 'X-Frame-Options', value: 'DENY' }, // no clickjacking via iframes
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
+  ...(process.env.NODE_ENV === 'production'
+    ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' }]
+    : []),
+];
+
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || defaultDistDir,
+  poweredByHeader: false,
+  // Lint runs separately (`npm run lint`, once eslint is installed); don't fail or warn in builds.
+  eslint: { ignoreDuringBuilds: true },
+  async headers() {
+    return [
+      { source: '/:path*', headers: securityHeaders },
+      // Auth and engine responses are per-user; never let a shared cache keep them.
+      { source: '/api/:path*', headers: [{ key: 'Cache-Control', value: 'no-store' }] },
+    ];
+  },
   async redirects() {
     return legacy.map(([source, tab]) => ({ source, destination: studio(tab), permanent: false }));
   },

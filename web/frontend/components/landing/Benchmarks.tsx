@@ -7,6 +7,7 @@ import { ArrowRight, Play } from 'lucide-react';
 import { runBenchmark } from '@/lib/api';
 import { BASELINE, HEADLINE, pps } from '@/lib/baseline';
 import { SAMPLE_CSV } from '@/lib/portfolio';
+import { useAuth } from '@/lib/auth';
 import { chartColors, useTheme } from '@/lib/theme';
 import { useEngineHealth } from '@/lib/useEngineHealth';
 import { cn, formatCompact, formatDuration } from '@/lib/utils';
@@ -35,6 +36,7 @@ const fmt = (m: Metric, v: number) => (m === 'throughput' ? formatCompact(v) : m
 export function Benchmarks() {
   const cc = chartColors(useTheme().theme);
   const engine = useEngineHealth();
+  const { isAuthenticated, openAuthModal } = useAuth();
   const [metric, setMetric] = useState<Metric>('throughput');
   const [live, setLive] = useState<Record<number, number> | null>(null);
   const [running, setRunning] = useState(false);
@@ -154,9 +156,16 @@ export function Benchmarks() {
               {live && <span className="text-caution"> · Rust bars now from your engine; NumPy stays the reference run</span>}
               {error && <span className="text-loss"> · {error}</span>}
             </p>
-            <button type="button" onClick={measureLive} disabled={engine.status !== 'online' || running || metric === 'memory'} className={cn('btn-ghost border border-ink/10', metric === 'memory' && 'hidden')} title={engine.status !== 'online' ? 'Start the engine to measure live' : undefined}>
-              {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />} Measure Rust live
-            </button>
+            {isAuthenticated ? (
+              <button type="button" onClick={measureLive} disabled={engine.status !== 'online' || running || metric === 'memory'} className={cn('btn-ghost border border-ink/10', metric === 'memory' && 'hidden')} title={engine.status !== 'online' ? 'Start the engine to measure live' : undefined}>
+                {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />} Measure Rust live
+              </button>
+            ) : (
+              // The engine is behind sign-in; offer the account instead of a button that would 401.
+              <button type="button" onClick={() => openAuthModal('signup')} className={cn('btn-ghost border border-ink/10', metric === 'memory' && 'hidden')}>
+                <Play className="h-3.5 w-3.5" /> Sign up to measure live
+              </button>
+            )}
           </div>
         </div>
       </div>

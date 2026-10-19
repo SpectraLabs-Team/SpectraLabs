@@ -3,8 +3,11 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, type MouseEvent, type ReactNode } from 'react';
+import { useAuth } from '@/lib/auth';
 
 const PENDING_KEY = 'spectra-scroll-to';
+/** Where to go after the next successful sign-in (set when middleware bounced a visitor). */
+export const NEXT_KEY = 'spectra-auth-next';
 
 /** "/#features" → "features"; anything else → null. */
 function homeAnchor(href: string): string | null {
@@ -68,5 +71,31 @@ export function PendingSectionScroll() {
     const raf = requestAnimationFrame(() => setTimeout(() => scrollToId(target), 60));
     return () => cancelAnimationFrame(raf);
   }, []);
+  return null;
+}
+
+/**
+ * Mount on the landing page: when middleware bounced a signed-out visitor here
+ * (`/?auth=login&next=/studio`), open Log In and clean the URL.
+ */
+export function AuthRedirectPrompt() {
+  const { openAuthModal, isAuthenticated, isLoading } = useAuth();
+  const router = useRouter();
+  useEffect(() => {
+    if (isLoading) return;
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('auth');
+    if (mode !== 'login' && mode !== 'signup') return;
+    const next = params.get('next');
+    const safeNext = next === '/studio' || next === '/admin' ? next : null;
+    window.history.replaceState(null, '', window.location.pathname);
+    if (isAuthenticated && safeNext) router.replace(safeNext);
+    else if (!isAuthenticated) {
+      try {
+        if (safeNext) sessionStorage.setItem(NEXT_KEY, safeNext);
+      } catch {}
+      openAuthModal(mode);
+    }
+  }, [isLoading, isAuthenticated, openAuthModal, router]);
   return null;
 }

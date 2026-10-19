@@ -22,12 +22,15 @@ export async function sendOtpEmail({
 }: {
   to: string;
   code: string;
-  type?: 'signup' | 'login' | 'verify';
+  type?: 'signup' | 'login' | 'verify' | 'reset';
 }) {
   const title =
     type === 'signup'
       ? 'Verify your Spectra Labs account'
-      : 'Spectra Labs security verification';
+      : type === 'reset'
+        ? 'Reset your Spectra Labs password'
+        : 'Spectra Labs security verification';
+  const heading = type === 'signup' ? 'Complete your registration' : type === 'reset' ? 'Reset your password' : 'Two-Factor Authentication';
 
   const html = `
 <!DOCTYPE html>
@@ -56,7 +59,7 @@ export async function sendOtpEmail({
           <tr>
             <td align="center" style="padding-bottom:12px;">
               <h1 style="margin:0;font-size:22px;font-weight:700;color:#FFFFFF;letter-spacing:-0.02em;">
-                ${type === 'signup' ? 'Complete your registration' : 'Two-Factor Authentication'}
+                ${heading}
               </h1>
             </td>
           </tr>
@@ -117,8 +120,16 @@ export async function sendOtpEmail({
   const info = await transporter.sendMail({
     from: `"Spectra Labs Security" <${user}>`,
     to,
-    subject: `[${code}] Your Spectra Labs Verification Code`,
-    text: `Your Spectra Labs 6-digit verification code is: ${code}. This code expires in 5 minutes.`,
+    subject:
+      type === 'reset'
+        ? `[${code}] Your Spectra Labs password reset code`
+        : type === 'login'
+          ? `[${code}] Your Spectra Labs login code`
+          : `[${code}] Your Spectra Labs Verification Code`,
+    text:
+      type === 'reset'
+        ? `Your Spectra Labs password reset code is: ${code}. It expires in 5 minutes. If you didn't ask to reset your password, ignore this email; your password stays the same.`
+        : `Your Spectra Labs 6-digit verification code is: ${code}. This code expires in 5 minutes.`,
     html,
   });
 

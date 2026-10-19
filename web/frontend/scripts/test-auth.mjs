@@ -1940,7 +1940,7 @@ function apiHandlers() {
 function guardOf(body) {
   const guards = [
     [/requireAdmin\(/, () => 'admin'],
-    [/requireWorkspace\(route\.minRole/, () => 'engine'],
+    [/requireWorkspace\(minRole/, () => 'engine'],
     [/requireWorkspace\('(\w+)'(?:,\s*(params\.id))?/, (m) => m[1] + (m[2] ? '@url' : '')],
     [/requireUser\(/, () => 'user'],
     [/getSession\(/, () => 'session'],
@@ -2349,7 +2349,7 @@ test('api tokens: the engine proxy checks scope and role, logs every use, never 
   const tokenBranch = src.slice(src.indexOf('bearer !== undefined'), src.indexOf('} else if (!route.public)'));
   assert.ok(tokenBranch.length > 200, 'a bearer header takes the token branch (never the cookie)');
   assert.match(tokenBranch, /authenticateToken\(bearer, ip\)/);
-  assert.match(tokenBranch, /!caller\.token\.scopes\.includes\(scope\) \|\| !hasRole\(caller\.workspace\.role, route\.minRole\)/);
+  assert.match(tokenBranch, /!caller\.token\.scopes\.includes\(scope\) \|\| !hasRole\(caller\.workspace\.role, minRole\)/);
   assert.equal(tokenBranch.match(/action: 'api_token\.used'/g)?.length, 1);
   assert.match(tokenBranch, /outcome: 'denied'/, 'refusals are logged');
   assert.ok(tokenBranch.indexOf("await audit({ ...used, details") < tokenBranch.indexOf('signEngineIdentity'), 'every allowed use is logged before it is forwarded');

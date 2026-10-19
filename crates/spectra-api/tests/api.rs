@@ -426,7 +426,7 @@ async fn openapi_spec_is_served_unsigned() {
     assert_eq!(status, 200);
     let paths = j.at("paths").unwrap();
     for path in ["/api/v1/jobs", "/api/v1/jobs/{id}", "/api/v1/jobs/{id}/cancel", "/api/v1/risk", "/ready"] {
-        assert!(paths.at(path).is_some(), "missing {path}");
+        assert!(paths.at(path).is_ok(), "missing {path}");
     }
 }
 

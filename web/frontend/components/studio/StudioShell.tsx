@@ -11,6 +11,7 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { displayName, initials, useAuth } from '@/lib/auth';
 import { cn, formatCompactCurrency, formatCurrency } from '@/lib/utils';
 import { usePortfolio } from './PortfolioContext';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 export type StudioTab = 'risk' | 'portfolio' | 'benchmark' | 'settings';
 
@@ -18,7 +19,7 @@ export const TABS: { id: StudioTab; label: string; short: string; icon: typeof C
   { id: 'risk', label: 'Risk & Stress Lab', short: 'Risk', icon: ShieldAlert },
   { id: 'portfolio', label: 'Portfolio Studio', short: 'Portfolio', icon: Briefcase },
   { id: 'benchmark', label: 'Hardware Benchmarks', short: 'Benchmarks', icon: Cpu },
-  { id: 'settings', label: 'Account & Market Settings', short: 'Settings', icon: PlugZap },
+  { id: 'settings', label: 'Market Data & Alpaca Settings', short: 'Settings', icon: PlugZap },
 ];
 
 const COLLAPSE_KEY = 'spectra-sidebar-collapsed';
@@ -43,10 +44,12 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
       </div>
 
       <div className="flex-1 space-y-5 overflow-y-auto p-3">
-        {/* Profile */}
-        <div
-          className={cn('flex items-center gap-3 rounded-xl border border-ink/[0.07] bg-ink/[0.02] p-2.5', collapsed && 'justify-center p-2')}
-          title={user ? `${displayName(user)} · ${user.email}` : undefined}
+        {/* Profile → Account page */}
+        <Link
+          href="/account"
+          onClick={onNavigate}
+          className={cn('flex items-center gap-3 rounded-xl border border-ink/[0.07] bg-ink/[0.02] p-2.5 transition hover:border-accent/30 hover:bg-accent/[0.05]', collapsed && 'justify-center p-2')}
+          title={user ? `${displayName(user)} · ${user.email} · Account settings` : 'Account settings'}
         >
           <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-gradient font-mono text-xs font-bold text-onaccent shadow-glow">
             {user ? initials(user) : 'SL'}
@@ -59,7 +62,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
               </span>
             </div>
           )}
-        </div>
+        </Link>
 
         {/* Trading mode */}
         {!collapsed ? (
@@ -228,9 +231,11 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
           <button type="button" onClick={() => setMobileOpen(true)} className="-ml-1 rounded-md p-1.5 text-ink/60 lg:hidden" aria-label="Open menu">
             <Menu className="h-5 w-5" />
           </button>
+          <WorkspaceSwitcher className="shrink-0" />
+          <span aria-hidden className="hidden h-5 w-px bg-ink/10 sm:block" />
           <div className="flex min-w-0 items-center gap-2.5">
-            <current.icon className="h-4 w-4 shrink-0 text-accent" />
-            <h1 className="truncate text-sm font-semibold text-ink">{current.label}</h1>
+            <current.icon className="hidden h-4 w-4 shrink-0 text-accent sm:block" />
+            <h1 className="hidden truncate text-sm font-semibold text-ink sm:block">{current.label}</h1>
           </div>
           <div className="ml-auto flex items-center gap-3">
             <span className="hidden items-center gap-2 rounded-full border border-ink/10 bg-ink/[0.03] px-3 py-1 text-xs text-ink/60 2xl:inline-flex">

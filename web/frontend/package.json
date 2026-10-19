@@ -3,35 +3,51 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/db-migrate.mjs --create",
     "dev": "next dev",
     "build": "next build",
+    "prestart": "node scripts/db-migrate.mjs",
     "start": "next start",
     "lint": "next lint",
+    "setup": "node scripts/setup-env.mjs",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:import-users": "node scripts/import-users.mjs",
+    "admin": "node scripts/admin.mjs",
+    "secrets:rotate": "node scripts/secrets-rotate.mjs",
+    "audit:verify": "node scripts/audit-verify.mjs",
     "test": "node scripts/test-auth.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@react-three/drei": "^9.88.0",
-    "@react-three/fiber": "^8.15.0",
+    "@node-rs/argon2": "^2.2.2",
+    "@react-three/drei": "^10.0.0",
+    "@react-three/fiber": "^9.0.0",
     "clsx": "^2.0.0",
-    "framer-motion": "^10.16.0",
-    "lucide-react": "^0.292.0",
-    "next": "^14.0.0",
+    "framer-motion": "^11.18.2",
+    "lucide-react": "^0.499.0",
+    "next": "15.5.28",
     "nodemailer": "^10.1.6",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
+    "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "recharts": "^2.10.0",
     "tailwind-merge": "^2.0.0",
-    "three": "^0.158.0"
+    "three": "^0.170.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "@types/nodemailer": "^8.0.2",
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
+    "@types/pg": "^8.11.10",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.32",
+    "postcss": "^8.5.28",
     "tailwindcss": "^3.3.6",
     "typescript": "^5.3.0"
+  },
+  "overrides": {
+    "postcss": "^8.5.28"
   }
 }

@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
-import { listUsers, verifySessionToken } from '@/lib/server/authStore';
+import { listUsers } from '@/lib/server/authStore';
+import { requireAdmin } from '@/lib/server/requireUser';
 
 export const dynamic = 'force-dynamic';
 
-/** Registered accounts for the admin console. Role is checked from the signed session cookie, never the client. */
+/** Registered accounts for the admin console. Platform admins only (role read from the database). */
 export async function GET() {
-  const token = cookies().get('spectra_session')?.value;
-  const session = token ? verifySessionToken(token) : null;
-  if (!session) return NextResponse.json({ ok: false, error: 'Not signed in.' }, { status: 401 });
-  if (session.role !== 'admin') return NextResponse.json({ ok: false, error: 'Admin privileges required.' }, { status: 403 });
-  return NextResponse.json({ ok: true, users: listUsers() });
+  const { res } = await requireAdmin();
+  if (res) return res;
+  return NextResponse.json({ ok: true, users: await listUsers() });
 }

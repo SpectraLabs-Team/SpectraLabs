@@ -64,7 +64,7 @@ cargo run --release -p spectra-cli --example research_workflow
 
 # Dashboard: API, then the frontend
 ./target/release/spectra-api                   # http://127.0.0.1:8000
-cd web/frontend && cp .env.example .env.local && npm install && npm run dev   # http://localhost:3000
+cd web/frontend && npm install && npm run setup && npm run dev   # http://localhost:3000
 ```
 
 API settings: `SPECTRA_API_ADDR` (default `127.0.0.1:8000`) and `SPECTRA_CORS_ORIGINS` (default

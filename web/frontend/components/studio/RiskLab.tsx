@@ -1,13 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Download, Info, Play, ShieldAlert, Sigma, SlidersHorizontal, Sparkles, TrendingDown, Wallet } from 'lucide-react';
+import { Activity, Cpu, Download, Info, Play, ShieldAlert, Sigma, SlidersHorizontal, Sparkles, TrendingDown, Wallet } from 'lucide-react';
 import { calculateRisk } from '@/lib/api';
-import { analyticCVaR, analyticLossStd, analyticVaR } from '@/lib/model';
+import { analyticVaR } from '@/lib/model';
 import type { BackendRequest } from '@/lib/types';
 import { parseCsv, portfolioStats } from '@/lib/portfolio';
 import { cn, confidenceLabel, formatCompact, formatCurrency, formatDuration, formatPercent } from '@/lib/utils';
-import { AnimatedValue, Badge, ErrorNote, GlassCard, RangeSlider, Segmented, Spinner } from '@/components/ui/primitives';
+import { AnimatedValue, Badge, ErrorNote, GlassCard, RangeSlider, Spinner } from '@/components/ui/primitives';
 import { LossHistogram } from './LossHistogram';
 import { usePortfolio, type RiskRun } from './PortfolioContext';
 import { StressPanel } from './StressPanel';
@@ -21,11 +21,12 @@ const HORIZON_PRESETS = [
   { value: 63, label: '1Q' },
   { value: 252, label: '1Y' },
 ];
-const BACKENDS: { value: BackendRequest; label: string }[] = [
-  { value: 'auto', label: 'Auto' },
-  { value: 'cpu', label: 'CPU' },
-  { value: 'parallel', label: 'Parallel' },
-];
+/**
+ * The Risk Lab always runs the Parallel backend (all cores). It's the fastest choice for every
+ * run size, and its results depend only on the seed and path count, never on the machine's
+ * thread count. CPU vs Parallel comparisons live in the Hardware Benchmarks tab.
+ */
+const BACKEND: BackendRequest = 'parallel';
 
 
 /**
@@ -90,15 +91,15 @@ function MetricCard({ icon: Icon, label, value, sub, tone = 'neutral', loading }
 }
 
 export function RiskLab() {
-  const { csv, stats, revision, engine, riskParams, setRiskParams, riskRun: results, setRiskRun: setResults } = usePortfolio();
+  const { csv, revision, engine, riskParams, setRiskParams, riskRun: results, setRiskRun: setResults } = usePortfolio();
   const online = engine.status === 'online';
   // Inputs and the last run live in PortfolioContext, so they survive switching Studio tabs.
   // `auto` (Live mode) is off by default: the engine only runs on an explicit click.
-  const { confidence, simulations, horizon, backend, auto } = riskParams;
+  const { confidence, simulations, horizon, auto } = riskParams;
+  const backend = BACKEND;
   const setConfidence = (confidence: number) => setRiskParams({ confidence });
   const setSimulations = (simulations: number) => setRiskParams({ simulations });
   const setHorizon = (horizon: number) => setRiskParams({ horizon });
-  const setBackend = (backend: BackendRequest) => setRiskParams({ backend });
   const setAuto = (f: (a: boolean) => boolean) => setRiskParams((p) => ({ auto: f(p.auto) }));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -131,9 +132,6 @@ export function RiskLab() {
     return () => clearTimeout(t);
   }, [online, auto, run, simulations, revision]);
 
-  // Closed-form values: instant preview offline, and a sanity check next to the Monte Carlo result.
-  const modelInput = useMemo(() => ({ value: stats.netValue, volatility: stats.modelVolatility, horizonDays: horizon }), [stats.netValue, stats.modelVolatility, horizon]);
-  const cf = { var: analyticVaR(modelInput, confidence), cvar: analyticCVaR(modelInput, confidence), std: analyticLossStd(modelInput) };
   // A run is "fresh" only if every input still matches: book, confidence, horizon, paths and backend.
   const fresh =
     !!results &&
@@ -143,14 +141,21 @@ export function RiskLab() {
     results.simulations === simulations &&
     results.backend === backend;
   const dirty = !!results && !fresh;
-  const shown = {
-    value: fresh ? results!.var.portfolio_value : stats.netValue,
-    var: fresh ? results!.var.value : cf.var,
-    cvar: fresh ? results!.cvar.value : cf.cvar,
-    std: fresh ? results!.vol.value : cf.std,
-    vol: fresh ? results!.var.model_volatility : stats.modelVolatility,
-  };
-  const mcErr = fresh ? results!.var.value / cf.var - 1 : null;
+
+  // Everything below describes the LAST RUN, using that run's own inputs. Nothing here moves
+  // when a slider moves: numbers change only when "Run simulation" is pressed (or Live is on).
+  const ran = results
+    ? {
+        confidence: results.var.confidence,
+        horizon: Math.round(results.var.horizon_years * 252),
+        model: { value: results.var.portfolio_value, volatility: results.var.model_volatility, horizonDays: Math.round(results.var.horizon_years * 252) },
+      }
+    : null;
+  const runGross = useMemo(() => (results ? portfolioStats(parseCsv(results.csv).positions).grossExposure : 0), [results]);
+  // Closed-form value of the same model and inputs: a sanity check on the Monte Carlo estimate.
+  const mcErr = results && ran ? results.var.value / analyticVaR(ran.model, ran.confidence) - 1 : null;
+  const label = ran ? confidenceLabel(ran.confidence) : confidenceLabel(confidence);
+  const days = ran ? ran.horizon : horizon;
 
   return (
     <div className="grid gap-5 xl:grid-cols-[340px_1fr]">
@@ -196,11 +201,12 @@ export function RiskLab() {
             </div>
           </div>
 
-          <div>
-            <p className="mb-2 text-xs font-medium text-ink/60">Execution backend</p>
-            <Segmented label="backend" value={backend} onChange={setBackend} options={BACKENDS} className="w-full" />
-            <p className="mt-2 text-[11px] leading-4 text-ink/40">Auto picks CPU for small runs and Parallel for large ones. Results never depend on thread count.</p>
-          </div>
+          <p className="flex items-start gap-2 rounded-lg border border-ink/[0.07] bg-ink/[0.02] px-3 py-2 text-[11px] leading-4 text-ink/50">
+            <Cpu className="mt-px h-3.5 w-3.5 shrink-0 text-accent" />
+            <span>
+              Runs on all CPU cores. Results depend only on the seed and path count, so a run is reproducible on any machine.
+            </span>
+          </p>
 
           <div className="flex gap-2">
             <button type="button" onClick={run} disabled={!online || loading} className="btn-primary flex-1">
@@ -225,10 +231,10 @@ export function RiskLab() {
       <div className="min-w-0 space-y-5">
         {/* Metric cards */}
         <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-          <MetricCard icon={Wallet} label="Portfolio value" value={formatCurrency(shown.value)} sub={`gross ${formatCurrency(stats.grossExposure)}`} loading={loading} />
-          <MetricCard icon={ShieldAlert} tone="loss" label={`Value at Risk · ${confidenceLabel(confidence)}`} value={formatCurrency(shown.var)} sub={`${formatPercent(shown.var / shown.value)} of book · ${horizon}d`} loading={loading} />
-          <MetricCard icon={TrendingDown} tone="loss" label="Expected shortfall (CVaR)" value={formatCurrency(shown.cvar)} sub={`${formatPercent(shown.cvar / shown.value)} · mean of worst ${formatPercent(1 - confidence, confidence > 0.99 ? 1 : 0)}`} loading={loading} />
-          <MetricCard icon={Sigma} tone="accent" label="Annualized volatility" value={formatPercent(shown.vol)} sub={`σ of ${horizon}d P&L ${formatCurrency(shown.std)}`} loading={loading} />
+          <MetricCard icon={Wallet} label="Portfolio value" value={results ? formatCurrency(results.var.portfolio_value) : '—'} sub={results ? `gross ${formatCurrency(runGross)}` : 'Run a simulation'} loading={loading} />
+          <MetricCard icon={ShieldAlert} tone="loss" label={`Value at Risk · ${label}`} value={results ? formatCurrency(results.var.value) : '—'} sub={results ? `${formatPercent(results.var.value / results.var.portfolio_value)} of book · ${days}d` : `${days}d horizon`} loading={loading} />
+          <MetricCard icon={TrendingDown} tone="loss" label="Expected shortfall (CVaR)" value={results ? formatCurrency(results.cvar.value) : '—'} sub={results ? `${formatPercent(results.cvar.value / results.var.portfolio_value)} · mean of worst ${formatPercent(1 - ran!.confidence, ran!.confidence > 0.99 ? 1 : 0)}` : 'mean loss beyond VaR'} loading={loading} />
+          <MetricCard icon={Sigma} tone="accent" label="Annualized volatility" value={results ? formatPercent(results.var.model_volatility) : '—'} sub={results ? `σ of ${days}d P&L ${formatCurrency(results.vol.value)}` : 'model volatility'} loading={loading} />
         </div>
 
         {/* Distribution */}
@@ -236,10 +242,10 @@ export function RiskLab() {
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold text-ink">Loss distribution · density histogram</h2>
-              <p className="mt-0.5 text-xs text-ink/50">{horizon}-day horizon · the shaded tail is the loss beyond VaR</p>
+              <p className="mt-0.5 text-xs text-ink/50">{days}-day horizon · the shaded tail is the loss beyond VaR</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {fresh ? <Badge tone="profit">Monte Carlo · {results!.var.simulations_run.toLocaleString()} paths</Badge> : <Badge tone="accent">closed-form preview</Badge>}
+              {results && <Badge tone={fresh ? 'profit' : 'caution'}>Monte Carlo · {results.var.simulations_run.toLocaleString()} paths{fresh ? '' : ' · last run'}</Badge>}
               {mcErr !== null && (
                 <span className="num text-[11px] text-ink/50" title="Monte Carlo VaR vs the exact closed-form value of the same model">
                   vs closed form {mcErr >= 0 ? '+' : ''}
@@ -249,8 +255,8 @@ export function RiskLab() {
             </div>
           </div>
           <div className="mt-4 h-[320px]">
-            {results || loading ? (
-              <LossHistogram input={modelInput} varValue={shown.var} cvarValue={shown.cvar} confidenceLabel={confidenceLabel(confidence)} />
+            {results && ran ? (
+              <LossHistogram input={ran.model} varValue={results.var.value} cvarValue={results.cvar.value} confidenceLabel={label} />
             ) : (
               <div className="relative flex h-full flex-col items-center justify-center overflow-hidden rounded-xl border border-dashed border-ink/[0.12] bg-ink/[0.015] px-6 text-center">
                 <div aria-hidden className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_40%,rgb(var(--accent)/0.10),transparent_65%)]" />
@@ -263,7 +269,7 @@ export function RiskLab() {
                 <span className="relative flex h-11 w-11 items-center justify-center rounded-xl border border-accent/30 bg-accent/10 text-accent shadow-glow">
                   <Sparkles className="h-5 w-5" />
                 </span>
-                <p className="relative mt-4 text-sm font-semibold text-ink">Ready to simulate</p>
+                <p className="relative mt-4 text-sm font-semibold text-ink">{loading ? 'Running simulation…' : 'Ready to simulate'}</p>
                 <p className="relative mt-1 max-w-sm text-[12.5px] leading-5 text-ink/55">
                   Configure parameters on the left and click <span className="font-semibold text-ink/80">&lsquo;Run simulation&rsquo;</span>.
                   {!online && ' The Rust engine must be running first.'}

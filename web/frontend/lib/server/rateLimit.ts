@@ -1,53 +1,67 @@
+import { query } from './db';
+
 /**
- * Fixed-window rate limiter kept in server memory. Good for a single Next.js process;
- * with several instances or serverless, move the counters to Redis/Upstash.
+ * Fixed-window rate limiter backed by Postgres (table `rate_limits`), so limits survive restarts
+ * and hold across several server processes. Each hit is one atomic upsert.
+ *
+ * Keys name what is limited and for whom, e.g. `login:ip:<ip>` or `otp:email:hour:<email>`.
+ * A key's window starts at its first hit; once it ends, the next hit starts a new window.
  */
-type Bucket = { count: number; resetAt: number };
-
-const g = global as unknown as { __spectra_rl?: Map<string, Bucket> };
-const buckets = g.__spectra_rl || new Map<string, Bucket>();
-g.__spectra_rl = buckets;
-
-let lastSweep = 0;
-function sweep(now: number) {
-  if (now - lastSweep < 60_000) return;
-  lastSweep = now;
-  buckets.forEach((b, k) => {
-    if (b.resetAt <= now) buckets.delete(k);
-  });
-}
 
 export type Limit = { ok: true } | { ok: false; retryAfter: number };
 
-/** Count one hit against `key`; refuse once `max` hits land within `windowMs`. */
-export function hit(key: string, max: number, windowMs: number): Limit {
-  const now = Date.now();
-  sweep(now);
-  const b = buckets.get(key);
-  if (!b || b.resetAt <= now) {
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
-    return { ok: true };
+type Row = { count: number; retry_ms: number };
+
+const retryAfter = (ms: number) => Math.max(1, Math.ceil(ms / 1000));
+
+/** Count one hit against `key`; refuse once more than `max` hits land within `windowMs`. */
+export async function hit(key: string, max: number, windowMs: number): Promise<Limit> {
+  const [row] = await query<Row>(
+    `INSERT INTO rate_limits AS r (key, count, reset_at)
+     VALUES ($1, 1, now() + $2 * interval '1 millisecond')
+     ON CONFLICT (key) DO UPDATE SET
+       count    = CASE WHEN r.reset_at <= now() THEN 1 ELSE r.count + 1 END,
+       reset_at = CASE WHEN r.reset_at <= now() THEN EXCLUDED.reset_at ELSE r.reset_at END
+     RETURNING count, (extract(epoch FROM (reset_at - now())) * 1000)::float8 AS retry_ms`,
+    [key, windowMs],
+  );
+  // Housekeeping now and then: rows whose window ended long ago are dead weight.
+  if (Math.random() < 0.01) {
+    query(`DELETE FROM rate_limits WHERE reset_at < now() - interval '1 hour'`).catch(() => {});
   }
-  if (b.count >= max) return { ok: false, retryAfter: Math.ceil((b.resetAt - now) / 1000) };
-  b.count += 1;
+  return row.count <= max ? { ok: true } : { ok: false, retryAfter: retryAfter(row.retry_ms) };
+}
+
+/** Check without counting (e.g. "is this already over the limit?"). */
+export async function peek(key: string, max: number): Promise<Limit> {
+  const [row] = await query<Row>(
+    `SELECT count, (extract(epoch FROM (reset_at - now())) * 1000)::float8 AS retry_ms
+       FROM rate_limits WHERE key = $1 AND reset_at > now()`,
+    [key],
+  );
+  return !row || row.count < max ? { ok: true } : { ok: false, retryAfter: retryAfter(row.retry_ms) };
+}
+
+/** Clear a key (e.g. failures after a successful sign-in). */
+export async function reset(key: string): Promise<void> {
+  await query('DELETE FROM rate_limits WHERE key = $1', [key]);
+}
+
+/**
+ * Run several limits in order; the first one exceeded wins. Every limit up to and including that
+ * one is counted.
+ */
+export async function hitAll(limits: readonly (readonly [key: string, max: number, windowMs: number, what: string])[]): Promise<{ ok: true } | { ok: false; retryAfter: number; what: string }> {
+  for (const [key, max, windowMs, what] of limits) {
+    const r = await hit(key, max, windowMs);
+    if (!r.ok) return { ok: false, retryAfter: r.retryAfter, what };
+  }
   return { ok: true };
-}
-
-/** Check without counting (e.g. "is this email locked out by failures?"). */
-export function peek(key: string, max: number): Limit {
-  const now = Date.now();
-  const b = buckets.get(key);
-  if (!b || b.resetAt <= now || b.count < max) return { ok: true };
-  return { ok: false, retryAfter: Math.ceil((b.resetAt - now) / 1000) };
-}
-
-export function reset(key: string) {
-  buckets.delete(key);
 }
 
 /**
  * Best-effort client IP. x-forwarded-for is only trustworthy behind a proxy you control
- * (Vercel, nginx) that overwrites it; per-email limits below don't depend on it.
+ * (Vercel, nginx) that overwrites it; per-account limits don't depend on it.
  */
 export function clientIp(req: Request): string {
   const xff = req.headers.get('x-forwarded-for');

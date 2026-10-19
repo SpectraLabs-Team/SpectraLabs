@@ -135,3 +135,144 @@ export async function sendOtpEmail({
 
   return info;
 }
+
+/**
+ * Tell an account owner their sign-in was locked after repeated wrong passwords (M19 task 7).
+ * Callers rate-limit this (see shouldSendLockoutEmail) and never let a send failure block a request.
+ */
+export async function sendLockoutEmail({ to, minutes, ip }: { to: string; minutes: number; ip: string }) {
+  const where = ip && ip !== 'unknown' ? ` from IP address ${ip}` : '';
+  const text =
+    `There were 10 failed sign-in attempts on your Spectra Labs account${where}, so sign-in is locked for ${minutes} minutes.\n\n` +
+    `If this was you, wait or reset your password to unlock it now.\n` +
+    `If it wasn't you, someone may know or be guessing your email address: reset your password, and keep two-factor login on.`;
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Sign-in locked</title></head>
+<body style="margin:0;padding:0;background-color:#040711;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#F1F5F9;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#040711;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#0B0F19;border:1px solid rgba(251,191,36,0.35);border-radius:16px;padding:36px 32px;">
+        <tr><td align="center" style="padding-bottom:20px;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:0.2em;color:#FBBF24;text-transform:uppercase;">Spectra Labs · Security alert</span>
+        </td></tr>
+        <tr><td align="center" style="padding-bottom:12px;">
+          <h1 style="margin:0;font-size:22px;font-weight:700;color:#FFFFFF;">Sign-in temporarily locked</h1>
+        </td></tr>
+        <tr><td style="padding-bottom:20px;">
+          <p style="margin:0;font-size:14px;line-height:22px;color:#94A3B8;">
+            There were 10 failed sign-in attempts on your account${where.replace(/[<>&"]/g, '')}, so sign-in is locked for
+            <strong style="color:#E2E8F0;">${minutes} minutes</strong>.
+          </p>
+        </td></tr>
+        <tr><td style="padding-bottom:24px;">
+          <p style="margin:0;font-size:14px;line-height:22px;color:#94A3B8;">
+            <strong style="color:#E2E8F0;">If this was you</strong>, wait, or reset your password to unlock it now.<br>
+            <strong style="color:#E2E8F0;">If it wasn't</strong>, someone may be guessing your password: reset it and keep two-factor login on.
+          </p>
+        </td></tr>
+        <tr><td style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;" align="center">
+          <p style="margin:0;font-size:10px;color:#334155;font-family:'JetBrains Mono',monospace;">Spectra Labs Inc. · Pure Rust Quantitative Engine</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return transporter.sendMail({ from: `"Spectra Labs Security" <${user}>`, to, subject: 'Sign-in to your Spectra Labs account was locked', text, html });
+}
+
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+
+/**
+ * "New sign-in to your account" (M19 task 11): a password sign-in from a browser this account
+ * hasn't used before. Callers rate-limit it and never let a send failure block the sign-in.
+ * APP_URL (optional, e.g. https://app.spectralabs.dev) adds a link to the Account page.
+ */
+export async function sendNewDeviceEmail({ to, device, ip, when }: { to: string; device: string; ip: string; when: Date }) {
+  const whenText = when.toUTCString();
+  const where = ip && ip !== 'unknown' ? ip : 'an unknown network';
+  const account = process.env.APP_URL ? `${process.env.APP_URL.replace(/\/+$/, '')}/account` : '';
+  const text =
+    `Your Spectra Labs account was just signed in to from a device it hasn't used before.\n\n` +
+    `Device: ${device}\nIP address: ${where}\nTime: ${whenText}\n\n` +
+    `If this was you, there's nothing to do.\n` +
+    `If it wasn't, reset your password now and sign out the other devices${account ? `: ${account}` : ' on your Account page'}. Keep two-step login on.`;
+  const row = (k: string, v: string) =>
+    `<tr><td style="padding:4px 12px 4px 0;font-size:13px;color:#64748B;">${k}</td><td style="padding:4px 0;font-size:13px;color:#E2E8F0;font-family:'JetBrains Mono',monospace;">${escapeHtml(v)}</td></tr>`;
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>New sign-in</title></head>
+<body style="margin:0;padding:0;background-color:#040711;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#F1F5F9;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#040711;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#0B0F19;border:1px solid rgba(0,242,254,0.25);border-radius:16px;padding:36px 32px;">
+        <tr><td align="center" style="padding-bottom:20px;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:0.2em;color:#00F2FE;text-transform:uppercase;">Spectra Labs · Security</span>
+        </td></tr>
+        <tr><td align="center" style="padding-bottom:12px;">
+          <h1 style="margin:0;font-size:22px;font-weight:700;color:#FFFFFF;">New sign-in to your account</h1>
+        </td></tr>
+        <tr><td style="padding-bottom:16px;">
+          <p style="margin:0;font-size:14px;line-height:22px;color:#94A3B8;">Your account was just signed in to from a device it hasn&#39;t used before.</p>
+        </td></tr>
+        <tr><td style="padding-bottom:20px;"><table cellpadding="0" cellspacing="0">${row('Device', device)}${row('IP address', where)}${row('Time', whenText)}</table></td></tr>
+        <tr><td style="padding-bottom:24px;">
+          <p style="margin:0;font-size:14px;line-height:22px;color:#94A3B8;">
+            <strong style="color:#E2E8F0;">If this was you</strong>, there&#39;s nothing to do.<br>
+            <strong style="color:#E2E8F0;">If it wasn&#39;t</strong>, reset your password now and sign out the other devices${account ? ` on your <a href="${escapeHtml(account)}" style="color:#00F2FE;">Account page</a>` : ' on your Account page'}.
+          </p>
+        </td></tr>
+        <tr><td style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;" align="center">
+          <p style="margin:0;font-size:10px;color:#334155;font-family:'JetBrains Mono',monospace;">Spectra Labs Inc. · Pure Rust Quantitative Engine</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return transporter.sendMail({ from: `"Spectra Labs Security" <${user}>`, to, subject: 'New sign-in to your Spectra Labs account', text, html });
+}
+
+/** Workspace invitation (M19 task 12). The link is single-use and valid for 7 days. */
+export async function sendInviteEmail({ to, inviter, workspace, role, link }: { to: string; inviter: string; workspace: string; role: string; link: string }) {
+  const text =
+    `${inviter} invited you to join the "${workspace}" workspace on Spectra Labs as ${role === 'editor' ? 'an editor' : 'a viewer'}.\n\n` +
+    `Accept: ${link}\n\n` +
+    `The link works once and expires in 7 days. Sign in (or create an account) with this email address to accept. ` +
+    `If you weren't expecting this, ignore it: nothing happens unless you accept.`;
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Workspace invitation</title></head>
+<body style="margin:0;padding:0;background-color:#040711;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#F1F5F9;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#040711;padding:40px 20px;">
+    <tr><td align="center">
+      <table width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background-color:#0B0F19;border:1px solid rgba(0,242,254,0.25);border-radius:16px;padding:36px 32px;">
+        <tr><td align="center" style="padding-bottom:20px;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:0.2em;color:#00F2FE;text-transform:uppercase;">Spectra Labs</span>
+        </td></tr>
+        <tr><td align="center" style="padding-bottom:12px;">
+          <h1 style="margin:0;font-size:22px;font-weight:700;color:#FFFFFF;">Join ${escapeHtml(workspace)}</h1>
+        </td></tr>
+        <tr><td align="center" style="padding-bottom:24px;">
+          <p style="margin:0;font-size:14px;line-height:22px;color:#94A3B8;">${escapeHtml(inviter)} invited you to the <strong style="color:#E2E8F0;">${escapeHtml(workspace)}</strong> workspace as ${role === 'editor' ? 'an editor' : 'a viewer'}.</p>
+        </td></tr>
+        <tr><td align="center" style="padding-bottom:24px;">
+          <a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 22px;border-radius:10px;background:#00F2FE;color:#03131A;font-weight:700;font-size:14px;text-decoration:none;">Accept invitation</a>
+        </td></tr>
+        <tr><td align="center" style="padding-bottom:20px;">
+          <p style="margin:0;font-size:12px;line-height:18px;color:#64748B;">The link works once and expires in 7 days. Sign in with this email address to accept. Not expecting this? Ignore it.</p>
+        </td></tr>
+        <tr><td style="border-top:1px solid rgba(255,255,255,0.08);padding-top:16px;" align="center">
+          <p style="margin:0;font-size:10px;color:#334155;font-family:'JetBrains Mono',monospace;">Spectra Labs Inc. · Pure Rust Quantitative Engine</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+  return transporter.sendMail({ from: `"Spectra Labs" <${user}>`, to, subject: `${inviter} invited you to ${workspace} on Spectra Labs`, text, html });
+}

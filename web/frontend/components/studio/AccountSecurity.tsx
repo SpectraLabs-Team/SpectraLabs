@@ -5,7 +5,7 @@ import { Lock, ShieldCheck, ShieldOff } from 'lucide-react';
 import { GlassCard, Spinner } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
 
-type State = { status: 'loading' } | { status: 'ready'; enabled: boolean; enforced: boolean } | { status: 'error'; message: string };
+type State = { status: 'loading' } | { status: 'ready'; enabled: boolean; enforced: boolean; reason?: string | null; method?: 'totp' | 'email' } | { status: 'error'; message: string };
 
 /** Studio → Settings: choose password-only (1FA) or password + emailed code (2FA) at login. */
 export function AccountSecurity() {
@@ -19,7 +19,7 @@ export function AccountSecurity() {
   useEffect(() => {
     fetch('/api/auth/2fa', { cache: 'no-store', credentials: 'same-origin' })
       .then((r) => r.json())
-      .then((d) => setState(d.ok ? { status: 'ready', enabled: d.enabled, enforced: d.enforced } : { status: 'error', message: d.error || 'Could not load.' }))
+      .then((d) => setState(d.ok ? { status: 'ready', enabled: d.enabled, enforced: d.enforced, reason: d.reason, method: d.method } : { status: 'error', message: d.error || 'Could not load.' }))
       .catch(() => setState({ status: 'error', message: 'Could not load your security settings.' }));
   }, []);
 
@@ -36,10 +36,10 @@ export function AccountSecurity() {
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error || 'Could not update the setting.');
-      setState({ status: 'ready', enabled: d.enabled, enforced: d.enforced });
+      setState({ status: 'ready', enabled: d.enabled, enforced: d.enforced, reason: d.reason, method: d.method });
       setConfirming(false);
       setPassword('');
-      setNotice(d.enabled ? 'Two-factor login is on. Your next login will ask for an emailed code.' : 'Two-factor login is off. You’ll log in with your password only.');
+      setNotice(d.enabled ? (d.method === 'totp' ? 'Two-factor login is on. Your next login will ask for a code from your authenticator app.' : 'Two-factor login is on. Your next login will ask for an emailed code.') : 'Two-factor login is off. You’ll log in with your password only.');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not update the setting.');
     } finally {
@@ -79,7 +79,7 @@ export function AccountSecurity() {
                 setError('');
                 setNotice('');
               }}
-              title={state.enforced ? 'Two-factor login is required for admin accounts' : undefined}
+              title={state.enforced ? state.reason ?? 'Two-factor login is required for this account' : undefined}
               className={cn('rounded-lg px-3 py-1.5 transition disabled:cursor-not-allowed', !on ? 'bg-panel text-ink shadow-sm' : 'text-ink/55 hover:text-ink disabled:hover:text-ink/55')}
             >
               Password only
@@ -92,13 +92,13 @@ export function AccountSecurity() {
               onClick={() => save(true)}
               className={cn('rounded-lg px-3 py-1.5 transition disabled:cursor-not-allowed', on ? 'bg-profit/15 text-profit shadow-sm' : 'text-ink/55 hover:text-ink')}
             >
-              {busy && !confirming ? <Spinner className="h-3.5 w-3.5" /> : 'Password + email code'}
+              {busy && !confirming ? <Spinner className="h-3.5 w-3.5" /> : state.method === 'totp' ? 'Password + authenticator' : 'Password + email code'}
             </button>
           </div>
         )}
       </div>
 
-      {state.status === 'ready' && state.enforced && <p className="mt-3 text-[12px] text-ink/50">Required for admin accounts, so it can&apos;t be turned off here.</p>}
+      {state.status === 'ready' && state.enforced && <p className="mt-3 text-[12px] text-ink/50">{state.reason ?? 'Required for this account.'} It can&apos;t be turned off here.</p>}
 
       {confirming && state.status === 'ready' && (
         <form onSubmit={submitOff} className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-caution/25 bg-caution/[0.05] p-3">

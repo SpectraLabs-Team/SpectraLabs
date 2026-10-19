@@ -11,6 +11,7 @@ import { ThemeToggle } from '@/components/ui/ThemeToggle';
 import { displayName, initials, useAuth } from '@/lib/auth';
 import { cn, formatCompactCurrency, formatCurrency } from '@/lib/utils';
 import { usePortfolio } from './PortfolioContext';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
 export type StudioTab = 'risk' | 'portfolio' | 'benchmark' | 'settings';
 
@@ -230,9 +231,11 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
           <button type="button" onClick={() => setMobileOpen(true)} className="-ml-1 rounded-md p-1.5 text-ink/60 lg:hidden" aria-label="Open menu">
             <Menu className="h-5 w-5" />
           </button>
+          <WorkspaceSwitcher className="shrink-0" />
+          <span aria-hidden className="hidden h-5 w-px bg-ink/10 sm:block" />
           <div className="flex min-w-0 items-center gap-2.5">
-            <current.icon className="h-4 w-4 shrink-0 text-accent" />
-            <h1 className="truncate text-sm font-semibold text-ink">{current.label}</h1>
+            <current.icon className="hidden h-4 w-4 shrink-0 text-accent sm:block" />
+            <h1 className="hidden truncate text-sm font-semibold text-ink sm:block">{current.label}</h1>
           </div>
           <div className="ml-auto flex items-center gap-3">
             <span className="hidden items-center gap-2 rounded-full border border-ink/10 bg-ink/[0.03] px-3 py-1 text-xs text-ink/60 2xl:inline-flex">

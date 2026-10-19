@@ -53,6 +53,10 @@ export const AUDIT_ACTIONS = [
   'secret.replaced',
   'secret.deleted',
   'secret.used',
+  // API tokens (lib/server/apiTokens.ts); every use is logged
+  'api_token.created',
+  'api_token.revoked',
+  'api_token.used',
   // Trading (M9)
   'order.placed',
   'kill_switch.used',

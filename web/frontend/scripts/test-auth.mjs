@@ -55,7 +55,7 @@ const build = path.join(root, 'node_modules', '.cache', 'spectra-auth-test');
 fs.rmSync(build, { recursive: true, force: true });
 fs.mkdirSync(build, { recursive: true });
 fs.writeFileSync(path.join(build, 'package.json'), '{"type":"commonjs"}');
-for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts']) {
+for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts']) {
   const { outputText } = ts.transpileModule(fs.readFileSync(path.join(root, rel), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
   });
@@ -134,7 +134,7 @@ test('password rules', () => {
 
 test('migrations: tables exist, re-running is a no-op', async () => {
   const tables = (await sql.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY 1`, [schema])).rows.map((r) => r.table_name);
-  assert.deepEqual(tables, ['audit_events', 'email_codes', 'known_devices', 'rate_limits', 'recovery_codes', 'schema_migrations', 'secrets', 'sessions', 'user_totp', 'users', 'workspace_invites', 'workspace_keys', 'workspace_members', 'workspaces']);
+  assert.deepEqual(tables, ['api_tokens', 'audit_events', 'email_codes', 'known_devices', 'rate_limits', 'recovery_codes', 'schema_migrations', 'secrets', 'sessions', 'user_totp', 'users', 'workspace_invites', 'workspace_keys', 'workspace_members', 'workspaces']);
   assert.deepEqual(await migrate(sql), [], 'nothing left to apply');
 });
 
@@ -1881,10 +1881,13 @@ const ROUTE_RULES = {
   'workspaces/[id]/members/[userId] PATCH': 'owner@url',
   'workspaces/[id]/members/[userId] DELETE': 'viewer@url', // leaving; removing others is owner-only (checked below)
   'workspaces/[id]/transfer POST': 'owner@url',
+  'workspaces/[id]/tokens GET': 'viewer@url', // owners see every token, others their own (apiTokens.listTokens)
+  'workspaces/[id]/tokens POST': 'viewer@url', // personal tokens; workspace tokens and "run" checked in createToken
+  'workspaces/[id]/tokens/[tokenId] DELETE': 'viewer@url', // your own; owners any (apiTokens.revokeToken)
 };
 // Workspace routes that change something yet only need viewer: switching your own active
 // workspace, and leaving one. Everything else that changes workspace data needs editor or more.
-const VIEWER_WRITES = new Set(['workspaces/active PUT', 'workspaces/[id]/members/[userId] DELETE']);
+const VIEWER_WRITES = new Set(['workspaces/active PUT', 'workspaces/[id]/members/[userId] DELETE', 'workspaces/[id]/tokens POST', 'workspaces/[id]/tokens/[tokenId] DELETE']);
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /** Every route handler: { key: 'path METHOD', file, body } where body includes local helpers it calls. */
@@ -1964,12 +1967,14 @@ test('permissions: viewer = read only, editor = create and run, owner = members,
   // Engine: computations need editor, reads need viewer (the table itself is tested in task 4's tests).
   for (const [p, r] of Object.entries(engineRoutes.ENGINE_ROUTES)) if (r.method === 'POST' && !r.public) assert.ok(rank[r.minRole] >= rank.editor, `engine ${p}`);
 
-  // The two viewer-level writes stay narrow.
+  // The viewer-level writes stay narrow.
   const handlers = Object.fromEntries(apiHandlers().map((h) => [h.key, h.body]));
   const leave = handlers['workspaces/[id]/members/[userId] DELETE'];
   assert.match(leave, /const leaving = params\.userId === auth\.user\.id/);
   assert.match(leave, /if \(!leaving\) \{\s*if \(workspace\.role !== 'owner'\)/, 'removing someone else is owner-only');
   assert.match(handlers['workspaces/active PUT'], /setActiveWorkspace\(auth\.session\.id, auth\.user\.id/, 'switching only moves your own session');
+  assert.match(handlers['workspaces/[id]/tokens POST'], /createToken\(\{ by: auth\.user, workspace,/, 'token rules are enforced with the caller\'s role (apiTokens tests)');
+  assert.match(handlers['workspaces/[id]/tokens/[tokenId] DELETE'], /revokeToken\(workspace, params\.tokenId, auth\.user\)/);
 });
 
 test('permissions: admin routes, public routes and sensitive changes', () => {
@@ -2126,6 +2131,221 @@ test('spikes: every failed sign-in and every code request is counted', () => {
     const i = s.indexOf("await noteSpike('code_request');");
     assert.ok(i > 0 && i < s.indexOf(before), `${f}: code requests are counted before the per-user limits (refused ones count too)`);
   }
+});
+
+// ── M19 task 17: API tokens ──
+
+const tok = () => load('lib/server/apiTokens.js');
+const membership = (userId, wsId) => workspaces.getMembership(userId, wsId);
+const teamLib = () => team; // (tests below name their workspaces "team")
+
+test('api tokens: shown once, only a keyed hash stored, act in their workspace', async () => {
+  const t = tok();
+  const owner = await store.createUser('tok-owner@x.com', 'h', 'Owner');
+  const team = await workspaces.createWorkspace(owner.id, 'Token Desk');
+  const { token, info } = await t.createToken({ by: owner, workspace: await membership(owner.id, team.id), kind: 'personal', name: '  research   notebook ', scopes: ['read'], expiresInDays: 30 });
+  assert.match(token, /^spectra_pat_[A-Za-z0-9_-]{43}$/);
+  assert.match(token, t.TOKEN_RE);
+  assert.equal(info.name, 'research notebook');
+  assert.deepEqual(info.scopes, ['read']);
+  assert.equal(info.hint, token.slice(-4));
+  assert.equal(info.owner.email, 'tok-owner@x.com');
+  assert.ok(Math.abs(info.expiresAt - (Date.now() + 30 * 86_400_000)) < 60_000);
+
+  const raw = JSON.stringify((await sql.query('SELECT * FROM api_tokens WHERE id = $1', [info.id])).rows);
+  assert.ok(!raw.includes(token) && !raw.includes(token.slice(12)), 'the token itself is never stored');
+
+  const auth = await t.authenticateToken(token, '198.51.100.20');
+  assert.equal(auth.token.id, info.id);
+  assert.equal(auth.user.id, owner.id);
+  assert.equal(auth.workspace.id, team.id);
+  assert.equal(auth.workspace.role, 'viewer', 'an owner\'s read token acts as a viewer');
+  const [row] = (await sql.query('SELECT last_used_at, last_used_ip FROM api_tokens WHERE id = $1', [info.id])).rows;
+  assert.ok(row.last_used_at && row.last_used_ip === '198.51.100.20', 'last use is recorded');
+
+  for (const bad of [null, '', 'nope', token + 'x', token.replace('spectra_pat_', 'spectra_wat_'), 'spectra_pat_' + 'A'.repeat(43)]) {
+    assert.equal(await t.authenticateToken(bad), null, `refused: ${String(bad).slice(0, 20)}`);
+  }
+  assert.equal(t.bearerToken(null), undefined);
+  assert.equal(t.bearerToken(`Bearer ${token}`), token);
+  assert.equal(t.bearerToken(`bearer   ${token} `), token);
+  assert.equal(t.bearerToken('Basic abc'), '', 'any other Authorization header is a failed token, never a fallback to the cookie');
+});
+
+test('api tokens: who can make which token, and validation', async () => {
+  const t = tok();
+  const owner = await store.createUser('tok-rules-owner@x.com', 'h', 'O');
+  const editor = await store.createUser('tok-rules-editor@x.com', 'h', 'E');
+  const viewer = await store.createUser('tok-rules-viewer@x.com', 'h', 'V');
+  const team = await workspaces.createWorkspace(owner.id, 'Rules Desk');
+  await addMember(team.id, editor.id, 'editor');
+  await addMember(team.id, viewer.id, 'viewer');
+  const make = async (u, fields) => t.createToken({ by: u, workspace: await membership(u.id, team.id), name: 'n', scopes: ['read'], ...fields });
+  const status = (p) => p.then(() => 200, (e) => (e.name === 'TokenError' ? e.status : Promise.reject(e)));
+
+  assert.equal(await status(make(viewer, { scopes: ['run'] })), 403, 'viewers: read-only tokens');
+  assert.equal(await status(make(viewer, {})), 200);
+  assert.deepEqual((await make(editor, { scopes: ['run'] })).info.scopes, ['read', 'run'], 'run always includes read');
+  assert.equal(await status(make(editor, { kind: 'workspace' })), 403, 'workspace tokens are owner-only');
+  assert.equal((await make(owner, { kind: 'workspace', scopes: ['read', 'run'] })).token.slice(0, 12), 'spectra_wat_');
+
+  for (const [fields, why] of [
+    [{ name: '   ' }, 'empty name'],
+    [{ name: 42 }, 'name not text'],
+    [{ scopes: [] }, 'no scopes'],
+    [{ scopes: ['admin'] }, 'unknown scope'],
+    [{ scopes: 'read' }, 'scopes not a list'],
+    [{ expiresInDays: 0 }, 'expires today'],
+    [{ expiresInDays: 366 }, 'over a year'],
+    [{ expiresInDays: 1.5 }, 'fractional days'],
+    [{ kind: 'admin' }, 'unknown kind'],
+  ]) assert.equal(await status(make(owner, fields)), 400, why);
+  assert.equal((await make(owner, { name: 'x'.repeat(200) })).info.name.length, 60, 'long names are cut');
+  await assert.rejects(sql.query(`UPDATE api_tokens SET scopes = ARRAY['run'] WHERE workspace_id = $1`, [team.id]), /check/i, 'the database refuses run without read');
+  await assert.rejects(sql.query(`UPDATE api_tokens SET expires_at = created_at + interval '400 days' WHERE workspace_id = $1`, [team.id]), /check/i, 'and anything over a year');
+
+  // At most 10 live personal tokens per person per workspace.
+  const solo = await store.createUser('tok-many@x.com', 'h', 'M');
+  const ws = await membership(solo.id, (await authFor(solo)).workspace.id);
+  for (let i = 0; i < 10; i++) await t.createToken({ by: solo, workspace: ws, name: `t${i}`, scopes: ['read'] });
+  assert.equal(await status(t.createToken({ by: solo, workspace: ws, name: 'one too many', scopes: ['read'] })), 409);
+});
+
+test('api tokens: personal tokens follow their owner (role changes, removal, disabling, new password)', async () => {
+  const t = tok();
+  const owner = await store.createUser('tok-p-owner@x.com', 'h', 'O');
+  const member = await store.createUser('tok-p-member@x.com', 'h', 'M');
+  const team = await workspaces.createWorkspace(owner.id, 'Personal Desk');
+  await addMember(team.id, member.id, 'editor');
+  const { token, info } = await t.createToken({ by: member, workspace: await membership(member.id, team.id), name: 'job', scopes: ['read', 'run'] });
+  assert.equal((await t.authenticateToken(token)).workspace.role, 'editor');
+
+  await sql.query(`UPDATE workspace_members SET role = 'viewer' WHERE workspace_id = $1 AND user_id = $2`, [team.id, member.id]);
+  assert.equal((await t.authenticateToken(token)).workspace.role, 'viewer', 'demoted: the token can no longer run');
+  await sql.query(`UPDATE workspace_members SET role = 'owner' WHERE workspace_id = $1 AND user_id = $2`, [team.id, member.id]);
+  assert.equal((await t.authenticateToken(token)).workspace.role, 'editor', 'promoted: still capped by the token\'s scopes, never owner');
+
+  await sql.query(`UPDATE users SET status = 'disabled' WHERE id = $1`, [member.id]);
+  assert.equal(await t.authenticateToken(token), null, 'disabled account');
+  await sql.query(`UPDATE users SET status = 'active' WHERE id = $1`, [member.id]);
+  assert.ok(await t.authenticateToken(token));
+
+  await sql.query(`DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2`, [team.id, member.id]);
+  assert.equal(await t.authenticateToken(token), null, 'removed from the workspace (even without the team helper)');
+  await addMember(team.id, member.id, 'editor');
+  assert.ok(await t.authenticateToken(token));
+  await teamLib().removeMember(team.id, member.id);
+  assert.ok((await sql.query('SELECT revoked_at FROM api_tokens WHERE id = $1', [info.id])).rows[0].revoked_at, 'removeMember revokes their tokens there');
+  await addMember(team.id, member.id, 'editor');
+  assert.equal(await t.authenticateToken(token), null, 'and rejoining doesn\'t bring them back');
+
+  const again = await t.createToken({ by: member, workspace: await membership(member.id, team.id), name: 'job 2', scopes: ['read'] });
+  await store.updatePassword('tok-p-member@x.com', 'new-hash');
+  assert.equal(await t.authenticateToken(again.token), null, 'a new password revokes personal tokens');
+
+  const third = await t.createToken({ by: member, workspace: await membership(member.id, team.id), name: 'job 3', scopes: ['read'] });
+  await sql.query('DELETE FROM workspace_members WHERE user_id = $1', [member.id]);
+  await store.deleteUser('tok-p-member@x.com');
+  assert.equal((await sql.query('SELECT count(*)::int AS n FROM api_tokens WHERE id = $1', [third.info.id])).rows[0].n, 0, 'deleting the account deletes its tokens');
+});
+
+test('api tokens: workspace tokens belong to the workspace; expiry, revocation and AUTH_SECRET', async () => {
+  const t = tok();
+  const owner = await store.createUser('tok-w-owner@x.com', 'h', 'O');
+  const owner2 = await store.createUser('tok-w-owner2@x.com', 'h', 'O2');
+  const team = await workspaces.createWorkspace(owner.id, 'Shared Desk');
+  await addMember(team.id, owner2.id, 'owner');
+  const { token, info } = await t.createToken({ by: owner, workspace: await membership(owner.id, team.id), kind: 'workspace', name: 'nightly', scopes: ['read', 'run'] });
+  let auth = await t.authenticateToken(token);
+  assert.equal(auth.user, null, 'acts as itself, not its creator');
+  assert.equal(auth.workspace.role, 'editor');
+  assert.equal(info.createdBy, 'tok-w-owner@x.com');
+
+  await teamLib().removeMember(team.id, owner.id);
+  assert.ok(await t.authenticateToken(token), 'keeps working when its creator leaves');
+
+  // Expired.
+  await sql.query(`UPDATE api_tokens SET created_at = now() - interval '2 days', expires_at = now() - interval '1 second' WHERE id = $1`, [info.id]);
+  assert.equal(await t.authenticateToken(token), null, 'expired');
+  await sql.query(`UPDATE api_tokens SET expires_at = now() + interval '1 day' WHERE id = $1`, [info.id]);
+
+  // A different AUTH_SECRET makes every token unusable.
+  const secret = process.env.AUTH_SECRET;
+  process.env.AUTH_SECRET = 'another-secret-' + crypto.randomBytes(16).toString('hex');
+  try {
+    assert.equal(await t.authenticateToken(token), null);
+  } finally {
+    process.env.AUTH_SECRET = secret;
+  }
+  assert.ok(await t.authenticateToken(token));
+
+  // Revoke.
+  const ws2 = await membership(owner2.id, team.id);
+  assert.equal((await t.revokeToken(ws2, info.id, owner2)).revokedAt > 0, true);
+  assert.equal(await t.authenticateToken(token), null, 'revoked: stops at once');
+  assert.equal(await t.revokeToken(ws2, info.id, owner2), null, 'already revoked');
+
+  // Deleting the workspace deletes its tokens.
+  const w = await t.createToken({ by: owner2, workspace: ws2, kind: 'workspace', name: 'temp', scopes: ['read'] });
+  await workspaces.deleteWorkspace(team.id);
+  assert.equal(await t.authenticateToken(w.token), null);
+  assert.equal((await sql.query('SELECT count(*)::int AS n FROM api_tokens WHERE workspace_id = $1', [team.id])).rows[0].n, 0);
+});
+
+test('api tokens: owners see and revoke every token; others only their own', async () => {
+  const t = tok();
+  const owner = await store.createUser('tok-l-owner@x.com', 'h', 'O');
+  const a = await store.createUser('tok-l-a@x.com', 'h', 'A');
+  const b = await store.createUser('tok-l-b@x.com', 'h', 'B');
+  const team = await workspaces.createWorkspace(owner.id, 'List Desk');
+  const other = await workspaces.createWorkspace(owner.id, 'Other Desk');
+  await addMember(team.id, a.id, 'editor');
+  await addMember(team.id, b.id, 'viewer');
+  const wsOf = (u) => membership(u.id, team.id);
+  const ta = await t.createToken({ by: a, workspace: await wsOf(a), name: 'a', scopes: ['read'] });
+  const tb = await t.createToken({ by: b, workspace: await wsOf(b), name: 'b', scopes: ['read'] });
+  const tw = await t.createToken({ by: owner, workspace: await wsOf(owner), kind: 'workspace', name: 'w', scopes: ['read'] });
+  await t.createToken({ by: owner, workspace: await membership(owner.id, other.id), name: 'elsewhere', scopes: ['read'] });
+
+  assert.deepEqual((await t.listTokens(await wsOf(owner), owner.id)).map((x) => x.name).sort(), ['a', 'b', 'w']);
+  assert.deepEqual((await t.listTokens(await wsOf(a), a.id)).map((x) => x.name), ['a']);
+  assert.deepEqual((await t.listTokens(await wsOf(b), b.id)).map((x) => x.name), ['b']);
+
+  assert.equal(await t.revokeToken(await wsOf(a), tb.info.id, a), null, 'can\'t revoke someone else\'s');
+  assert.equal(await t.revokeToken(await wsOf(a), tw.info.id, a), null, 'or the workspace\'s');
+  assert.equal(await t.revokeToken(await membership(owner.id, other.id), ta.info.id, owner), null, 'or one from another workspace');
+  assert.ok(await t.revokeToken(await wsOf(a), ta.info.id, a), 'your own: yes');
+  assert.ok(await t.revokeToken(await wsOf(owner), tb.info.id, owner), 'owners: any');
+  assert.deepEqual((await t.listTokens(await wsOf(owner), owner.id)).map((x) => x.name), ['w'], 'revoked tokens drop off the list');
+  assert.ok(!JSON.stringify(await t.listTokens(await wsOf(owner), owner.id)).includes('token_hash'));
+});
+
+test('api tokens: the engine proxy checks scope and role, logs every use, never sends admin rights', () => {
+  const t = tok();
+  assert.equal(t.scopeFor('viewer'), 'read');
+  assert.equal(t.scopeFor('editor'), 'run');
+  assert.equal(t.scopeFor('owner'), null, 'nothing owner-level for tokens');
+  assert.equal(t.scopeRole(['read']), 'viewer');
+  assert.equal(t.scopeRole(['read', 'run']), 'editor');
+
+  const src = fs.readFileSync(path.join(root, 'app/api/engine/[...path]/route.ts'), 'utf8');
+  const tokenBranch = src.slice(src.indexOf('bearer !== undefined'), src.indexOf('} else if (!route.public)'));
+  assert.ok(tokenBranch.length > 200, 'a bearer header takes the token branch (never the cookie)');
+  assert.match(tokenBranch, /authenticateToken\(bearer, ip\)/);
+  assert.match(tokenBranch, /!caller\.token\.scopes\.includes\(scope\) \|\| !hasRole\(caller\.workspace\.role, route\.minRole\)/);
+  assert.equal(tokenBranch.match(/action: 'api_token\.used'/g)?.length, 1);
+  assert.match(tokenBranch, /outcome: 'denied'/, 'refusals are logged');
+  assert.ok(tokenBranch.indexOf("await audit({ ...used, details") < tokenBranch.indexOf('signEngineIdentity'), 'every allowed use is logged before it is forwarded');
+  assert.match(tokenBranch, /platformRole: 'user'/);
+  assert.match(tokenBranch, /hit\(`api-token:ip:\$\{ip\}`/, 'bad tokens are rate-limited per address');
+
+  // Leaked tokens are caught by the secret scan.
+  const gl = fs.readFileSync(path.join(root, '../../.gitleaks.toml'), 'utf8');
+  const rule = /id = "spectra-api-token"[\s\S]*?regex = '''(.+?)'''/.exec(gl);
+  assert.ok(rule, '.gitleaks.toml has a rule for Spectra API tokens');
+  const re = new RegExp(rule[1].replace(/^\(\?i\)/, ''));
+  assert.ok(re.test('spectra_pat_' + crypto.randomBytes(32).toString('base64url')));
+  assert.ok(re.test('spectra_wat_' + crypto.randomBytes(32).toString('base64url')));
 });
 
 test('audit: tampering outside the app is detected (runs last: it breaks the chain on purpose)', async () => {

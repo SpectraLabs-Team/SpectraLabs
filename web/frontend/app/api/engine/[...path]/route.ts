@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { hit, tooMany } from '@/lib/server/rateLimit';
+import { authenticateToken, bearerToken, scopeFor } from '@/lib/server/apiTokens';
+import { record as audit, requestMeta } from '@/lib/server/audit';
+import { hasRole } from '@/lib/server/authz';
+import { clientIp, hit, tooMany } from '@/lib/server/rateLimit';
 import { ENGINE_IDENTITY_HEADER, signEngineIdentity } from '@/lib/server/engineIdentity';
 import { ENGINE_ROUTES } from '@/lib/server/engineRoutes';
 import { requireWorkspace } from '@/lib/server/requireUser';
@@ -9,7 +12,8 @@ import { requireWorkspace } from '@/lib/server/requireUser';
  * every call lands here, the session cookie is checked, and only then is it forwarded to
  * ENGINE_URL (server-side env, default http://127.0.0.1:8000, the engine's default bind).
  * Signed-in calls carry a signed identity header (user, session, active workspace and role); see
- * lib/server/engineIdentity.ts.
+ * lib/server/engineIdentity.ts. Scripts can call it with an API token instead of a session
+ * (`Authorization: Bearer spectra_pat_…`, lib/server/apiTokens.ts); every token call is audit-logged.
  */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -25,7 +29,37 @@ async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
   }
 
   const headers: Record<string, string> = {};
-  if (!route.public) {
+  const bearer = bearerToken(req.headers.get('authorization'));
+  if (!route.public && bearer !== undefined) {
+    // API token (M19 task 17): the token's workspace, capped by its scopes; never the session.
+    const ip = clientIp(req);
+    const guard = await hit(`api-token:ip:${ip}`, 600, 60_000);
+    if (!guard.ok) return tooMany(guard.retryAfter, 'API requests');
+    const caller = await authenticateToken(bearer, ip);
+    if (!caller) return NextResponse.json({ detail: 'Invalid, expired or revoked API token.' }, { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+    const meta = requestMeta(req);
+    const used = { action: 'api_token.used' as const, actor: caller.user, workspaceId: caller.workspace.id, target: { type: 'api_token', id: caller.token.id } };
+    const scope = scopeFor(route.minRole);
+    if (!scope || !caller.token.scopes.includes(scope) || !hasRole(caller.workspace.role, route.minRole)) {
+      await audit({ ...used, outcome: 'denied', details: { method, path: key, needs: scope ?? 'owner' } }, meta);
+      return NextResponse.json({ detail: scope ? `This token can't ${scope === 'run' ? 'run computations' : 'read'} here (needs the "${scope}" scope and a high enough role).` : 'Not available to API tokens.' }, { status: 403 });
+    }
+    const limit = route.heavy ? await hit(`engine:heavy:token:${caller.token.id}`, 40, 10 * 60_000) : await hit(`engine:token:${caller.token.id}`, 240, 60_000);
+    if (!limit.ok) return tooMany(limit.retryAfter, 'engine requests');
+    await audit({ ...used, details: { method, path: key } }, meta);
+
+    const identity = signEngineIdentity({
+      // Workspace tokens act as themselves, not as whoever created them.
+      userId: caller.user?.id ?? `token:${caller.token.id}`,
+      sessionId: `token:${caller.token.id}`,
+      workspaceId: caller.workspace.id,
+      workspaceRole: caller.workspace.role,
+      platformRole: 'user', // admin powers never travel with a token
+      method,
+      path: key,
+    });
+    if (identity) headers[ENGINE_IDENTITY_HEADER] = identity;
+  } else if (!route.public) {
     // Signed in, and at least route.minRole in the active workspace (viewers can't run computations).
     const { auth, workspace, res } = await requireWorkspace(route.minRole, undefined, 'detail');
     if (res) return res;

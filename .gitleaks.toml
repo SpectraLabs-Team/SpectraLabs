@@ -11,3 +11,11 @@ regexes = [
   '''^b-secret-0123456789abcdef$''',
   '''^another-secret-key-0123456789$''',
 ]
+
+# Spectra API tokens (web/frontend/lib/server/apiTokens.ts). Any match is a real, usable token:
+# revoke it in Settings → API tokens first, then remove it from the code.
+[[rules]]
+id = "spectra-api-token"
+description = "Spectra Labs API token"
+regex = '''spectra_(?:pat|wat)_[A-Za-z0-9_-]{43}'''
+keywords = ["spectra_pat_", "spectra_wat_"]

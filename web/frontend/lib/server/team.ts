@@ -198,6 +198,9 @@ export async function removeMember(workspaceId: string, userId: string): Promise
       throw new TeamError(409, 'The last owner can’t leave or be removed. Transfer ownership first, or delete the workspace.');
     }
     await query('DELETE FROM workspace_members WHERE workspace_id = $1 AND user_id = $2', [workspaceId, userId], c);
+    // Their personal API tokens for this workspace stop working anyway (membership is checked on
+    // every use); revoking them keeps the token list honest.
+    await query('UPDATE api_tokens SET revoked_at = now() WHERE workspace_id = $1 AND user_id = $2 AND revoked_at IS NULL', [workspaceId, userId], c);
     return { role };
   });
 }

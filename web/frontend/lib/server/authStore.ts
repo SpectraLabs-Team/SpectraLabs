@@ -340,6 +340,8 @@ export async function updatePassword(email: string, passwordHash: string): Promi
     );
     if (!row) return undefined;
     await query('UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [row.id], c);
+    // Personal API tokens too: a new password should lock out whoever had the old one.
+    await query('UPDATE api_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL', [row.id], c);
     return toUser(row);
   });
 }

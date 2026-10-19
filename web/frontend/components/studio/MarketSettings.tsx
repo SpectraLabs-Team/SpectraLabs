@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { CheckCircle2, CircleSlash, Database, KeyRound, PlugZap, RefreshCw, ScrollText, Server, ShieldCheck, Users, Wallet } from 'lucide-react';
+import { CheckCircle2, CircleSlash, Database, KeyRound, PlugZap, RefreshCw, ScrollText, Server, ShieldCheck, Terminal, Users, Wallet } from 'lucide-react';
 import { API_BASE } from '@/lib/api';
 import { DEFAULT_PAPER } from '@/lib/paperLedger';
 import { cn, formatCurrency } from '@/lib/utils';
 import { Badge, GlassCard, Spinner } from '@/components/ui/primitives';
 import { WorkspaceActivity } from '@/components/audit/WorkspaceActivity';
+import { ApiTokens } from './ApiTokens';
 import { BrokerKeys } from './BrokerKeys';
 import { WorkspaceMembers } from './WorkspaceMembers';
 import { usePortfolio } from './PortfolioContext';
@@ -180,6 +181,13 @@ export function MarketSettings() {
         </h2>
         <p className="mb-4 mt-1 text-xs leading-5 text-ink/50">Who can use this workspace. Viewers read; editors create and run; owners manage members, keys and settings.</p>
         <WorkspaceMembers />
+      </GlassCard>
+      <GlassCard as="section" className="p-5 xl:col-span-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+          <Terminal className="h-4 w-4 text-accent" /> API tokens
+        </h2>
+        <p className="mb-4 mt-1 text-xs leading-5 text-ink/50">Call the engine from scripts and notebooks with <code className="font-mono">Authorization: Bearer &lt;token&gt;</code>. Tokens can read, or read and run computations; they never manage members, keys or settings. Every use is logged.</p>
+        <ApiTokens />
       </GlassCard>
       <GlassCard as="section" className="p-5 xl:col-span-2">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">

@@ -51,6 +51,25 @@ Rate-limit counters and login lockouts live in Postgres, so restarts don't reset
 Schema changes go in a new numbered file (`db/migrations/002_….sql`); never edit one that has been
 applied.
 
+## API tokens
+
+Scripts and notebooks call the engine with a token instead of a browser session. Make one in
+Studio → Settings → API tokens (it is shown once), then:
+
+```bash
+export SPECTRA_TOKEN=spectra_pat_...
+curl -H "Authorization: Bearer $SPECTRA_TOKEN" http://localhost:3000/api/engine/api/sample-portfolio
+```
+
+- **Personal** tokens act as you in one workspace, never above your current role there; they stop
+  working if you leave, are disabled, or change your password. **Workspace** tokens (owners only)
+  belong to the workspace and survive their creator leaving.
+- Scopes: *read* (viewer-level GETs) or *read + run* (editor-level computations). Nothing that
+  manages members, broker keys or settings is reachable with a token.
+- Every token expires (1 to 365 days), can be revoked at once, and every use is in the audit log
+  (`api_token.used`). Only a keyed hash is stored, so changing `AUTH_SECRET` invalidates all tokens.
+- A token committed to git is caught by the gitleaks rule in `.gitleaks.toml`: revoke it first.
+
 ## Security
 
 Scanning in CI, spike alerts (`ALERT_*` in `.env.example`) and the pre-real-money checklist are in [SECURITY.md](../SECURITY.md).

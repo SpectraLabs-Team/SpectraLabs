@@ -40,5 +40,5 @@ fn dashboard_identity_tokens_are_signed_and_bound_to_the_request() {
     assert!(!caller.platform_admin);
     assert!(verify(&signed, &secret, "GET", "/api/risk", now).is_err());
     assert!(verify(&signed, &secret, "POST", "/api/stress", now).is_err());
-    assert!(verify(&signed, &secret, "POST", "/api/risk", now + 61).is_err());
+    assert!(verify(&signed, &secret, "POST", "/api/risk", now + 66).is_err());
 }

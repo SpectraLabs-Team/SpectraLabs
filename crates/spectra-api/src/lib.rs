@@ -20,10 +20,23 @@
 //! not call them.
 //!
 //! Configuration (environment): `SPECTRA_API_ADDR` (default
-//! `127.0.0.1:8000`) and `SPECTRA_CORS_ORIGINS` (comma-separated, default
-//! `http://localhost:3000`).
+//! `127.0.0.1:8000`), `SPECTRA_CORS_ORIGINS` (comma-separated, default
+//! `http://localhost:3000`) and `ENGINE_SHARED_SECRET`.
+//!
+//! ## Caller identity
+//!
+//! With `ENGINE_SHARED_SECRET` set (32+ characters, the same value as the
+//! Next.js server's), every route except `GET /` and `GET /health` requires the
+//! signed `X-Spectra-Identity` header the dashboard's proxy adds (see
+//! [`identity`]): no header or a bad one is 401, and computations
+//! (`POST /api/risk`, `/api/benchmark`, `/api/stress`) and `/api/alpaca/*` need
+//! the editor role in the caller's active workspace (403 otherwise). Without the
+//! secret the API accepts anonymous calls, as before, and says so at startup.
+//! When the engine starts storing data, every read and write must be scoped to
+//! the verified workspace id.
 
 pub mod http;
+pub mod identity;
 pub mod telemetry;
 
 use spectra_core::{Error, Json, ENGINE_VERSION};
@@ -42,29 +55,54 @@ pub const BENCHMARK_PATH_BUDGET: u64 = 10_000_000;
 pub struct ApiConfig {
     /// Origins allowed by CORS.
     pub cors_origins: Vec<String>,
+    /// Verifies caller identity when set (see the crate docs).
+    pub shared_secret: Option<identity::Secret>,
 }
 
 impl Default for ApiConfig {
     fn default() -> Self {
-        Self { cors_origins: vec!["http://localhost:3000".into()] }
+        Self { cors_origins: vec!["http://localhost:3000".into()], shared_secret: None }
     }
 }
 
 impl ApiConfig {
-    /// Reads `SPECTRA_CORS_ORIGINS`.
+    /// Reads `SPECTRA_CORS_ORIGINS` and `ENGINE_SHARED_SECRET` (ignored if
+    /// shorter than [`identity::MIN_SECRET_LEN`]).
     pub fn from_env() -> Self {
-        match std::env::var("SPECTRA_CORS_ORIGINS") {
-            Ok(v) => Self {
-                cors_origins: v
-                    .split(',')
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .collect(),
-            },
-            Err(_) => Self::default(),
+        let mut cfg = Self::default();
+        if let Ok(v) = std::env::var("SPECTRA_CORS_ORIGINS") {
+            cfg.cors_origins =
+                v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
         }
+        cfg.shared_secret =
+            std::env::var("ENGINE_SHARED_SECRET").ok().and_then(|v| identity::Secret::new(v.trim()));
+        cfg
     }
+}
+
+/// Routes anyone may call, even with identity checks on.
+fn is_public(method: &str, path: &str) -> bool {
+    matches!((method, path), ("GET", "/" | "/health"))
+}
+
+/// Minimum workspace role for a route.
+fn min_role(method: &str, path: &str) -> identity::Role {
+    match (method, path) {
+        ("POST", "/api/risk" | "/api/benchmark" | "/api/stress") => identity::Role::Editor,
+        (_, p) if p.starts_with("/api/alpaca") => identity::Role::Editor,
+        _ => identity::Role::Viewer,
+    }
+}
+
+/// With identity checks on: the verified caller, or the 401/403 to answer.
+fn authorize(secret: &identity::Secret, req: &Request) -> Result<identity::Identity, (u16, String)> {
+    let header = req.header(identity::HEADER).ok_or((401, "Sign in to use the engine.".to_string()))?;
+    let id = identity::verify(header, secret, &req.method, &req.path, identity::unix_now())
+        .map_err(|why| (401, format!("Unauthenticated: {why}.")))?;
+    if id.workspace_role < min_role(&req.method, &req.path) {
+        return Err((403, "Your role in this workspace can't run computations (editor role needed).".into()));
+    }
+    Ok(id)
 }
 
 type Reply = Result<Json, (u16, String)>;
@@ -275,6 +313,13 @@ pub fn handle(cfg: &ApiConfig, req: &Request) -> Response {
         } else {
             Response { status: 204, headers: Vec::new(), body: Vec::new() }
         }
+    } else if let Some(Err((code, msg))) = cfg
+        .shared_secret
+        .as_ref()
+        .filter(|_| !is_public(&req.method, &req.path))
+        .map(|secret| authorize(secret, req))
+    {
+        Response::error(code, &msg)
     } else {
         let reply: Reply = match (req.method.as_str(), req.path.as_str()) {
             ("GET", "/") => Ok(Json::object()

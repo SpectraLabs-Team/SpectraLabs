@@ -21,6 +21,15 @@ fn main() -> ExitCode {
         spectra_core::ENGINE_VERSION,
         cfg.cors_origins.join(", ")
     );
+    if cfg.shared_secret.is_some() {
+        eprintln!("spectra-api: caller identity checks are ON (ENGINE_SHARED_SECRET)");
+    } else {
+        eprintln!(
+            "spectra-api: ENGINE_SHARED_SECRET is not set (or shorter than {} characters): identity checks are OFF and any \
+             process that can reach this port can use the engine",
+            spectra_api::identity::MIN_SECRET_LEN
+        );
+    }
     http::serve(&listener, Arc::new(move |req| handle(&cfg, req)));
     ExitCode::SUCCESS
 }

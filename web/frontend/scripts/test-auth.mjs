@@ -55,7 +55,7 @@ const build = path.join(root, 'node_modules', '.cache', 'spectra-auth-test');
 fs.rmSync(build, { recursive: true, force: true });
 fs.mkdirSync(build, { recursive: true });
 fs.writeFileSync(path.join(build, 'package.json'), '{"type":"commonjs"}');
-for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts']) {
+for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts', 'lib/server/engineSign.ts']) {
   const { outputText } = ts.transpileModule(fs.readFileSync(path.join(root, rel), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
   });
@@ -73,6 +73,7 @@ let store = load('lib/server/authStore.js');
 let sessions = load('lib/server/sessions.js');
 let workspaces = load('lib/server/workspaces.js');
 const engineId = load('lib/server/engineIdentity.js');
+const engineSign = load('lib/server/engineSign.js');
 let authz = load('lib/server/authz.js');
 let lockout = load('lib/server/lockout.js');
 let vault = load('lib/server/vault.js');
@@ -109,13 +110,16 @@ async function restart() {
   breached = load('lib/server/breached.js');
 }
 
+
 after(async () => {
   await db.closePool();
   await sql.end();
   await admin.query(`DROP SCHEMA ${schema} CASCADE`);
   await admin.end();
-  fs.rmSync(build, { recursive: true, force: true });
+  process.chdir(root);
+  fs.rmSync(build, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
+
 
 test('display helpers', () => {
   assert.equal(shared.initials({ email: 'x@y.z', name: 'Amogh R Gowda' }), 'AG');
@@ -2385,3 +2389,30 @@ test('toQrSvg generates deterministic SVG from otpauth URI and rejects invalid l
   await assert.rejects(async () => qr.toQrSvg('x'.repeat(1025)), Error);
 });
 
+
+test('engine request signing matches the Rust verifier', () => {
+  const secret = 'test-secret-test-secret-test-secret!';
+  const body = '{"metric":"var","note":"ünïcødé"}';
+  const h = engineSign.signEngineRequest(
+    secret,
+    { method: 'post', pathAndQuery: '/api/v1/risk', body, requestId: '6f1c0e5e-1111-4222-8333-444455556666' },
+    { user: 'alice@example.com' },
+    1700000000 * 1000 + 999,
+  );
+  assert.equal(h['X-Spectra-Timestamp'], '1700000000');
+  assert.equal(h['X-Spectra-Workspace'], '');
+  // Same vector as the cross-check against crates/spectra-api/src/auth.rs.
+  assert.equal(h['X-Spectra-Signature'], 'd218123bb0b8ba8ada3e81710dbe967c4ac2909055a55063b60ae03815ddd989');
+  // Pinned canonical string, identical to the_canonical_string_is_stable in auth.rs.
+  assert.equal(
+    engineSign.canonical('post', '/api/v1/risk?x=1', '1700000000', 'u', '', 'r', ''),
+    'spectra-v1\nPOST\n/api/v1/risk?x=1\n1700000000\nu\n\nr\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+  );
+  const before = process.env.ENGINE_SECRET;
+  process.env.ENGINE_SECRET = 'too-short';
+  assert.equal(engineSign.engineSecret(), null, 'short secrets are refused');
+  process.env.ENGINE_SECRET = secret;
+  assert.equal(engineSign.engineSecret(), secret);
+  if (before === undefined) delete process.env.ENGINE_SECRET;
+  else process.env.ENGINE_SECRET = before;
+});

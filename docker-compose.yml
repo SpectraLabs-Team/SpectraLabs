@@ -1,0 +1,99 @@
+# Local stack: Postgres, migrations + seed, the engine API and the dashboard.
+#
+#   cp .env.example .env                                   # fill in ENGINE_SECRET (and ADMIN_EMAIL)
+#   cp web/frontend/.env.example web/frontend/.env.local   # AUTH_SECRET, Gmail settings
+#   docker compose up --build                              # http://localhost:3000
+#
+# Only the dashboard (and Postgres, for psql) are published, both on 127.0.0.1. The engine is
+# reachable only inside this network, and only through the signed Next.js proxy.
+
+name: spectralabs
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-spectra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-spectra}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: apply migrations, and seed the dev workspace when ADMIN_EMAIL is set.
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/engine.Dockerfile
+    image: spectralabs/engine:dev
+    command:
+      - sh
+      - -c
+      - 'if [ -n "$$ADMIN_EMAIL" ]; then exec spectra-db seed; else exec spectra-db migrate; fi'
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-spectra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-spectra}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/engine.Dockerfile
+    image: spectralabs/engine:dev
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-spectra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-spectra}
+      ENGINE_SECRET: ${ENGINE_SECRET:?set ENGINE_SECRET in .env (openssl rand -base64 48)}
+      SPECTRA_API_ADDR: 0.0.0.0:8000
+      SPECTRA_CORS_ORIGINS: http://localhost:3000
+      SPECTRA_MIGRATE_ON_START: "false"
+    volumes:
+      - artifacts:/var/lib/spectra/artifacts
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/ready"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 60s # in-flight engine requests finish before SIGKILL
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    image: spectralabs/frontend:dev
+    env_file:
+      - path: web/frontend/.env.local
+        required: false
+    environment:
+      ENGINE_URL: http://api:8000
+      ENGINE_SECRET: ${ENGINE_SECRET}
+    volumes:
+      - web-data:/app/.data # users.json until accounts move to Postgres (M20 step 4)
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  artifacts:
+  web-data:

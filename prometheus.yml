@@ -1,0 +1,38 @@
+# Prometheus configuration for SpectraLabs (M20b step 11)
+# Scrapes metrics from the API /metrics endpoint
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'spectra-labs'
+    environment: 'development'  # change to 'production' for prod
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Load rules once and periodically evaluate them
+rule_files:
+  # - 'alert_rules.yml'  # Uncomment when alerting rules are added
+
+# Scrape configurations
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # SpectraLabs API - metrics endpoint at /metrics
+  - job_name: 'spectra-api'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['localhost:8000']
+    metrics_path: '/metrics'
+    # In Docker, use: targets: ['api:8000']
+
+  # Optional: if using Postgres exporter
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['localhost:9187']

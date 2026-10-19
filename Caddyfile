@@ -1,0 +1,35 @@
+# Caddy reverse proxy configuration for SpectraLabs (M20b step 12)
+# Production: use with automatic HTTPS + security headers
+#
+# Run: caddy run --config Caddyfile
+# Or: caddy start --config Caddyfile (background)
+
+(security_headers) {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+	header X-Frame-Options "DENY"
+	header X-Content-Type-Options "nosniff"
+	header X-XSS-Protection "1; mode=block"
+	header Referrer-Policy "no-referrer-when-downgrade"
+	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+	header Permissions-Policy "geolocation=(), microphone=(), camera=()"
+}
+
+# Local development: http without TLS
+:8080 {
+	# Frontend (Next.js)
+	reverse_proxy localhost:3000 {
+		header_up X-Forwarded-Host {http.request.host}
+		header_up X-Forwarded-Proto http
+		header_up X-Real-IP {http.request.remote}
+	}
+}
+
+# Production: use actual domain
+# example.com www.example.com {
+# 	import security_headers
+# 	reverse_proxy localhost:3000 {
+# 		header_up X-Forwarded-Host {http.request.host}
+# 		header_up X-Forwarded-Proto https
+# 		header_up X-Real-IP {http.request.remote}
+# 	}
+# }

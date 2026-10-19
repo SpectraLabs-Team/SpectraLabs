@@ -67,6 +67,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
-      # RustSec advisories against Cargo.lock; warnings (unmaintained, yanked, unsound) fail too.
+      # SQLx's macros lock optional MySQL support (and its rsa dependency) even though this
+      # workspace enables only PostgreSQL. `cargo tree -i rsa` confirms rsa is not compiled.
+      # RustSec has no fixed rsa release; keep auditing everything else and re-evaluate this
+      # exception when SQLx drops that optional lockfile dependency or rsa is fixed.
       - name: Audit Cargo.lock
-        run: cargo audit --deny warnings
+        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071

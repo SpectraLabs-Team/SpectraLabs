@@ -4,10 +4,9 @@
 
 - **CUDA backend.** Excluded on purpose. Requests for CUDA run on the parallel CPU backend and are
   reported as a fallback.
-- **Alpaca brokerage proxy** (`/api/alpaca/*`). It needs an HTTPS client and TLS, and this workspace
-  uses the standard library only because crates.io was not reachable from the build environment. The
-  routes answer 501. The dashboard does not call them. Porting them means adding an HTTP client crate
-  such as `ureq` with `rustls`.
+- **Alpaca brokerage proxy** (`/api/alpaca/*`). It needs an HTTPS client and TLS, which `spectra-api`
+  does not include yet. The routes answer 501. The dashboard does not call them. Porting them means
+  adding an HTTP client crate such as `reqwest` with `rustls` to `spectra-api`.
 
 ## Verification gaps
 
@@ -38,8 +37,18 @@
 ## API hardening before public exposure
 
 `spectra-api` is meant for local use or to sit behind a reverse proxy. Before exposing it, add TLS,
-authentication and rate limiting in front of it. It serves one request per connection and handles at
-most 32 connections at a time.
+authentication and rate limiting in front of it. It runs at most 32 engine computations at a time
+and answers 503 to further compute requests instead of queueing them.
+
+## Platform ops (M20) in progress
+
+- **Rust service code was written without a compiler.** The build environment could not reach
+  crates.io, so `spectra-api` (axum) and `spectra-db` (sqlx) were not compiled before review. The
+  HMAC signing was compiled and tested against RFC 4231 and against the Node signer, and the SQL
+  migration and seed were run against Postgres 16. Run `just check` before merging.
+- **No OpenAPI spec yet.** `utoipa` lands with the first serde-typed routes (jobs, step 6).
+- **`/ready` checks only the database.** The worker check joins it with the worker (step 6).
+- **Users still live in `users.json`** until step 4 moves them to Postgres.
 
 ## Security
 

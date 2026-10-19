@@ -24,6 +24,8 @@ const { pageHeaders, apiHeaders } = require('./lib/securityHeaders');
 
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || defaultDistDir,
+  // The Docker image runs the standalone server (docker/frontend.Dockerfile sets NEXT_OUTPUT).
+  ...(process.env.NEXT_OUTPUT === 'standalone' ? { output: 'standalone' } : {}),
   poweredByHeader: false,
   // Lint runs separately (`npm run lint`, once eslint is installed); don't fail or warn in builds.
   eslint: { ignoreDuringBuilds: true },

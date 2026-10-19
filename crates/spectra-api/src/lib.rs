@@ -1,361 +1,496 @@
 //! Spectra Labs HTTP API: the Rust replacement for the FastAPI backend. It
-//! calls the risk engine directly (the Python backend shelled out to the C++
-//! CLI and parsed its stdout) and serves the same routes and JSON shapes the
-//! Next.js dashboard already uses:
+//! calls the risk engine directly and serves the routes the Next.js dashboard
+//! uses. Only the Next.js proxy talks to it; see [`auth`].
 //!
-//! | route | |
-//! |---|---|
-//! | `GET /`, `GET /health` | service info |
-//! | `POST /api/risk` | `{portfolio_csv, metric, confidence, simulations[, seed, backend, horizon_days]}` |
-//! | `POST /api/benchmark` | `{portfolio_csv, simulations, repetitions, warmups}` |
-//! | `POST /api/stress` | `{portfolio_csv, scenario[, simulations, seed]}` |
-//! | `GET /api/metrics` | which metric names are computable |
-//! | `GET /api/sample-portfolio` | `{csv}` |
-//! | `GET /api/telemetry/{cpu,workers,gpu}` | host readings |
-//! | `/api/alpaca/*` | 501: not ported (see below) |
+//! | route | auth | |
+//! |---|---|---|
+//! | `GET /`, `GET /health` | none | liveness: the process is up |
+//! | `GET /ready` | none | readiness: the database answers |
+//! | `POST /api/v1/risk` | signed | `{portfolio_csv, metric, confidence, simulations[, seed, backend, horizon_days]}` |
+//! | `POST /api/v1/benchmark` | signed | `{portfolio_csv, simulations, repetitions, warmups}` |
+//! | `POST /api/v1/stress` | signed | `{portfolio_csv, scenario[, simulations, seed]}` |
+//! | `GET /api/v1/metrics` | signed | which metric names are computable |
+//! | `GET /api/v1/sample-portfolio` | signed | `{csv}` |
+//! | `GET /api/v1/telemetry/{cpu,workers,gpu}` | signed | host readings |
+//! | `/api/v1/alpaca/*` | signed | 501: not ported yet |
 //!
-//! The Alpaca brokerage proxy is not ported: it needs an HTTPS client, and
-//! this workspace builds with the standard library only (no crates.io
-//! access). Those routes answer 501 with an explanation; the dashboard does
-//! not call them.
+//! Every `/api/v1/...` route is also served at its old `/api/...` path. Those
+//! aliases are temporary: remove them once nothing calls them.
 //!
-//! Configuration (environment): `SPECTRA_API_ADDR` (default
-//! `127.0.0.1:8000`), `SPECTRA_CORS_ORIGINS` (comma-separated, default
-//! `http://localhost:3000`) and `ENGINE_SHARED_SECRET`.
+//! **Conventions** (docs/api-conventions.md): errors are
+//! `{"code", "message", "details", "request_id"}` (plus a deprecated `detail`
+//! copy of `message` while the old paths exist); every response carries
+//! `X-Request-Id`, taken from the proxy or generated as a UUIDv7.
 //!
-//! ## Caller identity
+//! The server is [axum] on a multi-threaded tokio runtime. Engine work is
+//! CPU-bound and synchronous, so each compute request runs on tokio's blocking
+//! pool, at most [`MAX_CONCURRENT_COMPUTE`] at a time; further compute
+//! requests get 503 rather than queueing. [`serve`] shuts down gracefully.
 //!
-//! With `ENGINE_SHARED_SECRET` set (32+ characters, the same value as the
-//! Next.js server's), every route except `GET /` and `GET /health` requires the
-//! signed `X-Spectra-Identity` header the dashboard's proxy adds (see
-//! [`identity`]): no header or a bad one is 401, and computations
-//! (`POST /api/risk`, `/api/benchmark`, `/api/stress`) and `/api/alpaca/*` need
-//! the editor role in the caller's active workspace (403 otherwise). Without the
-//! secret the API accepts anonymous calls, as before, and says so at startup.
-//! When the engine starts storing data, every read and write must be scoped to
-//! the verified workspace id.
+//! Configuration is read once at startup: see [`config`].
 
-pub mod http;
+pub mod auth;
+pub mod config;
+pub mod engine;
 pub mod identity;
 pub mod telemetry;
 
-use spectra_core::{Error, Json, ENGINE_VERSION};
-use spectra_risk::{benchmark, stress_test, Backend, Metric, Portfolio, RiskConfig, RiskEngine, SCENARIOS};
+use std::future::Future;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-pub use http::{Request, Response};
+use axum::body::{Body, Bytes};
+use axum::extract::rejection::BytesRejection;
+use axum::extract::{DefaultBodyLimit, Request, State};
+use axum::http::{header, HeaderValue, Method, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{any, get, post, MethodRouter};
+use axum::Router;
+use spectra_core::{Json, ENGINE_VERSION};
+use spectra_db::PgPool;
+use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
+use tower_http::set_header::SetResponseHeaderLayer;
+use uuid::Uuid;
 
-/// The sample portfolio served at `/api/sample-portfolio`.
+pub use auth::Identity;
+pub use config::{Config, ConfigError, Secret};
+pub use engine::{to_text, Reply, BENCHMARK_PATH_BUDGET};
+
+/// The sample portfolio served at `/api/v1/sample-portfolio`.
 pub const SAMPLE_PORTFOLIO: &str = include_str!("../../../examples/sample_portfolio.csv");
 
-/// Total simulated paths one benchmark request may cost (as in the Python backend).
-pub const BENCHMARK_PATH_BUDGET: u64 = 10_000_000;
+/// Largest accepted request body (the dashboard sends portfolio CSVs up to 10 MB).
+pub const MAX_BODY: usize = 12 * 1024 * 1024;
 
-/// Server settings.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Engine computations (risk, stress, benchmark, telemetry sampling) run at
+/// once; further ones get 503.
+pub const MAX_CONCURRENT_COMPUTE: usize = 32;
+
+/// How long `/ready` waits for the database.
+pub const READY_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Router settings.
+#[derive(Debug, Clone)]
 pub struct ApiConfig {
-    /// Origins allowed by CORS.
+    /// Origins allowed by CORS. `*` allows any origin.
     pub cors_origins: Vec<String>,
-    /// Verifies caller identity when set (see the crate docs).
-    pub shared_secret: Option<identity::Secret>,
-}
-
-impl Default for ApiConfig {
-    fn default() -> Self {
-        Self { cors_origins: vec!["http://localhost:3000".into()], shared_secret: None }
-    }
+    /// Verifies the proxy's request signatures.
+    pub engine_secret: Secret,
 }
 
 impl ApiConfig {
-    /// Reads `SPECTRA_CORS_ORIGINS` and `ENGINE_SHARED_SECRET` (ignored if
-    /// shorter than [`identity::MIN_SECRET_LEN`]).
-    pub fn from_env() -> Self {
-        let mut cfg = Self::default();
-        if let Ok(v) = std::env::var("SPECTRA_CORS_ORIGINS") {
-            cfg.cors_origins =
-                v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
+    /// Default CORS origins (`http://localhost:3000`) and the given secret.
+    pub fn new(engine_secret: Secret) -> Self {
+        Self { cors_origins: vec!["http://localhost:3000".into()], engine_secret }
+    }
+
+    fn allows(&self, origin: &str) -> bool {
+        self.cors_origins.iter().any(|o| o == origin || o == "*")
+    }
+}
+
+impl From<&Config> for ApiConfig {
+    fn from(c: &Config) -> Self {
+        Self { cors_origins: c.cors_origins.clone(), engine_secret: c.engine_secret.clone() }
+    }
+}
+
+/// The request id, in each request's extensions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestId(pub String);
+
+#[derive(Debug, Clone)]
+struct AppState {
+    cfg: Arc<ApiConfig>,
+    compute: Arc<Semaphore>,
+    db: Option<PgPool>,
+}
+
+// ---------------------------------------------------------------------------
+// Responses and the error format
+// ---------------------------------------------------------------------------
+
+/// An error waiting to be rendered. Handlers and middleware attach it to an
+/// empty response; [`request_id`] renders it once the request id is known, so
+/// every error, from any layer, has the same shape.
+#[derive(Debug, Clone)]
+struct ErrorBody {
+    code: &'static str,
+    message: String,
+}
+
+/// The machine-readable `code` for a status.
+pub fn error_code(status: u16) -> &'static str {
+    match status {
+        400 => "bad_request",
+        401 => "unauthenticated",
+        403 => "forbidden",
+        404 => "not_found",
+        405 => "method_not_allowed",
+        408 => "timeout",
+        409 => "conflict",
+        413 => "payload_too_large",
+        422 => "invalid_request",
+        429 => "rate_limited",
+        501 => "not_implemented",
+        503 => "unavailable",
+        _ if status >= 500 => "internal",
+        _ => "error",
+    }
+}
+
+fn json_response(status: u16, text: String) -> Response {
+    let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    (status, [(header::CONTENT_TYPE, "application/json")], text).into_response()
+}
+
+fn error_response(status: u16, message: impl Into<String>) -> Response {
+    let mut resp = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR).into_response();
+    resp.extensions_mut().insert(ErrorBody { code: error_code(status), message: message.into() });
+    resp
+}
+
+fn render_error(resp: Response, err: ErrorBody, request_id: &str) -> Response {
+    let (mut parts, _) = resp.into_parts();
+    let body = Json::object()
+        .with("code", Json::string(err.code))
+        .with("message", Json::string(err.message.clone()))
+        .with("details", Json::Null)
+        .with("request_id", Json::string(request_id))
+        // Deprecated: the old `{"detail"}` shape, kept while the /api/... aliases exist.
+        .with("detail", Json::string(err.message));
+    parts.headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, Body::from(body.dump()))
+}
+
+fn respond(reply: Reply) -> Response {
+    match reply {
+        Ok(j) => json_response(200, to_text(&j)),
+        Err((code, msg)) => error_response(code, msg),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------------------------
+
+fn valid_request_id(v: &str) -> bool {
+    !v.is_empty() && v.len() <= 128 && v.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
+}
+
+/// Takes `X-Request-Id` from the proxy (or makes a UUIDv7), puts it in the
+/// request's extensions and on the response, and renders pending errors.
+async fn request_id(mut req: Request, next: Next) -> Response {
+    let id = req
+        .headers()
+        .get(auth::headers::REQUEST_ID)
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| valid_request_id(v))
+        .map_or_else(|| Uuid::now_v7().to_string(), str::to_string);
+    req.extensions_mut().insert(RequestId(id.clone()));
+    let mut resp = next.run(req).await;
+    if let Some(err) = resp.extensions_mut().remove::<ErrorBody>() {
+        resp = render_error(resp, err, &id);
+    }
+    if let Ok(v) = HeaderValue::from_str(&id) {
+        resp.headers_mut().insert(auth::headers::REQUEST_ID, v);
+    }
+    resp
+}
+
+/// Rejects a declared `Content-Length` over [`MAX_BODY`] before reading any of
+/// the body. (The body limit on the extractor only trips as bytes arrive, so a
+/// client that declares a huge body and sends nothing would otherwise hang.)
+async fn reject_oversized(req: Request, next: Next) -> Response {
+    let declared = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<u64>().ok());
+    if declared.is_some_and(|n| n > MAX_BODY as u64) {
+        return error_response(413, "Request body exceeds the 12 MB limit.");
+    }
+    next.run(req).await
+}
+
+/// CORS: headers only for configured origins, a 403 for preflights from any
+/// other origin, and 204 for every preflight that passes.
+async fn cors(State(st): State<AppState>, req: Request, next: Next) -> Response {
+    let origin = req.headers().get(header::ORIGIN).cloned();
+    let allowed = origin.as_ref().and_then(|o| o.to_str().ok()).is_some_and(|o| st.cfg.allows(o));
+    let mut resp = if req.method() == Method::OPTIONS {
+        if origin.is_some() && !allowed {
+            error_response(403, "Origin not allowed.")
+        } else {
+            StatusCode::NO_CONTENT.into_response()
         }
-        cfg.shared_secret =
-            std::env::var("ENGINE_SHARED_SECRET").ok().and_then(|v| identity::Secret::new(v.trim()));
-        cfg
+    } else {
+        next.run(req).await
+    };
+    if let (true, Some(origin)) = (allowed, origin) {
+        let h = resp.headers_mut();
+        h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin);
+        h.append(header::VARY, HeaderValue::from_static("Origin"));
+        h.insert(header::ACCESS_CONTROL_ALLOW_METHODS, HeaderValue::from_static("GET, POST, OPTIONS"));
+        h.insert(header::ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("Content-Type"));
+        h.insert(header::ACCESS_CONTROL_MAX_AGE, HeaderValue::from_static("600"));
     }
+    resp
 }
 
-/// Routes anyone may call, even with identity checks on.
-fn is_public(method: &str, path: &str) -> bool {
-    matches!((method, path), ("GET", "/" | "/health"))
+fn now_secs() -> i64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64)
 }
 
-/// Minimum workspace role for a route.
-fn min_role(method: &str, path: &str) -> identity::Role {
-    match (method, path) {
-        ("POST", "/api/risk" | "/api/benchmark" | "/api/stress") => identity::Role::Editor,
-        (_, p) if p.starts_with("/api/alpaca") => identity::Role::Editor,
-        _ => identity::Role::Viewer,
-    }
-}
-
-/// With identity checks on: the verified caller, or the 401/403 to answer.
-fn authorize(secret: &identity::Secret, req: &Request) -> Result<identity::Identity, (u16, String)> {
-    let header = req.header(identity::HEADER).ok_or((401, "Sign in to use the engine.".to_string()))?;
-    let id = identity::verify(header, secret, &req.method, &req.path, identity::unix_now())
-        .map_err(|why| (401, format!("Unauthenticated: {why}.")))?;
-    if id.workspace_role < min_role(&req.method, &req.path) {
-        return Err((403, "Your role in this workspace can't run computations (editor role needed).".into()));
-    }
-    Ok(id)
-}
-
-type Reply = Result<Json, (u16, String)>;
-
-/// JSON text for the browser: like [`Json::dump`], but doubles use the
-/// shortest representation that round-trips (`0.99`, not
-/// `0.98999999999999999`). Same values, friendlier display.
-pub fn to_text(j: &Json) -> String {
-    let mut out = String::new();
-    write_text(j, &mut out);
-    out
-}
-
-fn write_text(j: &Json, out: &mut String) {
-    match j {
-        Json::Double(d) if d.is_finite() => {
-            let s = format!("{d}");
-            out.push_str(&s);
+/// Verifies the proxy's HMAC signature (see [`auth`]) and puts the caller's
+/// [`Identity`] in the request's extensions. Reads the body to hash it, then
+/// hands the same bytes on.
+async fn require_signature(State(st): State<AppState>, req: Request, next: Next) -> Response {
+    let (parts, body) = req.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, MAX_BODY).await else {
+        return error_response(400, "The request body is too large or was not received in full.");
+    };
+    let header = |name: &str| parts.headers.get(name).and_then(|v| v.to_str().ok());
+    let signed = auth::SignedRequest {
+        method: parts.method.as_str(),
+        path_and_query: parts.uri.path_and_query().map_or_else(|| parts.uri.path(), |p| p.as_str()),
+        user: header(auth::headers::USER),
+        workspace: header(auth::headers::WORKSPACE),
+        request_id: header(auth::headers::REQUEST_ID),
+        timestamp: header(auth::headers::TIMESTAMP),
+        signature: header(auth::headers::SIGNATURE),
+        body: &bytes,
+    };
+    match auth::verify(st.cfg.engine_secret.expose(), &signed, now_secs()) {
+        Ok(identity) => {
+            let mut req = Request::from_parts(parts, Body::from(bytes));
+            req.extensions_mut().insert(identity);
+            next.run(req).await
         }
-        Json::Array(items) => {
-            out.push('[');
-            for (i, v) in items.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                write_text(v, out);
-            }
-            out.push(']');
-        }
-        Json::Object(members) => {
-            out.push('{');
-            for (i, (k, v)) in members.iter().enumerate() {
-                if i > 0 {
-                    out.push(',');
-                }
-                out.push_str(&Json::string(k.clone()).dump());
-                out.push(':');
-                write_text(v, out);
-            }
-            out.push('}');
-        }
-        other => out.push_str(&other.dump()),
+        Err(reason) => error_response(401, reason),
     }
 }
 
-fn unprocessable(msg: impl Into<String>) -> (u16, String) {
-    (422, msg.into())
-}
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
 
-fn engine_error(e: &Error) -> (u16, String) {
-    match e {
-        Error::InvalidArgument(_) | Error::Data(_) | Error::Unsupported(_) => (422, e.to_string()),
-        _ => (500, e.to_string()),
-    }
-}
-
-fn body_json(req: &Request) -> Result<Json, (u16, String)> {
+/// Parses a request body that must be a JSON object.
+fn body_json(body: Result<Bytes, BytesRejection>) -> Result<Json, (u16, String)> {
+    let bytes = body.map_err(|r| match r.status() {
+        StatusCode::PAYLOAD_TOO_LARGE => (413, "Request body exceeds the 12 MB limit.".to_string()),
+        s => (s.as_u16(), r.body_text()),
+    })?;
     let text =
-        std::str::from_utf8(&req.body).map_err(|_| unprocessable("Request body must be UTF-8 JSON."))?;
-    let j = Json::parse(text).map_err(|e| unprocessable(format!("Request body is not valid JSON: {e}")))?;
+        std::str::from_utf8(&bytes).map_err(|_| engine::unprocessable("Request body must be UTF-8 JSON."))?;
+    let j = Json::parse(text)
+        .map_err(|e| engine::unprocessable(format!("Request body is not valid JSON: {e}")))?;
     if j.entries().is_err() {
-        return Err(unprocessable("Request body must be a JSON object."));
+        return Err(engine::unprocessable("Request body must be a JSON object."));
     }
     Ok(j)
 }
 
-/// An integer field: a JSON integer, an integral number, or a numeric string.
-fn int_field(j: &Json, key: &str, default: i64, msg: &str) -> Result<i64, (u16, String)> {
-    match j.find(key) {
-        None | Some(Json::Null) => Ok(default),
-        Some(Json::Int(v)) => Ok(*v),
-        Some(Json::Double(d)) if d.fract() == 0.0 && d.abs() < 9e15 => Ok(*d as i64),
-        Some(Json::String(s)) => s.trim().parse().map_err(|_| unprocessable(msg)),
-        _ => Err(unprocessable(msg)),
-    }
-}
-
-fn float_field(j: &Json, key: &str, default: f64, msg: &str) -> Result<f64, (u16, String)> {
-    match j.find(key) {
-        None | Some(Json::Null) => Ok(default),
-        Some(Json::Int(v)) => Ok(*v as f64),
-        Some(Json::Double(d)) => Ok(*d),
-        Some(Json::String(s)) => {
-            s.trim().parse::<f64>().ok().filter(|v| v.is_finite()).ok_or_else(|| unprocessable(msg))
-        }
-        _ => Err(unprocessable(msg)),
-    }
-}
-
-fn str_field(j: &Json, key: &str, default: &str) -> Result<String, (u16, String)> {
-    match j.find(key) {
-        None | Some(Json::Null) => Ok(default.to_string()),
-        Some(Json::String(s)) => Ok(s.clone()),
-        _ => Err(unprocessable(format!("{key} must be a string."))),
-    }
-}
-
-fn simulations(j: &Json, default: i64) -> Result<u64, (u16, String)> {
-    let n = int_field(j, "simulations", default, "Simulation count must be an integer.")?;
-    if !(1_000..=100_000_000).contains(&n) {
-        return Err(unprocessable("Simulations must be between 1,000 and 100,000,000."));
-    }
-    Ok(n as u64)
-}
-
-fn portfolio(j: &Json) -> Result<Portfolio, (u16, String)> {
-    let csv = match j.find("portfolio_csv") {
-        Some(Json::String(s)) if !s.trim().is_empty() => s,
-        _ => return Err(unprocessable("Portfolio CSV is required.")),
+/// Runs synchronous engine work on the blocking pool, bounded by the compute
+/// semaphore so a burst of requests cannot pile up unbounded CPU work.
+async fn compute(st: &AppState, work: impl FnOnce() -> Reply + Send + 'static) -> Response {
+    let Ok(permit) = Arc::clone(&st.compute).try_acquire_owned() else {
+        return error_response(503, "Server busy; try again.");
     };
-    if csv.len() > 10_000_000 {
-        return Err((413, "Portfolio CSV exceeds the 10 MB limit.".into()));
+    let joined = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await;
+    match joined {
+        Ok(reply) => respond(reply),
+        Err(_) => error_response(500, "The engine failed while handling this request."),
     }
-    Portfolio::from_csv_str(csv).map_err(|e| engine_error(&e))
 }
 
-fn run_options(j: &Json, base: RiskConfig) -> Result<RiskConfig, (u16, String)> {
-    let mut cfg = base;
-    let seed = int_field(j, "seed", cfg.seed as i64, "Seed must be a non-negative integer.")?;
-    cfg.seed = u64::try_from(seed).map_err(|_| unprocessable("Seed must be a non-negative integer."))?;
-    cfg.backend = Backend::parse(&str_field(j, "backend", "auto")?).map_err(|e| engine_error(&e))?;
-    let days = float_field(j, "horizon_days", cfg.horizon_years * 252.0, "horizon_days must be numeric.")?;
-    if !(days > 0.0 && days <= 252.0 * 30.0) {
-        return Err(unprocessable("horizon_days must be between 0 and 7560 (30 years)."));
+/// A POST route: parse the JSON body, then run `route` on the blocking pool.
+async fn post_json(
+    st: &AppState,
+    body: Result<Bytes, BytesRejection>,
+    route: fn(&Json) -> Reply,
+) -> Response {
+    match body_json(body) {
+        Ok(j) => compute(st, move || route(&j)).await,
+        Err((code, msg)) => error_response(code, msg),
     }
-    cfg.horizon_years = days / 252.0;
-    Ok(cfg)
 }
 
-fn risk(req: &Request) -> Reply {
-    let j = body_json(req)?;
-    let metric = str_field(&j, "metric", "var")?.trim().to_ascii_lowercase();
-    if metric.is_empty() || !metric.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err(unprocessable("Metric name is invalid."));
-    }
-    let confidence = float_field(&j, "confidence", 0.99, "Confidence must be numeric.")?;
-    let sims = simulations(&j, 1_000_000)?;
-    if !(confidence > 0.5 && confidence < 1.0) {
-        return Err(unprocessable("Confidence must be between 0.5 and 1.0."));
-    }
-    let p = portfolio(&j)?;
-    let cfg = run_options(&j, RiskConfig { confidence, simulations: sims, ..RiskConfig::default() })?;
-    let report = RiskEngine::new().calculate_named(&metric, &p, &cfg).map_err(|e| engine_error(&e))?;
-    Ok(report.to_json_value())
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn root() -> Response {
+    respond(Ok(Json::object()
+        .with("message", Json::string("Spectra Labs API"))
+        .with("version", Json::string(ENGINE_VERSION))))
 }
 
-fn benchmark_route(req: &Request) -> Reply {
-    let j = body_json(req)?;
-    let sims = simulations(&j, 100_000)?;
-    let reps = int_field(&j, "repetitions", 5, "Repetitions and warmups must be integers.")?;
-    let warm = int_field(&j, "warmups", 1, "Repetitions and warmups must be integers.")?;
-    if !(1..=30).contains(&reps) || !(0..=5).contains(&warm) {
-        return Err(unprocessable("Use 1–30 repetitions and 0–5 warmups."));
-    }
-    if sims.saturating_mul((reps + warm) as u64).saturating_mul(3) > BENCHMARK_PATH_BUDGET {
-        return Err(unprocessable(
-            "This benchmark exceeds the 10 million total-path limit. Reduce simulations or repetitions.",
-        ));
-    }
-    let p = portfolio(&j)?;
-    benchmark(&p, sims, reps as usize, warm as usize).map_err(|e| engine_error(&e))
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn health() -> Response {
+    respond(Ok(Json::object()
+        .with("status", Json::string("healthy"))
+        .with("engine", Json::string("spectra-risk"))
+        .with("engine_version", Json::string(ENGINE_VERSION))
+        .with("cli_exists", Json::boolean(true))))
 }
 
-fn stress(req: &Request) -> Reply {
-    let j = body_json(req)?;
-    let scenario = str_field(&j, "scenario", "market-crash")?;
-    if !SCENARIOS.iter().any(|s| s.name == scenario) {
-        return Err(unprocessable("Unknown stress scenario."));
-    }
-    let p = portfolio(&j)?;
-    let sims = simulations(&j, 1_000_000)?;
-    let cfg = run_options(&j, RiskConfig { simulations: sims, ..RiskConfig::default() })?;
-    Ok(stress_test(&RiskEngine::new(), &p, &scenario, &cfg).map_err(|e| engine_error(&e))?.to_json_value())
+/// Readiness: 200 when every dependency answers, else 503. The worker check
+/// joins this once the worker exists (M20 step 6).
+async fn ready(State(st): State<AppState>) -> Response {
+    let database = match &st.db {
+        None => "not_configured",
+        Some(pool) => match tokio::time::timeout(READY_TIMEOUT, spectra_db::ping(pool)).await {
+            Ok(Ok(())) => "ok",
+            _ => "unavailable",
+        },
+    };
+    let ok = database == "ok";
+    let body = Json::object()
+        .with("status", Json::string(if ok { "ready" } else { "not_ready" }))
+        .with("checks", Json::object().with("database", Json::string(database)));
+    json_response(if ok { 200 } else { 503 }, body.dump())
 }
 
-fn metrics_route() -> Json {
-    Json::Array(
-        Metric::all()
-            .map(|m| {
-                Json::object()
-                    .with("name", Json::string(m.name()))
-                    .with("supported", Json::boolean(m.is_supported()))
-            })
-            .collect(),
+async fn risk_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
+    post_json(&st, body, engine::risk).await
+}
+
+async fn benchmark_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
+    post_json(&st, body, engine::benchmark_route).await
+}
+
+async fn stress_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
+    post_json(&st, body, engine::stress).await
+}
+
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn metrics_handler() -> Response {
+    respond(Ok(engine::metrics_route()))
+}
+
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn sample_portfolio() -> Response {
+    respond(Ok(Json::object().with("csv", Json::string(SAMPLE_PORTFOLIO))))
+}
+
+// Telemetry samples /proc over a 100 ms window (and may run nvidia-smi), so it
+// runs on the blocking pool too.
+async fn telemetry_cpu(State(st): State<AppState>) -> Response {
+    compute(&st, || Ok(telemetry::cpu())).await
+}
+
+async fn telemetry_workers(State(st): State<AppState>) -> Response {
+    compute(&st, || Ok(telemetry::workers())).await
+}
+
+async fn telemetry_gpu(State(st): State<AppState>) -> Response {
+    compute(&st, || Ok(telemetry::gpu())).await
+}
+
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn alpaca() -> Response {
+    error_response(
+        501,
+        "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
+         has not been added.",
     )
 }
 
-fn cors_headers(cfg: &ApiConfig, req: &Request) -> Vec<(String, String)> {
-    let Some(origin) = req.header("origin") else { return Vec::new() };
-    if !cfg.cors_origins.iter().any(|o| o == origin || o == "*") {
-        return Vec::new();
-    }
-    vec![
-        ("Access-Control-Allow-Origin".into(), origin.to_string()),
-        ("Vary".into(), "Origin".into()),
-        ("Access-Control-Allow-Methods".into(), "GET, POST, OPTIONS".into()),
-        ("Access-Control-Allow-Headers".into(), "Content-Type".into()),
-        ("Access-Control-Max-Age".into(), "600".into()),
-    ]
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn not_found() -> Response {
+    error_response(404, "Not Found")
 }
 
-/// Routes one request.
-pub fn handle(cfg: &ApiConfig, req: &Request) -> Response {
-    let cors = cors_headers(cfg, req);
-    let mut resp = if req.method == "OPTIONS" {
-        if cors.is_empty() && req.header("origin").is_some() {
-            Response::error(403, "Origin not allowed.")
-        } else {
-            Response { status: 204, headers: Vec::new(), body: Vec::new() }
-        }
-    } else if let Some(Err((code, msg))) = cfg
-        .shared_secret
-        .as_ref()
-        .filter(|_| !is_public(&req.method, &req.path))
-        .map(|secret| authorize(secret, req))
-    {
-        Response::error(code, &msg)
-    } else {
-        let reply: Reply = match (req.method.as_str(), req.path.as_str()) {
-            ("GET", "/") => Ok(Json::object()
-                .with("message", Json::string("Spectra Labs API"))
-                .with("version", Json::string(ENGINE_VERSION))),
-            ("GET", "/health") => Ok(Json::object()
-                .with("status", Json::string("healthy"))
-                .with("engine", Json::string("spectra-risk"))
-                .with("engine_version", Json::string(ENGINE_VERSION))
-                .with("cli_exists", Json::boolean(true))),
-            ("POST", "/api/risk") => risk(req),
-            ("POST", "/api/benchmark") => benchmark_route(req),
-            ("POST", "/api/stress") => stress(req),
-            ("GET", "/api/metrics") => Ok(metrics_route()),
-            ("GET", "/api/sample-portfolio") => Ok(Json::object().with("csv", Json::string(SAMPLE_PORTFOLIO))),
-            ("GET", "/api/telemetry/cpu") => Ok(telemetry::cpu()),
-            ("GET", "/api/telemetry/workers") => Ok(telemetry::workers()),
-            ("GET", "/api/telemetry/gpu") => Ok(telemetry::gpu()),
-            (_, p) if p.starts_with("/api/alpaca") => Err((
-                501,
-                "The Alpaca brokerage proxy is not available in the Rust API: it needs an HTTPS client, and this \
-                 build uses the standard library only."
-                    .into(),
-            )),
-            (
-                _,
-                "/" | "/health" | "/api/risk" | "/api/benchmark" | "/api/stress" | "/api/metrics" | "/api/sample-portfolio"
-                | "/api/telemetry/cpu" | "/api/telemetry/workers" | "/api/telemetry/gpu",
-            ) => Err((405, "Method not allowed.".into())),
-            _ => Err((404, "Not Found".into())),
-        };
-        match reply {
-            Ok(j) => Response::json(200, to_text(&j)),
-            Err((code, msg)) => Response::error(code, &msg),
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn method_not_allowed() -> Response {
+    error_response(405, "Method not allowed.")
+}
+
+/// A route that answers 405 to other methods.
+fn only(route: MethodRouter<AppState>) -> MethodRouter<AppState> {
+    route.fallback(method_not_allowed)
+}
+
+/// The engine routes under `prefix` (`/api/v1`, or the old `/api`).
+fn engine_routes(prefix: &str) -> Router<AppState> {
+    Router::new()
+        .route(&format!("{prefix}/risk"), only(post(risk_handler)))
+        .route(&format!("{prefix}/benchmark"), only(post(benchmark_handler)))
+        .route(&format!("{prefix}/stress"), only(post(stress_handler)))
+        .route(&format!("{prefix}/metrics"), only(get(metrics_handler)))
+        .route(&format!("{prefix}/sample-portfolio"), only(get(sample_portfolio)))
+        .route(&format!("{prefix}/telemetry/cpu"), only(get(telemetry_cpu)))
+        .route(&format!("{prefix}/telemetry/workers"), only(get(telemetry_workers)))
+        .route(&format!("{prefix}/telemetry/gpu"), only(get(telemetry_gpu)))
+        .route(&format!("{prefix}/alpaca"), any(alpaca))
+        .route(&format!("{prefix}/alpaca/{{*rest}}"), any(alpaca))
+}
+
+/// The application. `db` is checked by `/ready`; pass `None` where there is
+/// no database (unit tests), and `/ready` reports 503.
+pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
+    let st = AppState { cfg: Arc::new(cfg), compute: Arc::new(Semaphore::new(MAX_CONCURRENT_COMPUTE)), db };
+    let signed = engine_routes("/api/v1")
+        .merge(engine_routes("/api"))
+        .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
+    Router::new()
+        .route("/", only(get(root)))
+        .route("/health", only(get(health)))
+        .route("/ready", only(get(ready)))
+        .merge(signed)
+        .fallback(not_found)
+        .layer(DefaultBodyLimit::max(MAX_BODY))
+        .layer(middleware::from_fn(reject_oversized))
+        .layer(middleware::from_fn_with_state(st.clone(), cors))
+        .layer(middleware::from_fn(request_id))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store"),
+        ))
+        .with_state(st)
+}
+
+/// Serves [`router`] on `listener` until `shutdown` resolves, then stops
+/// accepting connections and waits for in-flight requests to finish.
+///
+/// # Errors
+/// An I/O error from the listener.
+pub async fn serve(
+    listener: TcpListener,
+    cfg: ApiConfig,
+    db: Option<PgPool>,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> std::io::Result<()> {
+    axum::serve(listener, router(cfg, db)).with_graceful_shutdown(shutdown).await
+}
+
+/// Resolves on Ctrl-C, or on SIGTERM on Unix (what `docker stop` sends).
+pub async fn shutdown_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
         }
     };
-    resp.headers.extend(cors);
-    resp
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        () = ctrl_c => {},
+        () = terminate => {},
+    }
 }

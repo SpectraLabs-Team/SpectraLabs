@@ -7,10 +7,11 @@ import { teamErrorResponse } from '@/lib/server/teamRoute';
 import { setActiveWorkspace } from '@/lib/server/workspaces';
 
 export const dynamic = 'force-dynamic';
-type Ctx = { params: { token: string } };
+type Ctx = { params: Promise<{ token: string }> };
 
 /** What an invite is for (workspace, role, masked email), for the invite page. Public. */
-export async function GET(req: Request, { params }: Ctx) {
+export async function GET(req: Request, props: Ctx) {
+  const params = await props.params;
   const limit = await hit(`invite-view:${clientIp(req)}`, 60, 15 * 60_000);
   if (!limit.ok) return tooMany(limit.retryAfter, 'requests');
   if (!isInviteToken(params.token)) return NextResponse.json({ ok: true, invite: { status: 'missing' } });
@@ -18,7 +19,8 @@ export async function GET(req: Request, { params }: Ctx) {
 }
 
 /** Accept: must be signed in with the invited email. Joins the workspace and makes it active here. */
-export async function POST(req: Request, { params }: Ctx) {
+export async function POST(req: Request, props: Ctx) {
+  const params = await props.params;
   const auth = await getSession();
   if (!auth) return NextResponse.json({ ok: false, error: 'Sign in to accept the invite.' }, { status: 401 });
   const limit = await hit(`invite-accept:${auth.user.id}`, 20, 15 * 60_000);

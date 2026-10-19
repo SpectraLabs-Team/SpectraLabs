@@ -4,11 +4,12 @@ import { requireRecentAuth, requireWorkspace } from '@/lib/server/requireUser';
 import { changeRole, removeMember } from '@/lib/server/team';
 import { teamErrorResponse } from '@/lib/server/teamRoute';
 
-type Ctx = { params: { id: string; userId: string } };
+type Ctx = { params: Promise<{ id: string; userId: string }> };
 const validId = (id: string) => /^[0-9a-f-]{36}$/i.test(id);
 
 /** Change a member's role. Owners only, with a fresh "confirm it's you". Keeps at least one owner. */
-export async function PATCH(req: Request, { params }: Ctx) {
+export async function PATCH(req: Request, props: Ctx) {
+  const params = await props.params;
   if (!validId(params.userId)) return NextResponse.json({ ok: false, error: 'Member not found.' }, { status: 404 });
   const { auth, workspace, res } = await requireWorkspace('owner', params.id);
   if (res) return res;
@@ -30,7 +31,8 @@ export async function PATCH(req: Request, { params }: Ctx) {
  * Remove a member (owners, with a fresh "confirm it's you"), or leave the workspace yourself (any
  * member). The last owner can't leave or be removed.
  */
-export async function DELETE(req: Request, { params }: Ctx) {
+export async function DELETE(req: Request, props: Ctx) {
+  const params = await props.params;
   if (!validId(params.userId)) return NextResponse.json({ ok: false, error: 'Member not found.' }, { status: 404 });
   const { auth, workspace, res } = await requireWorkspace('viewer', params.id);
   if (res) return res;

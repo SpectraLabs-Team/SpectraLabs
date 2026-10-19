@@ -14,7 +14,8 @@ export const SESSION_COOKIE = 'spectra_session';
  * database lookup (see lib/server/sessions.ts). Server-only: route handlers and server components.
  */
 export async function getSession(): Promise<Auth | null> {
-  return lookupSession(cookies().get(SESSION_COOKIE)?.value);
+  const jar = await cookies();
+  return lookupSession(jar.get(SESSION_COOKIE)?.value);
 }
 
 /**
@@ -25,7 +26,7 @@ export async function getSession(): Promise<Auth | null> {
  * Call from a route handler.
  */
 export async function startSession(user: UserRecord, req: Request, opts: { notifyNewDevice?: boolean } = {}): Promise<SessionInfo & { newDevice: boolean }> {
-  const jar = cookies();
+  const jar = await cookies();
   const ip = clientIp(req);
   const userAgent = req.headers.get('user-agent');
 
@@ -70,7 +71,7 @@ async function notifyNewDevice(user: UserRecord, info: { ip: string; userAgent: 
 
 /** Sign this browser out: revoke its session and clear the cookie. */
 export async function endSession(): Promise<void> {
-  const jar = cookies();
+  const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (token) await revokeSessionByToken(token);
   jar.delete(SESSION_COOKIE);

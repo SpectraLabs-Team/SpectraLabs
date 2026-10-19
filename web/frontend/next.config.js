@@ -36,9 +36,7 @@ const nextConfig = {
   async redirects() {
     return legacy.map(([source, tab]) => ({ source, destination: studio(tab), permanent: false }));
   },
-  experimental: {
-    serverComponentsExternalPackages: ['@node-rs/argon2', 'pg'],
-  },
+  serverExternalPackages: ['@node-rs/argon2', 'pg'],
 };
 
 // Refuse to start (dev or production server) without a real AUTH_SECRET and a DATABASE_URL. Builds are not checked,

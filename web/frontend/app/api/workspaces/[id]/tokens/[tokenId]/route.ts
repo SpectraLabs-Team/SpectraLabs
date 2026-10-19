@@ -6,7 +6,8 @@ import { requireWorkspace } from '@/lib/server/requireUser';
 export const dynamic = 'force-dynamic';
 
 /** Revoke a token: your own, or (owners) any token of the workspace. Takes effect immediately. */
-export async function DELETE(req: Request, { params }: { params: { id: string; tokenId: string } }) {
+export async function DELETE(req: Request, props: { params: Promise<{ id: string; tokenId: string }> }) {
+  const params = await props.params;
   const { auth, workspace, res } = await requireWorkspace('viewer', params.id);
   if (res) return res;
   const info = await revokeToken(workspace, params.tokenId, auth.user);

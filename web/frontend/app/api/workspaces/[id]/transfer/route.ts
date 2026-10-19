@@ -5,7 +5,8 @@ import { transferOwnership } from '@/lib/server/team';
 import { teamErrorResponse } from '@/lib/server/teamRoute';
 
 /** Make another member the owner; you become an editor. Owners only, with a fresh "confirm it's you". */
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const { auth, workspace, res } = await requireWorkspace('owner', params.id);
   if (res) return res;
   const stepUp = requireRecentAuth(auth.session);

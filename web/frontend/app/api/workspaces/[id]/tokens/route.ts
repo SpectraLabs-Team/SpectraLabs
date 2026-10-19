@@ -5,10 +5,11 @@ import { hit, tooMany } from '@/lib/server/rateLimit';
 import { requireRecentAuth, requireWorkspace } from '@/lib/server/requireUser';
 
 export const dynamic = 'force-dynamic';
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 /** Live API tokens for this workspace: owners see all of them, everyone else only their own. */
-export async function GET(_req: Request, { params }: Ctx) {
+export async function GET(_req: Request, props: Ctx) {
+  const params = await props.params;
   const { auth, workspace, res } = await requireWorkspace('viewer', params.id);
   if (res) return res;
   return NextResponse.json({ ok: true, role: workspace.role, tokens: await listTokens(workspace, auth.user.id) }, { headers: { 'Cache-Control': 'no-store' } });
@@ -18,7 +19,8 @@ export async function GET(_req: Request, { params }: Ctx) {
  * Make a token, shown once. Any member can make a personal token (read-only for viewers);
  * workspace tokens are owner-only (checked in createToken). Needs a fresh "confirm it's you".
  */
-export async function POST(req: Request, { params }: Ctx) {
+export async function POST(req: Request, props: Ctx) {
+  const params = await props.params;
   const { auth, workspace, res } = await requireWorkspace('viewer', params.id);
   if (res) return res;
   const stepUp = requireRecentAuth(auth.session);

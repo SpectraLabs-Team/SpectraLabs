@@ -114,10 +114,12 @@ async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
   }
 }
 
-export function GET(req: Request, { params }: { params: { path: string[] } }) {
+export async function GET(req: Request, props: { params: Promise<{ path: string[] }> }) {
+  const params = await props.params;
   return proxy(req, params.path, 'GET');
 }
 
-export function POST(req: Request, { params }: { params: { path: string[] } }) {
+export async function POST(req: Request, props: { params: Promise<{ path: string[] }> }) {
+  const params = await props.params;
   return proxy(req, params.path, 'POST');
 }

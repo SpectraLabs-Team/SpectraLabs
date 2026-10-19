@@ -6,13 +6,14 @@ import { deleteSecret, isSecretKind, listSecrets, putSecret, SecretValidationErr
 
 export const dynamic = 'force-dynamic';
 
-type Ctx = { params: { kind: string } };
+type Ctx = { params: Promise<{ kind: string }> };
 
 /**
  * Add or replace a broker key in the active workspace. Owners only. Write-only: the response
  * carries metadata (last 4 characters, dates), never the key. The request body is never logged.
  */
-export async function PUT(req: Request, { params }: Ctx) {
+export async function PUT(req: Request, props: Ctx) {
+  const params = await props.params;
   if (!isSecretKind(params.kind)) return NextResponse.json({ ok: false, error: 'Unknown key type.' }, { status: 404 });
   const { auth, workspace, res } = await requireWorkspace('owner');
   if (res) return res;
@@ -43,7 +44,8 @@ export async function PUT(req: Request, { params }: Ctx) {
 }
 
 /** Delete a broker key from the active workspace. Owners only. */
-export async function DELETE(req: Request, { params }: Ctx) {
+export async function DELETE(req: Request, props: Ctx) {
+  const params = await props.params;
   if (!isSecretKind(params.kind)) return NextResponse.json({ ok: false, error: 'Unknown key type.' }, { status: 404 });
   const { auth, workspace, res } = await requireWorkspace('owner');
   if (res) return res;

@@ -8,10 +8,11 @@ import { createInvite, listInvites } from '@/lib/server/team';
 import { teamErrorResponse } from '@/lib/server/teamRoute';
 
 export const dynamic = 'force-dynamic';
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 /** Open invites for this workspace. Owners only. */
-export async function GET(_req: Request, { params }: Ctx) {
+export async function GET(_req: Request, props: Ctx) {
+  const params = await props.params;
   const { workspace, res } = await requireWorkspace('owner', params.id);
   if (res) return res;
   return NextResponse.json({ ok: true, invites: await listInvites(workspace.id) });
@@ -22,7 +23,8 @@ export async function GET(_req: Request, { params }: Ctx) {
  * (it grants access). The link is emailed; it's also returned so the owner can share it another
  * way if the email doesn't arrive (it only works for the invited address).
  */
-export async function POST(req: Request, { params }: Ctx) {
+export async function POST(req: Request, props: Ctx) {
+  const params = await props.params;
   const { auth, workspace, res } = await requireWorkspace('owner', params.id);
   if (res) return res;
   const stepUp = requireRecentAuth(auth.session);

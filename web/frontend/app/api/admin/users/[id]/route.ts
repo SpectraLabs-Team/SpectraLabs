@@ -5,10 +5,11 @@ import { findUserById, LastAdminError, setPlatformRole, setUserStatus } from '@/
 import { requireAdmin, requireRecentAuth } from '@/lib/server/requireUser';
 
 export const dynamic = 'force-dynamic';
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 /** One account in detail: profile, security, workspaces, devices, recent activity. Admins only; the view is audit-logged. */
-export async function GET(req: Request, { params }: Ctx) {
+export async function GET(req: Request, props: Ctx) {
+  const params = await props.params;
   const { auth, res } = await requireAdmin();
   if (res) return res;
   const detail = await getAdminUserDetail(params.id);
@@ -24,7 +25,8 @@ export async function GET(req: Request, { params }: Ctx) {
  * { role: 'admin' | 'user' }         grant or remove platform admin (signs them out everywhere)
  * Admins only, with a fresh "confirm it's you". Not on your own account; the last admin stays.
  */
-export async function PATCH(req: Request, { params }: Ctx) {
+export async function PATCH(req: Request, props: Ctx) {
+  const params = await props.params;
   const { auth, res } = await requireAdmin();
   if (res) return res;
   const stepUp = requireRecentAuth(auth.session);

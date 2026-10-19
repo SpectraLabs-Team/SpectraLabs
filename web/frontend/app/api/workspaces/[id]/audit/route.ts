@@ -9,7 +9,8 @@ export const dynamic = 'force-dynamic';
  * trading). Owners only: entries include members' IP addresses. Same filters and CSV export as
  * the admin view.
  */
-export async function GET(req: Request, { params }: { params: { id: string } }) {
+export async function GET(req: Request, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const { auth, workspace, res } = await requireWorkspace('owner', params.id);
   if (res) return res;
   try {

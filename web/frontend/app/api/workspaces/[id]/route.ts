@@ -5,17 +5,19 @@ import { cleanWorkspaceName, deleteWorkspace, listMembers, MAX_WORKSPACE_NAME, P
 
 export const dynamic = 'force-dynamic';
 
-type Ctx = { params: { id: string } };
+type Ctx = { params: Promise<{ id: string }> };
 
 /** Workspace details and members. Any member (viewer and up). */
-export async function GET(_req: Request, { params }: Ctx) {
+export async function GET(_req: Request, props: Ctx) {
+  const params = await props.params;
   const { workspace, res } = await requireWorkspace('viewer', params.id);
   if (res) return res;
   return NextResponse.json({ ok: true, workspace, members: await listMembers(workspace.id) });
 }
 
 /** Rename. Owners only. */
-export async function PATCH(req: Request, { params }: Ctx) {
+export async function PATCH(req: Request, props: Ctx) {
+  const params = await props.params;
   const { auth, workspace, res } = await requireWorkspace('owner', params.id);
   if (res) return res;
   try {
@@ -32,7 +34,8 @@ export async function PATCH(req: Request, { params }: Ctx) {
 }
 
 /** Delete a team workspace and everything in it. Owners only; personal workspaces can't be deleted. */
-export async function DELETE(req: Request, { params }: Ctx) {
+export async function DELETE(req: Request, props: Ctx) {
+  const params = await props.params;
   const { auth, workspace, res } = await requireWorkspace('owner', params.id);
   if (res) return res;
   const stepUp = requireRecentAuth(auth.session);

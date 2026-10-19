@@ -10,7 +10,8 @@ export async function GET() {
   try {
     const auth = await getSession();
     if (!auth) {
-      if (cookies().get(SESSION_COOKIE)) cookies().delete(SESSION_COOKIE);
+      const jar = await cookies();
+      if (jar.get(SESSION_COOKIE)) jar.delete(SESSION_COOKIE);
       return NextResponse.json({ ok: true, user: null });
     }
     const { id, name, slug, personal, role } = auth.workspace;

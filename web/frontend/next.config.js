@@ -18,17 +18,9 @@ const legacy = [
   ['/system/:path*', null],
 ];
 
-// Baseline security headers for every response. (A full Content-Security-Policy is a later
-// step: the theme/scroll init scripts in app/layout.tsx are inline and would need nonces.)
-const securityHeaders = [
-  { key: 'X-Frame-Options', value: 'DENY' }, // no clickjacking via iframes
-  { key: 'X-Content-Type-Options', value: 'nosniff' },
-  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
-  ...(process.env.NODE_ENV === 'production'
-    ? [{ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' }]
-    : []),
-];
+// Security headers for every response (lib/securityHeaders.js). The Content-Security-Policy is
+// set per request in middleware.ts, because it carries a nonce.
+const { pageHeaders, apiHeaders } = require('./lib/securityHeaders');
 
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || defaultDistDir,
@@ -39,14 +31,39 @@ const nextConfig = {
   eslint: { ignoreDuringBuilds: true },
   async headers() {
     return [
-      { source: '/:path*', headers: securityHeaders },
-      // Auth and engine responses are per-user; never let a shared cache keep them.
-      { source: '/api/:path*', headers: [{ key: 'Cache-Control', value: 'no-store' }] },
+      { source: '/:path*', headers: pageHeaders() },
+      { source: '/api/:path*', headers: apiHeaders },
     ];
   },
   async redirects() {
     return legacy.map(([source, tab]) => ({ source, destination: studio(tab), permanent: false }));
   },
+  serverExternalPackages: ['@node-rs/argon2', 'pg'],
 };
 
-module.exports = nextConfig;
+// Refuse to start (dev or production server) without a real AUTH_SECRET and a DATABASE_URL. Builds are not checked,
+// so CI can compile without secrets. Rules match authSecret() in lib/server/authStore.ts.
+const { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_SERVER } = require('next/constants');
+const RETIRED_AUTH_SECRETS = new Set(['spectralabs_jwt_default_secret_key_32bytes_required']);
+
+function assertServerEnv() {
+  require('@next/env').loadEnvConfig(__dirname); // .env.local etc.; a no-op if already loaded
+  const s = process.env.AUTH_SECRET;
+  let problem = null;
+  if (!s || !s.trim()) problem = 'AUTH_SECRET is not set';
+  else if (s.length < 32) problem = 'AUTH_SECRET is too short (need 32+ characters)';
+  else if (RETIRED_AUTH_SECRETS.has(s)) problem = 'AUTH_SECRET is the old public development default';
+  if (problem) {
+    console.error(`\n  ✖ ${problem}.\n    Run \`npm run setup\` in web/frontend to generate one, then start again.\n`);
+    process.exit(1);
+  }
+  if (!process.env.DATABASE_URL || !process.env.DATABASE_URL.trim()) {
+    console.error('\n  ✖ DATABASE_URL is not set.\n    Run `npm run setup`, then see "Database" in web/README.md.\n');
+    process.exit(1);
+  }
+}
+
+module.exports = (phase) => {
+  if (phase === PHASE_DEVELOPMENT_SERVER || phase === PHASE_PRODUCTION_SERVER) assertServerEnv();
+  return nextConfig;
+};

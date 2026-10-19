@@ -1,9 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { Activity, ArrowRight, Check, Copy, Cpu, Gauge, RefreshCw, ScrollText, Search, Server, Users, Workflow, X } from 'lucide-react';
+import { Activity, ArrowRight, Check, Copy, Cpu, RefreshCw, ScrollText, Search, Server, Users, Workflow, X } from 'lucide-react';
+import { AuditLog } from '@/components/audit/AuditLog';
+import { AdminUserPanel } from './AdminUserPanel';
 import { StatusPills } from '@/components/ui/StatusPills';
 import { getCpuTelemetry } from '@/lib/api';
 import type { CpuTelemetry } from '@/lib/types';
@@ -17,13 +19,6 @@ const WORKERS = [
   { id: 'mc-02', job: 'Stress · 2008 replay', pct: 41 },
   { id: 'bt-01', job: 'Backtest sweep · 48 trials', pct: 88 },
   { id: 'rs-01', job: 'PBO / DSR validation', pct: 15 },
-];
-const LEDGER = [
-  ['21:14:07', 'registry.append', 'exp#0193 sealed', '9f3a…c21e'],
-  ['21:09:52', 'auth.verify', 'admin session issued', '41be…07d9'],
-  ['20:58:31', 'risk.calculate', 'VaR 99% · seed 42', 'c7d0…88a4'],
-  ['20:41:16', 'vault.unlock', 'holdout read denied', '2e19…f5b3'],
-  ['20:33:04', 'data.ingest', 'SPY 1d · 5,031 bars', 'a8c6…1d70'],
 ];
 
 function Card({ title, icon, className, children, i, demo }: { title: string; icon: ReactNode; className?: string; children: ReactNode; i: number; demo?: boolean }) {
@@ -88,7 +83,7 @@ function useHostTelemetry(intervalMs = 5_000) {
 
 const pct = (n: number) => `${n.toFixed(n < 10 ? 1 : 0)}%`;
 
-type Account = { email: string; name: string; role: Role; createdAt: number; twoFactor?: boolean };
+type Account = { id: string; email: string; name: string; role: Role; status: 'active' | 'disabled'; createdAt: number; twoFactor?: boolean; lastActiveAt: number | null };
 
 const joined = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 
@@ -119,6 +114,8 @@ function CopyEmail({ email }: { email: string }) {
 }
 
 function RegisteredUsers() {
+  const { user: me } = useAuth();
+  const [open, setOpen] = useState<string | null>(null);
   const [users, setUsers] = useState<Account[] | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -196,12 +193,15 @@ function RegisteredUsers() {
                 <th className="px-1 pb-2 font-medium">Email</th>
                 <th className="px-1 pb-2 font-medium">Role</th>
                 <th className="px-1 pb-2 font-medium">Login</th>
+                <th className="px-1 pb-2 font-medium">Status</th>
                 <th className="px-1 pb-2 text-right font-medium">Joined</th>
+                <th className="px-1 pb-2" aria-label="Actions" />
               </tr>
             </thead>
             <tbody className="divide-y divide-ink/[0.06]">
               {shown.map((u) => (
-                <tr key={u.email}>
+                <Fragment key={u.id}>
+                <tr>
                   <td className="px-1 py-2.5">
                     <span className="flex items-center gap-2.5">
                       <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent-gradient font-mono text-[10px] font-bold text-onaccent">{initials(u)}</span>
@@ -222,8 +222,28 @@ function RegisteredUsers() {
                   <td className="px-1 py-2.5 font-mono text-[11px]">
                     {u.twoFactor ? <span className="text-profit">2FA</span> : <span className="text-caution">Password only</span>}
                   </td>
-                  <td className="px-1 py-2.5 text-right font-mono tabular-nums text-ink/55">{joined.format(new Date(u.createdAt))}</td>
+                  <td className="px-1 py-2.5">
+                    <span className={cn('rounded-full px-2 py-0.5 text-[10.5px] font-semibold', u.status === 'active' ? 'bg-ink/[0.05] text-ink/60' : 'bg-rose-500/15 text-rose-700 dark:text-rose-300')}>
+                      {u.status === 'active' ? 'Active' : 'Disabled'}
+                    </span>
+                  </td>
+                  <td className="px-1 py-2.5 text-right font-mono tabular-nums text-ink/55" title={u.lastActiveAt ? `Last active ${new Date(u.lastActiveAt).toLocaleString()}` : 'No activity recorded'}>
+                    {joined.format(new Date(u.createdAt))}
+                  </td>
+                  <td className="px-1 py-2.5 text-right">
+                    <button type="button" className="btn-ghost border border-ink/10" aria-expanded={open === u.id} onClick={() => setOpen((o) => (o === u.id ? null : u.id))}>
+                      {open === u.id ? 'Close' : 'Manage'}
+                    </button>
+                  </td>
                 </tr>
+                {open === u.id && (
+                  <tr>
+                    <td colSpan={7} className="px-1 pb-3">
+                      <AdminUserPanel userId={u.id} self={u.email === me?.email} onChanged={load} />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -324,18 +344,8 @@ export function AdminDashboard() {
           </ul>
         </Card>
 
-        <Card i={4} demo title="Audit Ledger" icon={<ScrollText className="h-4 w-4" />} className="lg:col-span-2">
-          <ul className="divide-y divide-ink/[0.06] font-mono text-[11.5px]">
-            {LEDGER.map(([t, ev, msg, hash]) => (
-              <li key={t} className="grid grid-cols-[64px_1fr] gap-x-3 py-2 sm:grid-cols-[64px_120px_1fr_88px]">
-                <span className="text-ink/45">{t}</span>
-                <span className="text-accent">{ev}</span>
-                <span className="col-span-2 truncate text-ink/70 sm:col-span-1">{msg}</span>
-                <span className="hidden text-right text-ink/40 sm:block">{hash}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-3 flex items-center gap-1.5 text-[11px] text-ink/45"><Gauge className="h-3 w-3" /> SHA-256 hash-chained · tamper-evident</p>
+        <Card i={4} title="Audit Log" icon={<ScrollText className="h-4 w-4" />} className="md:col-span-2 lg:col-span-4">
+          <AuditLog endpoint="/api/admin/audit" admin />
         </Card>
 
         <Card i={5} title="Registered Quants & Fund Accounts" icon={<Users className="h-4 w-4" />} className="md:col-span-2 lg:col-span-4">

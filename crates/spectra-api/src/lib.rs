@@ -17,6 +17,7 @@
 //! Every `/api/v1/...` route is also served at its old `/api/...` path. Those
 //! aliases are temporary: remove them once nothing calls them.
 //!
+<<<<<<< HEAD
 //! **Conventions** (docs/api-conventions.md): errors are
 //! `{"code", "message", "details", "request_id"}` (plus a deprecated `detail`
 //! copy of `message` while the old paths exist); every response carries
@@ -32,6 +33,26 @@
 pub mod auth;
 pub mod config;
 pub mod engine;
+=======
+//! Configuration (environment): `SPECTRA_API_ADDR` (default
+//! `127.0.0.1:8000`), `SPECTRA_CORS_ORIGINS` (comma-separated, default
+//! `http://localhost:3000`) and `ENGINE_SHARED_SECRET`.
+//!
+//! ## Caller identity
+//!
+//! With `ENGINE_SHARED_SECRET` set (32+ characters, the same value as the
+//! Next.js server's), every route except `GET /` and `GET /health` requires the
+//! signed `X-Spectra-Identity` header the dashboard's proxy adds (see
+//! [`identity`]): no header or a bad one is 401, and computations
+//! (`POST /api/risk`, `/api/benchmark`, `/api/stress`) and `/api/alpaca/*` need
+//! the editor role in the caller's active workspace (403 otherwise). Without the
+//! secret the API accepts anonymous calls, as before, and says so at startup.
+//! When the engine starts storing data, every read and write must be scoped to
+//! the verified workspace id.
+
+pub mod http;
+pub mod identity;
+>>>>>>> origin/main
 pub mod telemetry;
 
 use std::future::Future;
@@ -75,6 +96,7 @@ pub const READY_TIMEOUT: Duration = Duration::from_secs(2);
 pub struct ApiConfig {
     /// Origins allowed by CORS. `*` allows any origin.
     pub cors_origins: Vec<String>,
+<<<<<<< HEAD
     /// Verifies the proxy's request signatures.
     pub engine_secret: Secret,
 }
@@ -93,6 +115,98 @@ impl ApiConfig {
 impl From<&Config> for ApiConfig {
     fn from(c: &Config) -> Self {
         Self { cors_origins: c.cors_origins.clone(), engine_secret: c.engine_secret.clone() }
+=======
+    /// Verifies caller identity when set (see the crate docs).
+    pub shared_secret: Option<identity::Secret>,
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self { cors_origins: vec!["http://localhost:3000".into()], shared_secret: None }
+    }
+}
+
+impl ApiConfig {
+    /// Reads `SPECTRA_CORS_ORIGINS` and `ENGINE_SHARED_SECRET` (ignored if
+    /// shorter than [`identity::MIN_SECRET_LEN`]).
+    pub fn from_env() -> Self {
+        let mut cfg = Self::default();
+        if let Ok(v) = std::env::var("SPECTRA_CORS_ORIGINS") {
+            cfg.cors_origins =
+                v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect();
+        }
+        cfg.shared_secret =
+            std::env::var("ENGINE_SHARED_SECRET").ok().and_then(|v| identity::Secret::new(v.trim()));
+        cfg
+    }
+}
+
+/// Routes anyone may call, even with identity checks on.
+fn is_public(method: &str, path: &str) -> bool {
+    matches!((method, path), ("GET", "/" | "/health"))
+}
+
+/// Minimum workspace role for a route.
+fn min_role(method: &str, path: &str) -> identity::Role {
+    match (method, path) {
+        ("POST", "/api/risk" | "/api/benchmark" | "/api/stress") => identity::Role::Editor,
+        (_, p) if p.starts_with("/api/alpaca") => identity::Role::Editor,
+        _ => identity::Role::Viewer,
+    }
+}
+
+/// With identity checks on: the verified caller, or the 401/403 to answer.
+fn authorize(secret: &identity::Secret, req: &Request) -> Result<identity::Identity, (u16, String)> {
+    let header = req.header(identity::HEADER).ok_or((401, "Sign in to use the engine.".to_string()))?;
+    let id = identity::verify(header, secret, &req.method, &req.path, identity::unix_now())
+        .map_err(|why| (401, format!("Unauthenticated: {why}.")))?;
+    if id.workspace_role < min_role(&req.method, &req.path) {
+        return Err((403, "Your role in this workspace can't run computations (editor role needed).".into()));
+    }
+    Ok(id)
+}
+
+type Reply = Result<Json, (u16, String)>;
+
+/// JSON text for the browser: like [`Json::dump`], but doubles use the
+/// shortest representation that round-trips (`0.99`, not
+/// `0.98999999999999999`). Same values, friendlier display.
+pub fn to_text(j: &Json) -> String {
+    let mut out = String::new();
+    write_text(j, &mut out);
+    out
+}
+
+fn write_text(j: &Json, out: &mut String) {
+    match j {
+        Json::Double(d) if d.is_finite() => {
+            let s = format!("{d}");
+            out.push_str(&s);
+        }
+        Json::Array(items) => {
+            out.push('[');
+            for (i, v) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_text(v, out);
+            }
+            out.push(']');
+        }
+        Json::Object(members) => {
+            out.push('{');
+            for (i, (k, v)) in members.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&Json::string(k.clone()).dump());
+                out.push(':');
+                write_text(v, out);
+            }
+            out.push('}');
+        }
+        other => out.push_str(&other.dump()),
+>>>>>>> origin/main
     }
 }
 
@@ -405,6 +519,7 @@ async fn not_found() -> Response {
     error_response(404, "Not Found")
 }
 
+<<<<<<< HEAD
 #[allow(clippy::unused_async)] // axum handlers are async fns
 async fn method_not_allowed() -> Response {
     error_response(405, "Method not allowed.")
@@ -484,6 +599,58 @@ pub async fn shutdown_signal() {
                 s.recv().await;
             }
             Err(_) => std::future::pending::<()>().await,
+=======
+/// Routes one request.
+pub fn handle(cfg: &ApiConfig, req: &Request) -> Response {
+    let cors = cors_headers(cfg, req);
+    let mut resp = if req.method == "OPTIONS" {
+        if cors.is_empty() && req.header("origin").is_some() {
+            Response::error(403, "Origin not allowed.")
+        } else {
+            Response { status: 204, headers: Vec::new(), body: Vec::new() }
+        }
+    } else if let Some(Err((code, msg))) = cfg
+        .shared_secret
+        .as_ref()
+        .filter(|_| !is_public(&req.method, &req.path))
+        .map(|secret| authorize(secret, req))
+    {
+        Response::error(code, &msg)
+    } else {
+        let reply: Reply = match (req.method.as_str(), req.path.as_str()) {
+            ("GET", "/") => Ok(Json::object()
+                .with("message", Json::string("Spectra Labs API"))
+                .with("version", Json::string(ENGINE_VERSION))),
+            ("GET", "/health") => Ok(Json::object()
+                .with("status", Json::string("healthy"))
+                .with("engine", Json::string("spectra-risk"))
+                .with("engine_version", Json::string(ENGINE_VERSION))
+                .with("cli_exists", Json::boolean(true))),
+            ("POST", "/api/risk") => risk(req),
+            ("POST", "/api/benchmark") => benchmark_route(req),
+            ("POST", "/api/stress") => stress(req),
+            ("GET", "/api/metrics") => Ok(metrics_route()),
+            ("GET", "/api/sample-portfolio") => Ok(Json::object().with("csv", Json::string(SAMPLE_PORTFOLIO))),
+            ("GET", "/api/telemetry/cpu") => Ok(telemetry::cpu()),
+            ("GET", "/api/telemetry/workers") => Ok(telemetry::workers()),
+            ("GET", "/api/telemetry/gpu") => Ok(telemetry::gpu()),
+            (_, p) if p.starts_with("/api/alpaca") => Err((
+                501,
+                "The Alpaca brokerage proxy is not available in the Rust API: it needs an HTTPS client, and this \
+                 build uses the standard library only."
+                    .into(),
+            )),
+            (
+                _,
+                "/" | "/health" | "/api/risk" | "/api/benchmark" | "/api/stress" | "/api/metrics" | "/api/sample-portfolio"
+                | "/api/telemetry/cpu" | "/api/telemetry/workers" | "/api/telemetry/gpu",
+            ) => Err((405, "Method not allowed.".into())),
+            _ => Err((404, "Not Found".into())),
+        };
+        match reply {
+            Ok(j) => Response::json(200, to_text(&j)),
+            Err((code, msg)) => Response::error(code, &msg),
+>>>>>>> origin/main
         }
     };
     #[cfg(not(unix))]

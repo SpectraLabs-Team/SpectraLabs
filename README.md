@@ -64,6 +64,13 @@ cargo fmt --all --check
 cargo run --release -p spectra-cli --example sma_cross
 cargo run --release -p spectra-cli --example overfitting
 cargo run --release -p spectra-cli --example research_workflow
+<<<<<<< HEAD
+=======
+
+# Dashboard: API, then the frontend
+./target/release/spectra-api                   # http://127.0.0.1:8000
+cd web/frontend && npm install && npm run setup && npm run dev   # http://localhost:3000
+>>>>>>> origin/main
 ```
 
 ## Running the platform

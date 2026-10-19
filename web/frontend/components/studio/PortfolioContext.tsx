@@ -16,7 +16,6 @@ export interface RiskLabParams {
   confidence: number;
   simulations: number;
   horizon: number;
-  backend: BackendRequest;
   auto: boolean;
 }
 
@@ -50,7 +49,7 @@ export interface StressCache {
   baseVaR: number | null;
 }
 
-export const DEFAULT_RISK_PARAMS: RiskLabParams = { confidence: 0.99, simulations: 100_000, horizon: 1, backend: 'auto', auto: false };
+export const DEFAULT_RISK_PARAMS: RiskLabParams = { confidence: 0.99, simulations: 100_000, horizon: 1, auto: false };
 const EMPTY_STRESS: StressCache = { key: '', results: {}, baseVaR: null };
 
 interface PortfolioCtx {

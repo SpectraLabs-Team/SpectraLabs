@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
-import { findUser, setTwoFactor, twoFactorEnforced, twoFactorOn, verifyPassword } from '@/lib/server/authStore';
+import { record as audit, requestMeta } from '@/lib/server/audit';
+import { setTwoFactor, twoFactorOn, verifyPassword } from '@/lib/server/authStore';
+import { hasTotp, twoFactorRequirement } from '@/lib/server/mfa';
 import { clientIp, hit, tooMany } from '@/lib/server/rateLimit';
-import { getSession } from '@/lib/server/session';
+import { requireUser } from '@/lib/server/requireUser';
 
 export const dynamic = 'force-dynamic';
 
 /** Current login-security setting for the signed-in account. */
 export async function GET() {
-  const session = getSession();
-  const record = session && findUser(session.email);
-  if (!record) return NextResponse.json({ ok: false, error: 'Not signed in.' }, { status: 401 });
-  return NextResponse.json({ ok: true, enabled: twoFactorOn(record), enforced: twoFactorEnforced(record) });
+  const { record, res } = await requireUser();
+  if (res) return res;
+  const required = await twoFactorRequirement(record);
+  return NextResponse.json({ ok: true, enabled: twoFactorOn(record), enforced: !!required, reason: required, method: (await hasTotp(record.id)) ? 'totp' : 'email' });
 }
 
 /**
@@ -19,24 +21,28 @@ export async function GET() {
  */
 export async function POST(req: Request) {
   try {
-    const session = getSession();
-    const record = session && findUser(session.email);
-    if (!record) return NextResponse.json({ ok: false, error: 'Not signed in.' }, { status: 401 });
+    const { record, res } = await requireUser();
+    if (res) return res;
 
     const { enabled, password } = await req.json();
     if (typeof enabled !== 'boolean') return NextResponse.json({ ok: false, error: 'Invalid request.' }, { status: 400 });
-    if (!enabled && twoFactorEnforced(record)) {
-      return NextResponse.json({ ok: false, error: 'Two-factor login is required for admin accounts.' }, { status: 403 });
+    const required = await twoFactorRequirement(record);
+    if (!enabled && required) return NextResponse.json({ ok: false, error: required }, { status: 403 });
+    if (!enabled && (await hasTotp(record.id))) {
+      return NextResponse.json({ ok: false, error: 'Remove the authenticator app first (Account → Authenticator app).' }, { status: 409 });
     }
     if (!enabled) {
-      const limit = hit(`2fa-off:${record.email}:${clientIp(req)}`, 5, 15 * 60_000);
+      const limit = await hit(`2fa-off:${record.email}:${clientIp(req)}`, 5, 15 * 60_000);
       if (!limit.ok) return tooMany(limit.retryAfter, 'password attempts');
-      if (typeof password !== 'string' || !verifyPassword(password, record.passwordHash)) {
+      if (typeof password !== 'string' || !(await verifyPassword(password, record.passwordHash)).ok) {
         return NextResponse.json({ ok: false, error: 'Incorrect password.' }, { status: 401 });
       }
     }
-    const updated = setTwoFactor(record.email, enabled);
-    return NextResponse.json({ ok: true, enabled: !!updated && twoFactorOn(updated), enforced: !!updated && twoFactorEnforced(updated) });
+    const updated = await setTwoFactor(record.email, enabled);
+    if (updated && !!record.twoFactor !== !!updated.twoFactor) {
+      await audit({ action: updated.twoFactor ? 'auth.two_factor.enabled' : 'auth.two_factor.disabled', actor: record, target: { type: 'user', id: record.id } }, requestMeta(req));
+    }
+    return NextResponse.json({ ok: true, enabled: !!updated && twoFactorOn(updated), enforced: !!required, reason: required, method: (await hasTotp(record.id)) ? 'totp' : 'email' });
   } catch (err) {
     console.error('[2FA SETTING ERROR]', err);
     return NextResponse.json({ ok: false, error: 'Could not update the setting.' }, { status: 500 });

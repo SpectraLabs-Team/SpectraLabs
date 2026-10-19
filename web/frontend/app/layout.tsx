@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { headers } from 'next/headers';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { AuthProvider } from '@/lib/auth';
 import { ThemeProvider, themeInitScript } from '@/lib/theme';
@@ -19,13 +20,17 @@ export const viewport: Viewport = {
 
 const scrollResetScript = `(function(){try{if('scrollRestoration' in history){history.scrollRestoration='manual'}if(window.location.hash){history.replaceState(null,'',window.location.pathname+window.location.search)}window.scrollTo(0,0)}catch(e){}})();`;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Per-request nonce from middleware (Content-Security-Policy): our two inline scripts carry it,
+  // so they still run when the policy only allows nonced scripts.
+  const headerList = await headers();
+  const nonce = headerList.get('x-nonce') ?? undefined;
   return (
     // `dark` is the default; the init script restores a stored "light" choice before paint.
     <html lang="en" className="dark font-sans" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
-        <script dangerouslySetInnerHTML={{ __html: scrollResetScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: scrollResetScript }} />
       </head>
       <body className="min-h-screen">
         <ThemeProvider>

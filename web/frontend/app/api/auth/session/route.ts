@@ -1,28 +1,23 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { verifySessionToken } from '@/lib/server/authStore';
+import { publicUser } from '@/lib/server/authStore';
+import { getSession, SESSION_COOKIE } from '@/lib/server/session';
 
 export const dynamic = 'force-dynamic';
 
+/** Who is signed in on this browser (null if nobody). Clears a dead cookie. */
 export async function GET() {
   try {
-    const cookieStore = cookies();
-    const token = cookieStore.get('spectra_session')?.value;
-
-    if (!token) {
+    const auth = await getSession();
+    if (!auth) {
+      const jar = await cookies();
+      if (jar.get(SESSION_COOKIE)) jar.delete(SESSION_COOKIE);
       return NextResponse.json({ ok: true, user: null });
     }
-
-    const user = verifySessionToken(token);
-    if (!user) {
-      // Expired or invalid token, clean cookie
-      cookieStore.delete('spectra_session');
-      return NextResponse.json({ ok: true, user: null });
-    }
-
-    return NextResponse.json({ ok: true, user });
-  } catch (err: any) {
+    const { id, name, slug, personal, role } = auth.workspace;
+    return NextResponse.json({ ok: true, user: publicUser(auth.user), workspace: { id, name, slug, personal, role } });
+  } catch (err) {
     console.error('[SESSION ERROR]', err);
-    return NextResponse.json({ ok: true, user: null });
+    return NextResponse.json({ ok: false, user: null, error: 'Could not check your session.' }, { status: 500 });
   }
 }

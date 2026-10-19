@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { cleanName, EMAIL_RE, isPasswordValid, MIN_NAME } from '@/lib/auth-shared';
 import { findUser, generateOtp, getPendingOtp, hashPassword, setPendingOtp } from '@/lib/server/authStore';
+import { isBreachedPassword } from '@/lib/server/breached';
 import { sendOtpEmail } from '@/lib/server/email';
-import { clientIp, hit, tooMany } from '@/lib/server/rateLimit';
+import { clientIp, hitAll, tooMany } from '@/lib/server/rateLimit';
+import { noteSpike } from '@/lib/server/spikes';
 
 export async function POST(req: Request) {
   try {
@@ -22,7 +24,7 @@ export async function POST(req: Request) {
     if (mode === 'resend') {
       // Re-issue a code for the sign-up already in progress. The password hash and name
       // must carry over, otherwise verify-otp would have nothing to create the account from.
-      const pending = getPendingOtp(cleanEmail);
+      const pending = await getPendingOtp(cleanEmail);
       if (!pending || !pending.passwordHash) {
         return NextResponse.json(
           { ok: false, error: 'Your sign-up session expired. Please go back and start again.' },
@@ -33,7 +35,7 @@ export async function POST(req: Request) {
       name = pending.name;
       twoFactor = pending.twoFactor !== false;
     } else if (mode === 'signup') {
-      if (findUser(cleanEmail)) {
+      if (await findUser(cleanEmail)) {
         return NextResponse.json(
           { ok: false, error: 'An account with this email already exists. Please log in.' },
           { status: 400 },
@@ -49,7 +51,13 @@ export async function POST(req: Request) {
           { status: 400 },
         );
       }
-      passwordHash = hashPassword(password);
+      if (await isBreachedPassword(password)) {
+        return NextResponse.json(
+          { ok: false, error: 'This password has appeared in a data breach. Choose a different one.' },
+          { status: 400 },
+        );
+      }
+      passwordHash = await hashPassword(password);
       twoFactor = body.twoFactor !== false; // on unless explicitly turned off
     } else {
       return NextResponse.json({ ok: false, error: 'Unsupported request.' }, { status: 400 });
@@ -57,17 +65,16 @@ export async function POST(req: Request) {
 
     // Stop inbox flooding and SMTP quota burn: one code per email every 45s, 5 an hour,
     // and 20 an hour from one IP across all emails.
-    for (const [key, max, win, what] of [
+    await noteSpike('code_request');
+    const limit = await hitAll([
       [`otp:ip:${clientIp(req)}`, 20, 60 * 60_000, 'verification emails from this network'],
       [`otp:email:burst:${cleanEmail}`, 1, 45_000, 'code requests'],
       [`otp:email:hour:${cleanEmail}`, 5, 60 * 60_000, 'code requests for this email'],
-    ] as const) {
-      const r = hit(key, max, win);
-      if (!r.ok) return tooMany(r.retryAfter, what);
-    }
+    ]);
+    if (!limit.ok) return tooMany(limit.retryAfter, limit.what);
 
     const code = generateOtp();
-    setPendingOtp(cleanEmail, code, passwordHash, name, twoFactor);
+    await setPendingOtp(cleanEmail, code, passwordHash, name, twoFactor);
 
     try {
       await sendOtpEmail({ to: cleanEmail, code, type: 'signup' });

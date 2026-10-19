@@ -2,8 +2,9 @@ export type Role = 'admin' | 'user';
 export type AuthUser = { email: string; role: Role; name: string };
 export type AuthMode = 'login' | 'signup' | 'forgot';
 
-export const ADMIN_EMAIL = 'spectralabs.team@gmail.com';
 export const MIN_PASSWORD = 8;
+/** Longest accepted password (keeps hashing cost bounded; passphrases fit easily). */
+export const MAX_PASSWORD = 256;
 export const MIN_NAME = 2;
 export const MAX_NAME = 80;
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -26,12 +27,7 @@ export function checkPasswordRules(password: string): PasswordRules {
 
 export function isPasswordValid(password: string): boolean {
   const r = checkPasswordRules(password);
-  return r.length && r.letter && r.number && r.special;
-}
-
-/** Role is derived from the email for the UI preview only; the backend must assign the real role. */
-export function roleForEmail(email: string): Role {
-  return email.trim().toLowerCase() === ADMIN_EMAIL ? 'admin' : 'user';
+  return r.length && r.letter && r.number && r.special && password.length <= MAX_PASSWORD;
 }
 
 /** Trimmed, single-spaced display name; '' if it fails the length rule. */

@@ -23,11 +23,11 @@ use spectra_core::{Json, ENGINE_VERSION};
 use spectra_db::artifacts::{store_for_run, ArtifactStore, NewArtifact};
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
 use spectra_db::{PgPool, PoolConfig};
+use std::time::Instant;
 use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
-use uuid::Uuid;
 use tracing::{debug, error, info, warn};
-use std::time::Instant;
+use uuid::Uuid;
 
 /// Heartbeat interval for running jobs and for the worker itself.
 const HEARTBEAT: Duration = Duration::from_secs(5);
@@ -240,16 +240,29 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
         Outcome::Finished(Err((code, msg))) => {
             // 4xx: the input is wrong and will stay wrong. 5xx: worth retrying.
             let retryable = code >= 500;
-            observability::JobMetrics::job_completed(&job.kind, if retryable { "failed_retryable" } else { "failed_permanent" });
-            observability::JobMetrics::job_duration(&job.kind, if retryable { "failed_retryable" } else { "failed_permanent" }, job_duration);
-            (if retryable { "failed_retryable" } else { "failed_permanent" }, jobs::fail(pool, job.id, wid, &msg, retryable).await.map(|_| ()))
+            observability::JobMetrics::job_completed(
+                &job.kind,
+                if retryable { "failed_retryable" } else { "failed_permanent" },
+            );
+            observability::JobMetrics::job_duration(
+                &job.kind,
+                if retryable { "failed_retryable" } else { "failed_permanent" },
+                job_duration,
+            );
+            (
+                if retryable { "failed_retryable" } else { "failed_permanent" },
+                jobs::fail(pool, job.id, wid, &msg, retryable).await.map(|_| ()),
+            )
         }
         Outcome::Panicked => {
             observability::JobMetrics::job_completed(&job.kind, "panicked");
             observability::JobMetrics::job_duration(&job.kind, "panicked", job_duration);
-            ("panicked", jobs::fail(pool, job.id, wid, "The engine crashed while running this job.", true)
-                .await
-                .map(|_| ()))
+            (
+                "panicked",
+                jobs::fail(pool, job.id, wid, "The engine crashed while running this job.", true)
+                    .await
+                    .map(|_| ()),
+            )
         }
         Outcome::Cancelled => {
             observability::JobMetrics::job_completed(&job.kind, "cancelled");

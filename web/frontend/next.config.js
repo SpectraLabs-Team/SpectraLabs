@@ -47,4 +47,25 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+// Refuse to start (dev or production server) without a real AUTH_SECRET. Builds are not checked,
+// so CI can compile without secrets. Rules match authSecret() in lib/server/authStore.ts.
+const { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_SERVER } = require('next/constants');
+const RETIRED_AUTH_SECRETS = new Set(['spectralabs_jwt_default_secret_key_32bytes_required']);
+
+function assertAuthSecret() {
+  require('@next/env').loadEnvConfig(__dirname); // .env.local etc.; a no-op if already loaded
+  const s = process.env.AUTH_SECRET;
+  let problem = null;
+  if (!s || !s.trim()) problem = 'AUTH_SECRET is not set';
+  else if (s.length < 32) problem = 'AUTH_SECRET is too short (need 32+ characters)';
+  else if (RETIRED_AUTH_SECRETS.has(s)) problem = 'AUTH_SECRET is the old public development default';
+  if (problem) {
+    console.error(`\n  ✖ ${problem}.\n    Run \`npm run setup\` in web/frontend to generate one, then start again.\n`);
+    process.exit(1);
+  }
+}
+
+module.exports = (phase) => {
+  if (phase === PHASE_DEVELOPMENT_SERVER || phase === PHASE_PRODUCTION_SERVER) assertAuthSecret();
+  return nextConfig;
+};

@@ -87,7 +87,7 @@ export function AuthRedirectPrompt() {
     const mode = params.get('auth');
     if (mode !== 'login' && mode !== 'signup') return;
     const next = params.get('next');
-    const safeNext = next === '/studio' || next === '/admin' ? next : null;
+    const safeNext = next === '/studio' || next === '/admin' || next === '/account' ? next : null;
     window.history.replaceState(null, '', window.location.pathname);
     if (isAuthenticated && safeNext) router.replace(safeNext);
     else if (!isAuthenticated) {

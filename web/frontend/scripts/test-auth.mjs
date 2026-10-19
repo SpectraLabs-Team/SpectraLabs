@@ -127,6 +127,66 @@ test('2FA: per-account setting, admin always on, login codes isolated', () => {
   assert.equal(store.listUsers().find((u) => u.email === 'twofa@x.com').twoFactor, true);
 });
 
+test('account: rename, sign out everywhere, delete', async () => {
+  const u = store.createUser('acct@x.com', store.hashPassword('Passw0rd!'), 'Old Name');
+  const before = store.createSessionToken(store.publicUser(u));
+  store.updateName('acct@x.com', 'New Name');
+  assert.equal(store.verifySessionToken(before).name, 'New Name', 'name is read live, so the header updates without re-login');
+
+  await new Promise((r) => setTimeout(r, 1100)); // tokens have 1-second iat resolution
+  store.revokeSessions('acct@x.com');
+  assert.equal(store.verifySessionToken(before), null, 'older sessions die');
+  const current = store.createSessionToken(store.publicUser(store.findUser('acct@x.com')));
+  assert.ok(store.verifySessionToken(current), 're-issued session for this browser works');
+
+  store.setLoginCode('acct@x.com', '444444');
+  assert.equal(store.deleteUser('acct@x.com'), true);
+  assert.equal(store.findUser('acct@x.com'), undefined);
+  assert.equal(store.verifySessionToken(current), null, 'deleted account → no session');
+  assert.equal(store.checkLoginCode('acct@x.com', '444444').result, 'missing', 'pending codes are removed too');
+  assert.ok(!store.listUsers().some((x) => x.email === 'acct@x.com'));
+});
+
+test('AUTH_SECRET: no fallback; missing, short or retired secrets fail closed', async () => {
+  const good = process.env.AUTH_SECRET;
+  const token = store.createSessionToken({ email: 'nobody@x.com', role: 'user' });
+  try {
+    for (const bad of [undefined, '', 'short-secret', 'spectralabs_jwt_default_secret_key_32bytes_required']) {
+      if (bad === undefined) delete process.env.AUTH_SECRET;
+      else process.env.AUTH_SECRET = bad;
+      assert.throws(() => store.createSessionToken({ email: 'a@b.c', role: 'user' }), /AUTH_SECRET/, `server refuses to sign with ${JSON.stringify(bad)}`);
+      assert.equal(store.verifySessionToken(token), null, 'server verifier rejects');
+      assert.equal(await edge.verifySessionEdge(token), null, 'edge verifier rejects');
+    }
+  } finally {
+    process.env.AUTH_SECRET = good;
+  }
+});
+
+test('setup script generates a strong AUTH_SECRET and keeps a good one', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spectra-setup-test-'));
+  fs.mkdirSync(path.join(dir, 'scripts'));
+  fs.copyFileSync(path.join(root, 'scripts/setup-env.mjs'), path.join(dir, 'scripts/setup-env.mjs'));
+  fs.copyFileSync(path.join(root, '.env.example'), path.join(dir, '.env.example'));
+  const run = () => execFileSync(process.execPath, [path.join(dir, 'scripts/setup-env.mjs')], { encoding: 'utf8' });
+  const secretIn = () => fs.readFileSync(path.join(dir, '.env.local'), 'utf8').match(/^AUTH_SECRET=(.*)$/m)[1];
+  try {
+    const out = run();
+    const first = secretIn();
+    assert.ok(first.length >= 60, 'long random secret');
+    assert.ok(!out.includes(first), 'secret is never printed');
+    run();
+    assert.equal(secretIn(), first, 'a good secret is left alone');
+    const env = path.join(dir, '.env.local');
+    fs.writeFileSync(env, fs.readFileSync(env, 'utf8').replace(/^AUTH_SECRET=.*$/m, 'AUTH_SECRET=spectralabs_jwt_default_secret_key_32bytes_required'));
+    run();
+    assert.notEqual(secretIn(), 'spectralabs_jwt_default_secret_key_32bytes_required', 'the retired default is replaced');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('rate limiter', () => {
   for (let i = 0; i < 3; i++) assert.ok(rl.hit('t', 3, 60_000).ok);
   const r = rl.hit('t', 3, 60_000);

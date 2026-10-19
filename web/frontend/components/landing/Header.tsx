@@ -25,14 +25,17 @@ export function useLaunchStudio() {
   return () => (isAuthenticated ? router.push('/studio') : openAuthModal('signup'));
 }
 
-/** Signed-in identity: display name + role badge (email in the tooltip). */
-export function RolePill({ user, className }: { user: AuthUser; className?: string }) {
+/** Signed-in identity: display name + role badge. Opens the Account page (profile, password, 2FA). */
+export function RolePill({ user, className, onClick }: { user: AuthUser; className?: string; onClick?: () => void }) {
   const name = displayName(user);
   return (
-    <span
-      title={`${name} · ${user.email}`}
+    <Link
+      href="/account"
+      onClick={onClick}
+      title={`${name} · ${user.email} · Account settings`}
+      aria-label={`Account settings for ${name}`}
       className={cn(
-        'flex max-w-[240px] items-center gap-2 rounded-full border border-slate-300/80 bg-slate-100/90 py-1 pl-3 pr-1 text-[12px] font-medium text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200',
+        'flex max-w-[240px] items-center gap-2 rounded-full border border-slate-300/80 bg-slate-100/90 py-1 pl-3 pr-1 text-[12px] font-medium text-slate-700 transition hover:border-cyan-500/50 hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:border-cyan-400/40 dark:hover:bg-white/10',
         className,
       )}
     >
@@ -45,7 +48,7 @@ export function RolePill({ user, className }: { user: AuthUser; className?: stri
       >
         {user.role === 'admin' ? 'Admin' : 'User'}
       </span>
-    </span>
+    </Link>
   );
 }
 
@@ -149,7 +152,7 @@ export function Header({ overHero = false }: { overHero?: boolean }) {
 
           {user ? (
             <div className="mt-4 grid gap-2">
-              <RolePill user={user} className="w-fit max-w-full" />
+              <RolePill user={user} onClick={close} className="w-fit max-w-full" />
               {user.role === 'admin' && (
                 <Link href="/admin" onClick={close} className="rounded-xl border border-slate-300 py-2.5 text-center text-sm font-semibold text-slate-700 dark:border-white/15 dark:text-slate-200">
                   Admin Dashboard

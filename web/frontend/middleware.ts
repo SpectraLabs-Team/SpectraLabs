@@ -23,7 +23,7 @@ function crossSiteBlocked(req: NextRequest): boolean {
 
 /**
  * - /api/*: CSRF guard (each route still does its own session and role checks).
- * - /studio, /admin: a request without a valid session never receives the page; it is
+ * - /studio, /admin, /account: a request without a valid session never receives the page; it is
  *   redirected to the landing page, which opens Log In. (Admin *role* is enforced by
  *   /admin's UI and, for data, by /api/admin/* on the server.)
  */
@@ -52,5 +52,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/studio/:path*', '/admin/:path*', '/api/:path*'],
+  matcher: ['/studio/:path*', '/admin/:path*', '/account/:path*', '/api/:path*'],
 };

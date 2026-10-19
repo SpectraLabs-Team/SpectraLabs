@@ -3,11 +3,23 @@ import fs from 'fs';
 import path from 'path';
 
 export const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'spectralabs.team@gmail.com').toLowerCase();
-const rawSecret = process.env.AUTH_SECRET;
-if (!rawSecret && process.env.NODE_ENV === 'production') {
-  throw new Error('FATAL: AUTH_SECRET environment variable is missing in production.');
+
+// ── AUTH_SECRET: required, no fallback ──
+// Keep these rules in step with lib/sessionEdge.ts (Edge middleware) and next.config.js (startup check).
+const MIN_AUTH_SECRET_LENGTH = 32;
+/** Former hard-coded development default; it is public, so it must never sign anything. */
+const RETIRED_SECRETS = new Set(['spectralabs_jwt_default_secret_key_32bytes_required']);
+
+/** The session-signing secret. Throws if AUTH_SECRET is missing, short or a retired default. */
+function authSecret(): string {
+  const s = process.env.AUTH_SECRET;
+  let problem: string | null = null;
+  if (!s || !s.trim()) problem = 'AUTH_SECRET is not set';
+  else if (s.length < MIN_AUTH_SECRET_LENGTH) problem = `AUTH_SECRET is too short (need ${MIN_AUTH_SECRET_LENGTH}+ characters)`;
+  else if (RETIRED_SECRETS.has(s)) problem = 'AUTH_SECRET is the old public development default';
+  if (problem) throw new Error(`${problem}. Run \`npm run setup\` in web/frontend to generate one.`);
+  return s as string;
 }
-const SECRET = rawSecret || 'spectralabs_jwt_default_secret_key_32bytes_required';
 
 export type UserRecord = {
   email: string;
@@ -19,6 +31,8 @@ export type UserRecord = {
   passwordChangedAt?: number;
   /** Ask for an emailed code at every login (in addition to the password). */
   twoFactor?: boolean;
+  /** ms epoch of "sign out everywhere"; sessions issued before it are rejected. */
+  sessionsRevokedAt?: number;
 };
 
 // ── In-Memory OTP Store (5-minute TTL) ──
@@ -204,6 +218,35 @@ export function updatePassword(email: string, passwordHash: string): UserRecord 
   return u;
 }
 
+/** Change the display name (already validated with cleanName). */
+export function updateName(email: string, name: string): UserRecord | undefined {
+  const u = users.get(email.trim().toLowerCase());
+  if (!u) return undefined;
+  u.name = name;
+  saveUsers();
+  return u;
+}
+
+/** End every session issued before now (the caller re-issues one for the current browser). */
+export function revokeSessions(email: string): UserRecord | undefined {
+  const u = users.get(email.trim().toLowerCase());
+  if (!u) return undefined;
+  u.sessionsRevokedAt = Date.now();
+  saveUsers();
+  return u;
+}
+
+/** Permanently remove an account. Its sessions stop working immediately (no record = no session). */
+export function deleteUser(email: string): boolean {
+  const key = email.trim().toLowerCase();
+  const existed = users.delete(key);
+  if (existed) {
+    saveUsers();
+    (['signup', 'reset', 'login'] as const).forEach((k) => clearCode(k, key));
+  }
+  return existed;
+}
+
 /** Admins can't turn 2FA off: their account can see and manage every user. */
 export const twoFactorEnforced = (u: UserRecord) => u.role === 'admin';
 export const twoFactorOn = (u: UserRecord) => twoFactorEnforced(u) || !!u.twoFactor;
@@ -238,7 +281,7 @@ export function createSessionToken(user: { email: string; role: 'admin' | 'user'
     exp: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60, // 7 days
   };
   const b64Payload = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = crypto.createHmac('sha256', SECRET).update(b64Payload).digest('base64url');
+  const signature = crypto.createHmac('sha256', authSecret()).update(b64Payload).digest('base64url');
   return `${b64Payload}.${signature}`;
 }
 
@@ -247,7 +290,7 @@ export function verifySessionToken(token: string): { email: string; role: 'admin
     const [b64Payload, signature] = token.split('.');
     if (!b64Payload || !signature) return null;
 
-    const expectedSig = crypto.createHmac('sha256', SECRET).update(b64Payload).digest('base64url');
+    const expectedSig = crypto.createHmac('sha256', authSecret()).update(b64Payload).digest('base64url');
     if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
       return null;
     }
@@ -260,7 +303,8 @@ export function verifySessionToken(token: string): { email: string; role: 'admin
     // Revocation: the account must still exist, and the token must post-date the last reset.
     const record = users.get(String(payload.email).toLowerCase());
     if (!record) return null;
-    if (record.passwordChangedAt && (payload.iat ?? 0) < Math.floor(record.passwordChangedAt / 1000)) return null;
+    const revokedAt = Math.max(record.passwordChangedAt ?? 0, record.sessionsRevokedAt ?? 0);
+    if (revokedAt && (payload.iat ?? 0) < Math.floor(revokedAt / 1000)) return null;
 
     // Role and name come from the live record, so a role change applies on the next request.
     return { email: record.email, role: record.role, name: record.name || '' };

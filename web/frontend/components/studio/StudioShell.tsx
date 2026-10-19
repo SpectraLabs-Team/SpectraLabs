@@ -18,7 +18,7 @@ export const TABS: { id: StudioTab; label: string; short: string; icon: typeof C
   { id: 'risk', label: 'Risk & Stress Lab', short: 'Risk', icon: ShieldAlert },
   { id: 'portfolio', label: 'Portfolio Studio', short: 'Portfolio', icon: Briefcase },
   { id: 'benchmark', label: 'Hardware Benchmarks', short: 'Benchmarks', icon: Cpu },
-  { id: 'settings', label: 'Account & Market Settings', short: 'Settings', icon: PlugZap },
+  { id: 'settings', label: 'Market Data & Alpaca Settings', short: 'Settings', icon: PlugZap },
 ];
 
 const COLLAPSE_KEY = 'spectra-sidebar-collapsed';
@@ -43,10 +43,12 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
       </div>
 
       <div className="flex-1 space-y-5 overflow-y-auto p-3">
-        {/* Profile */}
-        <div
-          className={cn('flex items-center gap-3 rounded-xl border border-ink/[0.07] bg-ink/[0.02] p-2.5', collapsed && 'justify-center p-2')}
-          title={user ? `${displayName(user)} · ${user.email}` : undefined}
+        {/* Profile → Account page */}
+        <Link
+          href="/account"
+          onClick={onNavigate}
+          className={cn('flex items-center gap-3 rounded-xl border border-ink/[0.07] bg-ink/[0.02] p-2.5 transition hover:border-accent/30 hover:bg-accent/[0.05]', collapsed && 'justify-center p-2')}
+          title={user ? `${displayName(user)} · ${user.email} · Account settings` : 'Account settings'}
         >
           <span aria-hidden className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-gradient font-mono text-xs font-bold text-onaccent shadow-glow">
             {user ? initials(user) : 'SL'}
@@ -59,7 +61,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
               </span>
             </div>
           )}
-        </div>
+        </Link>
 
         {/* Trading mode */}
         {!collapsed ? (

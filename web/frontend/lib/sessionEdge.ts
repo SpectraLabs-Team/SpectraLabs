@@ -3,12 +3,15 @@
  * Must stay byte-compatible with createSessionToken in lib/server/authStore.ts:
  *   token = base64url(JSON payload) + "." + base64url(HMAC-SHA256(AUTH_SECRET, base64url(payload)))
  */
-const DEV_FALLBACK_SECRET = 'spectralabs_jwt_default_secret_key_32bytes_required';
+
+// No fallback: without a valid AUTH_SECRET every session is rejected (fail closed).
+// Same rules as authSecret() in lib/server/authStore.ts.
+const RETIRED_SECRETS = new Set(['spectralabs_jwt_default_secret_key_32bytes_required']);
 
 function secret(): string | null {
   const s = process.env.AUTH_SECRET;
-  if (s) return s;
-  return process.env.NODE_ENV === 'production' ? null : DEV_FALLBACK_SECRET;
+  if (!s || s.trim().length === 0 || s.length < 32 || RETIRED_SECRETS.has(s)) return null;
+  return s;
 }
 
 function b64urlFromBytes(bytes: ArrayBuffer): string {

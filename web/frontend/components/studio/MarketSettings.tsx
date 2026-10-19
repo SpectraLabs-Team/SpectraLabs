@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { CheckCircle2, CircleSlash, Database, KeyRound, PlugZap, RefreshCw, Server, Wallet } from 'lucide-react';
+import Link from 'next/link';
+import { CheckCircle2, CircleSlash, Database, KeyRound, PlugZap, RefreshCw, Server, ShieldCheck, Wallet } from 'lucide-react';
 import { API_BASE } from '@/lib/api';
 import { DEFAULT_PAPER } from '@/lib/paperLedger';
 import { cn, formatCurrency } from '@/lib/utils';
 import { Badge, GlassCard, Spinner } from '@/components/ui/primitives';
-import { AccountSecurity } from './AccountSecurity';
 import { usePortfolio } from './PortfolioContext';
 
 type Probe = { status: 'idle' | 'checking' } | { status: 'done'; code: number; detail: string } | { status: 'error'; detail: string };
@@ -52,7 +52,15 @@ export function MarketSettings() {
 
   return (
     <div className="grid gap-5 xl:grid-cols-2">
-      <AccountSecurity />
+      <Link
+        href="/account"
+        className="flex items-center justify-between gap-4 rounded-2xl border border-ink/[0.08] bg-ink/[0.02] px-5 py-3.5 text-sm transition hover:border-accent/30 hover:bg-accent/[0.04] xl:col-span-2"
+      >
+        <span className="flex items-center gap-2 text-ink/75">
+          <ShieldCheck className="h-4 w-4 text-accent" /> Profile, password and two-factor login now live on your Account page.
+        </span>
+        <span className="shrink-0 font-semibold text-accent">Open Account →</span>
+      </Link>
       <GlassCard as="section" className="p-5">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
           <Wallet className="h-4 w-4 text-profit" /> Paper trading ledger

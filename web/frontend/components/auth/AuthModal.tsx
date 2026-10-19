@@ -279,7 +279,7 @@ export function AuthModal() {
         next = sessionStorage.getItem(NEXT_KEY);
         sessionStorage.removeItem(NEXT_KEY);
       } catch {}
-      const allowed = next === '/studio' || (next === '/admin' && u.role === 'admin');
+      const allowed = next === '/studio' || next === '/account' || (next === '/admin' && u.role === 'admin');
       router.push(allowed && next ? next : u.role === 'admin' ? '/admin' : '/studio');
     },
     [login, closeAuthModal, router],

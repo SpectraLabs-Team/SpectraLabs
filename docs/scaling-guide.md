@@ -32,18 +32,18 @@ SIGTERM), and run as many replicas as you like.
 Reports (and later equity curves and trade lists) are content-addressed: the key is the SHA-256 of
 the bytes, every read is re-verified, and identical bytes are stored once. By default they live on
 the `artifacts` volume, which every worker must share. For several hosts, or to stop worrying about
-disk, use a bucket instead (AWS S3, Cloudflare R2, MinIO, anything S3-compatible).
+disk, use a bucket instead (AWS S3, Cloudflare R2, RustFS, or another S3-compatible service).
 
 The S3 code is behind the `s3` cargo feature, so builds without it pull in no object-store
 dependencies.
 
-**Try it locally with MinIO:**
+**Try it locally with RustFS:**
 
 ```bash
-just up-s3      # docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile minio up -d --build
+just up-s3      # docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 up -d --build
 ```
 
-This builds the worker with `--features spectra-api/s3`, starts MinIO (console on
+This builds the worker with `--features spectra-api/s3`, starts RustFS (console on
 `http://127.0.0.1:9001`), creates the bucket and sets `ARTIFACT_STORAGE=s3`.
 
 **In production** create the bucket (private, versioning or object lock recommended), give the

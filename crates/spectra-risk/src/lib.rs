@@ -25,9 +25,9 @@ pub mod rng;
 pub mod simulation;
 
 pub use engine::{
-    aggregate_volatility, benchmark, check_convergence, quantile, scenario, simulate, stress_test,
-    Convergence, PluginInfo, RiskConfig, RiskEngine, RiskPlugin, RiskReport, Scenario, Simulation,
-    StressResult, DEFAULT_VOLATILITY, PLUGIN_API_VERSION, SCENARIOS,
+    aggregate_volatility, benchmark, benchmark_with_progress, check_convergence, quantile, scenario,
+    simulate, stress_test, Convergence, Plugin, PluginInfo, RiskConfig, RiskEngine, RiskPlugin, RiskReport,
+    Scenario, Simulation, StressResult, DEFAULT_VOLATILITY, PLUGIN_API_VERSION, SCENARIOS,
 };
 pub use metrics::{compute, Metric};
 pub use portfolio::{Asset, Portfolio};

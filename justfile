@@ -63,9 +63,9 @@ up-prod:
 scale-workers n="3":
     docker compose up -d --scale worker={{n}}
 
-# Worker artifacts in a local MinIO bucket instead of the volume.
+# Worker artifacts in a local RustFS bucket instead of the volume.
 up-s3:
-    docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile minio up -d --build
+    docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 up -d --build
 
 # Back up DATABASE_URL to ./backups (BACKUP_KEEP_DAYS, default 7).
 backup dir="backups":

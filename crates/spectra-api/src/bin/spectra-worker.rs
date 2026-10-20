@@ -87,7 +87,7 @@ async fn main() -> ExitCode {
     let cfg = match WorkerConfig::from_env() {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("spectra-worker: {e}");
+            error!(error = %e, "invalid configuration");
             return ExitCode::from(2);
         }
     };
@@ -168,6 +168,7 @@ async fn main() -> ExitCode {
     let housekeeping = tokio::spawn(async move {
         let mut beat = tokio::time::interval(HEARTBEAT);
         let mut sweep = tokio::time::interval(SWEEP_EVERY);
+        let mut sample = tokio::time::interval(Duration::from_secs(15));
         loop {
             tokio::select! {
                 _ = hk_stop.changed() => break,
@@ -181,6 +182,13 @@ async fn main() -> ExitCode {
                     Ok(n) => info!("requeued {n} job(s) whose worker stopped responding"),
                     Err(e) => error!("stale sweep failed: {e}"),
                 },
+                _ = sample.tick() => {
+                    observability::DatabaseMetrics::pool_stats(hk_pool.size(), hk_pool.num_idle());
+                    match jobs::queue_depth(&hk_pool).await {
+                        Ok((queued, running)) => observability::DatabaseMetrics::queue_depth(queued, running),
+                        Err(e) => warn!("could not sample job queue depth: {e}"),
+                    }
+                }
             }
         }
     });
@@ -256,20 +264,33 @@ enum Outcome {
 async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
     let job_start = Instant::now();
     let (kind, payload_text) = (job.kind.clone(), job.payload.to_string());
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut work = tokio::task::spawn_blocking(move || {
         let payload = Json::parse(&payload_text).map_err(|e| (422, format!("Invalid payload: {e}")))?;
-        engine::run_job(&kind, &payload)
+        engine::run_job_with_progress(&kind, &payload, |progress| {
+            let _ = progress_tx.send(progress);
+        })
     });
 
     let timeout = engine::job_timeout(&job.kind);
     let deadline = tokio::time::Instant::now() + timeout;
     let mut beat = tokio::time::interval(HEARTBEAT);
+    let mut progress_open = true;
     beat.tick().await; // the first tick is immediate; the claim was the first heartbeat
     let outcome = loop {
         tokio::select! {
             res = &mut work => break match res {
                 Ok(reply) => Outcome::Finished(reply),
                 Err(_) => Outcome::Panicked,
+            },
+            progress = progress_rx.recv(), if progress_open => match progress {
+                Some(progress) => match jobs::heartbeat(&ctx.pool, job.id, &ctx.worker_id, Some(progress)).await {
+                    Ok(Beat::Continue) => {}
+                    Ok(Beat::CancelRequested) => break Outcome::Cancelled,
+                    Ok(Beat::Lost) => break Outcome::Lost,
+                    Err(e) => error!(job_id = %job.id, "progress heartbeat failed: {e}"),
+                },
+                None => progress_open = false,
             },
             _ = beat.tick() => match jobs::heartbeat(&ctx.pool, job.id, &ctx.worker_id, None).await {
                 Ok(Beat::Continue) => {}

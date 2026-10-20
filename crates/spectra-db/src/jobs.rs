@@ -165,6 +165,18 @@ pub struct Page<T> {
     pub next_cursor: Option<Uuid>,
 }
 
+/// Counts queued and running jobs for low-cardinality service metrics.
+///
+/// # Errors
+/// Any database error.
+pub async fn queue_depth(pool: &PgPool) -> Result<(i64, i64), Error> {
+    sqlx::query_as(
+        "SELECT COUNT(*) FILTER (WHERE status = 'queued'), COUNT(*) FILTER (WHERE status = 'running') FROM jobs",
+    )
+    .fetch_one(pool)
+    .await
+}
+
 /// A page of a workspace's jobs, newest first. `cursor` is the previous
 /// page's `next_cursor`.
 ///

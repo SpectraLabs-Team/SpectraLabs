@@ -254,6 +254,15 @@ fn benchmark_uses_the_dashboard_schema() {
 }
 
 #[test]
+fn benchmark_progress_advances_after_each_backend_repetition() {
+    let mut progress = Vec::new();
+    benchmark_with_progress(&sample(), 1_000, 2, 0, |value| progress.push(value)).unwrap();
+    assert_eq!(progress.len(), 6);
+    assert!(progress.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(progress.last(), Some(&1.0));
+}
+
+#[test]
 fn report_json_keeps_the_cpp_fields_with_full_precision() {
     let cfg = RiskConfig { simulations: 5_000, ..RiskConfig::default() };
     let r = RiskEngine::new().calculate(Metric::VaR, &sample(), &cfg).unwrap();

@@ -15,18 +15,27 @@ const BUCKETS: &[f64] =
 
 /// The installed Prometheus recorder, rendered by `GET /metrics`.
 static PROMETHEUS: OnceLock<PrometheusHandle> = OnceLock::new();
+static SENTRY_GUARD: OnceLock<sentry::ClientInitGuard> = OnceLock::new();
 
 /// Initialize JSON structured logging with tracing and Prometheus metrics.
 /// Safe to call more than once (later calls change nothing).
 pub fn init_observability() {
     let json_layer =
         fmt::layer().json().with_target(true).with_thread_ids(true).with_file(true).with_line_number(true);
+    let _ = SENTRY_GUARD.get_or_init(|| sentry::init(sentry::ClientOptions::default()));
+    let sentry_layer = sentry::integrations::tracing::layer().event_filter(|metadata| {
+        if *metadata.level() == tracing::Level::ERROR {
+            sentry::integrations::tracing::EventFilter::Event
+        } else {
+            sentry::integrations::tracing::EventFilter::Breadcrumb
+        }
+    });
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
     // Fails only if a subscriber is already set, which is fine.
-    let _ = tracing_subscriber::registry().with(env_filter).with(json_layer).try_init();
+    let _ = tracing_subscriber::registry().with(env_filter).with(json_layer).with(sentry_layer).try_init();
 
     if PROMETHEUS.get().is_none() {
         let builder = match PrometheusBuilder::new().set_buckets(BUCKETS) {
@@ -72,9 +81,15 @@ pub struct DatabaseMetrics;
 
 impl DatabaseMetrics {
     /// Record database pool stats: current connections, idle connections.
-    pub fn pool_stats(current: u32, idle: u32) {
+    pub fn pool_stats(current: u32, idle: usize) {
         metrics::gauge!("db_pool_connections").set(f64::from(current));
-        metrics::gauge!("db_pool_idle").set(f64::from(idle));
+        metrics::gauge!("db_pool_idle").set(f64::from(u32::try_from(idle).unwrap_or(u32::MAX)));
+    }
+
+    /// Record current queue depth without workspace or job ID labels.
+    pub fn queue_depth(queued: i64, running: i64) {
+        metrics::gauge!("jobs_queue_depth", "status" => "queued").set(queued as f64);
+        metrics::gauge!("jobs_queue_depth", "status" => "running").set(running as f64);
     }
 
     /// Record a database query duration.
@@ -115,7 +130,11 @@ mod tests {
         init_observability();
         init_observability();
         JobMetrics::job_claimed("risk");
+        DatabaseMetrics::pool_stats(10, 4);
+        DatabaseMetrics::queue_depth(3, 2);
         let text = render_metrics().expect("recorder installed");
         assert!(text.contains("jobs_claimed_total"), "{text}");
+        assert!(text.contains("db_pool_connections"), "{text}");
+        assert!(text.contains("jobs_queue_depth"), "{text}");
     }
 }

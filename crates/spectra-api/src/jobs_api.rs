@@ -121,7 +121,7 @@ fn db_error(e: &spectra_db::Error) -> Response {
     if e.as_database_error().is_some_and(|d| d.code().as_deref() == Some("23503")) {
         return error_response(422, "The workspace or user for this job does not exist.");
     }
-    eprintln!("spectra-api: database error: {e}");
+    tracing::error!(error = %e, "jobs database error");
     error_response(503, "The database is unavailable; try again.")
 }
 

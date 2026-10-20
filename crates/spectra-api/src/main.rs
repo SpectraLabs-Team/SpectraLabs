@@ -11,7 +11,7 @@ async fn main() -> ExitCode {
     let cfg = match Config::from_env() {
         Ok(c) => c,
         Err(e) => {
-            eprint!("spectra-api: {e}");
+            tracing::error!(error = %e, "invalid configuration");
             return ExitCode::from(2);
         }
     };
@@ -23,49 +23,43 @@ async fn main() -> ExitCode {
     let pool = match spectra_db::connect(&pool_cfg).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("spectra-api: cannot connect to the database: {e}");
+            tracing::error!(error = %e, "cannot connect to the database");
             return ExitCode::from(1);
         }
     };
     if cfg.migrate_on_start {
         if let Err(e) = spectra_db::migrate(&pool).await {
-            eprintln!("spectra-api: migrations failed: {e}");
+            tracing::error!(error = %e, "migrations failed");
             return ExitCode::from(1);
         }
-        eprintln!("spectra-api: migrations applied");
+        tracing::info!("migrations applied");
     }
 
     let ip = cfg.addr.ip();
     if ip.is_unspecified() {
-        eprintln!("spectra-api: listening on all interfaces; do not publish this port (docker compose keeps it private)");
-    } else if !(ip.is_loopback() || is_private(ip)) {
-        eprintln!(
-            "spectra-api: warning: listening on {ip}. Only the Next.js proxy should reach the engine: bind \
-             127.0.0.1, or a private network as in docker compose, and never publish the port."
+        tracing::warn!(
+            "listening on all interfaces; do not publish this port (docker compose keeps it private)"
         );
+    } else if !(ip.is_loopback() || is_private(ip)) {
+        tracing::warn!(%ip, "listening on a public address; only the Next.js proxy should reach the engine");
     }
     let listener = match tokio::net::TcpListener::bind(cfg.addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("spectra-api: cannot listen on {}: {e}", cfg.addr);
+            tracing::error!(address = %cfg.addr, error = %e, "cannot listen");
             return ExitCode::from(1);
         }
     };
-    eprintln!(
-        "spectra-api {} listening on http://{} (CORS origins: {})",
-        spectra_core::ENGINE_VERSION,
-        cfg.addr,
-        cfg.cors_origins.join(", ")
-    );
+    tracing::info!(engine_version = spectra_core::ENGINE_VERSION, address = %cfg.addr, cors_origins = %cfg.cors_origins.join(", "), "API listening");
     let result = serve(listener, ApiConfig::from(&cfg), Some(pool.clone()), shutdown_signal()).await;
     pool.close().await;
     match result {
         Ok(()) => {
-            eprintln!("spectra-api: shut down cleanly");
+            tracing::info!("shut down cleanly");
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("spectra-api: server error: {e}");
+            tracing::error!(error = %e, "server error");
             ExitCode::from(1)
         }
     }

@@ -43,3 +43,27 @@ async fn database_ids_are_uuid_v7() {
     let id: uuid::Uuid = sqlx::query_scalar("SELECT spectra_uuidv7()").fetch_one(&pool).await.unwrap();
     assert_eq!(id.get_version_num(), 7);
 }
+
+#[tokio::test]
+async fn queue_depth_counts_newly_enqueued_work() {
+    let Some(pool) = pool().await else { return };
+    let seed = seed_dev(&pool, "queue-metrics@example.test").await.unwrap();
+    let before = spectra_db::jobs::queue_depth(&pool).await.unwrap();
+    let job = spectra_db::jobs::enqueue(
+        &pool,
+        &spectra_db::jobs::NewJob {
+            workspace_id: seed.workspace_id,
+            kind: "risk".into(),
+            payload: serde_json::json!({}),
+            priority: 0,
+            max_attempts: 1,
+            created_by: Some(seed.admin_id),
+        },
+    )
+    .await
+    .unwrap();
+    let after = spectra_db::jobs::queue_depth(&pool).await.unwrap();
+    sqlx::query("DELETE FROM jobs WHERE id = $1").bind(job.id).execute(&pool).await.unwrap();
+    assert_eq!(after.0, before.0 + 1);
+    assert_eq!(after.1, before.1);
+}

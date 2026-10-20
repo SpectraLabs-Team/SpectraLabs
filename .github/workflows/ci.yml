@@ -41,6 +41,8 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Standard-library-only engine crates
+        run: cargo metadata --format-version 1 --no-deps | python3 scripts/check_std_only.py
       - name: Test (debug, overflow checks on)
         run: cargo test --workspace
       - name: Test (release)
@@ -121,5 +123,116 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Lint
+        run: npm run lint
       - name: Tests
         run: npm test
+      - name: Production build
+        run: npm run build
+        env:
+          AUTH_SECRET: ci-only-secret-value-that-is-not-used-at-runtime
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+          GMAIL_USER: ci-not-a-real-account@example.test
+          GMAIL_APP_PASSWORD: ci-only-placeholder-not-a-real-password
+
+  containers:
+    name: Docker images and Compose profiles
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Compose configuration
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          ENGINE_SECRET: ci-only-engine-secret-value-at-least-32-bytes
+          GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
+        run: |
+          docker compose --profile proxy --profile monitoring config --quiet
+          docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 config --quiet
+      - name: Build engine and worker image
+        run: docker build --file docker/engine.Dockerfile --tag spectralabs/engine:ci .
+      - name: Build frontend image
+        run: docker build --file docker/frontend.Dockerfile --tag spectralabs/frontend:ci .
+      - name: Fresh Compose stack reaches API readiness
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          ENGINE_SECRET: ci-only-engine-secret-value-at-least-32-bytes
+          GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
+        run: |
+          trap 'docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 --profile proxy --profile monitoring down -v --remove-orphans; rm -f .env web/frontend/.env.local' EXIT
+          cat > .env <<EOF
+          POSTGRES_USER=spectra
+          POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          POSTGRES_DB=spectra
+          ENGINE_SECRET=${ENGINE_SECRET}
+          ADMIN_EMAIL=ci@example.test
+          EOF
+          cat > web/frontend/.env.local <<EOF
+          AUTH_SECRET=ci-only-auth-secret-value-at-least-32-bytes
+          DATABASE_URL=postgres://spectra:${POSTGRES_PASSWORD}@postgres:5432/spectra
+          GMAIL_USER=ci-not-a-real-account@example.test
+          GMAIL_APP_PASSWORD=ci-only-placeholder-not-a-real-password
+          EOF
+          docker compose up -d --build
+          ready=false
+          for attempt in $(seq 1 45); do
+            if docker compose exec -T api curl -fsS http://127.0.0.1:8000/ready | grep -q '"status":"ready"'; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            docker compose ps
+            docker compose logs --tail 100 postgres migrate api worker frontend
+            exit 1
+          fi
+          docker compose --profile proxy --profile monitoring up -d
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:9090/-/ready >/dev/null && curl -fsS http://127.0.0.1:3001/api/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:3001/api/health >/dev/null
+          curl -fsS http://127.0.0.1:9090/api/v1/targets | grep -q 'spectra-api'
+          proxy_ready=false
+          for attempt in $(seq 1 30); do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1/ || true)
+            if [ "$status" = 200 ]; then
+              proxy_ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$proxy_ready" != true ]; then
+            docker compose logs --tail 100 caddy frontend
+            echo "Caddy did not return HTTP 200 from the frontend (last status: ${status:-none})"
+            exit 1
+          fi
+          docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 up -d --build rustfs rustfs-init worker
+          for attempt in $(seq 1 90); do
+            if docker compose -f docker-compose.yml -f deploy/compose.s3.yml exec -T worker curl -fsS http://127.0.0.1:9100/health >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          docker compose -f docker-compose.yml -f deploy/compose.s3.yml exec -T worker curl -fsS http://127.0.0.1:9100/health >/dev/null
+          workspace=$(docker compose exec -T postgres psql -U spectra -d spectra -At -c "select id from workspaces where slug='dev'")
+          response=$(docker compose exec -T -e ENGINE_URL=http://api:8000 -e SPECTRA_WORKSPACE="$workspace" frontend node --input-type=module - POST /api/v1/jobs '{"kind":"risk","payload":{"portfolio_csv":"symbol,quantity,price\nAAPL,10,190","simulations":1000}}' < scripts/engine-call.mjs)
+          job_id=$(printf '%s' "$response" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id))')
+          for attempt in $(seq 1 90); do
+            result=$(docker compose exec -T -e ENGINE_URL=http://api:8000 -e SPECTRA_WORKSPACE="$workspace" frontend node --input-type=module - GET "/api/v1/jobs/$job_id" < scripts/engine-call.mjs)
+            status=$(printf '%s' "$result" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).status))')
+            if [ "$status" = succeeded ]; then
+              printf '%s' "$result" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);if(!j.result?.artifact?.sha256)process.exit(1)})'
+              exit 0
+            fi
+            if [ "$status" = failed ] || [ "$status" = cancelled ]; then
+              printf '%s\n' "$result"
+              exit 1
+            fi
+            sleep 1
+          done
+          docker compose -f docker-compose.yml -f deploy/compose.s3.yml logs --tail 100 rustfs rustfs-init worker
+          exit 1

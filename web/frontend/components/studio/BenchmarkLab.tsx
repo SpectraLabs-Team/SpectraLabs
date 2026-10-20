@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { CheckCircle2, Cpu, Gauge, MemoryStick, Play, Server, Zap } from 'lucide-react';
-import { BENCHMARK_PATH_BUDGET, getCpuTelemetry, runBenchmark } from '@/lib/api';
+import { CheckCircle2, Cpu, Gauge, MemoryStick, Play, Server, Square, Zap } from 'lucide-react';
+import { BENCHMARK_PATH_BUDGET, getCpuTelemetry } from '@/lib/api';
+import { cancelJob, createJob, waitForJob, type Job, type JobStatus } from '@/lib/jobs';
 import type { BenchmarkResult, CpuTelemetry } from '@/lib/types';
 import { cn, formatBytes, formatCompact, formatDuration } from '@/lib/utils';
 import { Badge, ErrorNote, GlassCard, Segmented, Spinner } from '@/components/ui/primitives';
@@ -65,6 +66,8 @@ export function BenchmarkLab() {
   const [host, setHost] = useState<CpuTelemetry | null>(null);
   const [results, setResults] = useState<Record<number, BenchmarkResult>>({});
   const [current, setCurrent] = useState<number | null>(null);
+  const [activeJob, setActiveJob] = useState<Job<BenchmarkResult> | null>(null);
+  const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [error, setError] = useState('');
   const [scale, setScale] = useState<'linear' | 'log'>('log');
 
@@ -75,17 +78,41 @@ export function BenchmarkLab() {
   const sweep = async () => {
     setError('');
     setResults({});
+    setActiveJob(null);
+    setJobStatus(null);
     for (const n of SIZES) {
       setCurrent(n);
       try {
-        const r = await runBenchmark({ portfolio_csv: csv, simulations: n, repetitions: repsFor(n), warmups: WARMUPS });
-        setResults((s) => ({ ...s, [n]: r }));
+        const job = await createJob<BenchmarkResult>({
+          kind: 'benchmark',
+          payload: { portfolio_csv: csv, simulations: n, repetitions: repsFor(n), warmups: WARMUPS },
+        });
+        setActiveJob(job);
+        setJobStatus(job.status);
+        const finished = await waitForJob<BenchmarkResult>(job.id, {
+          timeoutMs: 15 * 60_000,
+          onUpdate: setActiveJob,
+        });
+        setJobStatus(finished.status);
+        if (finished.status === 'cancelled') break;
+        if (finished.status !== 'succeeded' || !finished.result) throw new Error(finished.error || 'Benchmark job failed');
+        setResults((s) => ({ ...s, [n]: finished.result!.report }));
+        setActiveJob(null);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Benchmark failed');
         break;
       }
     }
     setCurrent(null);
+  };
+
+  const cancelSweep = async () => {
+    if (!activeJob) return;
+    try {
+      setActiveJob(await cancelJob(activeJob.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not cancel benchmark');
+    }
   };
 
   const done = SIZES.filter((n) => results[n]);
@@ -115,12 +142,29 @@ export function BenchmarkLab() {
             </div>
             <div className="flex items-center gap-2">
               <Segmented label="bench-scale" value={scale} onChange={setScale} size="sm" options={[{ value: 'log', label: 'log' }, { value: 'linear', label: 'linear' }]} />
+              {running && activeJob && !activeJob.cancel_requested ? (
+                <button type="button" onClick={cancelSweep} className="btn-secondary px-3 py-1.5 text-xs">
+                  <Square className="h-3.5 w-3.5" /> Cancel
+                </button>
+              ) : null}
               <button type="button" onClick={sweep} disabled={!online || running} className="btn-primary px-3 py-1.5 text-xs">
                 {running ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                 {running ? `Running ${formatCompact(current!, 0)}…` : done.length ? 'Re-run sweep' : 'Run sweep'}
               </button>
             </div>
           </div>
+
+          {running && activeJob && (
+            <div className="mt-3" aria-live="polite">
+              <div className="flex justify-between text-[11px] text-ink/55">
+                <span>Job {activeJob.id.slice(0, 8)} · {jobStatus ?? activeJob.status}{activeJob.cancel_requested ? ' · cancelling' : ''}</span>
+                <span>{Math.round(activeJob.progress * 100)}%</span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-ink/5">
+                <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${Math.max(0, Math.min(100, activeJob.progress * 100))}%` }} />
+              </div>
+            </div>
+          )}
 
           <div className="mt-4 flex gap-1.5">
             {SIZES.map((n) => (

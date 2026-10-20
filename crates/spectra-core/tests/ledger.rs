@@ -498,3 +498,19 @@ fn financing_charges_may_take_cash_below_zero() {
     // A withdrawal still may not.
     assert!(l.withdraw(m(0.1), 3).is_err());
 }
+
+#[test]
+fn check_fill_answers_like_apply_fill_and_changes_nothing() {
+    let mut l = reference(false, false);
+    l.deposit(m(1_000.0), 1).unwrap();
+    let ok = fill(1, Side::Buy, 5.0, 100.0, 1.0);
+    let too_big = fill(1, Side::Buy, 20.0, 100.0, 0.0);
+    let short = fill(1, Side::Sell, 10.0, 100.0, 0.0);
+    assert_eq!(l.check_fill(&too_big), rej(Reject::InsufficientCash));
+    assert_eq!(l.check_fill(&short), rej(Reject::ShortNotAllowed));
+    assert_eq!(l.check_fill(&ok), Ok(()));
+    assert_eq!((l.cash(), l.journal().len()), (m(1_000.0), 1), "checking changes nothing");
+    l.apply_fill(&ok).unwrap();
+    assert_eq!(l.cash(), m(499.0));
+    expect_invariants(&l);
+}

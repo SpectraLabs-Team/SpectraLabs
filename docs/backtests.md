@@ -103,6 +103,45 @@ Market impact (off by default) adds `impact_coefficient x volatility x sqrt(qty 
 market and stop fills, capped at 10%; volatility is measured over the `impact_window` bars before
 the fill bar. Both are `config` fields.
 
+## Several strategies on one account
+
+Instead of `strategy` and `params`, a request can list up to 10 strategies, each with a share of
+the starting cash:
+
+```json
+{
+  "dataset_version_id": "<version id>",
+  "strategies": [
+    { "strategy": "equal_weight", "params": { "rebalance_every": 5 }, "weight": 0.5 },
+    { "strategy": "zscore_reversion", "weight": 0.3 }
+  ],
+  "config": { "preset": "default" }
+}
+```
+
+- Each strategy keeps its own books. It sees its own positions, cash and equity, sizes its orders
+  from them, is held to the ledger policy (shorting, negative cash, leverage limit) on them, and
+  is financed on them. A strategy cannot spend another strategy's cash: a fill it cannot afford
+  on its own books is rejected even when the account could afford it.
+- The weights add up to at most 1. Cash left over stays in the account as unallocated cash, and
+  earns `cash_interest_rate` if one is set.
+- The account is always the sum of the strategies' books. Orders from all strategies fill in
+  submission order, the same way as in a single-strategy run, and the strategies are called in
+  the order they are listed.
+- The output adds:
+  - a `strategy` column (the strategy's index in the list) to `orders.csv`;
+  - `order_id,strategy` columns to `fills.csv`;
+  - a `strategies.csv` artifact (`strategies_csv`) with each strategy's equity, cash and gross
+    exposure at every timestamp;
+  - a `strategies` section in the summary: per strategy, its allocation, final equity, profit,
+    contribution to the account's return, the headline metrics, fills, fees and financing; plus
+    the unallocated cash.
+- `run.strategy` in the summary is `"multi"`. `strategy_sha256` hashes every strategy's name,
+  source hash and weight, and the weights are part of `config_sha256`. Single-strategy runs keep
+  their fingerprints.
+
+Strategies written in Rust can do the same with `spectra_engine::run_multi_backtest`.
+
 ## Limits
 
 | Variable | Default | |

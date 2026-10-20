@@ -649,7 +649,7 @@ async fn finish_backtest(
             "dataset_sha256": products.run.dataset_sha256,
             "config_sha256": products.run.config_sha256,
             "result_sha256": products.run.result_sha256,
-            "strategy_sha256": bt.request.strategy.source_sha256(),
+            "strategy_sha256": bt.request.strategy_sha256(),
         },
         "summary": summary,
         "artifacts": stored,

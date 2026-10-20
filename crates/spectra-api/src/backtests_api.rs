@@ -28,11 +28,18 @@ pub struct CreateBacktest {
     /// A dataset version of the caller's workspace.
     pub dataset_version_id: Uuid,
     /// A built-in strategy name (see `GET /api/v1/strategies/builtin`).
-    pub strategy: String,
+    /// Give either `strategy` (with `params`) or `strategies`.
+    #[serde(default)]
+    pub strategy: Option<String>,
     /// Strategy parameters; missing ones take their defaults.
     #[serde(default)]
     #[schema(value_type = Option<Object>)]
     pub params: Option<serde_json::Value>,
+    /// Several strategies on one account: `[{"strategy", "params", "weight"}]`,
+    /// each `weight` a share of the starting cash (adding up to at most 1).
+    #[serde(default)]
+    #[schema(value_type = Option<Vec<Object>>)]
+    pub strategies: Option<Vec<serde_json::Value>>,
     /// Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...).
     #[serde(default)]
     #[schema(value_type = Option<Object>)]
@@ -136,10 +143,13 @@ pub(crate) async fn create_backtest(
         Ok(r) => r,
         Err(e) => return error_response(422, format!("Invalid backtest request: {e}")),
     };
-    let mut payload = serde_json::json!({
-        "dataset_version_id": req.dataset_version_id.to_string(),
-        "strategy": req.strategy,
-    });
+    let mut payload = serde_json::json!({ "dataset_version_id": req.dataset_version_id.to_string() });
+    if let Some(s) = req.strategy {
+        payload["strategy"] = serde_json::Value::String(s);
+    }
+    if let Some(list) = req.strategies {
+        payload["strategies"] = serde_json::Value::Array(list);
+    }
     if let Some(p) = req.params {
         payload["params"] = p;
     }

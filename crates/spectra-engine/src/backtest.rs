@@ -28,6 +28,11 @@
 //!  * datasets whose instruments have different median bar intervals are
 //!    refused, because a bar stamped at its start time exposes its close to
 //!    strategies trading other instruments inside that bar (look-ahead).
+//!
+//! Several strategies can share one account ([`run_multi_backtest`]): each
+//! gets a share of the starting cash and keeps its own books, every order
+//! records the strategy that placed it, and the account is the sum of the
+//! strategies' books.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -37,7 +42,7 @@ use std::time::{Duration, Instant};
 use spectra_core::cfmt::fmt_g17;
 use spectra_core::{
     bars_sha256, notional, validate_bars, Bar, Error, Fill, InstrumentId, JournalEntry, Ledger, LedgerConfig,
-    LedgerError, Money, Price, Qty, Reject, Result, Sha256, Side, ENGINE_VERSION, SCALE,
+    LedgerError, Money, Price, Qty, Ratio, Reject, Result, Sha256, Side, ENGINE_VERSION, SCALE,
 };
 
 use crate::costs::{commission_fee, slipped_price, CostModel};
@@ -175,6 +180,8 @@ pub struct Order {
     pub state: OrderState,
     /// Why it was rejected, if it was.
     pub reject_reason: Option<Reject>,
+    /// Index of the strategy that placed it (always 0 in a single-strategy run).
+    pub strategy: usize,
 }
 
 /// Execution realism settings.
@@ -306,7 +313,51 @@ pub struct BacktestResult {
     pub metrics: Metrics,
     /// Identity of the run.
     pub run: RunRecord,
+    /// The order behind each `Fill` entry of the journal, in journal order.
+    /// Not part of the result fingerprint.
+    pub fill_orders: Vec<OrderId>,
+    /// Each strategy's own books in a multi-strategy run, in the order given
+    /// to [`run_multi_backtest`]; empty for a single-strategy run.
+    pub strategies: Vec<StrategyResult>,
+    /// Starting cash not allocated to any strategy (a multi-strategy run whose
+    /// weights add up to less than 1), with the interest it earned.
+    pub unallocated: Option<Ledger>,
 }
+
+/// One strategy's part of a multi-strategy run.
+#[derive(Debug, Clone)]
+pub struct StrategyResult {
+    /// Its weight: the share of the starting cash it was given.
+    pub weight: Ratio,
+    /// The starting cash it was given.
+    pub allocation: Money,
+    /// Its equity (its cash plus its marked positions) at each timestamp.
+    pub equity_curve: Vec<EquityPoint>,
+    /// Its gross exposure at each timestamp.
+    pub gross_exposure: Vec<Money>,
+    /// Its own books: its allocation, its fills and its financing.
+    pub ledger: Ledger,
+    /// Metrics of its own equity curve.
+    pub metrics: Metrics,
+}
+
+/// A strategy and its share of the starting cash, for [`run_multi_backtest`].
+pub struct Allocation<'a> {
+    /// The strategy.
+    pub strategy: &'a mut dyn Strategy,
+    /// Share of the starting cash, in (0, 1]. The weights of a run add up to at
+    /// most 1; whatever is left stays in the account as unallocated cash.
+    pub weight: f64,
+}
+
+impl fmt::Debug for Allocation<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Allocation").field("weight", &self.weight).finish_non_exhaustive()
+    }
+}
+
+/// Most strategies in one run.
+pub const MAX_STRATEGIES: usize = 32;
 
 impl BacktestResult {
     /// Number of fills in the journal.
@@ -499,16 +550,19 @@ impl OrderSpec {
     }
 }
 
-/// The strategy's window onto the simulation.
+/// The strategy's window onto the simulation. In a multi-strategy run,
+/// positions, cash and equity are the strategy's own books, not the account's.
 #[derive(Debug)]
 pub struct Context<'a> {
-    ledger: &'a Ledger,
+    book: &'a Ledger,
+    account: &'a Ledger,
     history: &'a BTreeMap<InstrumentId, Vec<Bar>>,
     orders: &'a mut Vec<Order>,
     open: &'a mut OpenOrders,
     now: i64,
     step: i64,
     seed: u64,
+    strategy: usize,
 }
 
 impl Context<'_> {
@@ -526,27 +580,37 @@ impl Context<'_> {
     }
     /// Current position quantity.
     pub fn position(&self, instrument: InstrumentId) -> Qty {
-        self.ledger.position(instrument).qty
+        self.book.position(instrument).qty
     }
     /// Current cash.
     pub fn cash(&self) -> Money {
-        self.ledger.cash()
+        self.book.cash()
     }
     /// Current equity (cash plus marked positions); zero if it overflows.
     pub fn equity(&self) -> Money {
-        self.ledger.equity().unwrap_or_default()
+        self.book.equity().unwrap_or_default()
     }
-    /// The orders so far.
+    /// Equity of the whole account, all strategies together (the same as
+    /// [`Self::equity`] in a single-strategy run).
+    pub fn account_equity(&self) -> Money {
+        self.account.equity().unwrap_or_default()
+    }
+    /// Index of this strategy in the run (0 in a single-strategy run).
+    pub fn strategy(&self) -> usize {
+        self.strategy
+    }
+    /// The orders so far, of every strategy (see [`Order::strategy`]).
     pub fn orders(&self) -> &[Order] {
         self.orders
     }
     /// The ledger policy of this run (shorting, negative cash, leverage limit).
+    /// In a multi-strategy run each strategy is held to it on its own books.
     pub fn ledger_policy(&self) -> LedgerConfig {
-        *self.ledger.config()
+        *self.book.config()
     }
     /// Marked value of a position (negative for shorts).
     pub fn position_value(&self, instrument: InstrumentId) -> Money {
-        self.ledger.position_value(instrument).unwrap_or_default()
+        self.book.position_value(instrument).unwrap_or_default()
     }
 
     fn submit(&mut self, spec: OrderSpec) -> OrderId {
@@ -572,6 +636,7 @@ impl Context<'_> {
             submit_step: self.step,
             state: if bad { OrderState::Rejected } else { OrderState::Pending },
             reject_reason: bad.then_some(Reject::InvalidFill),
+            strategy: self.strategy,
         });
         if !bad {
             let index = self.orders.len() - 1;
@@ -615,13 +680,13 @@ impl Context<'_> {
     pub fn order(&mut self, spec: OrderSpec) -> OrderId {
         self.submit(spec)
     }
-    /// Cancel an open order; true if it was open and is now Cancelled.
+    /// Cancel an open order of this strategy; true if it was open and is now Cancelled.
     pub fn cancel(&mut self, id: OrderId) -> bool {
         if id == 0 || id > self.orders.len() as OrderId {
             return false;
         }
         let index = (id - 1) as usize;
-        if !self.orders[index].state.is_open() {
+        if !self.orders[index].state.is_open() || self.orders[index].strategy != self.strategy {
             return false;
         }
         self.orders[index].state = OrderState::Cancelled;
@@ -823,7 +888,18 @@ pub fn config_fingerprint(config: &BacktestConfig) -> String {
     spectra_core::sha256_hex(canonical_config(config).as_bytes())
 }
 
-fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order]) -> String {
+/// The canonical text form of a multi-strategy run's configuration: the
+/// single-run form followed by the number of strategies and their weights.
+pub fn canonical_multi_config(c: &BacktestConfig, weights: &[Ratio]) -> String {
+    let mut s = canonical_config(c);
+    s.push_str(&format!("strategies={};", weights.len()));
+    for (i, w) in weights.iter().enumerate() {
+        s.push_str(&format!("weight_{i}={};", w.raw()));
+    }
+    s
+}
+
+fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order], multi: bool) -> String {
     let mut h = Sha256::new();
     h.update_u64(curve.len() as u64);
     for p in curve {
@@ -880,6 +956,12 @@ fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order]
                     h.update_i64(t);
                 }
             }
+        }
+    }
+    if multi {
+        // Which strategy placed each order; single-strategy runs keep their fingerprints.
+        for o in orders {
+            h.update_u64(o.strategy as u64);
         }
     }
     h.hex_digest()
@@ -1032,31 +1114,59 @@ fn apply_rate(amount: Money, rate: i128) -> Result<Money> {
     Ok(Money::from_raw(spectra_core::fixed::narrow(raw)?))
 }
 
-/// Charges one period of financing on the books as they stand (positions at
-/// their latest marks, i.e. the previous close).
-fn charge_financing(ledger: &mut Ledger, rates: [i128; 3], ts: i64) -> Result<()> {
+/// One financing posting.
+enum Charge {
+    Borrow(InstrumentId, Money),
+    Interest(Money),
+}
+
+/// One period of financing on the books as they stand (positions at their
+/// latest marks, i.e. the previous close): a borrow fee per short position,
+/// then interest on the cash left after those fees.
+fn financing_charges(ledger: &Ledger, rates: [i128; 3]) -> Result<Vec<Charge>> {
     let [borrow, cash_rate, margin] = rates;
+    let mut out = Vec::new();
+    let mut cash = ledger.cash();
     if borrow != 0 {
-        let shorts: Vec<InstrumentId> =
-            ledger.positions().iter().filter(|(_, p)| p.qty.raw() < 0).map(|(&id, _)| id).collect();
-        for id in shorts {
-            let value = ledger.position_value(id)?.checked_abs()?;
-            let fee = apply_rate(value, borrow)?;
+        for (&id, p) in ledger.positions() {
+            if p.qty.raw() >= 0 {
+                continue;
+            }
+            let fee = apply_rate(ledger.position_value(id)?.checked_abs()?, borrow)?;
             if fee.raw() > 0 {
-                ledger.charge_borrow_fee(id, fee, ts).map_err(ledger_err)?;
+                cash = cash.checked_sub(fee)?;
+                out.push(Charge::Borrow(id, fee));
             }
         }
     }
-    let cash = ledger.cash();
     let interest = match cash.raw().cmp(&0) {
         std::cmp::Ordering::Greater => apply_rate(cash, cash_rate)?,
         std::cmp::Ordering::Less => apply_rate(cash, margin)?, // negative cash, so negative interest: a charge
         std::cmp::Ordering::Equal => Money::ZERO,
     };
     if !interest.is_zero() {
-        ledger.apply_interest(interest, ts).map_err(ledger_err)?;
+        out.push(Charge::Interest(interest));
     }
-    Ok(())
+    Ok(out)
+}
+
+fn post(ledger: &mut Ledger, c: &Charge, ts: i64) -> Result<()> {
+    match *c {
+        Charge::Borrow(id, fee) => ledger.charge_borrow_fee(id, fee, ts),
+        Charge::Interest(amount) => ledger.apply_interest(amount, ts),
+    }
+    .map_err(ledger_err)
+}
+
+/// Sum of the absolute marked position values.
+fn gross_of(ledger: &Ledger) -> Result<Money> {
+    let mut gross = Money::ZERO;
+    for (&id, p) in ledger.positions() {
+        if !p.qty.is_zero() {
+            gross = gross.checked_add(ledger.position_value(id)?.checked_abs()?)?;
+        }
+    }
+    Ok(gross)
 }
 
 fn check_size(bars: &[Bar], limits: &RunLimits) -> std::result::Result<(), RunError> {
@@ -1109,6 +1219,114 @@ pub fn run_backtest_controlled(
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<BacktestResult, RunError> {
+    run_inner(bars, &mut [strategy], None, cfg, ctl)
+}
+
+/// Runs several strategies on one shared account. Each strategy gets
+/// `weight` of the starting cash and keeps its own books: it sees its own
+/// positions, cash and equity, is held to the run's ledger policy (shorting,
+/// negative cash, leverage limit) on those books, and is financed on them.
+/// The account is the sum of the strategies' books (plus any unallocated
+/// cash), and every order records the strategy that placed it.
+///
+/// At each timestamp the strategies are called in the order given, after the
+/// fills of every strategy's orders, which fill in submission order as in a
+/// single-strategy run. A fill a strategy cannot afford on its own books is
+/// rejected even if the account as a whole could afford it.
+///
+/// # Errors
+/// As [`run_backtest_controlled`], and [`RunError::Engine`] when there are no
+/// strategies or more than [`MAX_STRATEGIES`], a weight is not in (0, 1], or
+/// the weights add up to more than 1.
+pub fn run_multi_backtest<'a>(
+    bars: &[Bar],
+    allocations: &mut [Allocation<'a>],
+    cfg: &BacktestConfig,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestResult, RunError> {
+    let invalid = |m: String| RunError::Engine(Error::InvalidArgument(m));
+    if allocations.is_empty() || allocations.len() > MAX_STRATEGIES {
+        return Err(invalid(format!("a run needs 1 to {MAX_STRATEGIES} strategies")));
+    }
+    let mut weights = Vec::with_capacity(allocations.len());
+    for (i, a) in allocations.iter().enumerate() {
+        let w = if a.weight.is_finite() && a.weight > 0.0 && a.weight <= 1.0 {
+            Ratio::from_f64(a.weight).ok().filter(|w| w.raw() > 0)
+        } else {
+            None
+        };
+        let Some(w) = w else { return Err(invalid(format!("strategy {i}: weight must be in (0, 1]"))) };
+        weights.push(w);
+    }
+    if weights.iter().map(|w| i128::from(w.raw())).sum::<i128>() > i128::from(SCALE) {
+        return Err(invalid("strategy weights add up to more than 1".into()));
+    }
+    let mut strategies: Vec<&mut (dyn Strategy + 'a)> =
+        allocations.iter_mut().map(|a| &mut *a.strategy).collect();
+    run_inner(bars, &mut strategies, Some(&weights), cfg, ctl)
+}
+
+/// Each strategy's own books in a multi-strategy run.
+struct Books {
+    ledgers: Vec<Ledger>,
+    allocations: Vec<Money>,
+    curves: Vec<Vec<EquityPoint>>,
+    exposure: Vec<Vec<Money>>,
+    unallocated: Option<Ledger>,
+}
+
+impl Books {
+    /// Splits the starting cash by weight (rounding down); with weights adding
+    /// up to exactly 1 the last strategy gets the rounding remainder,
+    /// otherwise the remainder is unallocated.
+    fn new(weights: &[Ratio], cfg: &BacktestConfig, ts: i64, capacity: usize) -> Result<Self> {
+        let total = i128::from(cfg.initial_cash.raw());
+        let mut allocations = Vec::with_capacity(weights.len());
+        let mut left = total;
+        for w in weights {
+            let raw = total * i128::from(w.raw()) / i128::from(SCALE);
+            left -= raw;
+            allocations.push(raw);
+        }
+        let full = weights.iter().map(|w| i128::from(w.raw())).sum::<i128>() == i128::from(SCALE);
+        let mut unallocated = None;
+        if full {
+            if let Some(last) = allocations.last_mut() {
+                *last += left;
+            }
+        } else if left > 0 {
+            let mut l = Ledger::new(cfg.ledger);
+            l.deposit(Money::from_raw(spectra_core::fixed::narrow(left)?), ts).map_err(ledger_err)?;
+            unallocated = Some(l);
+        }
+        let mut ledgers = Vec::with_capacity(weights.len());
+        let mut money = Vec::with_capacity(weights.len());
+        for raw in allocations {
+            let a = Money::from_raw(spectra_core::fixed::narrow(raw)?);
+            let mut l = Ledger::new(cfg.ledger);
+            if a.raw() > 0 {
+                l.deposit(a, ts).map_err(ledger_err)?;
+            }
+            ledgers.push(l);
+            money.push(a);
+        }
+        Ok(Self {
+            curves: vec![Vec::with_capacity(capacity); ledgers.len()],
+            exposure: vec![Vec::with_capacity(capacity); ledgers.len()],
+            ledgers,
+            allocations: money,
+            unallocated,
+        })
+    }
+}
+
+fn run_inner<'s>(
+    bars: &[Bar],
+    strategies: &mut [&mut (dyn Strategy + 's)],
+    weights: Option<&[Ratio]>,
+    cfg: &BacktestConfig,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestResult, RunError> {
     let started = Instant::now();
     check_size(bars, &ctl.limits)?;
     if let Some(err) = validate_bars(bars) {
@@ -1152,22 +1370,33 @@ pub fn run_backtest_controlled(
     let mut open = OpenOrders::default();
     let mut curve: Vec<EquityPoint> = Vec::with_capacity(bars.len());
     let mut exposure: Vec<Money> = Vec::with_capacity(bars.len());
+    let mut fill_orders: Vec<OrderId> = Vec::new();
 
     let first_ts = bars.first().map_or(0, |b| b.ts_ns);
     if cfg.initial_cash.raw() > 0 && ledger.deposit(cfg.initial_cash, first_ts).is_err() {
         return Err(Error::InvalidArgument("initial deposit rejected".into()).into());
     }
+    let mut books = match weights {
+        Some(w) => Some(Books::new(w, cfg, first_ts, bars.len())?),
+        None => None,
+    };
+    // Each strategy's own books; empty in a single-strategy run, where the
+    // strategy sees the account.
+    let mut sleeves: Vec<Ledger> = books.as_mut().map(|b| std::mem::take(&mut b.ledgers)).unwrap_or_default();
 
     // Orders placed in on_start are stamped just before the first bar so they can fill on it.
-    {
+    let start_ts = if first_ts > i64::MIN { first_ts - 1 } else { first_ts };
+    for (s, strategy) in strategies.iter_mut().enumerate() {
         let mut ctx = Context {
-            ledger: &ledger,
+            book: sleeves.get(s).unwrap_or(&ledger),
+            account: &ledger,
             history: &history,
             orders: &mut orders,
             open: &mut open,
-            now: if first_ts > i64::MIN { first_ts - 1 } else { first_ts },
+            now: start_ts,
             step: -1,
             seed: cfg.seed,
+            strategy: s,
         };
         strategy.on_start(&mut ctx);
     }
@@ -1203,14 +1432,27 @@ pub fn run_backtest_controlled(
 
         // 0. Financing for the period that just ended (none before the first bar).
         if financed && step > 0 {
-            charge_financing(&mut ledger, rates, ts)?;
+            if sleeves.is_empty() {
+                for c in financing_charges(&ledger, rates)? {
+                    post(&mut ledger, &c, ts)?;
+                }
+            } else {
+                // Each strategy is financed on its own books; the account carries every charge.
+                let idle = books.as_mut().and_then(|b| b.unallocated.as_mut());
+                for book in sleeves.iter_mut().chain(idle) {
+                    for c in financing_charges(book, rates)? {
+                        post(book, &c, ts)?;
+                        post(&mut ledger, &c, ts)?;
+                    }
+                }
+            }
         }
 
         // Good-till-date orders past their date expire before this timestamp's fills.
         expire(&mut orders, &mut open, |o| matches!(o.tif, TimeInForce::GoodTillDate(t) if ts > t));
 
         // 1. Fill orders submitted at earlier timestamps, in submission order.
-        let mut fills: Vec<Fill> = Vec::new();
+        let mut fills: Vec<(usize, Fill)> = Vec::new();
         for k in open.candidates(group, &orders) {
             if !orders[k].state.is_open() || step - orders[k].submit_step < min_wait {
                 continue;
@@ -1235,12 +1477,21 @@ pub fn run_backtest_controlled(
                 fee: commission_fee(&cfg.costs.commission, a.qty, notional(a.price, a.qty)?)?,
                 ts_ns: ts,
             };
-            match ledger.apply_fill(&f) {
+            // A strategy must afford a fill on its own books before the account takes it.
+            let accepted = match sleeves.get(o.strategy) {
+                Some(book) => book.check_fill(&f).and_then(|()| ledger.apply_fill(&f)),
+                None => ledger.apply_fill(&f),
+            };
+            match accepted {
                 Ok(()) => {
+                    if let Some(book) = sleeves.get_mut(o.strategy) {
+                        book.apply_fill(&f).map_err(ledger_err)?;
+                    }
                     o.remaining = o.remaining.checked_sub(a.qty)?;
                     o.state =
                         if o.remaining.is_zero() { OrderState::Filled } else { OrderState::PartiallyFilled };
-                    fills.push(f);
+                    fills.push((o.strategy, f));
+                    fill_orders.push(o.id);
                 }
                 Err(LedgerError::Rejected(r)) => {
                     o.state = OrderState::Rejected;
@@ -1262,33 +1513,41 @@ pub fn run_backtest_controlled(
 
         // 2. Mark to the close and record equity.
         for b in group {
-            if ledger.mark(b.instrument, b.close).is_err() {
+            let mut marked = ledger.mark(b.instrument, b.close);
+            for book in &mut sleeves {
+                marked = marked.and_then(|()| book.mark(b.instrument, b.close));
+            }
+            if marked.is_err() {
                 return Err(Error::Internal("validated bar produced an invalid mark".into()).into());
             }
         }
         curve.push(EquityPoint { ts_ns: ts, equity: ledger.equity()?, cash: ledger.cash() });
-        let mut gross = Money::ZERO;
-        for (&id, p) in ledger.positions() {
-            if !p.qty.is_zero() {
-                gross = gross.checked_add(ledger.position_value(id)?.checked_abs()?)?;
+        exposure.push(gross_of(&ledger)?);
+        if let Some(b) = books.as_mut() {
+            for (s, book) in sleeves.iter().enumerate() {
+                b.curves[s].push(EquityPoint { ts_ns: ts, equity: book.equity()?, cash: book.cash() });
+                b.exposure[s].push(gross_of(book)?);
             }
         }
-        exposure.push(gross);
 
-        // 3. Let the strategy react. Anything it submits fills at a later timestamp.
-        let mut ctx = Context {
-            ledger: &ledger,
-            history: &history,
-            orders: &mut orders,
-            open: &mut open,
-            now: ts,
-            step,
-            seed: cfg.seed,
-        };
-        for f in &fills {
-            strategy.on_fill(&mut ctx, f);
+        // 3. Let the strategies react, in order. Anything they submit fills at a later timestamp.
+        for (s, strategy) in strategies.iter_mut().enumerate() {
+            let mut ctx = Context {
+                book: sleeves.get(s).unwrap_or(&ledger),
+                account: &ledger,
+                history: &history,
+                orders: &mut orders,
+                open: &mut open,
+                now: ts,
+                step,
+                seed: cfg.seed,
+                strategy: s,
+            };
+            for (_, f) in fills.iter().filter(|(owner, _)| *owner == s) {
+                strategy.on_fill(&mut ctx, f);
+            }
+            strategy.on_bar(&mut ctx, group);
         }
-        strategy.on_bar(&mut ctx, group);
         open.market.retain(|&k| orders[k].state.is_open());
         i = j;
         step += 1;
@@ -1298,7 +1557,28 @@ pub fn run_backtest_controlled(
         cb(Progress { bars_done: bars.len(), bars_total: bars.len(), timestamps_done: step as usize });
     }
     let metrics = compute_metrics(&curve, cfg.periods_per_year, cfg.risk_free_rate);
-    let result_sha256 = hash_result(&curve, ledger.journal(), &orders);
+    let result_sha256 = hash_result(&curve, ledger.journal(), &orders, weights.is_some());
+    let config_sha256 = match weights {
+        Some(w) => spectra_core::sha256_hex(canonical_multi_config(cfg, w).as_bytes()),
+        None => config_fingerprint(cfg),
+    };
+    let mut per_strategy = Vec::with_capacity(sleeves.len());
+    let mut unallocated = None;
+    if let (Some(b), Some(w)) = (books, weights) {
+        unallocated = b.unallocated;
+        for ((((book, curve), exposure), allocation), &weight) in
+            sleeves.into_iter().zip(b.curves).zip(b.exposure).zip(b.allocations).zip(w)
+        {
+            per_strategy.push(StrategyResult {
+                weight,
+                allocation,
+                metrics: compute_metrics(&curve, cfg.periods_per_year, cfg.risk_free_rate),
+                equity_curve: curve,
+                gross_exposure: exposure,
+                ledger: book,
+            });
+        }
+    }
     Ok(BacktestResult {
         equity_curve: curve,
         gross_exposure: exposure,
@@ -1308,10 +1588,13 @@ pub fn run_backtest_controlled(
         run: RunRecord {
             engine_version: ENGINE_VERSION.into(),
             dataset_sha256: bars_sha256(bars),
-            config_sha256: config_fingerprint(cfg),
+            config_sha256,
             result_sha256,
             seed: cfg.seed,
             bar_count: bars.len(),
         },
+        fill_orders,
+        strategies: per_strategy,
+        unallocated,
     })
 }

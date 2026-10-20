@@ -1,35 +1,27 @@
-# Caddy reverse proxy configuration for SpectraLabs (M20b step 12)
-# Production: use with automatic HTTPS + security headers
+# Public edge for the Spectra dashboard (M20 step 12).
 #
-# Run: caddy run --config Caddyfile
-# Or: caddy start --config Caddyfile (background)
+# Only the Next.js frontend is published. The engine API, its /metrics and the
+# workers stay on the private compose network; Caddy never routes to them.
+#
+#   docker compose --profile proxy up -d
+#
+# SITE_ADDRESS is ":80" (plain HTTP, local) by default. Set it to a domain, e.g.
+# SITE_ADDRESS=app.spectralabs.example, and Caddy obtains and renews a TLS
+# certificate automatically (ports 80 and 443 must reach this host).
+# Outside compose: UPSTREAM=127.0.0.1:3000 caddy run --config Caddyfile
 
-(security_headers) {
-	header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-	header X-Frame-Options "DENY"
-	header X-Content-Type-Options "nosniff"
-	header X-XSS-Protection "1; mode=block"
-	header Referrer-Policy "no-referrer-when-downgrade"
-	header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
-	header Permissions-Policy "geolocation=(), microphone=(), camera=()"
-}
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
 
-# Local development: http without TLS
-:8080 {
-	# Frontend (Next.js)
-	reverse_proxy localhost:3000 {
-		header_up X-Forwarded-Host {http.request.host}
-		header_up X-Forwarded-Proto http
-		header_up X-Real-IP {http.request.remote}
+	# The frontend sets its own Content-Security-Policy; these complement it.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		-Server
 	}
-}
 
-# Production: use actual domain
-# example.com www.example.com {
-# 	import security_headers
-# 	reverse_proxy localhost:3000 {
-# 		header_up X-Forwarded-Host {http.request.host}
-# 		header_up X-Forwarded-Proto https
-# 		header_up X-Real-IP {http.request.remote}
-# 	}
-# }
+	reverse_proxy {$UPSTREAM:frontend:3000}
+}

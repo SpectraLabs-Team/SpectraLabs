@@ -12,15 +12,19 @@
 //!
 //! Configuration: see [`spectra_api::config::WorkerConfig`]. Stops cleanly
 //! on Ctrl-C or SIGTERM: no new claims, running jobs finish.
+//!
+//! With `SPECTRA_WORKER_METRICS_ADDR` set, the worker also serves `/health`
+//! (for container health checks) and Prometheus `/metrics` (job counts and
+//! durations, which only the worker process records).
 
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use spectra_api::config::WorkerConfig;
+use spectra_api::config::{ArtifactStorage, WorkerConfig};
 use spectra_api::{engine, observability, shutdown_signal};
 use spectra_core::{Json, ENGINE_VERSION};
-use spectra_db::artifacts::{store_for_run, ArtifactStore, NewArtifact};
+use spectra_db::artifacts::{store_for_run, ArtifactBackend, ArtifactStore, NewArtifact};
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
 use spectra_db::{PgPool, PoolConfig};
 use std::time::Instant;
@@ -40,9 +44,41 @@ const IDLE_POLL: Duration = Duration::from_secs(1);
 
 struct Ctx {
     pool: PgPool,
-    store: ArtifactStore,
+    store: ArtifactBackend,
     worker_id: String,
     quota: i64,
+}
+
+/// The configured artifact backend.
+fn artifact_backend(storage: &ArtifactStorage) -> Result<ArtifactBackend, String> {
+    match storage {
+        ArtifactStorage::Local(dir) => Ok(ArtifactBackend::Local(ArtifactStore::new(dir))),
+        #[cfg(feature = "s3")]
+        ArtifactStorage::S3 { bucket, prefix } => {
+            spectra_db::artifacts::s3::S3ArtifactStore::from_env(bucket, prefix)
+                .map(ArtifactBackend::S3)
+                .map_err(|e| format!("cannot use artifact bucket {bucket}: {e}"))
+        }
+        #[cfg(not(feature = "s3"))]
+        ArtifactStorage::S3 { .. } => {
+            Err("ARTIFACT_STORAGE=s3, but this worker was built without the `s3` feature \
+                 (cargo build --features s3)"
+                .into())
+        }
+    }
+}
+
+/// Prometheus text for the worker's own metrics.
+#[allow(clippy::unused_async)] // axum handlers are async fns
+async fn metrics_text() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match observability::render_metrics() {
+        Some(text) => {
+            ([(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")], text)
+                .into_response()
+        }
+        None => (axum::http::StatusCode::SERVICE_UNAVAILABLE, "metrics not initialised").into_response(),
+    }
 }
 
 #[tokio::main]
@@ -52,6 +88,13 @@ async fn main() -> ExitCode {
         Ok(c) => c,
         Err(e) => {
             eprintln!("spectra-worker: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let store = match artifact_backend(&cfg.artifact_storage) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("{e}");
             return ExitCode::from(2);
         }
     };
@@ -87,7 +130,7 @@ async fn main() -> ExitCode {
         kinds = %cfg.kinds.join(", "),
         concurrency = cfg.concurrency,
         workspace_max_running = cfg.workspace_max_running,
-        artifact_dir = %cfg.artifact_dir.display(),
+        artifact_store = %store.describe(),
         "worker started"
     );
 
@@ -96,6 +139,29 @@ async fn main() -> ExitCode {
         shutdown_signal().await;
         let _ = stop_tx.send(true);
     });
+
+    if let Some(addr) = cfg.metrics_addr {
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!("cannot listen for /metrics on {addr}: {e}");
+                return ExitCode::from(1);
+            }
+        };
+        info!(%addr, "serving /health and /metrics");
+        let mut stop = stop_rx.clone();
+        tokio::spawn(async move {
+            let app = axum::Router::new()
+                .route("/health", axum::routing::get(|| async { "ok" }))
+                .route("/metrics", axum::routing::get(metrics_text));
+            let shutdown = async move {
+                let _ = stop.changed().await;
+            };
+            if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {
+                error!("metrics listener failed: {e}");
+            }
+        });
+    }
 
     // Housekeeping: this worker's heartbeat, and requeueing jobs of dead workers.
     let (hk_pool, hk_info, mut hk_stop) = (pool.clone(), info.clone(), stop_rx.clone());
@@ -121,7 +187,7 @@ async fn main() -> ExitCode {
 
     let ctx = Arc::new(Ctx {
         pool: pool.clone(),
-        store: ArtifactStore::new(&cfg.artifact_dir),
+        store,
         worker_id: worker_id.clone(),
         quota: cfg.artifact_quota_bytes,
     });

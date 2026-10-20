@@ -24,6 +24,10 @@ tracing-subscriber.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
 
+[features]
+# S3-compatible artifact storage for spectra-worker (ARTIFACT_STORAGE=s3).
+s3 = ["spectra-db/s3"]
+
 [dev-dependencies]
 http-body-util.workspace = true
 tower.workspace = true

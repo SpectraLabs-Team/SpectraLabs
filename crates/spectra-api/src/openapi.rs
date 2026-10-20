@@ -111,6 +111,11 @@ pub fn spec_json() -> String {
     ApiDoc::openapi().to_json().unwrap_or_else(|_| "{}".to_string())
 }
 
+/// The spec as indented JSON (what `just api-client` commits, so diffs stay readable).
+pub fn spec_pretty_json() -> String {
+    ApiDoc::openapi().to_pretty_json().unwrap_or_else(|_| "{}".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

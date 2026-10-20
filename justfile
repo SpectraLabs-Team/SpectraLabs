@@ -55,6 +55,34 @@ check:
 check-web:
     cd web/frontend && npm run typecheck && npm test
 
+# Everything behind Caddy (TLS) with Prometheus: set SITE_ADDRESS in .env for a real domain.
+up-prod:
+    docker compose --profile proxy --profile monitoring up -d --build
+
+# Run N workers (they share the queue safely).
+scale-workers n="3":
+    docker compose up -d --scale worker={{n}}
+
+# Worker artifacts in a local MinIO bucket instead of the volume.
+up-s3:
+    docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile minio up -d --build
+
+# Back up DATABASE_URL to ./backups (BACKUP_KEEP_DAYS, default 7).
+backup dir="backups":
+    scripts/backup-postgres.sh {{dir}}
+
+# Restore a backup into RESTORE_DATABASE_URL and check it.
+restore-check file:
+    scripts/restore-postgres.sh {{file}}
+
+# Record every workspace's registry head hash in ./anchors.
+anchor dir="anchors":
+    scripts/anchor-registry-hash.sh {{dir}}
+
+# Regenerate the dashboard's TypeScript API types from the OpenAPI spec.
+api-client:
+    scripts/generate-typescript-client.sh
+
 # Open psql on the dev database.
 psql:
     docker compose exec postgres psql -U spectra spectra

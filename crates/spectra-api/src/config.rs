@@ -170,13 +170,32 @@ impl Config {
     }
 }
 
+/// Where the worker stores artifacts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArtifactStorage {
+    /// `ARTIFACT_STORAGE=local` (the default): the `ARTIFACT_DIR` directory.
+    Local(std::path::PathBuf),
+    /// `ARTIFACT_STORAGE=s3`: `ARTIFACT_S3_BUCKET` (required) and
+    /// `ARTIFACT_S3_PREFIX` (optional). Credentials come from the standard
+    /// `AWS_*` variables. Needs a worker built with the `s3` feature.
+    S3 {
+        /// Bucket name.
+        bucket: String,
+        /// Key prefix (may be empty).
+        prefix: String,
+    },
+}
+
 /// Configuration used by the background job worker.
 #[derive(Debug, Clone)]
 pub struct WorkerConfig {
     /// Postgres URL.
     pub database_url: Secret,
-    /// Directory for content-addressed artifacts.
-    pub artifact_dir: std::path::PathBuf,
+    /// Where content-addressed artifacts are stored.
+    pub artifact_storage: ArtifactStorage,
+    /// `SPECTRA_WORKER_METRICS_ADDR`: where the worker serves `/health` and
+    /// Prometheus `/metrics`. Unset: no listener.
+    pub metrics_addr: Option<SocketAddr>,
     /// Number of jobs this worker may run concurrently.
     pub concurrency: usize,
     /// Maximum jobs one workspace may run across all workers.
@@ -247,10 +266,33 @@ impl WorkerConfig {
         };
         let artifact_dir =
             val("ARTIFACT_DIR").map_or_else(|| std::path::PathBuf::from("artifacts"), Into::into);
+        let artifact_storage = match val("ARTIFACT_STORAGE").as_deref().unwrap_or("local") {
+            "local" => ArtifactStorage::Local(artifact_dir),
+            "s3" => {
+                if let Some(bucket) = val("ARTIFACT_S3_BUCKET") {
+                    ArtifactStorage::S3 { bucket, prefix: val("ARTIFACT_S3_PREFIX").unwrap_or_default() }
+                } else {
+                    problems.push("ARTIFACT_S3_BUCKET must be set when ARTIFACT_STORAGE=s3".into());
+                    ArtifactStorage::Local(artifact_dir)
+                }
+            }
+            other => {
+                problems.push(format!("ARTIFACT_STORAGE must be local or s3, not {other:?}"));
+                ArtifactStorage::Local(artifact_dir)
+            }
+        };
+        let metrics_addr = val("SPECTRA_WORKER_METRICS_ADDR").and_then(|v| {
+            let addr = v.parse::<SocketAddr>().ok();
+            if addr.is_none() {
+                problems.push("SPECTRA_WORKER_METRICS_ADDR must be host:port, e.g. 0.0.0.0:9100".into());
+            }
+            addr
+        });
         if problems.is_empty() {
             Ok(Self {
                 database_url,
-                artifact_dir,
+                artifact_storage,
+                metrics_addr,
                 concurrency,
                 workspace_max_running,
                 kinds,
@@ -301,6 +343,39 @@ mod tests {
         for needle in ["SPECTRA_API_ADDR", "DATABASE_URL", "ENGINE_SECRET", "SPECTRA_MIGRATE_ON_START"] {
             assert!(text.contains(needle), "{text}");
         }
+    }
+
+    #[test]
+    fn worker_artifact_storage_and_metrics_addr() {
+        let base = [("DATABASE_URL", "postgres://u:p@localhost/db")];
+        let c = WorkerConfig::from_lookup(lookup(&base)).unwrap();
+        assert_eq!(c.artifact_storage, ArtifactStorage::Local("artifacts".into()));
+        assert_eq!(c.metrics_addr, None);
+
+        let c = WorkerConfig::from_lookup(lookup(&[
+            base[0],
+            ("ARTIFACT_STORAGE", "s3"),
+            ("ARTIFACT_S3_BUCKET", "spectra-artifacts"),
+            ("ARTIFACT_S3_PREFIX", "prod"),
+            ("SPECTRA_WORKER_METRICS_ADDR", "0.0.0.0:9100"),
+        ]))
+        .unwrap();
+        assert_eq!(
+            c.artifact_storage,
+            ArtifactStorage::S3 { bucket: "spectra-artifacts".into(), prefix: "prod".into() }
+        );
+        assert_eq!(c.metrics_addr.unwrap().port(), 9100);
+
+        let err = WorkerConfig::from_lookup(lookup(&[
+            base[0],
+            ("ARTIFACT_STORAGE", "s3"),
+            ("SPECTRA_WORKER_METRICS_ADDR", "nine-thousand"),
+        ]))
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("ARTIFACT_S3_BUCKET") && err.contains("SPECTRA_WORKER_METRICS_ADDR"), "{err}");
+        let err = WorkerConfig::from_lookup(lookup(&[base[0], ("ARTIFACT_STORAGE", "ftp")])).unwrap_err();
+        assert!(err.to_string().contains("ARTIFACT_STORAGE"), "{err}");
     }
 
     #[test]

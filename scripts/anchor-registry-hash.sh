@@ -1,43 +1,42 @@
-#!/bin/bash
-# Anchor registry head hash (M20b step 12: Deployment)
-# Writes the current registry head hash to a trusted location (e.g., GitHub releases)
-# Usage: ./scripts/anchor-registry-hash.sh
-# Runs daily: 0 3 * * * /path/to/anchor-registry-hash.sh
+#!/usr/bin/env bash
+# Anchor the registry's hash chains outside the database (M20 step 12).
+#
+# Usage: scripts/anchor-registry-hash.sh [ANCHOR_DIR]      (default ANCHOR_DIR: anchors)
+#
+#   DATABASE_URL  the database (required)
+#
+# Each workspace's registry is a hash chain (registry_events.prev_hash -> hash),
+# so its latest hash commits to its whole history. This script records every
+# workspace's head (workspace, seq, hash) in ANCHOR_DIR/registry-heads-<UTC time>.txt
+# and appends "<UTC time> <sha256 of that file> <workspace count>" to
+# ANCHOR_DIR/anchors.log.
+#
+# The anchor only helps if it is kept where whoever controls the database cannot
+# rewrite it: commit ANCHOR_DIR to a separate git repository, upload it to a
+# bucket with object lock, or attach it to a release. Set ANCHOR_UPLOAD to a
+# command to run with the heads file as its argument, for example
+#   ANCHOR_UPLOAD='aws s3 cp --sse AES256 "$0" s3://spectra-anchors/'
+# Daily from cron:
+#   0 3 * * * cd /srv/spectralabs && DATABASE_URL=postgres://... scripts/anchor-registry-hash.sh /var/lib/spectra/anchors
+set -euo pipefail
 
-set -e
+dir="${1:-anchors}"
+: "${DATABASE_URL:?set DATABASE_URL}"
+mkdir -p "$dir"
+stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+heads="$dir/registry-heads-$(date -u +%Y%m%dT%H%M%SZ).txt"
 
-# Database connection
-DB_HOST="${DB_HOST:-127.0.0.1}"
-DB_PORT="${DB_PORT:-5432}"
-DB_NAME="${DB_NAME:-spectra}"
-DB_USER="${DB_USER:-spectra}"
+psql "$DATABASE_URL" -X -A -t -F ' ' -v ON_ERROR_STOP=1 -c \
+  "SELECT DISTINCT ON (workspace_id) workspace_id, seq, hash
+     FROM registry_events
+    ORDER BY workspace_id, seq DESC" >"$heads"
 
-# Output file
-ANCHOR_FILE="${ANCHOR_FILE:-.registry-head-hash.txt}"
+count="$(grep -c . "$heads" || true)"
+digest="$(sha256sum "$heads" | cut -d' ' -f1)"
+echo "$stamp $digest $count" >>"$dir/anchors.log"
+echo "anchor: $count workspace head(s) in $heads, digest $digest"
 
-# Get the current registry head hash
-REGISTRY_HASH=$(PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
-  -h "$DB_HOST" \
-  -U "$DB_USER" \
-  -d "$DB_NAME" \
-  -t -c "SELECT hash FROM registry_events ORDER BY seq DESC LIMIT 1;" 2>/dev/null || echo "")
-
-if [ -z "$REGISTRY_HASH" ]; then
-  echo "[$(date)] Warning: Could not retrieve registry hash from database"
-  exit 1
+if [ -n "${ANCHOR_UPLOAD:-}" ]; then
+  sh -c "$ANCHOR_UPLOAD" "$heads"
+  echo "anchor: uploaded"
 fi
-
-echo "[$(date)] Registry head hash: $REGISTRY_HASH"
-
-# Write to local file
-echo "$REGISTRY_HASH" > "$ANCHOR_FILE"
-echo "[$(date)] Anchored to $ANCHOR_FILE"
-
-# Optional: Write to GitHub release or other trusted location
-# Example: upload to GitHub:
-# gh release create "registry-anchor-$(date +%Y-%m-%d)" "$ANCHOR_FILE" \
-#   --title "Registry Head Hash Anchor - $(date +%Y-%m-%d)" \
-#   --notes "Registry head hash: $REGISTRY_HASH"
-
-# Optional: Upload to S3
-# aws s3 cp "$ANCHOR_FILE" "s3://my-bucket/registry-anchors/$(date +%Y-%m-%d).txt" --sse AES256

@@ -1,267 +1,125 @@
-# M20b Step 13: Scaling Guide
+# Scaling (M20 step 13)
 
-## 1. S3 Artifact Storage
+What exists, how to switch it on, and what it costs. Deployment basics are in
+[operations.md](operations.md).
 
-Move from local volume to S3 (or MinIO for self-hosted).
+## More workers
 
-### Setup
-
-**AWS S3:**
-```bash
-# Create bucket
-aws s3api create-bucket \
-  --bucket spectra-artifacts-prod \
-  --region us-west-2 \
-  --create-bucket-configuration LocationConstraint=us-west-2
-
-# Create IAM user for app
-aws iam create-user --user-name spectra-app
-
-# Attach policy
-aws iam attach-user-policy \
-  --user-name spectra-app \
-  --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
-
-# Get credentials
-aws iam create-access-key --user-name spectra-app
-```
-
-**MinIO (self-hosted):**
-```bash
-# Start MinIO
-docker run -d \
-  -p 9000:9000 \
-  -p 9001:9001 \
-  -e MINIO_ROOT_USER=minioadmin \
-  -e MINIO_ROOT_PASSWORD=minioadmin \
-  minio/minio server /data --console-address ":9001"
-
-# Create bucket
-mc mb minio/spectra-artifacts
-
-# Create service account
-mc admin user svcacct add minio minioadmin
-```
-
-### Code Changes
-
-Update `crates/spectra-db/src/artifacts.rs`:
-
-```rust
-// Add feature flag for S3
-#[cfg(feature = "s3")]
-pub struct S3ArtifactStore {
-    client: aws_sdk_s3::Client,
-    bucket: String,
-}
-
-#[cfg(feature = "s3")]
-impl S3ArtifactStore {
-    pub async fn put(&self, bytes: &[u8]) -> Result<Stored> {
-        let sha256 = sha256_hex(bytes);
-        self.client
-            .put_object()
-            .bucket(&self.bucket)
-            .key(&Self::relative_path(&sha256))
-            .body(bytes.into())
-            .send()
-            .await?;
-        Ok(Stored { sha256, path: Self::relative_path(&sha256), size: bytes.len() as u64 })
-    }
-}
-```
-
-### Environment Variables
+Workers claim jobs with `FOR UPDATE SKIP LOCKED`, heartbeat every 5 s, and requeue the jobs of a
+worker that has been silent for 30 s, so any number can share one database.
 
 ```bash
-# In .env
-ARTIFACT_STORAGE=s3  # or 'local'
-S3_BUCKET=spectra-artifacts-prod
-S3_REGION=us-west-2
+just scale-workers 3                     # docker compose up -d --scale worker=3
+```
+
+Prometheus finds every replica on its own (DNS discovery of `worker`). Per worker, tune
+`SPECTRA_WORKER_CONCURRENCY` (jobs at once, default 2) to the CPU cores it has; across all workers,
+`SPECTRA_WORKSPACE_MAX_RUNNING` caps how many jobs one workspace runs at once, so one heavy user
+cannot take every slot.
+
+**Splitting by job kind.** Give a worker `SPECTRA_WORKER_KINDS=benchmark` (any comma-separated
+subset of `benchmark,risk,stress`) and it claims only those. Use it to put long benchmarks on their
+own machines so quick risk jobs never wait behind them: add a second worker service in a compose
+override with a different `SPECTRA_WORKER_KINDS`.
+
+**Outside compose** (Kubernetes, Nomad, plain VMs) a worker needs only `DATABASE_URL`, the
+artifact settings below and, for health checks and metrics, `SPECTRA_WORKER_METRICS_ADDR`. Use
+`GET :9100/health` as the liveness probe, give it at least 60 s to stop (running jobs finish on
+SIGTERM), and run as many replicas as you like.
+
+## Artifacts in S3-compatible storage
+
+Reports (and later equity curves and trade lists) are content-addressed: the key is the SHA-256 of
+the bytes, every read is re-verified, and identical bytes are stored once. By default they live on
+the `artifacts` volume, which every worker must share. For several hosts, or to stop worrying about
+disk, use a bucket instead (AWS S3, Cloudflare R2, MinIO, anything S3-compatible).
+
+The S3 code is behind the `s3` cargo feature, so builds without it pull in no object-store
+dependencies.
+
+**Try it locally with MinIO:**
+
+```bash
+just up-s3      # docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile minio up -d --build
+```
+
+This builds the worker with `--features spectra-api/s3`, starts MinIO (console on
+`http://127.0.0.1:9001`), creates the bucket and sets `ARTIFACT_STORAGE=s3`.
+
+**In production** create the bucket (private, versioning or object lock recommended), give the
+worker credentials limited to `s3:GetObject` and `s3:PutObject` on it (`GetObject` also covers
+the existence check the worker makes before uploading), and set in `.env`:
+
+```
+ARTIFACT_S3_BUCKET=spectra-artifacts-production
+ARTIFACT_S3_PREFIX=                        # optional key prefix
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
-# OR for MinIO:
-S3_ENDPOINT=http://minio:9000
+AWS_REGION=eu-west-1
+AWS_ENDPOINT=https://s3.eu-west-1.amazonaws.com
+AWS_ALLOW_HTTP=false
 ```
 
-## 2. Multiple Workers
+then `docker compose -f docker-compose.yml -f deploy/compose.s3.yml up -d --build`.
 
-Scale the worker horizontally.
+**Moving existing artifacts:** the key layout is the same as on disk
+(`<prefix>/sha256/ab/cd/<hash>`), so copy the volume's `sha256/` directory once before switching,
+e.g. `aws s3 sync <volume>/sha256 s3://$ARTIFACT_S3_BUCKET/sha256`. Database rows do not change.
 
-### Docker Compose
+Storage costs are small: a risk report is a few kilobytes; at S3 Standard prices a million of them
+cost cents per month.
 
-```bash
-# Start 3 worker instances
-docker compose up --scale worker=3 -d
+## Typed API client for the dashboard
 
-# Monitor
-docker compose logs -f worker
+The engine describes itself with OpenAPI (`GET /api/v1/openapi.json`, generated from the Rust
+handlers with utoipa).
+
+- `web/frontend/lib/jobs.ts` is the typed client for the job queue: `createJob`, `getJob`,
+  `listJobs`, `cancelJob` and `waitForJob` (polls until done, with progress callbacks and abort).
+  It goes through the authenticated proxy like every other engine call.
+- `just api-client` prints the spec from the code (no server needed) to
+  `web/frontend/lib/generated/engine-api.json` and generates `engine-api.ts` from it with
+  `openapi-typescript`. Commit both. CI regenerates them and fails if the committed copies are
+  stale, so an API change cannot silently drift from the dashboard's types.
+
+```ts
+import { createJob, waitForJob } from '@/lib/jobs';
+
+const job = await createJob({ kind: 'benchmark', payload: { portfolio_csv, simulations: 100_000 } });
+const done = await waitForJob(job.id, { onUpdate: (j) => setStatus(j.status) });
+if (done.status === 'succeeded') show(done.result?.report);
 ```
 
-### Kubernetes
+## Risk plugins
 
-```yaml
-# worker-deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: spectra-worker
-spec:
-  replicas: 3  # scale by changing this
-  selector:
-    matchLabels:
-      app: spectra-worker
-  template:
-    metadata:
-      labels:
-        app: spectra-worker
-    spec:
-      containers:
-      - name: worker
-        image: spectra-labs/engine:latest
-        command: ["spectra-worker"]
-        env:
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: spectra-secrets
-              key: database-url
-        resources:
-          requests:
-            cpu: "2"
-            memory: "2Gi"
-          limits:
-            cpu: "4"
-            memory: "4Gi"
-```
-
-### Job Queue Split by Kind (optional)
-
-Run different workers for different job kinds:
-
-```bash
-# Worker 1: risk jobs only
-SPECTRA_WORKER_KINDS=risk docker compose up -d worker-risk
-
-# Worker 2: benchmark jobs only
-SPECTRA_WORKER_KINDS=benchmark docker compose up -d worker-benchmark
-
-# Worker 3: stress jobs only
-SPECTRA_WORKER_KINDS=stress docker compose up -d worker-stress
-```
-
-## 3. TypeScript Client Generation
-
-Generate auto-typed client from OpenAPI spec.
-
-### Generate
-
-```bash
-./scripts/generate-typescript-client.sh http://api.example.com/api/v1/openapi.json
-
-# Or use OpenAPI Generator CLI directly
-openapi-generator-cli generate \
-  -i http://localhost:8000/api/v1/openapi.json \
-  -g typescript-fetch \
-  -o ./web/frontend/src/lib/api-client
-```
-
-### Use in Frontend
-
-```typescript
-// Before (hand-written)
-const response = await fetch('/api/v1/jobs', {
-  method: 'POST',
-  body: JSON.stringify({ kind: 'risk', payload: {...} }),
-});
-const data = await response.json();
-
-// After (generated client - fully typed)
-import { DefaultApi } from './lib/api-client';
-
-const api = new DefaultApi();
-const job = await api.createJob({
-  kind: 'risk',
-  payload: {...},
-  priority: 0,
-});
-// job is fully typed with CreateJobRequest, JobView, etc.
-```
-
-## 4. Plugin Interface
-
-Version the RiskPlugin trait and extend to support other plugins.
-
-### Current (M20a)
+`spectra_risk::RiskPlugin` is versioned. A plugin implements `name` and `compute`, and may override
+`version` (its own release, shown by `RiskEngine::plugins()`). `api_version` defaults to
+`PLUGIN_API_VERSION` at build time; `RiskEngine::register_plugin` refuses a plugin written against
+another version instead of letting it run against an interface it does not know.
 
 ```rust
-pub trait RiskPlugin {
-    fn compute_risk(&self, portfolio: &Portfolio, ...) -> RiskMetrics;
-}
-```
-
-### Versioned (M20b)
-
-```rust
-pub trait Plugin: Send + Sync {
-    fn name(&self) -> &str;
-    fn version(&self) -> &str;
-    fn capabilities(&self) -> Vec<Capability>;
-}
-
-pub trait RiskPlugin: Plugin {
-    fn compute_risk(&self, ...) -> RiskMetrics;
-}
-
-pub trait BacktestPlugin: Plugin {
-    fn run_backtest(&self, ...) -> BacktestResult;
-}
-
-// Allow plugins to be registered at runtime
-pub struct PluginRegistry {
-    plugins: HashMap<String, Box<dyn Plugin>>,
-}
-
-impl PluginRegistry {
-    pub fn register<P: Plugin + 'static>(&mut self, plugin: P) {
-        self.plugins.insert(plugin.name().to_string(), Box::new(plugin));
-    }
-
-    pub fn get_risk_plugin(&self, name: &str) -> Option<&dyn RiskPlugin> {
-        self.plugins.get(name).and_then(|p| {
-            p.as_any().downcast_ref::<dyn RiskPlugin>()
-        })
+struct WorstLoss;
+impl RiskPlugin for WorstLoss {
+    fn name(&self) -> &str { "worst_loss" }
+    fn version(&self) -> &str { "1.2.0" }
+    fn compute(&self, losses: &[f64], _confidence: f64) -> spectra_core::Result<f64> {
+        Ok(losses.iter().copied().fold(f64::NEG_INFINITY, f64::max))
     }
 }
+
+let mut engine = RiskEngine::new();
+engine.register_plugin(Box::new(WorstLoss))?;
+let report = engine.calculate_named("worst_loss", &portfolio, &config)?;
 ```
 
-## Scaling Checklist
+Bump `PLUGIN_API_VERSION` whenever `RiskPlugin` changes incompatibly. Plugins are compiled in;
+loading them at run time (dynamic libraries or WebAssembly) is not built.
 
-- [ ] Switch artifact storage to S3/MinIO
-- [ ] Deploy 3+ worker instances
-- [ ] Set up job queue split by kind (optional)
-- [ ] Generate TypeScript client from OpenAPI
-- [ ] Integrate generated client in frontend
-- [ ] Version RiskPlugin and create PluginRegistry
-- [ ] Add support for other plugin types (backtest, optimization, etc.)
-- [ ] Monitor: queue depth, worker utilization, job duration
-- [ ] Add alerting: queue depth > threshold, worker down, artifact quota exceeded
+## Where the limits are now
 
-## Performance Targets
-
-With scaling:
-- **Queue throughput:** 100+ jobs/hour
-- **Concurrent jobs:** 8+ per worker, 50+ total
-- **Job latency:** <5s queue time, <10s median duration
-- **Artifact storage:** unlimited (S3 scales automatically)
-- **API response time:** <500ms p95 (with caching)
-
-## Cost Optimization
-
-- **S3:** ~$0.023/GB/month storage, ~$0.0004/1000 requests
-- **EC2 workers:** t3.medium ($0.04/hour) = ~$30/month per worker
-- **Database:** managed RDS cheaper than self-hosted at scale
-
----
-
-**M20a + M20b complete.** All three steps of M20b (Observability, Deployment, Scaling) are configured and ready.
+| Resource | Limit today | When it bites | Next step |
+|---|---|---|---|
+| Synchronous engine calls | 32 at once per API process, then 503 | many users running large risk calls interactively | send large runs through jobs (`lib/jobs.ts`) |
+| Job throughput | workers × `SPECTRA_WORKER_CONCURRENCY` | queue depth grows (`jobs` with `status='queued'`) | add workers |
+| Artifact volume | one shared disk | more than one host, or disk full | S3 |
+| Postgres | one instance | sustained heavy writes | managed Postgres with a read replica |

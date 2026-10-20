@@ -5,8 +5,12 @@
 //! once, a file's name is its checksum, and every read re-verifies it. Each
 //! use of an artifact is a `run_artifacts` row, and a workspace's distinct
 //! hashes count against its quota (`workspaces.artifact_quota_bytes`, or a
-//! default). S3-compatible storage can replace the volume later behind the
-//! same `put`/`get`.
+//! default).
+//!
+//! [`ArtifactBackend`] picks where the bytes go: the local volume
+//! ([`ArtifactStore`]), or, when built with the `s3` feature, an
+//! S3-compatible bucket ([`s3::S3ArtifactStore`]: AWS S3, MinIO, R2). Both
+//! use the same content-addressed paths and re-verify every read.
 
 use std::fs;
 use std::io::{self, Write};
@@ -105,6 +109,64 @@ impl ArtifactStore {
     }
 }
 
+/// Where artifact bytes live.
+#[derive(Debug, Clone)]
+pub enum ArtifactBackend {
+    /// A local directory (`ARTIFACT_DIR`).
+    Local(ArtifactStore),
+    /// An S3-compatible bucket.
+    #[cfg(feature = "s3")]
+    S3(s3::S3ArtifactStore),
+}
+
+impl From<ArtifactStore> for ArtifactBackend {
+    fn from(store: ArtifactStore) -> Self {
+        Self::Local(store)
+    }
+}
+
+impl ArtifactBackend {
+    /// Stores `bytes` under their SHA-256 and returns the address. Storing the
+    /// same bytes again changes nothing.
+    ///
+    /// # Errors
+    /// Any I/O or object-store error.
+    pub async fn put(&self, bytes: Vec<u8>) -> io::Result<Stored> {
+        match self {
+            Self::Local(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.put(&bytes)).await.map_err(io::Error::other)?
+            }
+            #[cfg(feature = "s3")]
+            Self::S3(store) => store.put(bytes).await,
+        }
+    }
+
+    /// The bytes for `sha256`, re-verified against it.
+    ///
+    /// # Errors
+    /// As [`ArtifactStore::get`]: `InvalidInput`, `NotFound` or `InvalidData`.
+    pub async fn get(&self, sha256: &str) -> io::Result<Vec<u8>> {
+        match self {
+            Self::Local(store) => {
+                let (store, sha256) = (store.clone(), sha256.to_string());
+                tokio::task::spawn_blocking(move || store.get(&sha256)).await.map_err(io::Error::other)?
+            }
+            #[cfg(feature = "s3")]
+            Self::S3(store) => store.get(sha256).await,
+        }
+    }
+
+    /// Where the bytes go, for logs: `local:<dir>` or `s3://<bucket>/<prefix>`.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Local(store) => format!("local:{}", store.root().display()),
+            #[cfg(feature = "s3")]
+            Self::S3(store) => format!("s3://{}/{}", store.bucket(), store.prefix()),
+        }
+    }
+}
+
 /// Why an artifact could not be recorded.
 #[derive(Debug)]
 pub enum ArtifactError {
@@ -171,7 +233,7 @@ pub struct NewArtifact<'a> {
 /// [`ArtifactError`].
 pub async fn store_for_run(
     pool: &PgPool,
-    store: &ArtifactStore,
+    store: &ArtifactBackend,
     a: NewArtifact<'_>,
     default_quota: i64,
 ) -> Result<Stored, ArtifactError> {
@@ -188,11 +250,7 @@ pub async fn store_for_run(
         return Err(ArtifactError::QuotaExceeded { quota, used, needed });
     }
 
-    let (bytes, artifact_store) = (a.bytes.to_vec(), store.clone());
-    let stored = tokio::task::spawn_blocking(move || artifact_store.put(&bytes))
-        .await
-        .map_err(|e| ArtifactError::Io(io::Error::other(e)))?
-        .map_err(ArtifactError::Io)?;
+    let stored = store.put(a.bytes.to_vec()).await.map_err(ArtifactError::Io)?;
 
     let (inserted, present, quota, used): (i64, bool, Option<i64>, Option<i64>) =
         sqlx::query_as(include_str!("../queries/artifact_record.sql"))
@@ -216,6 +274,142 @@ pub async fn store_for_run(
         });
     }
     Ok(stored)
+}
+
+/// S3-compatible artifact storage (the `s3` feature).
+#[cfg(feature = "s3")]
+pub mod s3 {
+    use std::io;
+    use std::sync::Arc;
+
+    use object_store::aws::AmazonS3Builder;
+    use object_store::path::Path as ObjectPath;
+    use object_store::{ObjectStore, PutPayload};
+
+    use super::{is_sha256_hex, sha256_hex, ArtifactStore, Stored};
+
+    /// Artifacts in a bucket, at `<prefix>/sha256/<2 hex>/<2 hex>/<hash>`.
+    #[derive(Debug, Clone)]
+    pub struct S3ArtifactStore {
+        store: Arc<dyn ObjectStore>,
+        bucket: String,
+        prefix: String,
+    }
+
+    fn not_found(e: &object_store::Error) -> bool {
+        matches!(e, object_store::Error::NotFound { .. })
+    }
+
+    impl S3ArtifactStore {
+        /// A store for `bucket`, with credentials, region and endpoint from the
+        /// standard variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+        /// `AWS_REGION`, and for MinIO `AWS_ENDPOINT` plus `AWS_ALLOW_HTTP=true`.
+        ///
+        /// # Errors
+        /// Invalid or incomplete configuration.
+        pub fn from_env(bucket: &str, prefix: &str) -> io::Result<Self> {
+            let store =
+                AmazonS3Builder::from_env().with_bucket_name(bucket).build().map_err(io::Error::other)?;
+            Ok(Self::new(Arc::new(store), bucket, prefix))
+        }
+
+        /// A store over any object store (tests use the in-memory one).
+        pub fn new(store: Arc<dyn ObjectStore>, bucket: &str, prefix: &str) -> Self {
+            Self { store, bucket: bucket.to_string(), prefix: prefix.trim_matches('/').to_string() }
+        }
+
+        /// The bucket name.
+        pub fn bucket(&self) -> &str {
+            &self.bucket
+        }
+
+        /// The key prefix, without slashes at either end (may be empty).
+        pub fn prefix(&self) -> &str {
+            &self.prefix
+        }
+
+        fn location(&self, sha256: &str) -> ObjectPath {
+            let rel = ArtifactStore::relative_path(sha256);
+            if self.prefix.is_empty() {
+                ObjectPath::from(rel)
+            } else {
+                ObjectPath::from(format!("{}/{rel}", self.prefix))
+            }
+        }
+
+        /// Uploads `bytes` unless an object with their hash already exists.
+        ///
+        /// # Errors
+        /// Any object-store error.
+        pub async fn put(&self, bytes: Vec<u8>) -> io::Result<Stored> {
+            let sha256 = sha256_hex(&bytes);
+            let size = bytes.len() as u64;
+            let location = self.location(&sha256);
+            match self.store.head(&location).await {
+                Ok(_) => {}
+                Err(e) if not_found(&e) => {
+                    self.store.put(&location, PutPayload::from(bytes)).await.map_err(io::Error::other)?;
+                }
+                Err(e) => return Err(io::Error::other(e)),
+            }
+            Ok(Stored { path: ArtifactStore::relative_path(&sha256), sha256, size })
+        }
+
+        /// The bytes for `sha256`, re-verified against it.
+        ///
+        /// # Errors
+        /// `InvalidInput` for a malformed hash, `NotFound` if absent,
+        /// `InvalidData` if the object no longer matches its hash, or any
+        /// object-store error.
+        pub async fn get(&self, sha256: &str) -> io::Result<Vec<u8>> {
+            if !is_sha256_hex(sha256) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "not a lower-case SHA-256 hex string",
+                ));
+            }
+            let bytes = match self.store.get(&self.location(sha256)).await {
+                Ok(found) => found.bytes().await.map_err(io::Error::other)?,
+                Err(e) if not_found(&e) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("artifact {sha256} not found"),
+                    ))
+                }
+                Err(e) => return Err(io::Error::other(e)),
+            };
+            if sha256_hex(&bytes) != sha256 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("artifact {sha256} is corrupt"),
+                ));
+            }
+            Ok(bytes.to_vec())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use object_store::memory::InMemory;
+
+        #[tokio::test]
+        async fn put_get_and_tamper_detection() {
+            let mem: Arc<dyn ObjectStore> = Arc::new(InMemory::new());
+            let s = S3ArtifactStore::new(Arc::clone(&mem), "bucket", "/runs/");
+            assert_eq!(s.prefix(), "runs");
+            let a = s.put(b"hello".to_vec()).await.unwrap();
+            assert_eq!(a.path, format!("sha256/2c/f2/{}", a.sha256));
+            assert_eq!(s.put(b"hello".to_vec()).await.unwrap(), a);
+            assert_eq!(s.get(&a.sha256).await.unwrap(), b"hello");
+            mem.put(&ObjectPath::from(format!("runs/{}", a.path)), PutPayload::from(b"tampered".to_vec()))
+                .await
+                .unwrap();
+            assert_eq!(s.get(&a.sha256).await.unwrap_err().kind(), io::ErrorKind::InvalidData);
+            assert_eq!(s.get(&"0".repeat(64)).await.unwrap_err().kind(), io::ErrorKind::NotFound);
+            assert_eq!(s.get("../x").await.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -243,6 +437,16 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty());
+        let _ = fs::remove_dir_all(s.root());
+    }
+
+    #[tokio::test]
+    async fn the_local_backend_wraps_the_store() {
+        let s = temp_store("backend");
+        let b = ArtifactBackend::from(s.clone());
+        let a = b.put(b"curve".to_vec()).await.unwrap();
+        assert_eq!(b.get(&a.sha256).await.unwrap(), b"curve");
+        assert!(b.describe().starts_with("local:"));
         let _ = fs::remove_dir_all(s.root());
     }
 

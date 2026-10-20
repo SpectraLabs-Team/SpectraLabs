@@ -50,6 +50,31 @@ jobs:
           python3 parity/gen_ops.py parity/ops
           python3 parity/gen_data.py parity/data
           git diff --exit-code parity/ops parity/data
+      - name: S3 artifact storage (feature build and tests)
+        run: |
+          cargo clippy -p spectra-db -p spectra-api --features spectra-api/s3 --all-targets -- -D warnings
+          cargo test -p spectra-db --features s3 --lib
+      - name: Database SQL checks, backup, restore and registry anchor
+        run: |
+          cargo run --quiet -p spectra-db -- migrate
+          ADMIN_EMAIL=ci@example.com cargo run --quiet -p spectra-db -- seed
+          psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f crates/spectra-db/tests/schema_checks.sql
+          { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/queue_checks.sql; } \
+            | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
+          scripts/backup-postgres.sh "$RUNNER_TEMP/backups"
+          psql "$DATABASE_URL" -c 'CREATE DATABASE spectra_restore'
+          RESTORE_DATABASE_URL=postgresql://spectra:spectra@localhost:5432/spectra_restore \
+            scripts/restore-postgres.sh "$(ls "$RUNNER_TEMP"/backups/spectra-*.dump | tail -1)"
+          scripts/anchor-registry-hash.sh "$RUNNER_TEMP/anchors"
+      - name: Generated API types are current
+        run: |
+          scripts/generate-typescript-client.sh
+          if git ls-files --error-unmatch web/frontend/lib/generated/engine-api.ts >/dev/null 2>&1; then
+            git diff --exit-code web/frontend/lib/generated \
+              || { echo "::error::Run 'just api-client' and commit web/frontend/lib/generated"; exit 1; }
+          else
+            echo "::warning::web/frontend/lib/generated is not committed yet: run 'just api-client' and commit it"
+          fi
 
   portable:
     # Behavioural tests on other platforms (bit-exact parity tests need glibc and are compiled out).

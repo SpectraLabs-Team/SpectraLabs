@@ -13,6 +13,11 @@ tokio.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 spectra-core = { path = "../spectra-core" }
+# S3-compatible artifact storage, only with `--features s3`.
+object_store = { version = "0.11", default-features = false, features = ["aws"], optional = true }
+
+[features]
+s3 = ["dep:object_store"]
 
 [dev-dependencies]
 serde_json.workspace = true

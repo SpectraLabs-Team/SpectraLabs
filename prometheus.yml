@@ -1,38 +1,22 @@
-# Prometheus configuration for SpectraLabs (M20b step 11)
-# Scrapes metrics from the API /metrics endpoint
-
+# Prometheus for Spectra (M20 step 11). Used by the `monitoring` compose profile:
+#   docker compose --profile monitoring up -d
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-  external_labels:
-    monitor: 'spectra-labs'
-    environment: 'development'  # change to 'production' for prod
 
-# Alertmanager configuration
-alerting:
-  alertmanagers:
-    - static_configs:
-        - targets: []
-
-# Load rules once and periodically evaluate them
-rule_files:
-  # - 'alert_rules.yml'  # Uncomment when alerting rules are added
-
-# Scrape configurations
 scrape_configs:
-  - job_name: 'prometheus'
+  # spectra-api: request latency by route pattern and status.
+  - job_name: spectra-api
+    metrics_path: /metrics
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: ["api:8000"]
 
-  # SpectraLabs API - metrics endpoint at /metrics
-  - job_name: 'spectra-api'
-    scrape_interval: 10s
-    static_configs:
-      - targets: ['localhost:8000']
-    metrics_path: '/metrics'
-    # In Docker, use: targets: ['api:8000']
-
-  # Optional: if using Postgres exporter
-  # - job_name: 'postgres'
-  #   static_configs:
-  #     - targets: ['localhost:9187']
+  # spectra-worker: job claims, completions and durations. Docker's DNS returns
+  # one address per replica, so `--scale worker=N` is picked up automatically.
+  - job_name: spectra-worker
+    metrics_path: /metrics
+    dns_sd_configs:
+      - names: ["worker"]
+        type: A
+        port: 9100
+        refresh_interval: 30s

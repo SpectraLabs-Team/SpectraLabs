@@ -8,9 +8,11 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock rustfmt.toml ./
 COPY crates ./crates
 COPY examples ./examples
+# Optional cargo features, e.g. --build-arg CARGO_FEATURES=spectra-api/s3 for S3 artifact storage.
+ARG CARGO_FEATURES=""
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p spectra-api -p spectra-db \
+    cargo build --release --locked -p spectra-api -p spectra-db ${CARGO_FEATURES:+--features "$CARGO_FEATURES"} \
  && mkdir -p /out \
  && cp target/release/spectra-api target/release/spectra-worker target/release/spectra-db /out/
 

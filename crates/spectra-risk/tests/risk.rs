@@ -193,6 +193,38 @@ fn plugins_are_registered_and_computed() {
     let var = e.calculate(Metric::VaR, &sample(), &cfg).unwrap();
     assert!(worst.value >= var.value);
     assert_eq!(e.plugin_names(), vec!["WorstLoss".to_string()]);
+    assert_eq!(
+        e.plugins(),
+        vec![PluginInfo {
+            name: "WorstLoss".into(),
+            version: "0.0.0".into(),
+            api_version: PLUGIN_API_VERSION
+        }]
+    );
+}
+
+struct FromTheFuture;
+impl RiskPlugin for FromTheFuture {
+    fn name(&self) -> &'static str {
+        "FromTheFuture"
+    }
+    fn version(&self) -> &'static str {
+        "2.1.0"
+    }
+    fn api_version(&self) -> u32 {
+        PLUGIN_API_VERSION + 1
+    }
+    fn compute(&self, _: &[f64], _: f64) -> Result<f64> {
+        Ok(0.0)
+    }
+}
+
+#[test]
+fn plugins_for_another_api_version_are_refused() {
+    let mut e = RiskEngine::new();
+    let err = e.register_plugin(Box::new(FromTheFuture)).unwrap_err();
+    assert!(err.to_string().contains("plugin API"), "{err}");
+    assert!(e.plugins().is_empty());
 }
 
 #[test]

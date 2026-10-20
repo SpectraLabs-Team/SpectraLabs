@@ -332,15 +332,42 @@ impl RiskReport {
     }
 }
 
+/// The plugin interface version this engine implements. Bump it when
+/// [`RiskPlugin`] changes incompatibly; [`RiskEngine::register_plugin`]
+/// refuses plugins written against another version.
+pub const PLUGIN_API_VERSION: u32 = 1;
+
 /// A user-supplied risk measure over simulated losses.
 pub trait RiskPlugin: Send + Sync {
     /// Unique name.
     fn name(&self) -> &str;
+    /// The plugin's own version, for listings and audit. Default `0.0.0`.
+    #[allow(clippy::unnecessary_literal_bound)] // implementors may return a borrowed field
+    fn version(&self) -> &str {
+        "0.0.0"
+    }
+    /// The plugin interface this plugin was written against. Keep the default
+    /// ([`PLUGIN_API_VERSION`] at build time) unless the plugin targets another
+    /// engine release.
+    fn api_version(&self) -> u32 {
+        PLUGIN_API_VERSION
+    }
     /// The measure.
     ///
     /// # Errors
     /// Whatever the plugin reports.
     fn compute(&self, losses: &[f64], confidence: f64) -> Result<f64>;
+}
+
+/// A registered plugin, as [`RiskEngine::plugins`] lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginInfo {
+    /// Unique name (what `calculate_named` takes).
+    pub name: String,
+    /// The plugin's own version.
+    pub version: String,
+    /// The plugin interface it was written against.
+    pub api_version: u32,
 }
 
 /// The engine: built-in metrics plus registered plugins.
@@ -364,9 +391,17 @@ impl RiskEngine {
     /// Registers a plugin.
     ///
     /// # Errors
-    /// [`Error::InvalidArgument`] if the name is taken (by a plugin or a built-in metric).
+    /// [`Error::InvalidArgument`] if the name is taken (by a plugin or a
+    /// built-in metric), and [`Error::Unsupported`] if the plugin was written
+    /// against another [`PLUGIN_API_VERSION`].
     pub fn register_plugin(&mut self, plugin: Box<dyn RiskPlugin>) -> Result<()> {
         let name = plugin.name().to_string();
+        if plugin.api_version() != PLUGIN_API_VERSION {
+            return Err(Error::Unsupported(format!(
+                "plugin '{name}' targets plugin API v{}, this engine implements v{PLUGIN_API_VERSION}",
+                plugin.api_version()
+            )));
+        }
         if Metric::parse(&name).is_ok() || self.plugins.iter().any(|p| p.name() == name) {
             return Err(Error::InvalidArgument(format!("a metric named '{name}' is already registered")));
         }
@@ -377,6 +412,18 @@ impl RiskEngine {
     /// Registered plugin names.
     pub fn plugin_names(&self) -> Vec<String> {
         self.plugins.iter().map(|p| p.name().to_string()).collect()
+    }
+
+    /// Registered plugins with their versions.
+    pub fn plugins(&self) -> Vec<PluginInfo> {
+        self.plugins
+            .iter()
+            .map(|p| PluginInfo {
+                name: p.name().to_string(),
+                version: p.version().to_string(),
+                api_version: p.api_version(),
+            })
+            .collect()
     }
 
     /// Simulates and computes one metric (built-in or plugin, by name).

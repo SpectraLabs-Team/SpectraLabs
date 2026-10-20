@@ -11,7 +11,7 @@ import sys
 
 STD_ONLY = {
     "spectra-core", "spectra-data", "spectra-engine", "spectra-research",
-    "spectra-registry", "spectra-risk", "spectra-cli",
+    "spectra-registry", "spectra-risk", "spectra-cli", "spectra-backtest",
 }
 
 packages = json.load(sys.stdin)["packages"]

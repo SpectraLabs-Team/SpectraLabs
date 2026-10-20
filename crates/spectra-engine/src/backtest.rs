@@ -30,6 +30,9 @@
 //!    strategies trading other instruments inside that bar (look-ahead).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use spectra_core::cfmt::fmt_g17;
 use spectra_core::{
@@ -566,6 +569,129 @@ fn ledger_err(e: LedgerError) -> Error {
     e.into()
 }
 
+/// Size and time limits for one run. `None` means unlimited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RunLimits {
+    /// Maximum number of bars (all instruments together).
+    pub max_bars: Option<usize>,
+    /// Maximum number of distinct instruments.
+    pub max_instruments: Option<usize>,
+    /// Maximum wall-clock time for the run, checked every few timestamps.
+    pub max_wall_time: Option<Duration>,
+}
+
+/// How far a run has got.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    /// Bars processed so far (all instruments).
+    pub bars_done: usize,
+    /// Bars in the dataset.
+    pub bars_total: usize,
+    /// Timestamps processed so far.
+    pub timestamps_done: usize,
+}
+
+impl Progress {
+    /// Share of bars processed, in `[0, 1]`.
+    pub fn fraction(&self) -> f64 {
+        if self.bars_total == 0 {
+            1.0
+        } else {
+            self.bars_done as f64 / self.bars_total as f64
+        }
+    }
+}
+
+/// Optional controls for [`run_backtest_controlled`]: limits, a cancel flag
+/// and a progress callback. None of them changes the simulation, so a run that
+/// completes has the same fingerprints as [`run_backtest`].
+#[derive(Default)]
+pub struct RunControl<'a> {
+    /// Size and time limits.
+    pub limits: RunLimits,
+    /// Checked before every timestamp; when set the run stops with
+    /// [`RunError::Cancelled`].
+    pub cancel: Option<&'a AtomicBool>,
+    /// Called every `progress_every` timestamps and once at the end.
+    pub progress: Option<&'a mut dyn FnMut(Progress)>,
+    /// Timestamps between progress calls (0 is treated as 1).
+    pub progress_every: usize,
+}
+
+impl fmt::Debug for RunControl<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RunControl")
+            .field("limits", &self.limits)
+            .field("cancel", &self.cancel.map(|c| c.load(Ordering::Relaxed)))
+            .field("progress", &self.progress.is_some())
+            .field("progress_every", &self.progress_every)
+            .finish()
+    }
+}
+
+/// Why a controlled run stopped without a result.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunError {
+    /// The cancel flag was set.
+    Cancelled(Progress),
+    /// The run took longer than [`RunLimits::max_wall_time`].
+    TimedOut(Progress),
+    /// The dataset is larger than [`RunLimits`] allow; nothing was simulated.
+    TooLarge(String),
+    /// The engine refused the input or failed (same errors as [`run_backtest`]).
+    Engine(Error),
+}
+
+impl fmt::Display for RunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cancelled(p) => write!(f, "run cancelled after {} of {} bars", p.bars_done, p.bars_total),
+            Self::TimedOut(p) => {
+                write!(f, "run exceeded its time limit after {} of {} bars", p.bars_done, p.bars_total)
+            }
+            Self::TooLarge(s) => f.write_str(s),
+            Self::Engine(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {}
+
+impl From<Error> for RunError {
+    fn from(e: Error) -> Self {
+        Self::Engine(e)
+    }
+}
+
+impl From<spectra_core::ArithmeticError> for RunError {
+    fn from(e: spectra_core::ArithmeticError) -> Self {
+        Self::Engine(e.into())
+    }
+}
+
+/// How often (in timestamps) the wall clock is read when a time limit is set.
+const CLOCK_CHECK_EVERY: usize = 256;
+
+fn check_size(bars: &[Bar], limits: &RunLimits) -> std::result::Result<(), RunError> {
+    if let Some(max) = limits.max_bars {
+        if bars.len() > max {
+            return Err(RunError::TooLarge(format!(
+                "dataset has {} bars; this workspace allows at most {max} per run",
+                bars.len()
+            )));
+        }
+    }
+    if let Some(max) = limits.max_instruments {
+        let n = bars.iter().map(|b| b.instrument).collect::<BTreeSet<_>>().len();
+        if n > max {
+            return Err(RunError::TooLarge(format!(
+                "dataset has {n} instruments; this workspace allows at most {max} per run"
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Runs a backtest.
 ///
 /// # Errors
@@ -576,16 +702,39 @@ pub fn run_backtest(
     strategy: &mut dyn Strategy,
     cfg: &BacktestConfig,
 ) -> Result<BacktestResult> {
+    run_backtest_controlled(bars, strategy, cfg, &mut RunControl::default()).map_err(|e| match e {
+        RunError::Engine(e) => e,
+        // Unreachable without limits or a cancel flag; kept total rather than panicking.
+        other => Error::Internal(other.to_string()),
+    })
+}
+
+/// [`run_backtest`] with limits, cancellation and progress reporting. A run
+/// that completes is identical to [`run_backtest`]'s, fingerprints included.
+///
+/// # Errors
+/// [`RunError::TooLarge`] before simulating anything, [`RunError::Cancelled`]
+/// or [`RunError::TimedOut`] part-way, and [`RunError::Engine`] for the errors
+/// [`run_backtest`] returns.
+pub fn run_backtest_controlled(
+    bars: &[Bar],
+    strategy: &mut dyn Strategy,
+    cfg: &BacktestConfig,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestResult, RunError> {
+    let started = Instant::now();
+    check_size(bars, &ctl.limits)?;
     if let Some(err) = validate_bars(bars) {
-        return Err(Error::InvalidArgument(format!("invalid bars: {err}")));
+        return Err(Error::InvalidArgument(format!("invalid bars: {err}")).into());
     }
     if cfg.initial_cash.raw() < 0 {
-        return Err(Error::InvalidArgument("initial_cash must be >= 0".into()));
+        return Err(Error::InvalidArgument("initial_cash must be >= 0".into()).into());
     }
     if cfg.periods_per_year <= 0.0 || cfg.periods_per_year.is_nan() {
-        return Err(Error::InvalidArgument("periods_per_year must be > 0".into()));
+        return Err(Error::InvalidArgument("periods_per_year must be > 0".into()).into());
     }
     check_uniform_intervals(bars)?;
+    let progress_every = ctl.progress_every.max(1);
 
     let mut ledger = Ledger::new(cfg.ledger);
     let mut history: BTreeMap<InstrumentId, Vec<Bar>> = BTreeMap::new();
@@ -595,7 +744,7 @@ pub fn run_backtest(
 
     let first_ts = bars.first().map_or(0, |b| b.ts_ns);
     if cfg.initial_cash.raw() > 0 && ledger.deposit(cfg.initial_cash, first_ts).is_err() {
-        return Err(Error::InvalidArgument("initial deposit rejected".into()));
+        return Err(Error::InvalidArgument("initial deposit rejected".into()).into());
     }
 
     // Orders placed in on_start are stamped just before the first bar so they can fill on it.
@@ -616,6 +765,21 @@ pub fn run_backtest(
     let mut i = 0usize;
     let mut step: i64 = 0;
     while i < bars.len() {
+        // Progress first, so a cancel requested from the callback takes effect at once.
+        let done = Progress { bars_done: i, bars_total: bars.len(), timestamps_done: step as usize };
+        if done.timestamps_done > 0 && done.timestamps_done.is_multiple_of(progress_every) {
+            if let Some(cb) = ctl.progress.as_mut() {
+                cb(done);
+            }
+        }
+        if ctl.cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+            return Err(RunError::Cancelled(done));
+        }
+        if let Some(max) = ctl.limits.max_wall_time {
+            if done.timestamps_done.is_multiple_of(CLOCK_CHECK_EVERY) && started.elapsed() > max {
+                return Err(RunError::TimedOut(done));
+            }
+        }
         let mut j = i;
         while j < bars.len() && bars[j].ts_ns == bars[i].ts_ns {
             j += 1;
@@ -654,7 +818,7 @@ pub fn run_backtest(
                     o.state = OrderState::Rejected;
                     o.reject_reason = Some(r);
                 }
-                Err(e) => return Err(ledger_err(e)),
+                Err(e) => return Err(ledger_err(e).into()),
             }
             if !orders[k].state.is_open() {
                 open.remove(&orders[k], k);
@@ -664,7 +828,7 @@ pub fn run_backtest(
         // 2. Mark to the close and record equity.
         for b in group {
             if ledger.mark(b.instrument, b.close).is_err() {
-                return Err(Error::Internal("validated bar produced an invalid mark".into()));
+                return Err(Error::Internal("validated bar produced an invalid mark".into()).into());
             }
         }
         curve.push(EquityPoint { ts_ns: ts, equity: ledger.equity()?, cash: ledger.cash() });
@@ -688,6 +852,9 @@ pub fn run_backtest(
         step += 1;
     }
 
+    if let Some(cb) = ctl.progress.as_mut() {
+        cb(Progress { bars_done: bars.len(), bars_total: bars.len(), timestamps_done: step as usize });
+    }
     let metrics = compute_metrics(&curve, cfg.periods_per_year, cfg.risk_free_rate);
     let result_sha256 = hash_result(&curve, ledger.journal(), &orders);
     Ok(BacktestResult {

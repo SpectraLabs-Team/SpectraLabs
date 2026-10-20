@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 spectra-core = { path = "../spectra-core" }
+spectra-backtest = { path = "../spectra-backtest" }
 spectra-data = { path = "../spectra-data" }
 spectra-engine = { path = "../spectra-engine" }
 spectra-research = { path = "../spectra-research" }
@@ -19,6 +20,11 @@ spectra-risk = { path = "../spectra-risk" }
 workspace = true
 
 # The binaries share names with library crates; document the libraries only.
+[[bin]]
+name = "spectra-backtest"
+path = "src/bin/spectra-backtest.rs"
+doc = false
+
 [[bin]]
 name = "spectra-ingest"
 path = "src/bin/spectra-ingest.rs"

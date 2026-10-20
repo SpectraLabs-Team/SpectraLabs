@@ -23,9 +23,10 @@ a dependency upgrade. Third-party crates are allowed only in the service crates:
 | `crates/spectra-data` | CSV ingest, data-quality report, content-addressed dataset store | research engine |
 | `crates/spectra-engine` | Event-driven backtester, costs, metrics, performance ratios | research engine |
 | `crates/spectra-research` | Sweeps, walk-forward, PSR/DSR/MinTRL, CSCV PBO, trade and benchmark analysis, Survival Lab | research engine |
+| `crates/spectra-backtest` | Backtests as data: config form and presets, built-in strategies, controlled runs, CSV artifacts, summary and chart series (for the backtest job) | new |
 | `crates/spectra-registry` | Hash-chained experiment registry, holdout vault, run reproduction | research engine |
 | `crates/spectra-risk` | Monte Carlo risk engine (CPU and parallel backends), metrics, stress, benchmark, plugins | risk engine |
-| `crates/spectra-cli` | `spectra-ingest`, `spectra-registry`, `spectra-risk` binaries and three demos | both |
+| `crates/spectra-cli` | `spectra-backtest`, `spectra-ingest`, `spectra-registry`, `spectra-risk` binaries, three demos and a throughput benchmark | both |
 | `crates/spectra-api` | HTTP API for the dashboard on axum + tokio (replaces the FastAPI backend) | risk engine `web/backend` |
 | `crates/spectra-db` | Postgres schema (migrations), connection pool, dev seed; `spectra-db` CLI | new |
 | `web/frontend` | Next.js dashboard | risk engine `web/frontend` |

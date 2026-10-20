@@ -75,7 +75,6 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
         insert_backtest_run, register_version, resolve_version, resolve_workspace, NewBacktestRun,
         NewDatasetVersion,
     };
-    use spectra_db::jobs::{enqueue, NewJob};
 
     let Some(pool) = pool().await else { return };
     let seeded = seed_dev(&pool, "backtest-test@example.com").await.unwrap();
@@ -106,17 +105,14 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
     );
     assert!(resolve_version(&pool, spectra_db::new_id(), v1.id).await.unwrap().is_none(), "other workspace");
 
-    let job = enqueue(
-        &pool,
-        &NewJob {
-            workspace_id: ws,
-            kind: "backtest".into(),
-            payload: serde_json::json!({ "dataset_version_id": v1.id.to_string() }),
-            priority: 0,
-            max_attempts: 3,
-            created_by: Some(seeded.admin_id),
-        },
+    let job_id: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO jobs (workspace_id, kind, payload, status, attempts, started_at, finished_at, created_by) \
+         VALUES ($1, 'backtest', $2, 'succeeded', 1, now(), now(), $3) RETURNING id",
     )
+    .bind(ws)
+    .bind(serde_json::json!({ "dataset_version_id": v1.id.to_string() }))
+    .bind(seeded.admin_id)
+    .fetch_one(&pool)
     .await
     .unwrap();
     let run_id = insert_backtest_run(
@@ -124,7 +120,7 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
         &NewBacktestRun {
             id: spectra_db::new_id(),
             workspace_id: ws,
-            job_id: job.id,
+            job_id,
             params: serde_json::json!({ "strategy": "sma_cross" }),
             metrics: serde_json::json!({ "schema": "spectra.backtest.summary/v1" }),
             seed: Some(7),
@@ -158,7 +154,7 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
     // Leave the shared database as found: the SQL checks that run later count jobs and events.
     for (sql, id) in [
         ("DELETE FROM runs WHERE id = $1", run_id),
-        ("DELETE FROM jobs WHERE id = $1", job.id),
+        ("DELETE FROM jobs WHERE id = $1", job_id),
         ("DELETE FROM datasets WHERE id = (SELECT dataset_id FROM dataset_versions WHERE id = $1)", v1.id),
     ] {
         sqlx::query(sql).bind(id).execute(&pool).await.unwrap();

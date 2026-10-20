@@ -55,7 +55,7 @@ const build = path.join(root, 'node_modules', '.cache', 'spectra-auth-test');
 fs.rmSync(build, { recursive: true, force: true });
 fs.mkdirSync(build, { recursive: true });
 fs.writeFileSync(path.join(build, 'package.json'), '{"type":"commonjs"}');
-for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts', 'lib/server/engineSign.ts']) {
+for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts', 'lib/server/engineSign.ts', 'lib/server/engineUpload.ts']) {
   const { outputText } = ts.transpileModule(fs.readFileSync(path.join(root, rel), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
   });
@@ -74,6 +74,7 @@ let sessions = load('lib/server/sessions.js');
 let workspaces = load('lib/server/workspaces.js');
 const engineId = load('lib/server/engineIdentity.js');
 const engineSign = load('lib/server/engineSign.js');
+const engineUpload = load('lib/server/engineUpload.js');
 let authz = load('lib/server/authz.js');
 let lockout = load('lib/server/lockout.js');
 let vault = load('lib/server/vault.js');
@@ -695,6 +696,9 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/preview'], 'POST'), 'editor');
   assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/preview'], 'GET'), 'preview is POST only');
   assert.equal(engineRoutes.routePolicyKey('api/v1/datasets/preview'), 'api/v1/datasets/preview');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/ingest'], 'POST'), 'editor', 'ingesting needs editor');
+  assert.equal(engineRoutes.ENGINE_UPLOAD_ROUTE.minRole, 'editor', 'uploading needs editor');
+  assert.ok(!Object.prototype.hasOwnProperty.call(routes, 'api/v1/uploads'), 'uploads never go through the 2 MB JSON proxy');
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {
@@ -1899,6 +1903,7 @@ const ROUTE_RULES = {
   'csp-report POST': 'public',
   'engine/[...path] GET': 'engine',
   'engine/[...path] POST': 'engine',
+  'engine-upload POST': 'editor',
   'invites/[token] GET': 'public',
   'invites/[token] POST': 'session',
   'secrets GET': 'viewer',
@@ -2427,6 +2432,40 @@ test('toQrSvg generates deterministic SVG from otpauth URI and rejects invalid l
 });
 
 
+test('uploads: spooled to a temp file while hashed, refused past the limit, names cleaned', async () => {
+  const data = Buffer.from('Date,Close\n2024-01-02,471.5\n');
+  const stream = (chunks) => new ReadableStream({ start(c) { for (const x of chunks) c.enqueue(x); c.close(); } });
+  const s = await engineUpload.spoolToTempFile(stream([data.subarray(0, 5), data.subarray(5)]));
+  try {
+    assert.equal(s.size, data.length);
+    assert.equal(s.sha256, crypto.createHash('sha256').update(data).digest('hex'));
+    assert.deepEqual(fs.readFileSync(s.file), data);
+    assert.equal(fs.statSync(s.file).mode & 0o077, 0, 'temp file is private');
+  } finally {
+    fs.rmSync(s.file, { force: true });
+  }
+  const tmpBefore = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('spectra-upload-')).length;
+  await assert.rejects(engineUpload.spoolToTempFile(stream([data, data]), data.length + 1), engineUpload.UploadTooLarge);
+  assert.equal(fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('spectra-upload-')).length, tmpBefore, 'nothing left behind');
+  assert.equal(engineUpload.MAX_UPLOAD_BYTES, 100 * 1024 * 1024);
+  assert.equal(engineUpload.cleanFilename('C:\\Users\\me\\prices.csv'), 'prices.csv');
+  assert.equal(engineUpload.cleanFilename('../../etc/passwd'), 'passwd');
+  assert.equal(engineUpload.cleanFilename(' spy\u0000daily.csv '), 'spydaily.csv');
+  assert.equal(engineUpload.cleanFilename(null), '');
+  assert.equal(engineUpload.cleanFilename('x'.repeat(400)).length, 255);
+});
+
+test('uploads skip the middleware (it cuts bodies at 10 MB), and only that route does', () => {
+  const text = fs.readFileSync(path.join(root, 'middleware.ts'), 'utf8');
+  // The matcher is a single-quoted string literal; as JSON it reads the same.
+  const literal = /matcher: \['((?:[^'\\]|\\.)+)'\]/.exec(text)[1];
+  const re = new RegExp(`^${JSON.parse(`"${literal}"`)}$`);
+  assert.ok(!re.test('/api/engine-upload'), 'upload route skipped');
+  for (const p of ['/api/engine/api/v1/datasets', '/api/engine-upload/x', '/api/engine-uploads', '/studio', '/api/auth/login']) {
+    assert.ok(re.test(p), `${p} still goes through the middleware`);
+  }
+});
+
 test('engine request signing matches the Rust verifier', () => {
   const secret = 'test-secret-test-secret-test-secret!';
   const body = '{"metric":"var","note":"ünïcødé"}';
@@ -2445,6 +2484,19 @@ test('engine request signing matches the Rust verifier', () => {
     engineSign.canonical('post', '/api/v1/risk?x=1', '1700000000', 'u', '', 'r', ''),
     'spectra-v1\nPOST\n/api/v1/risk?x=1\n1700000000\nu\n\nr\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   );
+  // Uploads sign a body hash they computed while streaming: the same signature as signing the body.
+  const hashed = engineSign.signEngineRequest(
+    secret,
+    {
+      method: 'post',
+      pathAndQuery: '/api/v1/risk',
+      requestId: '6f1c0e5e-1111-4222-8333-444455556666',
+      bodySha256: crypto.createHash('sha256').update(body, 'utf8').digest('hex'),
+    },
+    { user: 'alice@example.com' },
+    1700000000 * 1000 + 999,
+  );
+  assert.equal(hashed['X-Spectra-Signature'], h['X-Spectra-Signature']);
   const before = process.env.ENGINE_SECRET;
   process.env.ENGINE_SECRET = 'too-short';
   assert.equal(engineSign.engineSecret(), null, 'short secrets are refused');

@@ -146,6 +146,8 @@ async fn add_dataset(a: &DatasetArgs, pool: &spectra_db::PgPool) -> Result<(), S
             byte_size: i64::try_from(byte_size).unwrap_or(i64::MAX),
             quality_report: quality,
             created_by: None,
+            blob_sha256: None,
+            source: None,
         },
     )
     .await

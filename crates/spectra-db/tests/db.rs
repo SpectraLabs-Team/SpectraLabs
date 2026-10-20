@@ -92,6 +92,8 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
         byte_size: 9000,
         quality_report: serde_json::json!({ "rows_rejected": 0 }),
         created_by: Some(seeded.admin_id),
+        blob_sha256: None,
+        source: None,
     };
     let v1 = register_version(&pool, &new).await.unwrap();
     assert_eq!((v1.version, v1.existed), (1, false));

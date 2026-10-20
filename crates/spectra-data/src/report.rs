@@ -164,6 +164,31 @@ mod tests {
     }
 
     #[test]
+    fn progress_is_reported_and_can_cancel() {
+        use crate::dataset::{load_csv_with_progress, PROGRESS_EVERY_ROWS};
+        let mut csv = String::from("date,open,high,low,close\n");
+        let start = 1_700_000_000i64;
+        for i in 0..(2 * PROGRESS_EVERY_ROWS + 5) {
+            csv += &format!("{},1,2,0.5,1.5\n", start + i as i64 * 60);
+        }
+        let opt = CsvOptions {
+            time: crate::TimeOptions { format: crate::TimeFormat::EpochSeconds, naive_utc_offset_minutes: 0 },
+            ..CsvOptions::default()
+        };
+        let mut seen = Vec::new();
+        let d = load_csv_with_progress(csv.as_bytes(), &opt, &mut |done, total| {
+            seen.push((done, total));
+            true
+        })
+        .unwrap();
+        let total = 2 * PROGRESS_EVERY_ROWS + 5;
+        assert_eq!(seen, [(PROGRESS_EVERY_ROWS, total), (2 * PROGRESS_EVERY_ROWS, total), (total, total)]);
+        assert_eq!(d.info.id, load_csv(csv.as_bytes(), &opt).unwrap().info.id, "same result as load_csv");
+        let err = load_csv_with_progress(csv.as_bytes(), &opt, &mut |_, _| false).unwrap_err();
+        assert_eq!(err.to_string(), "cancelled");
+    }
+
+    #[test]
     fn a_preview_of_only_bad_rows_still_reports_them() {
         let p = preview_csv(b"date,open,high,low,close\nx,1,1,1,1\n", &CsvOptions::default(), 200).unwrap();
         assert!(p.dataset.bars.is_empty());

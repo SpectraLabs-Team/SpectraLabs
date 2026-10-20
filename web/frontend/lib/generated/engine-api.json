@@ -383,6 +383,47 @@
         }
       }
     },
+    "/api/v1/datasets/ingest": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Turn an upload into a dataset version (queues an `ingest` job).",
+        "operationId": "ingest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued: follow it with GET /api/v1/jobs/{id}. A rejected file ends as a failed job whose result holds the quality report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the upload, name and settings (`details.errors`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/datasets/preview": {
       "post": {
         "tags": [
@@ -731,6 +772,97 @@
           },
           "422": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Upload a data file (raw bytes; at most 100 MiB).",
+        "operationId": "upload",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "path",
+            "description": "The file's name as the person chose it (for display; at most 255 characters kept).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The file's bytes. Send X-Spectra-Content-SHA256 (signed) and Content-Length.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body does not match its declared SHA-256 or length",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "411": {
+            "description": "No Content-Length",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Over 100 MiB, or the workspace's storage quota (code `quota_exceeded`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1222,6 +1354,31 @@
               "null"
             ],
             "description": "Volume column, or null if the file has none (volume is then zero)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "IngestRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/datasets/ingest` body.",
+        "required": [
+          "upload_id",
+          "dataset_name",
+          "settings"
+        ],
+        "properties": {
+          "dataset_name": {
+            "type": "string",
+            "description": "The dataset to add a version to (created if new). Different content\nbecomes its next version; the same content changes nothing."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/IngestSettings",
+            "description": "How to read the file (as previewed)."
+          },
+          "upload_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From `POST /api/v1/uploads`."
           }
         },
         "additionalProperties": false
@@ -1975,6 +2132,43 @@
           }
         },
         "additionalProperties": false
+      },
+      "UploadView": {
+        "type": "object",
+        "description": "A stored upload.",
+        "required": [
+          "id",
+          "sha256",
+          "size",
+          "filename",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Removed at this time unless ingested (UTC, RFC 3339)."
+          },
+          "filename": {
+            "type": "string",
+            "description": "As uploaded."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass this to `POST /api/v1/datasets/ingest`."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Hex SHA-256 of the file."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes.",
+            "minimum": 0
+          }
+        }
       }
     }
   },

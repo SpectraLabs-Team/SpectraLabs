@@ -70,5 +70,7 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   // Every page and API route; not Next's static files, images or the favicon (no HTML there).
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|woff2?|txt|xml|json)$).*)'],
+  // Not /api/engine-upload either: Next buffers request bodies for middleware and cuts them at
+  // 10 MB, and uploads are up to 100 MiB. That route does the cross-site check itself.
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|api/engine-upload$|.*\\.(?:png|jpg|jpeg|gif|svg|ico|webp|woff2?|txt|xml|json)$).*)'],
 };

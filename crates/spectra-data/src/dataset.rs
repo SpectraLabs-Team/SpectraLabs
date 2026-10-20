@@ -499,7 +499,30 @@ pub fn load_csv(content: &[u8], opt: &CsvOptions) -> Result<Dataset> {
     let source_hash = spectra_core::sha256_hex(content);
     let content = content.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(content);
     let records = parse_records(content, opt.delimiter)?;
-    let mut ds = load_records(&records, opt, false)?;
+    let mut ds = load_records(&records, opt, false, None)?;
+    ds.info.source_sha256 = source_hash;
+    Ok(ds)
+}
+
+/// How often [`load_csv_with_progress`] reports, in data rows.
+pub const PROGRESS_EVERY_ROWS: usize = 10_000;
+
+/// [`load_csv`], calling `progress(rows_read, rows_total)` every
+/// [`PROGRESS_EVERY_ROWS`] data rows and once at the end. If it returns
+/// `false` the load stops with [`Error::Data`] `"cancelled"`. The result is
+/// identical to [`load_csv`]'s.
+///
+/// # Errors
+/// As [`load_csv`], or `"cancelled"`.
+pub fn load_csv_with_progress(
+    content: &[u8],
+    opt: &CsvOptions,
+    progress: &mut dyn FnMut(usize, usize) -> bool,
+) -> Result<Dataset> {
+    let source_hash = spectra_core::sha256_hex(content);
+    let content = content.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(content);
+    let records = parse_records(content, opt.delimiter)?;
+    let mut ds = load_records(&records, opt, false, Some(progress))?;
     ds.info.source_sha256 = source_hash;
     Ok(ds)
 }
@@ -535,7 +558,7 @@ pub fn preview_csv(content: &[u8], opt: &CsvOptions, max_rows: usize) -> Result<
     let rows_not_read = records.len().saturating_sub(max_rows + 1);
     records.truncate(max_rows + 1);
     let lenient = CsvOptions { on_invalid: InvalidRowPolicy::Skip, ..opt.clone() };
-    let dataset = load_records(&records, &lenient, true)?;
+    let dataset = load_records(&records, &lenient, true, None)?;
     let header =
         records.first().map_or_else(Vec::new, |r| r.fields.iter().map(|f| normalise_header(f)).collect());
     let would_abort = if opt.on_invalid == InvalidRowPolicy::Reject {
@@ -555,7 +578,12 @@ pub fn preview_csv(content: &[u8], opt: &CsvOptions, max_rows: usize) -> Result<
 /// with no bars (and its quality report) instead of failing when no row is
 /// valid.
 #[allow(clippy::too_many_lines)] // one linear pass, kept in the C++ reference's order
-fn load_records(records: &[Record], opt: &CsvOptions, allow_empty: bool) -> Result<Dataset> {
+fn load_records(
+    records: &[Record],
+    opt: &CsvOptions,
+    allow_empty: bool,
+    mut progress: Option<&mut dyn FnMut(usize, usize) -> bool>,
+) -> Result<Dataset> {
     let mut ds = Dataset::default();
     if records.is_empty() {
         return Err(data_err("CSV is empty"));
@@ -589,7 +617,15 @@ fn load_records(records: &[Record], opt: &CsvOptions, allow_empty: bool) -> Resu
     let mut naive_count = 0usize;
     {
         let mut rj = Rejections { policy: opt.on_invalid, rep: &mut ds.quality };
-        for rec in &records[1..] {
+        let total = records.len() - 1;
+        for (i, rec) in records[1..].iter().enumerate() {
+            if i % PROGRESS_EVERY_ROWS == 0 && i > 0 {
+                if let Some(report) = progress.as_mut() {
+                    if !report(i, total) {
+                        return Err(data_err("cancelled"));
+                    }
+                }
+            }
             rj.rep.rows_total += 1;
             if rec.fields.len() != header.len() {
                 rj.reject(
@@ -747,6 +783,11 @@ fn load_records(records: &[Record], opt: &CsvOptions, allow_empty: bool) -> Resu
     }
 
     ds.info = identify(&ds.bars, &ds.symbols);
+    if let Some(report) = progress.as_mut() {
+        if !report(records.len() - 1, records.len() - 1) {
+            return Err(data_err("cancelled"));
+        }
+    }
     Ok(ds)
 }
 

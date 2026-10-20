@@ -342,6 +342,27 @@ pub async fn fail(
         .await
 }
 
+/// Fails a running job for good (never retried), keeping `result` to explain
+/// why: an ingest whose file was rejected carries its quality report.
+///
+/// # Errors
+/// Any database error.
+pub async fn reject(
+    pool: &PgPool,
+    id: Uuid,
+    worker_id: &str,
+    error: &str,
+    result: &serde_json::Value,
+) -> Result<Option<Job>, Error> {
+    sqlx::query_as(include_str!("../queries/job_reject.sql"))
+        .bind(id)
+        .bind(worker_id)
+        .bind(error)
+        .bind(result)
+        .fetch_optional(pool)
+        .await
+}
+
 /// Marks a running job cancelled after its worker stopped it.
 ///
 /// # Errors

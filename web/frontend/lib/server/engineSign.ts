@@ -27,7 +27,20 @@ export function canonical(
   body: string,
 ): string {
   const bodyHash = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
-  return ['spectra-v1', method.toUpperCase(), pathAndQuery, timestamp, user, workspace, requestId, bodyHash].join('\n');
+  return canonicalWithBodyHash(method, pathAndQuery, timestamp, user, workspace, requestId, bodyHash);
+}
+
+/** `canonical` with the body's hex SHA-256 already computed (uploads stream their body). */
+export function canonicalWithBodyHash(
+  method: string,
+  pathAndQuery: string,
+  timestamp: string,
+  user: string,
+  workspace: string,
+  requestId: string,
+  bodySha256: string,
+): string {
+  return ['spectra-v1', method.toUpperCase(), pathAndQuery, timestamp, user, workspace, requestId, bodySha256].join('\n');
 }
 
 export type EngineIdentity = {
@@ -40,13 +53,15 @@ export type EngineIdentity = {
 /** The headers to add to one engine request. `now` is for tests. */
 export function signEngineRequest(
   secret: string,
-  req: { method: string; pathAndQuery: string; body?: string; requestId: string },
+  req: { method: string; pathAndQuery: string; body?: string; requestId: string; bodySha256?: string },
   identity: EngineIdentity,
   now: number = Date.now(),
 ): Record<string, string> {
   const timestamp = Math.floor(now / 1000).toString();
   const workspace = identity.workspace || '';
-  const message = canonical(req.method, req.pathAndQuery, timestamp, identity.user, workspace, req.requestId, req.body || '');
+  const message = req.bodySha256
+    ? canonicalWithBodyHash(req.method, req.pathAndQuery, timestamp, identity.user, workspace, req.requestId, req.bodySha256)
+    : canonical(req.method, req.pathAndQuery, timestamp, identity.user, workspace, req.requestId, req.body || '');
   return {
     'X-Spectra-User': identity.user,
     'X-Spectra-Workspace': workspace,

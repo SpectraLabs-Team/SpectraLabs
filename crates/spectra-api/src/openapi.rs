@@ -97,6 +97,8 @@ pub struct StressRequest {
         crate::backtests_api::list_datasets,
         crate::backtests_api::builtin_strategies,
         crate::datasets_api::preview,
+        crate::uploads_api::upload,
+        crate::datasets_api::ingest,
     ),
     components(schemas(
         ErrorDoc,
@@ -124,6 +126,8 @@ pub struct StressRequest {
         crate::datasets_api::QualityReport,
         crate::datasets_api::RowIssue,
         crate::datasets_api::SymbolStats,
+        crate::uploads_api::UploadView,
+        crate::datasets_api::IngestRequest,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
@@ -165,6 +169,8 @@ mod tests {
             "/api/v1/datasets",
             "/api/v1/strategies/builtin",
             "/api/v1/datasets/preview",
+            "/api/v1/uploads",
+            "/api/v1/datasets/ingest",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

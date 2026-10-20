@@ -128,6 +128,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasets/ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Turn an upload into a dataset version (queues an `ingest` job). */
+        post: operations["ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets/preview": {
         parameters: {
             query?: never;
@@ -279,6 +296,23 @@ export interface paths {
         put?: never;
         /** Run a stress scenario on a portfolio. */
         post: operations["stress_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload a data file (raw bytes; at most 100 MiB). */
+        post: operations["upload"];
         delete?: never;
         options?: never;
         head?: never;
@@ -540,6 +574,19 @@ export interface components {
             timestamp: string;
             /** @description Volume column, or null if the file has none (volume is then zero). */
             volume?: string | null;
+        };
+        /** @description `POST /api/v1/datasets/ingest` body. */
+        IngestRequest: {
+            /** @description The dataset to add a version to (created if new). Different content
+             *     becomes its next version; the same content changes nothing. */
+            dataset_name: string;
+            /** @description How to read the file (as previewed). */
+            settings: components["schemas"]["IngestSettings"];
+            /**
+             * Format: uuid
+             * @description From `POST /api/v1/uploads`.
+             */
+            upload_id: string;
         };
         /** @description Ingest settings (the JSON form of the engine's CSV options). Every field
          *     below without "optional" must be given: nothing is guessed. */
@@ -869,6 +916,28 @@ export interface components {
              */
             zero_volume_bars: number;
         };
+        /** @description A stored upload. */
+        UploadView: {
+            /**
+             * Format: date-time
+             * @description Removed at this time unless ingested (UTC, RFC 3339).
+             */
+            expires_at: string;
+            /** @description As uploaded. */
+            filename: string;
+            /**
+             * Format: uuid
+             * @description Pass this to `POST /api/v1/datasets/ingest`.
+             */
+            id: string;
+            /** @description Hex SHA-256 of the file. */
+            sha256: string;
+            /**
+             * Format: int64
+             * @description Bytes.
+             */
+            size: number;
+        };
     };
     responses: never;
     parameters: never;
@@ -1145,6 +1214,39 @@ export interface operations {
                 };
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    ingest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Queued: follow it with GET /api/v1/jobs/{id}. A rejected file ends as a failed job whose result holds the quality report */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description Every problem with the upload, name and settings (`details.errors`) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1437,6 +1539,70 @@ export interface operations {
                 content?: never;
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The file's name as the person chose it (for display; at most 255 characters kept). */
+                filename: string | null;
+            };
+            cookie?: never;
+        };
+        /** @description The file's bytes. Send X-Spectra-Content-SHA256 (signed) and Content-Length. */
+        requestBody: {
+            content: {
+                "application/octet-stream": number[];
+            };
+        };
+        responses: {
+            /** @description Stored */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadView"];
+                };
+            };
+            /** @description The body does not match its declared SHA-256 or length */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Bad signature */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description No Content-Length */
+            411: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Over 100 MiB, or the workspace's storage quota (code `quota_exceeded`) */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

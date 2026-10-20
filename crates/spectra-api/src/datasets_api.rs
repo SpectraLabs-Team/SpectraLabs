@@ -1,4 +1,5 @@
-//! Data Studio routes (M1): `POST /api/v1/datasets/preview` (task 3).
+//! Data Studio routes (M1): `POST /api/v1/datasets/preview` (task 3) and
+//! `POST /api/v1/datasets/ingest` (task 5).
 //!
 //! A preview parses the first rows of a file with the caller's ingest settings
 //! (task 2, `spectra_data::settings`) exactly as ingesting would, and returns
@@ -16,11 +17,13 @@ use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use axum::extract::State;
 use axum::response::Response;
+use axum::Extension;
 use serde::{Deserialize, Serialize};
 use spectra_core::Json;
 use utoipa::ToSchema;
 
-use crate::{error_response, invalid_fields, json_response, AppState};
+use crate::jobs_api::{context, db_error, to_json, JobView, MAX_ATTEMPTS};
+use crate::{engine, error_response, invalid_fields, json_response, AppState, Identity, RequestId};
 
 /// Largest preview sample, in bytes (the dashboard proxy accepts 2 MB bodies).
 pub const MAX_PREVIEW_SAMPLE: usize = 1024 * 1024;
@@ -321,5 +324,114 @@ fn file_problem(e: &spectra_core::Error) -> String {
         format!("{text} (check the column names and the delimiter against the header)")
     } else {
         text
+    }
+}
+
+/// Longest dataset name.
+pub const MAX_DATASET_NAME: usize = 200;
+
+/// `POST /api/v1/datasets/ingest` body.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct IngestRequest {
+    /// From `POST /api/v1/uploads`.
+    pub upload_id: uuid::Uuid,
+    /// The dataset to add a version to (created if new). Different content
+    /// becomes its next version; the same content changes nothing.
+    pub dataset_name: String,
+    /// How to read the file (as previewed).
+    #[schema(value_type = IngestSettings)]
+    pub settings: serde_json::Value,
+}
+
+/// A dataset name, trimmed: 1 to [`MAX_DATASET_NAME`] characters, no control characters.
+fn check_dataset_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("required".into());
+    }
+    if name.chars().count() > MAX_DATASET_NAME || name.chars().any(char::is_control) {
+        return Err(format!("must be 1 to {MAX_DATASET_NAME} characters, without control characters"));
+    }
+    Ok(name.to_string())
+}
+
+/// Turn an upload into a dataset version (queues an `ingest` job).
+#[utoipa::path(post, path = "/api/v1/datasets/ingest", tag = "datasets", request_body = IngestRequest,
+    responses(
+        (status = 202, description = "Queued: follow it with GET /api/v1/jobs/{id}. A rejected file ends as a failed job whose result holds the quality report", body = JobView),
+        (status = 422, description = "Every problem with the upload, name and settings (`details.errors`)", body = crate::openapi::ErrorDoc),
+    ))]
+pub(crate) async fn ingest(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    Extension(request_id): Extension<RequestId>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let Ok(bytes) = body else { return error_response(400, "Could not read the request body.") };
+    let req: IngestRequest = match serde_json::from_slice(&bytes) {
+        Ok(r) => r,
+        Err(e) => return error_response(422, format!("Invalid ingest request: {e}")),
+    };
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
+    // Every problem at once: the name, the settings and the upload.
+    let mut errors: Vec<(String, String)> = Vec::new();
+    let name =
+        check_dataset_name(&req.dataset_name).map_err(|m| errors.push(("dataset_name".into(), m))).ok();
+    let settings = match Json::parse(&req.settings.to_string()).map(|d| spectra_data::parse_settings(&d)) {
+        Ok(Ok(opt)) => Some(opt),
+        Ok(Err(list)) => {
+            for e in list {
+                let field =
+                    if e.field.is_empty() { "settings".to_string() } else { format!("settings.{}", e.field) };
+                errors.push((field, e.message));
+            }
+            None
+        }
+        Err(e) => {
+            errors.push(("settings".into(), e.to_string()));
+            None
+        }
+    };
+    let upload = match spectra_db::uploads::get(&pool, ws, req.upload_id).await {
+        Ok(Some(u)) => Some(u),
+        Ok(None) => {
+            errors.push((
+                "upload_id".into(),
+                "no such upload in this workspace (uploads expire after 24 hours)".into(),
+            ));
+            None
+        }
+        Err(e) => return db_error(&e),
+    };
+    let (Some(name), Some(settings), Some(upload)) = (name, settings, upload) else {
+        return invalid_fields(&errors);
+    };
+
+    let payload = serde_json::json!({
+        "upload_id": upload.id,
+        "dataset_name": name,
+        "file_sha256": upload.sha256,
+        "filename": upload.filename,
+        // Canonical form: every field explicit, so the job records exactly what was used.
+        "settings": serde_json::from_str::<serde_json::Value>(&spectra_data::settings_json(&settings).dump())
+            .unwrap_or(serde_json::Value::Null),
+        "request_id": request_id.0,
+    });
+    let new = spectra_db::jobs::NewJob {
+        workspace_id: ws,
+        kind: engine::INGEST_JOB_KIND.to_string(),
+        payload,
+        priority: 0,
+        max_attempts: MAX_ATTEMPTS,
+        created_by: uuid::Uuid::parse_str(&id.user).ok(),
+    };
+    match spectra_db::jobs::enqueue(&pool, &new).await {
+        Ok(job) => to_json(202, &JobView::from(job)),
+        Err(e) => db_error(&e),
     }
 }

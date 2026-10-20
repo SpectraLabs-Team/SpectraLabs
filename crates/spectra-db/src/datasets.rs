@@ -26,6 +26,9 @@ pub struct DatasetVersion {
     pub dataset_name: String,
     /// Version number within the dataset (1, 2, ...).
     pub version: i32,
+    /// SHA-256 of its bars.qfb in the artifact store, or `None` when it is
+    /// only in the local dataset store (registered from the command line).
+    pub blob_sha256: Option<String>,
 }
 
 /// The dataset version `id`, if it belongs to `workspace_id`.
@@ -37,18 +40,19 @@ pub async fn resolve_version(
     workspace_id: Uuid,
     id: Uuid,
 ) -> Result<Option<DatasetVersion>, Error> {
-    let row: Option<(Uuid, String, i64, String, i32)> =
+    let row: Option<(Uuid, String, i64, String, i32, Option<String>)> =
         sqlx::query_as(include_str!("../queries/dataset_version_resolve.sql"))
             .bind(workspace_id)
             .bind(id)
             .fetch_optional(pool)
             .await?;
-    Ok(row.map(|(id, checksum, row_count, dataset_name, version)| DatasetVersion {
+    Ok(row.map(|(id, checksum, row_count, dataset_name, version, blob_sha256)| DatasetVersion {
         id,
         checksum,
         row_count,
         dataset_name,
         version,
+        blob_sha256,
     }))
 }
 
@@ -118,6 +122,12 @@ pub struct NewDatasetVersion<'a> {
     pub quality_report: JsonValue,
     /// Who registered it.
     pub created_by: Option<Uuid>,
+    /// SHA-256 of the bars.qfb file in the artifact store; `None` when it is
+    /// only in a local dataset store (the command line).
+    pub blob_sha256: Option<&'a str>,
+    /// How it was made from an upload (`upload_id`, `file_sha256`,
+    /// `filename`, `settings`); `None` from the command line.
+    pub source: Option<JsonValue>,
 }
 
 /// A registered version.
@@ -147,6 +157,8 @@ pub async fn register_version(pool: &PgPool, v: &NewDatasetVersion<'_>) -> Resul
             .bind(v.byte_size)
             .bind(&v.quality_report)
             .bind(v.created_by)
+            .bind(v.blob_sha256)
+            .bind(&v.source)
             .fetch_one(pool)
             .await?;
     Ok(RegisteredVersion { id, version, existed })

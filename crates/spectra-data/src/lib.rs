@@ -11,8 +11,8 @@ pub mod time;
 
 pub use dataset::{
     assess_quality, compute_dataset_id, derive_dataset, format_quality_report, load_csv, load_csv_file,
-    preview_csv, CsvOptions, CsvPreview, DataQualityReport, Dataset, DatasetInfo, InvalidRowPolicy, RowIssue,
-    SymbolStats, SymbolTable,
+    load_csv_with_progress, preview_csv, CsvOptions, CsvPreview, DataQualityReport, Dataset, DatasetInfo,
+    InvalidRowPolicy, RowIssue, SymbolStats, SymbolTable,
 };
 pub use datastore::DataStore;
 pub use report::{preview_json, quality_report_json};

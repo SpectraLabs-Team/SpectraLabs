@@ -17,6 +17,8 @@
 //! | `/api/v1/alpaca/*` | signed | 501: not ported yet |
 //! | `POST /api/v1/jobs`, `GET /api/v1/jobs[/{id}]`, `POST /api/v1/jobs/{id}/cancel` | signed | queued work; see [`jobs_api`] |
 //! | `POST /api/v1/datasets/preview` | signed | parse a file's first rows with ingest settings; see [`datasets_api`] |
+//! | `POST /api/v1/uploads` | signed (streamed) | store a data file of up to 100 MiB; see [`uploads_api`] |
+//! | `POST /api/v1/datasets/ingest` | signed | queue an `ingest` job: upload → dataset version |
 //!
 //! Every engine route is also served at its old `/api/...` path (the jobs
 //! routes are `/api/v1` only). Those
@@ -40,10 +42,12 @@ pub mod config;
 pub mod datasets_api;
 pub mod engine;
 pub mod identity;
+pub mod ingest;
 pub mod jobs_api;
 pub mod observability;
 pub mod openapi;
 pub mod telemetry;
+pub mod uploads_api;
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -94,14 +98,21 @@ pub struct ApiConfig {
     /// Verifies the proxy's request signatures.
     pub engine_secret: Secret,
     /// The worker's artifact store (local or S3), read for backtest chart
-    /// series. `None` answers those routes with 503.
+    /// series and written by uploads. `None` answers those routes with 503.
     pub artifacts: Option<spectra_db::artifacts::ArtifactBackend>,
+    /// Default storage quota per workspace, for uploads.
+    pub artifact_quota_bytes: i64,
 }
 
 impl ApiConfig {
     /// Default CORS origins (`http://localhost:3000`), the given secret, no artifact store.
     pub fn new(engine_secret: Secret) -> Self {
-        Self { cors_origins: vec!["http://localhost:3000".into()], engine_secret, artifacts: None }
+        Self {
+            cors_origins: vec!["http://localhost:3000".into()],
+            engine_secret,
+            artifacts: None,
+            artifact_quota_bytes: config::DEFAULT_ARTIFACT_QUOTA_BYTES,
+        }
     }
 
     fn allows(&self, origin: &str) -> bool {
@@ -116,6 +127,7 @@ impl From<&Config> for ApiConfig {
             engine_secret: c.engine_secret.clone(),
             // Set by the caller once the backend is built (S3 setup can fail).
             artifacts: None,
+            artifact_quota_bytes: c.artifact_quota_bytes,
         }
     }
 }
@@ -279,8 +291,18 @@ async fn reject_oversized(req: Request, next: Next) -> Response {
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.trim().parse::<u64>().ok());
-    if declared.is_some_and(|n| n > MAX_BODY as u64) {
-        return error_response(413, "Request body exceeds the 12 MB limit.");
+    // Uploads stream and enforce their own, larger limit.
+    let limit =
+        if req.uri().path() == "/api/v1/uploads" { uploads_api::MAX_UPLOAD_BYTES } else { MAX_BODY as u64 };
+    if declared.is_some_and(|n| n > limit) {
+        return error_response(
+            413,
+            if limit == MAX_BODY as u64 {
+                "Request body exceeds the 12 MB limit."
+            } else {
+                "Uploads are limited to 100 MiB for now."
+            },
+        );
     }
     next.run(req).await
 }
@@ -647,7 +669,14 @@ fn backtest_routes() -> Router<AppState> {
         .route("/api/v1/backtests/{id}/artifacts/{kind}", only(get(backtests_api::backtest_artifact)))
         .route("/api/v1/datasets", only(get(backtests_api::list_datasets)))
         .route("/api/v1/datasets/preview", only(post(datasets_api::preview)))
+        .route("/api/v1/datasets/ingest", only(post(datasets_api::ingest)))
         .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
+}
+
+/// The upload route. Outside [`require_signature`], which holds the whole
+/// body: this one checks the signature against a declared hash and streams.
+fn upload_routes() -> Router<AppState> {
+    Router::new().route("/api/v1/uploads", only(post(uploads_api::upload)))
 }
 
 /// The application. `db` is checked by `/ready`; pass `None` where there is
@@ -665,6 +694,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(backtest_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
+        .merge(upload_routes())
         .route("/", only(get(root)))
         .route("/health", only(get(health)))
         .route("/ready", only(get(ready)))

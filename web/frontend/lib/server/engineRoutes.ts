@@ -37,8 +37,15 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/datasets': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   // Data Studio (M1). A preview stores nothing, but it is the first step of an upload: editors only.
   'api/v1/datasets/preview': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/datasets/ingest': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
 };
+
+/**
+ * File uploads don't go through the JSON proxy (2 MB bodies): app/api/engine-upload streams the file
+ * (up to 100 MiB) to POST /api/v1/uploads. Editors only, signed-in sessions only.
+ */
+export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };
 
 /** Map UUID job URLs to their allowlist policy while preserving the real path for signing. */
 export function routePolicyKey(path: string): string {

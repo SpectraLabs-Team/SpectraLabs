@@ -215,6 +215,7 @@ pub(crate) async fn upload(State(st): State<AppState>, req: Request) -> Response
 }
 
 /// Writes the body to `path`, hashing it, refusing more than `limit` bytes.
+#[allow(clippy::result_large_err)] // the error is the finished response
 async fn stream_to_file(
     mut body: axum::body::Body,
     path: &std::path::Path,

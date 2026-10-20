@@ -135,11 +135,13 @@ pub struct JobProducts {
 /// [`RunError`] as from [`run_request`].
 pub fn run_job(
     bars: &[Bar],
+    symbols: &[String],
     job: &BacktestJob,
     dataset_checksum: &str,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<JobProducts, RunError> {
-    let out = run_request(bars, &job.request, ctl)?;
+    let mut out = run_request(bars, &job.request, ctl)?;
+    out.symbols = symbols.to_vec();
     let summary = summary_json(&out)?;
     let params = job
         .request
@@ -185,13 +187,21 @@ pub fn run_job(
 /// [`Error::Data`] if the dataset is missing or fails verification, [`Error::Io`]
 /// if the store cannot be read.
 pub fn load_bars(store_root: &Path, checksum: &str) -> Result<Vec<Bar>> {
+    Ok(load_dataset(store_root, checksum)?.bars)
+}
+
+/// Loads dataset `checksum` (bars and symbol table) from the dataset store.
+///
+/// # Errors
+/// As [`load_bars`].
+pub fn load_dataset(store_root: &Path, checksum: &str) -> Result<spectra_data::Dataset> {
     let store = DataStore::new(store_root.to_path_buf())?;
     if !store.contains(checksum) {
         return Err(Error::Data(format!(
             "dataset {checksum} is not in the dataset store; it may have been registered on another machine"
         )));
     }
-    Ok(store.get(checksum)?.bars)
+    store.get(checksum)
 }
 
 /// Why a job did not produce results, sorted the way the queue needs it.
@@ -246,6 +256,6 @@ pub fn run_job_from_store(
     if ctl.cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
         return Err(JobFailure::Cancelled);
     }
-    let bars = load_bars(store_root, dataset_checksum).map_err(|e| JobFailure::from_engine(&e))?;
-    run_job(&bars, job, dataset_checksum, ctl).map_err(JobFailure::from)
+    let d = load_dataset(store_root, dataset_checksum).map_err(|e| JobFailure::from_engine(&e))?;
+    run_job(&d.bars, &d.symbols.symbols, job, dataset_checksum, ctl).map_err(JobFailure::from)
 }

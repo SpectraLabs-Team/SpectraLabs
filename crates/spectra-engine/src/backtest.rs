@@ -206,6 +206,9 @@ pub struct RunRecord {
 pub struct BacktestResult {
     /// One point per timestamp.
     pub equity_curve: Vec<EquityPoint>,
+    /// Gross exposure (sum of the absolute marked position values) at each
+    /// point of the equity curve. Not part of the result fingerprint.
+    pub gross_exposure: Vec<Money>,
     /// Every order in submission order.
     pub orders: Vec<Order>,
     /// The final books.
@@ -842,6 +845,7 @@ pub fn run_backtest_controlled(
     let mut orders: Vec<Order> = Vec::new();
     let mut open = OpenOrders::default();
     let mut curve: Vec<EquityPoint> = Vec::with_capacity(bars.len());
+    let mut exposure: Vec<Money> = Vec::with_capacity(bars.len());
 
     let first_ts = bars.first().map_or(0, |b| b.ts_ns);
     if cfg.initial_cash.raw() > 0 && ledger.deposit(cfg.initial_cash, first_ts).is_err() {
@@ -938,6 +942,13 @@ pub fn run_backtest_controlled(
             }
         }
         curve.push(EquityPoint { ts_ns: ts, equity: ledger.equity()?, cash: ledger.cash() });
+        let mut gross = Money::ZERO;
+        for (&id, p) in ledger.positions() {
+            if !p.qty.is_zero() {
+                gross = gross.checked_add(ledger.position_value(id)?.checked_abs()?)?;
+            }
+        }
+        exposure.push(gross);
 
         // 3. Let the strategy react. Anything it submits fills at a later timestamp.
         let mut ctx = Context {
@@ -965,6 +976,7 @@ pub fn run_backtest_controlled(
     let result_sha256 = hash_result(&curve, ledger.journal(), &orders);
     Ok(BacktestResult {
         equity_curve: curve,
+        gross_exposure: exposure,
         orders,
         ledger,
         metrics,

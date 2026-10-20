@@ -121,7 +121,8 @@ fn run(a: &RunArgs) -> std::result::Result<(), String> {
         }
     };
     let mut ctl = RunControl { progress: Some(&mut report), progress_every: 1000, ..RunControl::default() };
-    let out = run_request(&dataset.bars, &request, &mut ctl).map_err(|e| e.to_string())?;
+    let mut out = run_request(&dataset.bars, &request, &mut ctl).map_err(|e| e.to_string())?;
+    out.symbols.clone_from(&dataset.symbols.symbols);
 
     std::fs::create_dir_all(&a.out).map_err(|e| format!("{}: {e}", a.out.display()))?;
     let mut files: Vec<(String, Vec<u8>)> = vec![

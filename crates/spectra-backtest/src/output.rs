@@ -229,16 +229,141 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("best", num(t.best))
         .with("worst", num(t.worst))
         .with("top_trade_share", num(t.top_trade_share))
-        .with("avg_holding_ns", num(t.avg_holding_ns));
+        .with("avg_holding_ns", num(t.avg_holding_ns))
+        .with("avg_holding_days", num(t.avg_holding_ns / 86_400e9));
 
     Ok(Json::object()
         .with("schema", Json::string(SUMMARY_SCHEMA))
         .with("run", run)
         .with("metrics", metrics)
+        .with("performance", performance_json(out))
         .with("drawdown", drawdown)
         .with("tail", tail)
+        .with("exposure", exposure_json(r))
         .with("activity", activity)
-        .with("trades", trades))
+        .with("trades", trades)
+        .with("instruments", instruments_json(out)?)
+        .with("benchmark", benchmark_json(out)?))
+}
+
+fn opt(v: Option<f64>) -> Json {
+    v.map_or(Json::Null, num)
+}
+
+/// Ratios beyond the headline metrics, on the equity curve's period returns.
+fn performance_json(out: &BacktestOutput) -> Json {
+    let cfg = &out.request.config;
+    let r = returns_from_curve(&out.result.equity_curve);
+    let p = spectra_engine::performance::summarize(&r, cfg.periods_per_year, cfg.risk_free_rate);
+    Json::object()
+        .with("cagr", opt(p.cagr))
+        .with("sortino", opt(p.sortino))
+        .with("calmar", opt(p.calmar))
+        .with("omega", opt(p.omega))
+        .with("downside_deviation", opt(p.downside_deviation))
+        .with("skewness", opt(p.skewness))
+        .with("excess_kurtosis", opt(p.excess_kurtosis))
+        .with("drawdown_episodes", Json::integer(p.drawdown_episodes as i64))
+        .with("average_drawdown", opt(p.average_drawdown))
+}
+
+/// Exposure as a share of equity: gross (sum of absolute position values) and
+/// net (long minus short), averaged over the curve, plus time in the market.
+fn exposure_json(r: &BacktestResult) -> Json {
+    let (mut n, mut invested) = (0usize, 0usize);
+    let (mut gross_sum, mut gross_max, mut net_sum) = (0.0f64, 0.0f64, 0.0f64);
+    let (mut net_min, mut net_max) = (f64::INFINITY, f64::NEG_INFINITY);
+    for (p, g) in r.equity_curve.iter().zip(&r.gross_exposure) {
+        let eq = p.equity.to_f64();
+        if eq <= 0.0 {
+            continue;
+        }
+        let gross = g.to_f64() / eq;
+        let net = (p.equity.to_f64() - p.cash.to_f64()) / eq;
+        n += 1;
+        invested += usize::from(!g.is_zero());
+        gross_sum += gross;
+        gross_max = gross_max.max(gross);
+        net_sum += net;
+        net_min = net_min.min(net);
+        net_max = net_max.max(net);
+    }
+    if n == 0 {
+        return Json::object().with("valid", Json::boolean(false));
+    }
+    let nf = n as f64;
+    Json::object()
+        .with("valid", Json::boolean(true))
+        .with("average_gross", num(gross_sum / nf))
+        .with("max_gross", num(gross_max))
+        .with("average_net", num(net_sum / nf))
+        .with("min_net", num(net_min))
+        .with("max_net", num(net_max))
+        .with("time_in_market", num(invested as f64 / nf))
+}
+
+/// P&L and costs per instrument, from the ledger.
+fn instruments_json(out: &BacktestOutput) -> Result<Json> {
+    let l = &out.result.ledger;
+    let mut fills: std::collections::BTreeMap<spectra_core::InstrumentId, (i64, f64, Money)> =
+        std::collections::BTreeMap::new();
+    for e in l.journal() {
+        let slot = fills.entry(e.fill.instrument).or_insert((0, 0.0, Money::ZERO));
+        match e.kind {
+            EntryType::Fill => {
+                slot.0 += 1;
+                slot.1 += spectra_core::notional(e.fill.price, e.fill.qty)?.to_f64();
+            }
+            EntryType::BorrowFee => slot.2 = slot.2.checked_add(e.amount)?,
+            _ => {}
+        }
+    }
+    let mut arr = Json::array();
+    for (&id, p) in l.positions() {
+        let value = l.position_value(id)?;
+        let unrealized = value.checked_sub(p.cost)?;
+        let (count, traded, borrow) = fills.get(&id).copied().unwrap_or((0, 0.0, Money::ZERO));
+        let net = p.realized.checked_add(unrealized)?.checked_sub(p.fees)?.checked_sub(borrow)?;
+        let symbol = out.symbols.get(id as usize).map_or(Json::Null, |s| Json::string(s.clone()));
+        arr.push(
+            Json::object()
+                .with("instrument", Json::integer(i64::from(id)))
+                .with("symbol", symbol)
+                .with("fills", Json::integer(count))
+                .with("traded_notional", num(traded))
+                .with("final_qty", Json::string(p.qty.to_string()))
+                .with("market_value", money(value))
+                .with("realized_pnl", money(p.realized))
+                .with("unrealized_pnl", money(unrealized))
+                .with("fees", money(p.fees))
+                .with("borrow_fees", money(borrow))
+                .with("net_pnl", money(net)),
+        )?;
+    }
+    Ok(arr)
+}
+
+/// The strategy against an equal-weight buy-and-hold of the same bars (no costs).
+fn benchmark_json(out: &BacktestOutput) -> Result<Json> {
+    let s = spectra_research::aligned_returns(&out.result.equity_curve);
+    let b = &out.benchmark;
+    if b.len() != s.len() || s.len() < 2 {
+        return Ok(Json::object().with("valid", Json::boolean(false)));
+    }
+    let m = spectra_research::compute_benchmark_metrics(&s, b, out.request.config.periods_per_year)?;
+    let total = b.iter().fold(1.0, |acc, x| acc * (1.0 + x)) - 1.0;
+    Ok(Json::object()
+        .with("valid", Json::boolean(m.valid))
+        .with("name", Json::string("equal-weight buy and hold of every instrument, no costs"))
+        .with("total_return", num(total))
+        .with("excess_total_return", num(out.result.metrics.total_return - total))
+        .with("beta", num(m.beta))
+        .with("alpha_annualized", num(m.alpha_annualized))
+        .with("correlation", num(m.correlation))
+        .with("tracking_error", num(m.tracking_error))
+        .with("information_ratio", num(m.information_ratio))
+        .with("up_capture", num(m.up_capture))
+        .with("down_capture", num(m.down_capture)))
 }
 
 /// Which series to chart.

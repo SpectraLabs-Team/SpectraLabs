@@ -131,6 +131,16 @@ fn job_run_matches_a_direct_engine_run_and_stores_every_file() {
         products.summary.find("run").unwrap().find("result_sha256").unwrap().as_str().unwrap(),
         direct.run.result_sha256
     );
+    let symbols: Vec<&str> = products
+        .summary
+        .find("instruments")
+        .unwrap()
+        .items()
+        .unwrap()
+        .iter()
+        .map(|r| r.find("symbol").unwrap().as_str().unwrap())
+        .collect();
+    assert!(!symbols.is_empty() && symbols.iter().all(|s| ["AAA", "BBB"].contains(s)), "{symbols:?}");
     assert_eq!(products.params.find("dataset_version_id").unwrap().as_str().unwrap(), VERSION);
     assert_eq!(products.params.find("dataset_checksum").unwrap().as_str().unwrap(), checksum);
     assert!(products.params.find("config_exact").is_some());

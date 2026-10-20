@@ -527,7 +527,7 @@ fn summary_writes_null_for_non_finite_ratios() {
     }
     let req = BacktestRequest::new("buy_and_hold", &ParamSet::default(), BacktestConfig::default()).unwrap();
     let result = run_backtest(&bars, &mut OneTrade(0), &req.config).unwrap();
-    let out = BacktestOutput { request: req, result };
+    let out = BacktestOutput { request: req, result, benchmark: Vec::new(), symbols: Vec::new() };
     let s = summary_json(&out).unwrap();
     let t = s.find("trades").unwrap();
     assert_eq!(t.find("wins").unwrap().as_int().unwrap(), 1);
@@ -580,4 +580,95 @@ fn downsampling_keeps_global_extremes_of_any_series() {
     }
     assert_eq!(SeriesKind::parse("drawdown").unwrap(), SeriesKind::Drawdown);
     assert!(SeriesKind::parse("pnl").is_err());
+}
+
+// ---------------------------------------------------------------- task 12: more output
+
+/// Exact fixed-point raw value of a decimal string like "-12.50000000".
+fn raw(s: &str) -> i64 {
+    let neg = s.starts_with('-');
+    let (whole, frac) = s.trim_start_matches('-').split_once('.').unwrap();
+    let v = whole.parse::<i64>().unwrap() * SCALE + frac.parse::<i64>().unwrap();
+    if neg {
+        -v
+    } else {
+        v
+    }
+}
+
+fn run_summary(name: &str, params: &str, config: BacktestConfig, bars: &[Bar]) -> (BacktestOutput, Json) {
+    let p = builtin(name).unwrap().resolve_params_json(Some(&json(params))).unwrap();
+    let req = BacktestRequest::new(name, &p, config).unwrap();
+    let out = run_request(bars, &req, &mut RunControl::default()).unwrap();
+    let s = summary_json(&out).unwrap();
+    (out, Json::parse(&s.dump()).unwrap())
+}
+
+#[test]
+fn per_instrument_pnl_adds_up_to_the_equity_change() {
+    let bars = multi_bars(600, 3, 21);
+    let (out, s) =
+        run_summary("sma_cross", r#"{"fast":5,"slow":20,"qty":50}"#, Preset::Default.config(), &bars);
+    let rows = s.find("instruments").unwrap().items().unwrap();
+    assert_eq!(rows.len(), 3);
+    let net: i64 = rows.iter().map(|r| raw(r.find("net_pnl").unwrap().as_str().unwrap())).sum();
+    let change = out.result.ledger.equity().unwrap().raw() - out.request.config.initial_cash.raw();
+    assert_eq!(net, change, "per-instrument net P&L must reconcile exactly");
+    let fills: i64 = rows.iter().map(|r| r.find("fills").unwrap().as_int().unwrap()).sum();
+    assert_eq!(fills as usize, out.result.fill_count());
+    let fees: i64 = rows.iter().map(|r| raw(r.find("fees").unwrap().as_str().unwrap())).sum();
+    assert_eq!(fees, out.result.ledger.total_fees().raw());
+    assert!(rows[0].find("symbol").unwrap().is_null(), "no symbol table outside a dataset");
+}
+
+#[test]
+fn exposure_and_performance_sections_describe_the_run() {
+    let bars = multi_bars(400, 3, 5);
+    let (out, s) = run_summary("buy_and_hold", r#"{"allocation":0.9}"#, Preset::ZeroCost.config(), &bars);
+    let e = s.find("exposure").unwrap();
+    assert!(e.find("valid").unwrap().as_bool().unwrap());
+    let avg_gross = e.find("average_gross").unwrap().as_double().unwrap();
+    let avg_net = e.find("average_net").unwrap().as_double().unwrap();
+    assert!((0.8..0.95).contains(&avg_gross), "{avg_gross}");
+    assert!((avg_gross - avg_net).abs() < 1e-12, "long-only: net equals gross");
+    let tim = e.find("time_in_market").unwrap().as_double().unwrap();
+    assert!((tim - 399.0 / 400.0).abs() < 1e-12, "invested from the second bar: {tim}");
+    assert_eq!(out.result.gross_exposure.len(), out.result.equity_curve.len());
+
+    let p = s.find("performance").unwrap();
+    let r = spectra_engine::returns_from_curve(&out.result.equity_curve);
+    let expected = spectra_engine::performance::calmar(&r, 252.0);
+    assert_eq!(p.find("calmar").unwrap().as_double().ok(), expected);
+    assert!(p.find("sortino").unwrap().as_double().is_ok() || p.find("sortino").unwrap().is_null());
+}
+
+#[test]
+fn equal_weight_tracks_the_equal_weight_benchmark() {
+    let bars = multi_bars(500, 3, 8);
+    let (out, s) = run_summary(
+        "equal_weight",
+        r#"{"rebalance_every":1,"gross":1.0,"lot_size":0}"#,
+        Preset::ZeroCost.config(),
+        &bars,
+    );
+    let b = s.find("benchmark").unwrap();
+    assert!(b.find("valid").unwrap().as_bool().unwrap());
+    let corr = b.find("correlation").unwrap().as_double().unwrap();
+    let beta = b.find("beta").unwrap().as_double().unwrap();
+    assert!(corr > 0.99, "correlation {corr}");
+    assert!((beta - 0.98).abs() < 0.05, "beta {beta} (0.98 of the leverage limit invested)");
+    let total = b.find("total_return").unwrap().as_double().unwrap();
+    let excess = b.find("excess_total_return").unwrap().as_double().unwrap();
+    assert!((excess - (out.result.metrics.total_return - total)).abs() < 1e-15);
+}
+
+#[test]
+fn a_strategy_that_never_trades_has_flat_exposure_and_no_instruments() {
+    let bars = multi_bars(50, 2, 1);
+    // slow longer than the data: never trades.
+    let (_, s) = run_summary("sma_cross", r#"{"fast":10,"slow":100}"#, Preset::Default.config(), &bars);
+    assert_eq!(s.find("instruments").unwrap().items().unwrap().len(), 0);
+    let e = s.find("exposure").unwrap();
+    assert_eq!(e.find("time_in_market").unwrap().as_double().unwrap(), 0.0);
+    assert_eq!(e.find("max_gross").unwrap().as_double().unwrap(), 0.0);
 }

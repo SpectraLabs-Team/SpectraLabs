@@ -1,0 +1,708 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Spectra Labs engine API",
+    "description": "Reached only through the dashboard's server. Every /api route needs the HMAC headers X-Spectra-User, X-Spectra-Workspace, X-Request-Id, X-Spectra-Timestamp and X-Spectra-Signature (see crates/spectra-api/src/auth.rs). Timestamps are UTC RFC 3339; ids are UUIDv7; lists page with an opaque cursor.",
+    "license": {
+      "name": "UNLICENSED",
+      "identifier": "UNLICENSED"
+    },
+    "version": "1"
+  },
+  "paths": {
+    "/api/v1/benchmark": {
+      "post": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "Benchmark the engine on a portfolio.",
+        "operationId": "benchmark_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BenchmarkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Benchmark report"
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "The workspace's jobs, newest first.",
+        "operationId": "list_jobs",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "queued, running, succeeded, failed or cancelled",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "next_cursor from the previous page",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1..200, default 50",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Queue a job.",
+        "operationId": "create_job",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateJob"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The account has no workspace (code `no_workspace`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown kind or an invalid payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "One job.",
+        "operationId": "get_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/cancel": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Cancel a job: queued jobs stop at once, running jobs at the worker's next\ncheck (within a few seconds). Finished jobs are returned unchanged.",
+        "operationId": "cancel_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "Which risk metric names are computable (not the Prometheus metrics).",
+        "operationId": "metrics_handler",
+        "responses": {
+          "200": {
+            "description": "Metric names"
+          }
+        }
+      }
+    },
+    "/api/v1/risk": {
+      "post": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "A risk metric for a portfolio.",
+        "operationId": "risk_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Risk report"
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sample-portfolio": {
+      "get": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "A sample portfolio CSV.",
+        "operationId": "sample_portfolio",
+        "responses": {
+          "200": {
+            "description": "`{csv}`"
+          }
+        }
+      }
+    },
+    "/api/v1/stress": {
+      "post": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "Run a stress scenario on a portfolio.",
+        "operationId": "stress_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StressRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Stress report"
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "probes"
+        ],
+        "summary": "Liveness.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "The process is up"
+          }
+        }
+      }
+    },
+    "/ready": {
+      "get": {
+        "tags": [
+          "probes"
+        ],
+        "summary": "Readiness: 200 when both the database and at least one worker answer,\notherwise 503. Compose starts the API and worker together after migrations.",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "The database and a worker are available"
+          },
+          "503": {
+            "description": "The database or worker is unavailable or not configured"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "BenchmarkRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/benchmark` body (also the `benchmark` job payload).",
+        "required": [
+          "portfolio_csv"
+        ],
+        "properties": {
+          "portfolio_csv": {
+            "type": "string",
+            "description": "Portfolio CSV."
+          },
+          "repetitions": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "1..30, default 5.",
+            "minimum": 0
+          },
+          "simulations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Paths per run, default 100,000.",
+            "minimum": 0
+          },
+          "warmups": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "0..5, default 1.",
+            "minimum": 0
+          }
+        }
+      },
+      "CreateJob": {
+        "type": "object",
+        "description": "`POST /api/v1/jobs` body.",
+        "required": [
+          "kind",
+          "payload"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "One of `benchmark`, `risk`, `stress`."
+          },
+          "payload": {
+            "type": "object",
+            "description": "The same body the matching synchronous route takes."
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "-10..10; higher runs first. Default 0."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ErrorDoc": {
+        "type": "object",
+        "description": "Every error response.",
+        "required": [
+          "code",
+          "message",
+          "request_id",
+          "detail"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Machine-readable: `invalid_request`, `unauthenticated`, `not_found`, `no_workspace`, ..."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Deprecated copy of `message`, removed with the `/api/...` aliases."
+          },
+          "details": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Extra structured information, or null."
+          },
+          "message": {
+            "type": "string",
+            "description": "For people."
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Matches the `X-Request-Id` response header."
+          }
+        }
+      },
+      "JobPage": {
+        "type": "object",
+        "description": "A page of jobs.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobView"
+            },
+            "description": "Newest first."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Pass as `cursor` for the next page; null on the last."
+          }
+        }
+      },
+      "JobView": {
+        "type": "object",
+        "description": "A job as the API shows it (the payload is not echoed: it can be megabytes).",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "priority",
+          "attempts",
+          "max_attempts",
+          "progress",
+          "cancel_requested",
+          "created_at",
+          "run_after"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Attempts started."
+          },
+          "cancel_requested": {
+            "type": "boolean",
+            "description": "A cancel was asked for while it ran."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Queued at (UTC, RFC 3339)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The latest error."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Finished at."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "UUIDv7."
+          },
+          "kind": {
+            "type": "string",
+            "description": "What runs."
+          },
+          "max_attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Attempts allowed."
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Higher runs first."
+          },
+          "progress": {
+            "type": "number",
+            "format": "float",
+            "description": "0..1."
+          },
+          "result": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "On success: `{run_id, report, artifact}`."
+          },
+          "run_after": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Not run before (retry backoff)."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Latest attempt started at."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`."
+          }
+        }
+      },
+      "RiskRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/risk` body.",
+        "required": [
+          "portfolio_csv"
+        ],
+        "properties": {
+          "backend": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`auto`, `cpu` or `parallel`."
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "0.5..1, default 0.99."
+          },
+          "horizon_days": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Horizon in trading days, up to 7,560. Default 252."
+          },
+          "metric": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Metric name (`var`, `cvar`, ...; see `/api/v1/metrics`). Default `var`."
+          },
+          "portfolio_csv": {
+            "type": "string",
+            "description": "`symbol,quantity,price[,volatility]` rows; up to 10 MB."
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "RNG seed.",
+            "minimum": 0
+          },
+          "simulations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "1,000..100,000,000, default 1,000,000.",
+            "minimum": 0
+          }
+        }
+      },
+      "StressRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/stress` body (also the `stress` job payload).",
+        "required": [
+          "portfolio_csv"
+        ],
+        "properties": {
+          "portfolio_csv": {
+            "type": "string",
+            "description": "Portfolio CSV."
+          },
+          "scenario": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Scenario name, default `market-crash`."
+          },
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "RNG seed.",
+            "minimum": 0
+          },
+          "simulations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Default 1,000,000.",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "probes",
+      "description": "Liveness and readiness"
+    },
+    {
+      "name": "engine",
+      "description": "Synchronous engine calls"
+    },
+    {
+      "name": "jobs",
+      "description": "Queued engine work, run by spectra-worker"
+    }
+  ]
+}

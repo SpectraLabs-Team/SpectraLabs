@@ -26,8 +26,8 @@ pub mod simulation;
 
 pub use engine::{
     aggregate_volatility, benchmark, check_convergence, quantile, scenario, simulate, stress_test,
-    Convergence, RiskConfig, RiskEngine, RiskPlugin, RiskReport, Scenario, Simulation, StressResult,
-    DEFAULT_VOLATILITY, SCENARIOS,
+    Convergence, PluginInfo, RiskConfig, RiskEngine, RiskPlugin, RiskReport, Scenario, Simulation,
+    StressResult, DEFAULT_VOLATILITY, PLUGIN_API_VERSION, SCENARIOS,
 };
 pub use metrics::{compute, Metric};
 pub use portfolio::{Asset, Portfolio};

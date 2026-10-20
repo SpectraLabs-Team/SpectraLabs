@@ -32,6 +32,7 @@ sentry.workspace = true
 s3 = ["spectra-db/s3"]
 
 [dev-dependencies]
+sqlx.workspace = true
 http-body-util.workspace = true
 tower.workspace = true
 

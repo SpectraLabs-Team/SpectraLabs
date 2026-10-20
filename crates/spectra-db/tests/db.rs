@@ -170,3 +170,62 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
         sqlx::query(sql).bind(id).execute(&pool).await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn signed_in_identities_are_mirrored_once() {
+    use spectra_db::identity::ensure_identity;
+
+    let Some(pool) = pool().await else { return };
+    // Ids the engine has never seen (the frontend makes its own).
+    let (user, workspace) = (spectra_db::new_id(), spectra_db::new_id());
+    let enqueue = |by: uuid::Uuid| {
+        let pool = pool.clone();
+        async move {
+            spectra_db::jobs::enqueue(
+                &pool,
+                &spectra_db::jobs::NewJob {
+                    workspace_id: workspace,
+                    kind: "backtest".into(),
+                    payload: serde_json::json!({}),
+                    priority: 0,
+                    max_attempts: 1,
+                    created_by: Some(by),
+                },
+            )
+            .await
+        }
+    };
+    let err = enqueue(user).await.expect_err("unknown workspace and user");
+    assert_eq!(err.as_database_error().and_then(sqlx::error::DatabaseError::code).as_deref(), Some("23503"));
+
+    ensure_identity(&pool, Some(user), workspace).await.unwrap();
+    sqlx::query("UPDATE workspaces SET name = 'Kept' WHERE id = $1")
+        .bind(workspace)
+        .execute(&pool)
+        .await
+        .unwrap();
+    ensure_identity(&pool, Some(user), workspace).await.unwrap();
+    let (name, created_by): (String, Option<uuid::Uuid>) =
+        sqlx::query_as("SELECT name, created_by FROM workspaces WHERE id = $1")
+            .bind(workspace)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((name.as_str(), created_by), ("Kept", Some(user)), "existing rows are left alone");
+
+    let job = enqueue(user).await.expect("mirrored identity can queue work");
+    assert_eq!(job.created_by, Some(user));
+    assert!(spectra_db::datasets::list_versions(&pool, workspace, 500).await.unwrap().is_empty());
+
+    // Without a user (an API token with none), only the workspace is created.
+    let token_ws = spectra_db::new_id();
+    ensure_identity(&pool, None, token_ws).await.unwrap();
+
+    for (sql, id) in [
+        ("DELETE FROM workspaces WHERE id = $1", workspace),
+        ("DELETE FROM workspaces WHERE id = $1", token_ws),
+        ("DELETE FROM users WHERE id = $1", user),
+    ] {
+        sqlx::query(sql).bind(id).execute(&pool).await.unwrap();
+    }
+}

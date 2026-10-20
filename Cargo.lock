@@ -2734,6 +2734,7 @@ dependencies = [
  "spectra-db",
  "spectra-engine",
  "spectra-risk",
+ "sqlx",
  "tokio",
  "tower",
  "tower-http",

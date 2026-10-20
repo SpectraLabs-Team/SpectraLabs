@@ -177,7 +177,8 @@ pub fn config_from_json(j: &Json) -> Result<BacktestConfig> {
         impact: ImpactConfig {
             coefficient: rate("impact_coefficient")?,
             window: match j.find("impact_window") {
-                Some(v) => usize::try_from(v.as_int().map_err(wrap)?).map_err(|_| reg_err("negative impact_window"))?,
+                Some(v) => usize::try_from(v.as_int().map_err(wrap)?)
+                    .map_err(|_| reg_err("negative impact_window"))?,
                 None => ImpactConfig::default().window,
             },
         },

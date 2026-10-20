@@ -31,7 +31,7 @@ use spectra_core::{sha256_hex, Error, Json, Result};
 use spectra_data::DataStore;
 use spectra_engine::{
     config_fingerprint, returns_from_curve, run_backtest, BacktestConfig, BacktestResult, CommissionModel,
-    CostModel, ExecutionConfig, FinancingConfig, Metrics, RunRecord,
+    CostModel, ExecutionConfig, FinancingConfig, ImpactConfig, Metrics, RunRecord,
 };
 use spectra_research::{
     sharpe_per_period, ParamSet, StrategyFactory, SweepResult, TrialLedger, TrialSummary,
@@ -118,6 +118,11 @@ pub fn config_to_json(c: &BacktestConfig) -> Result<Json> {
             j = j.with(key, Json::number(v)?);
         }
     }
+    if c.impact.coefficient != 0.0 {
+        j = j
+            .with("impact_coefficient", Json::number(c.impact.coefficient)?)
+            .with("impact_window", Json::integer(c.impact.window as i64));
+    }
     Ok(j)
 }
 
@@ -168,6 +173,14 @@ pub fn config_from_json(j: &Json) -> Result<BacktestConfig> {
             borrow_rate: rate("borrow_rate")?,
             cash_rate: rate("cash_rate")?,
             margin_rate: rate("margin_rate")?,
+        },
+        impact: ImpactConfig {
+            coefficient: rate("impact_coefficient")?,
+            window: match j.find("impact_window") {
+                Some(v) => usize::try_from(v.as_int().map_err(wrap)?)
+                    .map_err(|_| reg_err("negative impact_window"))?,
+                None => ImpactConfig::default().window,
+            },
         },
     })
 }

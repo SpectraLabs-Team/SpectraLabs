@@ -141,6 +141,11 @@ pub struct BacktestOutput {
     pub request: BacktestRequest,
     /// The engine's result.
     pub result: BacktestResult,
+    /// Equal-weight buy-and-hold returns of the same bars, one per period of
+    /// the equity curve (see [`spectra_research::benchmark_returns`]).
+    pub benchmark: Vec<f64>,
+    /// Symbol of each instrument id, when known (for per-instrument output).
+    pub symbols: Vec<String>,
 }
 
 /// Builds the strategy and runs it under `ctl`.
@@ -155,5 +160,6 @@ pub fn run_request(
 ) -> std::result::Result<BacktestOutput, RunError> {
     let mut strategy = request.strategy.build(&request.params)?;
     let result = run_backtest_controlled(bars, strategy.as_mut(), &request.config, ctl)?;
-    Ok(BacktestOutput { request: request.clone(), result })
+    let benchmark = spectra_research::benchmark_returns(bars);
+    Ok(BacktestOutput { request: request.clone(), result, benchmark, symbols: Vec::new() })
 }

@@ -172,7 +172,7 @@ const fn num_positive(max: f64) -> Kind {
 /// strategy can grow it a hundredfold without overflow.
 const MAX_CASH: f64 = 1e9;
 
-const FIELDS: [Field; 14] = [
+const FIELDS: [Field; 17] = [
     Field { name: "preset", kind: Kind::Preset, description: "Starting point for every field not given" },
     Field { name: "initial_cash", kind: num_positive(MAX_CASH), description: "Starting cash" },
     Field { name: "allow_short", kind: Kind::Bool, description: "Allow negative positions" },
@@ -214,6 +214,21 @@ const FIELDS: [Field; 14] = [
         name: "risk_free_rate",
         kind: num(-1.0, 1.0),
         description: "Annual risk-free rate for the Sharpe ratio",
+    },
+    Field {
+        name: "borrow_fee_rate",
+        kind: num(0.0, 1.0),
+        description: "Annual borrow fee on short positions' market value (0.03 = 3%), charged each bar",
+    },
+    Field {
+        name: "cash_interest_rate",
+        kind: num(0.0, 1.0),
+        description: "Annual interest earned on positive cash, including short proceeds",
+    },
+    Field {
+        name: "margin_interest_rate",
+        kind: num(0.0, 1.0),
+        description: "Annual interest paid on negative cash (a margin debit)",
     },
 ];
 
@@ -369,6 +384,9 @@ pub fn parse_config(doc: &Json) -> std::result::Result<BacktestConfig, ConfigErr
                     }
                     "periods_per_year" => c.periods_per_year = x,
                     "risk_free_rate" => c.risk_free_rate = x,
+                    "borrow_fee_rate" => c.financing.borrow_rate = x,
+                    "cash_interest_rate" => c.financing.cash_rate = x,
+                    "margin_interest_rate" => c.financing.margin_rate = x,
                     _ => errs.add(name, "internal: field has no target"),
                 }
             }
@@ -408,7 +426,10 @@ pub fn config_to_user_json(c: &BacktestConfig) -> Result<Json> {
         .with("max_participation", Json::number(c.exec.max_participation.to_f64())?)
         .with("seed", seed)
         .with("periods_per_year", Json::number(c.periods_per_year)?)
-        .with("risk_free_rate", Json::number(c.risk_free_rate)?))
+        .with("risk_free_rate", Json::number(c.risk_free_rate)?)
+        .with("borrow_fee_rate", Json::number(c.financing.borrow_rate)?)
+        .with("cash_interest_rate", Json::number(c.financing.cash_rate)?)
+        .with("margin_interest_rate", Json::number(c.financing.margin_rate)?))
 }
 
 /// The exact stored form recorded with a run (raw fixed-point integers);

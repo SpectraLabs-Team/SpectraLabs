@@ -31,7 +31,7 @@ use spectra_core::{sha256_hex, Error, Json, Result};
 use spectra_data::DataStore;
 use spectra_engine::{
     config_fingerprint, returns_from_curve, run_backtest, BacktestConfig, BacktestResult, CommissionModel,
-    CostModel, ExecutionConfig, Metrics, RunRecord,
+    CostModel, ExecutionConfig, FinancingConfig, Metrics, RunRecord,
 };
 use spectra_research::{
     sharpe_per_period, ParamSet, StrategyFactory, SweepResult, TrialLedger, TrialSummary,
@@ -99,7 +99,8 @@ pub fn config_to_json(c: &BacktestConfig) -> Result<Json> {
     if let Some(l) = c.ledger.max_gross_leverage {
         j = j.with("max_gross_leverage", Json::integer(l.raw()));
     }
-    Ok(j.with("commission_per_unit", Json::integer(c.costs.commission.per_unit.raw()))
+    j = j
+        .with("commission_per_unit", Json::integer(c.costs.commission.per_unit.raw()))
         .with("commission_bps", Json::integer(c.costs.commission.bps_of_notional.raw()))
         .with("commission_min", Json::integer(c.costs.commission.min_fee.raw()))
         .with("slippage_bps", Json::integer(c.costs.slippage.raw()))
@@ -107,7 +108,17 @@ pub fn config_to_json(c: &BacktestConfig) -> Result<Json> {
         .with("delay_bars", Json::integer(c.exec.delay_bars as i64))
         .with("seed", Json::string(c.seed.to_string())) // u64 may not fit an i64
         .with("periods_per_year", Json::number(c.periods_per_year)?)
-        .with("risk_free_rate", Json::number(c.risk_free_rate)?))
+        .with("risk_free_rate", Json::number(c.risk_free_rate)?);
+    // Financing keys only when set, so earlier records and their hashes are unchanged.
+    let f = &c.financing;
+    for (key, v) in
+        [("borrow_rate", f.borrow_rate), ("cash_rate", f.cash_rate), ("margin_rate", f.margin_rate)]
+    {
+        if v != 0.0 {
+            j = j.with(key, Json::number(v)?);
+        }
+    }
+    Ok(j)
 }
 
 /// Parses [`config_to_json`] output (and C++ records, which have no leverage limit).
@@ -123,6 +134,10 @@ pub fn config_from_json(j: &Json) -> Result<BacktestConfig> {
     }
     let seed_text = j.at("seed").and_then(Json::as_str).map_err(wrap)?;
     let seed = seed_text.parse::<u64>().map_err(|_| reg_err("invalid seed"))?;
+    let rate = |k: &str| match j.find(k) {
+        Some(v) => v.as_double().map_err(wrap),
+        None => Ok(0.0),
+    };
     let leverage = match j.find("max_gross_leverage") {
         Some(v) => Some(Ratio::from_raw(v.as_int().map_err(wrap)?)),
         None => None,
@@ -149,6 +164,11 @@ pub fn config_from_json(j: &Json) -> Result<BacktestConfig> {
         seed,
         periods_per_year: j.at("periods_per_year").and_then(Json::as_double).map_err(wrap)?,
         risk_free_rate: j.at("risk_free_rate").and_then(Json::as_double).map_err(wrap)?,
+        financing: FinancingConfig {
+            borrow_rate: rate("borrow_rate")?,
+            cash_rate: rate("cash_rate")?,
+            margin_rate: rate("margin_rate")?,
+        },
     })
 }
 

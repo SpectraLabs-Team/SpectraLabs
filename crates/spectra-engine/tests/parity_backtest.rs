@@ -238,6 +238,7 @@ fn backtester_matches_cpp_reference() {
             seed: c as u64 * 977 + 3,
             periods_per_year: if c % 2 == 0 { 252.0 } else { 98_280.0 },
             risk_free_rate: if c % 3 == 0 { 0.0 } else { 0.035 },
+            financing: spectra_engine::FinancingConfig::default(), // the reference engine had none
         };
         for seed in 1..=3u64 {
             let bars = random_market(seed * 101 + c as u64, 1 + (c % 4) as usize, 300);

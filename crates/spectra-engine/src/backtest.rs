@@ -126,6 +126,28 @@ pub struct ExecutionConfig {
     pub max_participation: Qty,
 }
 
+/// Financing charged or paid once per bar period, on the books as they stood
+/// at the end of the previous period (positions valued at the previous close).
+/// Rates are annual fractions (0.05 = 5% a year), divided by
+/// `periods_per_year` for each period. All zero (the default) charges nothing,
+/// and the run is identical to one without financing.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct FinancingConfig {
+    /// Borrow fee on the market value of each short position.
+    pub borrow_rate: f64,
+    /// Interest earned on positive cash (including short-sale proceeds).
+    pub cash_rate: f64,
+    /// Interest paid on negative cash (a margin debit).
+    pub margin_rate: f64,
+}
+
+impl FinancingConfig {
+    /// True when nothing would ever be charged or paid.
+    pub fn is_zero(&self) -> bool {
+        self.borrow_rate == 0.0 && self.cash_rate == 0.0 && self.margin_rate == 0.0
+    }
+}
+
 /// Everything that defines a backtest besides the bars and the strategy.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BacktestConfig {
@@ -143,6 +165,8 @@ pub struct BacktestConfig {
     pub periods_per_year: f64,
     /// Annual risk-free rate for the Sharpe ratio.
     pub risk_free_rate: f64,
+    /// Borrow fees and interest (off by default).
+    pub financing: FinancingConfig,
 }
 
 impl Default for BacktestConfig {
@@ -155,6 +179,7 @@ impl Default for BacktestConfig {
             seed: 0,
             periods_per_year: 252.0,
             risk_free_rate: 0.0,
+            financing: FinancingConfig::default(),
         }
     }
 }
@@ -345,6 +370,14 @@ impl Context<'_> {
     pub fn orders(&self) -> &[Order] {
         self.orders
     }
+    /// The ledger policy of this run (shorting, negative cash, leverage limit).
+    pub fn ledger_policy(&self) -> LedgerConfig {
+        *self.ledger.config()
+    }
+    /// Marked value of a position (negative for shorts).
+    pub fn position_value(&self, instrument: InstrumentId) -> Money {
+        self.ledger.position_value(instrument).unwrap_or_default()
+    }
 
     fn submit(
         &mut self,
@@ -486,6 +519,15 @@ pub fn canonical_config(c: &BacktestConfig) -> String {
     add("seed", i128::from(c.seed as i64)); // the C++ engine printed the seed as a signed long long
     s.push_str(&format!("periods_per_year={};", fmt_g17(c.periods_per_year)));
     s.push_str(&format!("risk_free_rate={};", fmt_g17(c.risk_free_rate)));
+    // Written only when set, so configurations without financing keep their fingerprints.
+    let f = &c.financing;
+    for (key, v) in
+        [("borrow_rate", f.borrow_rate), ("cash_rate", f.cash_rate), ("margin_rate", f.margin_rate)]
+    {
+        if v != 0.0 {
+            s.push_str(&format!("{key}={};", fmt_g17(v)));
+        }
+    }
     s
 }
 
@@ -509,6 +551,8 @@ fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order]
             spectra_core::EntryType::Deposit => 0,
             spectra_core::EntryType::Withdrawal => 1,
             spectra_core::EntryType::Fill => 2,
+            spectra_core::EntryType::Interest => 3,
+            spectra_core::EntryType::BorrowFee => 4,
         });
         h.update_i64(e.ts_ns);
         h.update_i64(e.amount.raw());
@@ -672,6 +716,47 @@ impl From<spectra_core::ArithmeticError> for RunError {
 /// How often (in timestamps) the wall clock is read when a time limit is set.
 const CLOCK_CHECK_EVERY: usize = 256;
 
+/// Fixed-point scale of per-period financing rates (1e-12 resolution).
+const RATE_SCALE: i128 = 1_000_000_000_000;
+
+/// An annual rate as a per-period rate scaled by [`RATE_SCALE`].
+fn per_period_rate(annual: f64, periods_per_year: f64) -> i128 {
+    (annual / periods_per_year * RATE_SCALE as f64).round() as i128
+}
+
+/// `amount * rate / RATE_SCALE`, rounded half away from zero.
+fn apply_rate(amount: Money, rate: i128) -> Result<Money> {
+    let raw = spectra_core::fixed::div_round_half_away(i128::from(amount.raw()) * rate, RATE_SCALE);
+    Ok(Money::from_raw(spectra_core::fixed::narrow(raw)?))
+}
+
+/// Charges one period of financing on the books as they stand (positions at
+/// their latest marks, i.e. the previous close).
+fn charge_financing(ledger: &mut Ledger, rates: [i128; 3], ts: i64) -> Result<()> {
+    let [borrow, cash_rate, margin] = rates;
+    if borrow != 0 {
+        let shorts: Vec<InstrumentId> =
+            ledger.positions().iter().filter(|(_, p)| p.qty.raw() < 0).map(|(&id, _)| id).collect();
+        for id in shorts {
+            let value = ledger.position_value(id)?.checked_abs()?;
+            let fee = apply_rate(value, borrow)?;
+            if fee.raw() > 0 {
+                ledger.charge_borrow_fee(id, fee, ts).map_err(ledger_err)?;
+            }
+        }
+    }
+    let cash = ledger.cash();
+    let interest = match cash.raw().cmp(&0) {
+        std::cmp::Ordering::Greater => apply_rate(cash, cash_rate)?,
+        std::cmp::Ordering::Less => apply_rate(cash, margin)?, // negative cash, so negative interest: a charge
+        std::cmp::Ordering::Equal => Money::ZERO,
+    };
+    if !interest.is_zero() {
+        ledger.apply_interest(interest, ts).map_err(ledger_err)?;
+    }
+    Ok(())
+}
+
 fn check_size(bars: &[Bar], limits: &RunLimits) -> std::result::Result<(), RunError> {
     if let Some(max) = limits.max_bars {
         if bars.len() > max {
@@ -733,6 +818,22 @@ pub fn run_backtest_controlled(
     if cfg.periods_per_year <= 0.0 || cfg.periods_per_year.is_nan() {
         return Err(Error::InvalidArgument("periods_per_year must be > 0".into()).into());
     }
+    let fin = &cfg.financing;
+    for (name, v) in
+        [("borrow_rate", fin.borrow_rate), ("cash_rate", fin.cash_rate), ("margin_rate", fin.margin_rate)]
+    {
+        if !v.is_finite() || v.abs() > 10.0 {
+            return Err(
+                Error::InvalidArgument(format!("financing {name} must be a finite annual rate")).into()
+            );
+        }
+    }
+    let rates = [
+        per_period_rate(fin.borrow_rate, cfg.periods_per_year),
+        per_period_rate(fin.cash_rate, cfg.periods_per_year),
+        per_period_rate(fin.margin_rate, cfg.periods_per_year),
+    ];
+    let financed = !fin.is_zero();
     check_uniform_intervals(bars)?;
     let progress_every = ctl.progress_every.max(1);
 
@@ -788,6 +889,11 @@ pub fn run_backtest_controlled(
         let ts = bars[i].ts_ns;
         for b in group {
             history.entry(b.instrument).or_default().push(*b);
+        }
+
+        // 0. Financing for the period that just ended (none before the first bar).
+        if financed && step > 0 {
+            charge_financing(&mut ledger, rates, ts)?;
         }
 
         // 1. Fill orders submitted at earlier timestamps, in submission order.

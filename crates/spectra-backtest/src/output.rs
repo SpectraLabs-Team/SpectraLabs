@@ -60,11 +60,14 @@ pub fn equity_csv(r: &BacktestResult) -> String {
     s
 }
 
-/// Every order with its final state.
+/// Every order with its final state; a multi-strategy run adds the index of
+/// the strategy that placed it as a last `strategy` column.
 pub fn orders_csv(r: &BacktestResult) -> String {
+    let multi = !r.strategies.is_empty();
     let mut s = String::from(
-        "id,instrument,side,type,qty,remaining,limit,stop,time_in_force,submit_ts_ns,submit_step,state,reject_reason\n",
+        "id,instrument,side,type,qty,remaining,limit,stop,time_in_force,submit_ts_ns,submit_step,state,reject_reason",
     );
+    s.push_str(if multi { ",strategy\n" } else { "\n" });
     for o in &r.orders {
         let limit = if o.limit.is_zero() { String::new() } else { o.limit.to_string() };
         let stop = if o.stop.is_zero() { String::new() } else { o.stop.to_string() };
@@ -89,14 +92,21 @@ pub fn orders_csv(r: &BacktestResult) -> String {
             o.state.as_str(),
             o.reject_reason.map_or("", spectra_core::Reject::as_str),
         );
+        if multi {
+            s.pop();
+            let _ = writeln!(s, ",{}", o.strategy);
+        }
     }
     s
 }
 
-/// Every fill from the ledger journal, with its effect on cash.
+/// Every fill from the ledger journal, with its effect on cash; a
+/// multi-strategy run adds `order_id,strategy` columns.
 pub fn fills_csv(r: &BacktestResult) -> String {
-    let mut s = String::from("seq,ts_ns,instrument,side,qty,price,fee,realized,cash_after\n");
-    for e in r.ledger.journal().iter().filter(|e| e.kind == EntryType::Fill) {
+    let multi = !r.strategies.is_empty();
+    let mut s = String::from("seq,ts_ns,instrument,side,qty,price,fee,realized,cash_after");
+    s.push_str(if multi { ",order_id,strategy\n" } else { "\n" });
+    for (n, e) in r.ledger.journal().iter().filter(|e| e.kind == EntryType::Fill).enumerate() {
         let f = &e.fill;
         let _ = writeln!(
             s,
@@ -111,6 +121,24 @@ pub fn fills_csv(r: &BacktestResult) -> String {
             e.realized,
             e.cash_after
         );
+        if multi {
+            let id = r.fill_orders.get(n).copied().unwrap_or(0);
+            let strategy = id.checked_sub(1).and_then(|k| r.orders.get(k as usize)).map(|o| o.strategy);
+            s.pop();
+            let _ = writeln!(s, ",{id},{}", strategy.map_or(String::new(), |x| x.to_string()));
+        }
+    }
+    s
+}
+
+/// `ts_ns,strategy,equity,cash,gross_exposure`: each strategy's own books at
+/// every timestamp (multi-strategy runs only; empty header otherwise).
+pub fn strategies_csv(r: &BacktestResult) -> String {
+    let mut s = String::from("ts_ns,strategy,equity,cash,gross_exposure\n");
+    for (i, st) in r.strategies.iter().enumerate() {
+        for (p, g) in st.equity_curve.iter().zip(&st.gross_exposure) {
+            let _ = writeln!(s, "{},{i},{},{},{g}", p.ts_ns, p.equity, p.cash);
+        }
     }
     s
 }
@@ -128,15 +156,19 @@ pub fn returns_csv(r: &BacktestResult) -> String {
     s
 }
 
-/// The four CSV artifacts of a run.
+/// The CSV artifacts of a run: four, plus `strategies.csv` for a multi-strategy run.
 pub fn artifacts(r: &BacktestResult) -> Vec<Artifact> {
     let csv = |name, text: String| Artifact { name, media_type: "text/csv", bytes: text.into_bytes() };
-    vec![
+    let mut out = vec![
         csv("equity.csv", equity_csv(r)),
         csv("orders.csv", orders_csv(r)),
         csv("fills.csv", fills_csv(r)),
         csv("returns.csv", returns_csv(r)),
-    ]
+    ];
+    if !r.strategies.is_empty() {
+        out.push(csv("strategies.csv", strategies_csv(r)));
+    }
+    out
 }
 
 /// A finite number, or `null`.
@@ -182,11 +214,17 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("config_sha256", Json::string(&r.run.config_sha256))
         .with("result_sha256", Json::string(&r.run.result_sha256))
         .with("seed", Json::string(r.run.seed.to_string()))
-        .with("bar_count", Json::integer(r.run.bar_count as i64))
-        .with("strategy", Json::string(req.strategy.name))
-        .with("strategy_sha256", Json::string(req.strategy.source_sha256()))
-        .with("params", spectra_registry::params_to_json(&req.params)?)
-        .with("config", config_to_user_json(&req.config)?);
+        .with("bar_count", Json::integer(r.run.bar_count as i64));
+    let run = if req.is_multi() {
+        run.with("strategy", Json::string("multi"))
+            .with("strategy_sha256", Json::string(req.strategy_sha256()))
+            .with("config", config_to_user_json(&req.config)?)
+    } else {
+        run.with("strategy", Json::string(req.strategy.name))
+            .with("strategy_sha256", Json::string(req.strategy.source_sha256()))
+            .with("params", spectra_registry::params_to_json(&req.params)?)
+            .with("config", config_to_user_json(&req.config)?)
+    };
 
     let metrics = Json::object()
         .with("valid", Json::boolean(m.valid))
@@ -240,7 +278,7 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("avg_holding_ns", num(t.avg_holding_ns))
         .with("avg_holding_days", num(t.avg_holding_ns / 86_400e9));
 
-    Ok(Json::object()
+    let summary = Json::object()
         .with("schema", Json::string(SUMMARY_SCHEMA))
         .with("run", run)
         .with("metrics", metrics)
@@ -251,7 +289,73 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("activity", activity)
         .with("trades", trades)
         .with("instruments", instruments_json(out)?)
-        .with("benchmark", benchmark_json(out)?))
+        .with("benchmark", benchmark_json(out)?);
+    if req.is_multi() {
+        return Ok(summary.with("strategies", strategies_json(out)?));
+    }
+    Ok(summary)
+}
+
+/// Each strategy of a multi-strategy run on its own books, and the
+/// unallocated cash. `contribution` is the strategy's profit as a share of the
+/// account's starting cash, so the contributions add up to the account's
+/// total return less the unallocated cash's interest.
+fn strategies_json(out: &BacktestOutput) -> Result<Json> {
+    let r = &out.result;
+    let start = r.equity_curve.first().map_or(0.0, |_| out.request.config.initial_cash.to_f64());
+    let mut list = Json::array();
+    for (i, (a, s)) in out.request.strategies.iter().zip(&r.strategies).enumerate() {
+        let m = &s.metrics;
+        let equity = s.ledger.equity()?;
+        let profit = equity.checked_sub(s.allocation)?;
+        let orders = r.orders.iter().filter(|o| o.strategy == i).count();
+        let fills = s.ledger.journal().iter().filter(|e| e.kind == EntryType::Fill).count();
+        let average_gross = {
+            let (mut sum, mut n) = (0.0, 0usize);
+            for (p, g) in s.equity_curve.iter().zip(&s.gross_exposure) {
+                if p.equity.raw() > 0 {
+                    sum += g.to_f64() / p.equity.to_f64();
+                    n += 1;
+                }
+            }
+            if n == 0 {
+                Json::Null
+            } else {
+                num(sum / n as f64)
+            }
+        };
+        list.push(
+            Json::object()
+                .with("index", Json::integer(i as i64))
+                .with("strategy", Json::string(a.strategy.name))
+                .with("strategy_sha256", Json::string(a.strategy.source_sha256()))
+                .with("params", spectra_registry::params_to_json(&a.params)?)
+                .with("weight", num(a.weight))
+                .with("allocation", money(s.allocation))
+                .with("final_equity", money(equity))
+                .with("profit", money(profit))
+                .with("contribution", if start > 0.0 { num(profit.to_f64() / start) } else { Json::Null })
+                .with("total_return", num(m.total_return))
+                .with("annualized_return", num(m.annualized_return))
+                .with("annualized_volatility", num(m.annualized_volatility))
+                .with("sharpe", num(m.sharpe))
+                .with("max_drawdown", num(m.max_drawdown))
+                .with("average_gross_exposure", average_gross)
+                .with("order_count", Json::integer(orders as i64))
+                .with("fill_count", Json::integer(fills as i64))
+                .with("total_fees", money(s.ledger.total_fees()))
+                .with("financing", money(s.ledger.financing()))
+                .with("realized_pnl", money(s.ledger.realized_pnl())),
+        )?;
+    }
+    let unallocated = match &r.unallocated {
+        Some(l) => Json::object()
+            .with("allocation", money(l.net_deposits()))
+            .with("final_cash", money(l.cash()))
+            .with("financing", money(l.financing())),
+        None => Json::Null,
+    };
+    Ok(Json::object().with("list", list).with("unallocated", unallocated))
 }
 
 fn opt(v: Option<f64>) -> Json {

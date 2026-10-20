@@ -52,6 +52,55 @@ pub async fn resolve_version(
     }))
 }
 
+/// A dataset version as the Studio lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DatasetVersionInfo {
+    /// Version id (what a backtest's `dataset_version_id` names).
+    pub id: Uuid,
+    /// Name of the dataset it belongs to.
+    pub dataset_name: String,
+    /// Version number within the dataset (1, 2, ...).
+    pub version: i32,
+    /// Dataset-store checksum (64 hex characters).
+    pub checksum: String,
+    /// Number of bars.
+    pub row_count: i64,
+    /// Stored size in bytes.
+    pub byte_size: i64,
+    /// Registered at.
+    pub created_at: DateTime<Utc>,
+}
+
+type VersionRow = (Uuid, String, i32, String, i64, i64, DateTime<Utc>);
+
+/// A workspace's dataset versions, newest first (at most `limit`, 1 to 500).
+///
+/// # Errors
+/// Any database error.
+pub async fn list_versions(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    limit: u32,
+) -> Result<Vec<DatasetVersionInfo>, Error> {
+    let rows: Vec<VersionRow> = sqlx::query_as(include_str!("../queries/dataset_version_list.sql"))
+        .bind(workspace_id)
+        .bind(i32::try_from(limit.clamp(1, 500)).unwrap_or(500))
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, dataset_name, version, checksum, row_count, byte_size, created_at)| DatasetVersionInfo {
+            id,
+            dataset_name,
+            version,
+            checksum,
+            row_count,
+            byte_size,
+            created_at,
+        })
+        .collect())
+}
+
 /// A dataset-store entry to register.
 #[derive(Debug, Clone)]
 pub struct NewDatasetVersion<'a> {

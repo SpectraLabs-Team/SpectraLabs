@@ -142,13 +142,21 @@ fn run(a: &RunArgs) -> std::result::Result<(), String> {
 
     let r = &out.result;
     let m = &r.metrics;
-    println!(
-        "{} on {} bars ({} instruments)",
-        request.strategy.name,
-        r.run.bar_count,
-        dataset.symbols.symbols.len()
-    );
-    println!("  params           {}", request.params.canonical());
+    let name = if request.is_multi() { "multi-strategy run" } else { request.strategy.name };
+    println!("{} on {} bars ({} instruments)", name, r.run.bar_count, dataset.symbols.symbols.len());
+    if request.is_multi() {
+        for (a, s) in request.strategies.iter().zip(&r.strategies) {
+            println!(
+                "  {:<16} weight {:.4}  return {:.2}%  params {}",
+                a.strategy.name,
+                a.weight,
+                s.metrics.total_return * 100.0,
+                a.params.canonical()
+            );
+        }
+    } else {
+        println!("  params           {}", request.params.canonical());
+    }
     println!("  total return     {:.2}%", m.total_return * 100.0);
     println!("  sharpe           {:.2}", m.sharpe);
     println!("  max drawdown     {:.2}%", m.max_drawdown * 100.0);
@@ -157,7 +165,7 @@ fn run(a: &RunArgs) -> std::result::Result<(), String> {
     println!("  engine           {}", r.run.engine_version);
     println!("  dataset          {}", r.run.dataset_sha256);
     println!("  config           {}", r.run.config_sha256);
-    println!("  strategy         {}", request.strategy.source_sha256());
+    println!("  strategy         {}", request.strategy_sha256());
     println!("  result           {}", r.run.result_sha256);
     println!("wrote {} files to {}", files.len(), a.out.display());
     Ok(())

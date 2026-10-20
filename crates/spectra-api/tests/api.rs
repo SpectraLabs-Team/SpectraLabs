@@ -422,6 +422,9 @@ async fn backtest_routes_need_a_signature() {
         ("GET", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002"),
         ("POST", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/cancel"),
         ("GET", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/series"),
+        ("GET", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/artifacts/orders_csv"),
+        ("GET", "/api/v1/backtests"),
+        ("GET", "/api/v1/datasets"),
         ("GET", "/api/v1/strategies/builtin"),
     ] {
         assert_eq!(call(unsigned(method, path)).await.0, 401, "{method} {path}");
@@ -436,6 +439,17 @@ async fn backtest_routes_report_503_without_a_database() {
     let (status, j) = call(post("/api/v1/backtests", &body)).await;
     assert_eq!(status, 503, "{}", j.dump());
     assert_eq!(call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002")).await.0, 503);
+    assert_eq!(call(get("/api/v1/backtests")).await.0, 503);
+    assert_eq!(call(get("/api/v1/datasets")).await.0, 503);
+    assert_eq!(
+        call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/artifacts/orders_csv")).await.0,
+        503
+    );
+    // An unknown file kind is refused before the database is needed.
+    assert_eq!(
+        call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/artifacts/secrets")).await.0,
+        404
+    );
 }
 
 #[tokio::test]
@@ -481,6 +495,8 @@ async fn openapi_spec_is_served_unsigned() {
         "/api/v1/jobs/{id}/cancel",
         "/api/v1/backtests",
         "/api/v1/backtests/{id}/series",
+        "/api/v1/backtests/{id}/artifacts/{kind}",
+        "/api/v1/datasets",
         "/api/v1/strategies/builtin",
         "/api/v1/risk",
         "/ready",

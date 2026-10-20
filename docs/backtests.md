@@ -52,10 +52,22 @@ POST /api/v1/backtests
 | `GET /api/v1/backtests/{id}` | viewer | `status`, `progress` (0 to 1, every heartbeat), then `run_id`, `fingerprints`, `summary`, `artifacts` |
 | `POST /api/v1/backtests/{id}/cancel` | editor | stops it at the next bar group |
 | `GET /api/v1/backtests/{id}/series?kind=equity\|drawdown` | viewer | the chart series (at most 1,000 points; the maximum drawdown is always kept). 409 until it has succeeded |
+| `GET /api/v1/backtests/{id}/artifacts/{kind}` | viewer | a stored file to download: `summary`, `request`, `equity_csv`, `orders_csv`, `fills_csv`, `returns_csv` or `strategies_csv`. 409 until it has succeeded |
+| `GET /api/v1/backtests?status=&cursor=&limit=` | viewer | the workspace's backtests, newest first, with `headline` numbers (total return, Sharpe, max drawdown, final equity, fills) once finished |
+| `GET /api/v1/datasets` | viewer | the workspace's dataset versions, newest first (for the dataset picker) |
 
 A finished backtest stores `summary`, `equity_series`, `drawdown_series`, `request`, and the CSVs
 `equity_csv`, `orders_csv`, `fills_csv`, `returns_csv`, each with its SHA-256. The API reads the
 series from `ARTIFACT_DIR` (mounted read-only under docker compose).
+
+## In the Studio
+
+The Studio's **Backtests** tab (`/studio?tab=backtests`) is the same flow without writing JSON:
+pick a dataset version and a strategy (or several, with weights), adjust the parameters and the
+configuration, and run. It shows the job's progress with a cancel button, then the equity and
+drawdown charts, the summary's metrics, exposure, trades, per-instrument and per-strategy tables,
+the fingerprints, and the CSVs to download. Past runs are listed beside it. Viewers can look at
+runs; starting or cancelling one needs the editor role.
 
 ## Checking a job against the CLI
 
@@ -102,6 +114,45 @@ Strategies written in Rust can place, besides market and limit orders:
 Market impact (off by default) adds `impact_coefficient x volatility x sqrt(qty / bar volume)` to
 market and stop fills, capped at 10%; volatility is measured over the `impact_window` bars before
 the fill bar. Both are `config` fields.
+
+## Several strategies on one account
+
+Instead of `strategy` and `params`, a request can list up to 10 strategies, each with a share of
+the starting cash:
+
+```json
+{
+  "dataset_version_id": "<version id>",
+  "strategies": [
+    { "strategy": "equal_weight", "params": { "rebalance_every": 5 }, "weight": 0.5 },
+    { "strategy": "zscore_reversion", "weight": 0.3 }
+  ],
+  "config": { "preset": "default" }
+}
+```
+
+- Each strategy keeps its own books. It sees its own positions, cash and equity, sizes its orders
+  from them, is held to the ledger policy (shorting, negative cash, leverage limit) on them, and
+  is financed on them. A strategy cannot spend another strategy's cash: a fill it cannot afford
+  on its own books is rejected even when the account could afford it.
+- The weights add up to at most 1. Cash left over stays in the account as unallocated cash, and
+  earns `cash_interest_rate` if one is set.
+- The account is always the sum of the strategies' books. Orders from all strategies fill in
+  submission order, the same way as in a single-strategy run, and the strategies are called in
+  the order they are listed.
+- The output adds:
+  - a `strategy` column (the strategy's index in the list) to `orders.csv`;
+  - `order_id,strategy` columns to `fills.csv`;
+  - a `strategies.csv` artifact (`strategies_csv`) with each strategy's equity, cash and gross
+    exposure at every timestamp;
+  - a `strategies` section in the summary: per strategy, its allocation, final equity, profit,
+    contribution to the account's return, the headline metrics, fills, fees and financing; plus
+    the unallocated cash.
+- `run.strategy` in the summary is `"multi"`. `strategy_sha256` hashes every strategy's name,
+  source hash and weight, and the weights are part of `config_sha256`. Single-strategy runs keep
+  their fingerprints.
+
+Strategies written in Rust can do the same with `spectra_engine::run_multi_backtest`.
 
 ## Limits
 

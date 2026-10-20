@@ -11,7 +11,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** The workspace's backtests, newest first, with headline numbers once finished. */
+        get: operations["list_backtests"];
         put?: never;
         /** Queue a backtest. */
         post: operations["create_backtest"];
@@ -30,6 +31,25 @@ export interface paths {
         };
         /** One backtest: status and progress, then the summary and fingerprints. */
         get: operations["get_backtest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{id}/artifacts/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A stored file of a finished backtest, as stored (CSV or JSON), with a
+         *     download file name. `kind` is one of `summary`, `request`, `equity_csv`,
+         *     `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`. */
+        get: operations["backtest_artifact"];
         put?: never;
         post?: never;
         delete?: never;
@@ -85,6 +105,23 @@ export interface paths {
         put?: never;
         /** Benchmark the engine on a portfolio. */
         post: operations["benchmark_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The dataset versions of the caller's workspace, newest first (for the backtest form). */
+        get: operations["list_datasets"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -270,6 +307,54 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One backtest in a list: what was asked for, its state and headline numbers. */
+        BacktestListItem: {
+            /** @description A cancel was asked for while it ran. */
+            cancel_requested: boolean;
+            /**
+             * Format: date-time
+             * @description Queued at (UTC, RFC 3339).
+             */
+            created_at: string;
+            /** @description Why it failed. */
+            error?: string | null;
+            /**
+             * Format: date-time
+             * @description Finished at.
+             */
+            finished_at?: string | null;
+            /** @description `{total_return, sharpe, max_drawdown, final_equity, fill_count}`, once finished. */
+            headline?: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description The job id (UUIDv7).
+             */
+            id: string;
+            /**
+             * Format: float
+             * @description 0..1.
+             */
+            progress: number;
+            /** @description What was asked for: dataset version, strategy or strategies, params, config. */
+            request: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The recorded run, once finished.
+             */
+            run_id?: string | null;
+            /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
+            status: string;
+        };
+        /** @description A page of backtests, newest first. */
+        BacktestPage: {
+            /** @description This page. */
+            items: components["schemas"]["BacktestListItem"][];
+            /**
+             * Format: uuid
+             * @description Pass as `cursor` for the next page; null on the last.
+             */
+            next_cursor?: string | null;
+        };
         /** @description A backtest as the API shows it. */
         BacktestView: {
             /** @description Stored files `[{kind, file_name, content_type, sha256, size}]`, once finished. */
@@ -353,8 +438,12 @@ export interface components {
              * @description -10..10; higher runs first. Default 0.
              */
             priority?: number;
-            /** @description A built-in strategy name (see `GET /api/v1/strategies/builtin`). */
-            strategy: string;
+            /** @description Several strategies on one account: `[{"strategy", "params", "weight"}]`,
+             *     each `weight` a share of the starting cash (adding up to at most 1). */
+            strategies?: Record<string, never>[] | null;
+            /** @description A built-in strategy name (see `GET /api/v1/strategies/builtin`).
+             *     Give either `strategy` (with `params`) or `strategies`. */
+            strategy?: string | null;
         };
         /** @description `POST /api/v1/jobs` body. */
         CreateJob: {
@@ -367,6 +456,43 @@ export interface components {
              * @description -10..10; higher runs first. Default 0.
              */
             priority?: number;
+        };
+        /** @description The workspace's dataset versions, newest first. */
+        DatasetList: {
+            /** @description At most 500. */
+            items: components["schemas"]["DatasetVersionView"][];
+        };
+        /** @description A dataset version a backtest can run on. */
+        DatasetVersionView: {
+            /**
+             * Format: int64
+             * @description Stored size in bytes.
+             */
+            byte_size: number;
+            /** @description Dataset-store checksum. */
+            checksum: string;
+            /**
+             * Format: date-time
+             * @description Registered at.
+             */
+            created_at: string;
+            /** @description The dataset's name. */
+            dataset_name: string;
+            /**
+             * Format: uuid
+             * @description Version id: a backtest's `dataset_version_id`.
+             */
+            id: string;
+            /**
+             * Format: int64
+             * @description Number of bars.
+             */
+            row_count: number;
+            /**
+             * Format: int32
+             * @description Version number within the dataset.
+             */
+            version: number;
         };
         /** @description Every error response. */
         ErrorDoc: {
@@ -504,6 +630,40 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_backtests: {
+        parameters: {
+            query?: {
+                /** @description queued, running, succeeded, failed or cancelled */
+                status?: string;
+                /** @description next_cursor from the previous page */
+                cursor?: string;
+                /** @description 1..200, default 50 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestPage"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     create_backtest: {
         parameters: {
             query?: never;
@@ -567,6 +727,47 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    backtest_artifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest (job) id */
+                id: string;
+                /** @description summary, request, equity_csv, orders_csv, fills_csv, returns_csv or strategies_csv */
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such backtest, kind or file */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The backtest has not succeeded (yet) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -669,6 +870,33 @@ export interface operations {
                 content?: never;
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_datasets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetList"];
+                };
+            };
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

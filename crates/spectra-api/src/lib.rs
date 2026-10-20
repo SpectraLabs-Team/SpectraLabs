@@ -551,10 +551,15 @@ fn job_routes() -> Router<AppState> {
 /// Backtests (jobs of kind `backtest`) and the built-in strategy list (`/api/v1` only).
 fn backtest_routes() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/backtests", only(post(backtests_api::create_backtest)))
+        .route(
+            "/api/v1/backtests",
+            only(get(backtests_api::list_backtests).post(backtests_api::create_backtest)),
+        )
         .route("/api/v1/backtests/{id}", only(get(backtests_api::get_backtest)))
         .route("/api/v1/backtests/{id}/cancel", only(post(backtests_api::cancel_backtest)))
         .route("/api/v1/backtests/{id}/series", only(get(backtests_api::backtest_series)))
+        .route("/api/v1/backtests/{id}/artifacts/{kind}", only(get(backtests_api::backtest_artifact)))
+        .route("/api/v1/datasets", only(get(backtests_api::list_datasets)))
         .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
 }
 

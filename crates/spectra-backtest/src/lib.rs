@@ -31,10 +31,10 @@ pub use job::{
     JOB_KIND,
 };
 pub use output::{
-    artifacts, downsample, series, series_json, summary_json, Artifact, SeriesKind, SeriesPoint,
-    DEFAULT_SERIES_POINTS, SUMMARY_SCHEMA,
+    artifacts, downsample, series, series_json, strategies_csv, summary_json, Artifact, SeriesKind,
+    SeriesPoint, DEFAULT_SERIES_POINTS, SUMMARY_SCHEMA,
 };
-pub use run::{run_request, BacktestOutput, BacktestRequest};
+pub use run::{run_request, BacktestOutput, BacktestRequest, StrategyAllocation, MAX_REQUEST_STRATEGIES};
 pub use strategies::{
     builtin, builtin_factory, builtin_strategies, builtins_json, find_builtin, BuiltinStrategy, ParamKind,
     ParamSpec,

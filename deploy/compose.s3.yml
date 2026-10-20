@@ -1,4 +1,5 @@
-# S3-compatible artifact storage for the worker (M20 step 13).
+# S3-compatible artifact storage for the worker, and for the API, which reads backtest
+# chart series from the same bucket (M20 step 13, M3).
 #
 # Local RustFS (bucket created for you):
 #   docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 up -d --build
@@ -13,6 +14,21 @@
 # same (<prefix>/sha256/ab/cd/<hash>), so copy them once before switching, e.g.
 #   aws s3 sync <artifacts volume>/sha256 s3://$ARTIFACT_S3_BUCKET/$ARTIFACT_S3_PREFIX/sha256
 services:
+  api:
+    build:
+      args:
+        CARGO_FEATURES: spectra-api/s3
+    image: spectralabs/engine:dev-s3
+    environment:
+      ARTIFACT_STORAGE: s3
+      ARTIFACT_S3_BUCKET: ${ARTIFACT_S3_BUCKET:-spectra-artifacts}
+      ARTIFACT_S3_PREFIX: ${ARTIFACT_S3_PREFIX:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-spectra-local}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-change-me-local-s3-secret}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT: ${AWS_ENDPOINT:-http://rustfs:9000}
+      AWS_ALLOW_HTTP: ${AWS_ALLOW_HTTP:-true}
+
   worker:
     build:
       args:

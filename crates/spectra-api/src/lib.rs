@@ -34,6 +34,7 @@
 //! Configuration is read once at startup: see [`config`].
 
 pub mod auth;
+pub mod backtests_api;
 pub mod config;
 pub mod engine;
 pub mod identity;
@@ -89,12 +90,15 @@ pub struct ApiConfig {
     pub cors_origins: Vec<String>,
     /// Verifies the proxy's request signatures.
     pub engine_secret: Secret,
+    /// The worker's artifact store (local or S3), read for backtest chart
+    /// series. `None` answers those routes with 503.
+    pub artifacts: Option<spectra_db::artifacts::ArtifactBackend>,
 }
 
 impl ApiConfig {
-    /// Default CORS origins (`http://localhost:3000`) and the given secret.
+    /// Default CORS origins (`http://localhost:3000`), the given secret, no artifact store.
     pub fn new(engine_secret: Secret) -> Self {
-        Self { cors_origins: vec!["http://localhost:3000".into()], engine_secret }
+        Self { cors_origins: vec!["http://localhost:3000".into()], engine_secret, artifacts: None }
     }
 
     fn allows(&self, origin: &str) -> bool {
@@ -104,7 +108,12 @@ impl ApiConfig {
 
 impl From<&Config> for ApiConfig {
     fn from(c: &Config) -> Self {
-        Self { cors_origins: c.cors_origins.clone(), engine_secret: c.engine_secret.clone() }
+        Self {
+            cors_origins: c.cors_origins.clone(),
+            engine_secret: c.engine_secret.clone(),
+            // Set by the caller once the backend is built (S3 setup can fail).
+            artifacts: None,
+        }
     }
 }
 
@@ -539,6 +548,16 @@ fn job_routes() -> Router<AppState> {
         .route("/api/v1/jobs/{id}/cancel", only(post(jobs_api::cancel_job)))
 }
 
+/// Backtests (jobs of kind `backtest`) and the built-in strategy list (`/api/v1` only).
+fn backtest_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/backtests", only(post(backtests_api::create_backtest)))
+        .route("/api/v1/backtests/{id}", only(get(backtests_api::get_backtest)))
+        .route("/api/v1/backtests/{id}/cancel", only(post(backtests_api::cancel_backtest)))
+        .route("/api/v1/backtests/{id}/series", only(get(backtests_api::backtest_series)))
+        .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -546,6 +565,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
     let signed = engine_routes("/api/v1")
         .merge(engine_routes("/api"))
         .merge(job_routes())
+        .merge(backtest_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .route("/", only(get(root)))

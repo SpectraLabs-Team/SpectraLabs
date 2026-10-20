@@ -25,12 +25,11 @@ async fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let cmd = args.first().cloned().unwrap_or_default();
     let dataset_args = if cmd == "dataset-add" {
-        if let Some(a) = DatasetArgs::parse(&args[1..]) {
-            Some(a)
-        } else {
+        let Some(a) = DatasetArgs::parse(&args[1..]) else {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
-        }
+        };
+        Some(a)
     } else {
         None
     };

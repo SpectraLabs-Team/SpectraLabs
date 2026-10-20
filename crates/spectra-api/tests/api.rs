@@ -416,6 +416,56 @@ async fn job_routes_report_503_without_a_database() {
 }
 
 #[tokio::test]
+async fn backtest_routes_need_a_signature() {
+    for (method, path) in [
+        ("POST", "/api/v1/backtests"),
+        ("GET", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002"),
+        ("POST", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/cancel"),
+        ("GET", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/series"),
+        ("GET", "/api/v1/strategies/builtin"),
+    ] {
+        assert_eq!(call(unsigned(method, path)).await.0, 401, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn backtest_routes_report_503_without_a_database() {
+    let body = Json::object()
+        .with("dataset_version_id", Json::string("0192f3a4-0000-7000-8000-000000000003"))
+        .with("strategy", Json::string("sma_cross"));
+    let (status, j) = call(post("/api/v1/backtests", &body)).await;
+    assert_eq!(status, 503, "{}", j.dump());
+    assert_eq!(call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002")).await.0, 503);
+}
+
+#[tokio::test]
+async fn backtest_requests_are_checked_before_the_database() {
+    // Unknown fields and a missing dataset are refused before anything is queued.
+    let extra = Json::object().with("strategy", Json::string("sma_cross")).with("dataset", Json::integer(1));
+    assert_eq!(call(post("/api/v1/backtests", &extra)).await.0, 422);
+    let (status, j) =
+        call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/series?kind=pnl")).await;
+    assert_eq!(status, 422, "{}", j.dump());
+}
+
+#[tokio::test]
+async fn builtin_strategies_describe_the_backtest_form() {
+    let (status, j) = call(get("/api/v1/strategies/builtin")).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let names: Vec<String> = j
+        .at("strategies")
+        .unwrap()
+        .items()
+        .unwrap()
+        .iter()
+        .map(|s| s.at("name").unwrap().as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, ["buy_and_hold", "sma_cross", "zscore_reversion"]);
+    assert!(j.at("config_schema").unwrap().at("properties").unwrap().at("slippage_bps").is_ok());
+    assert_eq!(j.at("presets").unwrap().items().unwrap().len(), 3);
+}
+
+#[tokio::test]
 async fn job_routes_are_not_served_at_the_old_paths() {
     assert_eq!(call(get("/api/jobs")).await.0, 404);
 }
@@ -425,7 +475,16 @@ async fn openapi_spec_is_served_unsigned() {
     let (status, j) = call(unsigned("GET", "/api/v1/openapi.json")).await;
     assert_eq!(status, 200);
     let paths = j.at("paths").unwrap();
-    for path in ["/api/v1/jobs", "/api/v1/jobs/{id}", "/api/v1/jobs/{id}/cancel", "/api/v1/risk", "/ready"] {
+    for path in [
+        "/api/v1/jobs",
+        "/api/v1/jobs/{id}",
+        "/api/v1/jobs/{id}/cancel",
+        "/api/v1/backtests",
+        "/api/v1/backtests/{id}/series",
+        "/api/v1/strategies/builtin",
+        "/api/v1/risk",
+        "/ready",
+    ] {
         assert!(paths.at(path).is_ok(), "missing {path}");
     }
 }

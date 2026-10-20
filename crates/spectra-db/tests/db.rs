@@ -67,3 +67,91 @@ async fn queue_depth_counts_newly_enqueued_work() {
     assert_eq!(after.0, before.0 + 1);
     assert_eq!(after.1, before.1);
 }
+
+#[tokio::test]
+async fn backtest_runs_link_dataset_versions_and_artifacts() {
+    use spectra_db::artifacts::{find_for_run, store_for_run, ArtifactBackend, ArtifactStore, NewArtifact};
+    use spectra_db::datasets::{
+        insert_backtest_run, register_version, resolve_version, resolve_workspace, NewBacktestRun,
+        NewDatasetVersion,
+    };
+    use spectra_db::jobs::{enqueue, NewJob};
+
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "backtest-test@example.com").await.unwrap();
+    let ws = resolve_workspace(&pool, &seeded.workspace_id.to_string()).await.unwrap().unwrap();
+    assert_eq!(ws, seeded.workspace_id);
+
+    // A fresh checksum and dataset name, so the test can run against a shared database.
+    let checksum = format!("{}{}", spectra_db::new_id().simple(), spectra_db::new_id().simple());
+    let name = format!("bt-{}", spectra_db::new_id().simple());
+    let new = NewDatasetVersion {
+        workspace_id: ws,
+        dataset_name: &name,
+        checksum: &checksum,
+        row_count: 2400,
+        byte_size: 9000,
+        quality_report: serde_json::json!({ "rows_rejected": 0 }),
+        created_by: Some(seeded.admin_id),
+    };
+    let v1 = register_version(&pool, &new).await.unwrap();
+    assert_eq!((v1.version, v1.existed), (1, false));
+    let again = register_version(&pool, &new).await.unwrap();
+    assert_eq!((again.id, again.existed), (v1.id, true));
+
+    let resolved = resolve_version(&pool, ws, v1.id).await.unwrap().unwrap();
+    assert_eq!(
+        (resolved.checksum.as_str(), resolved.row_count, resolved.dataset_name.as_str()),
+        (checksum.as_str(), 2400, name.as_str())
+    );
+    assert!(resolve_version(&pool, spectra_db::new_id(), v1.id).await.unwrap().is_none(), "other workspace");
+
+    let job = enqueue(
+        &pool,
+        &NewJob {
+            workspace_id: ws,
+            kind: "backtest".into(),
+            payload: serde_json::json!({ "dataset_version_id": v1.id.to_string() }),
+            priority: 0,
+            max_attempts: 3,
+            created_by: Some(seeded.admin_id),
+        },
+    )
+    .await
+    .unwrap();
+    let run_id = insert_backtest_run(
+        &pool,
+        &NewBacktestRun {
+            id: spectra_db::new_id(),
+            workspace_id: ws,
+            job_id: job.id,
+            params: serde_json::json!({ "strategy": "sma_cross" }),
+            metrics: serde_json::json!({ "schema": "spectra.backtest.summary/v1" }),
+            seed: Some(7),
+            engine_version: "test".into(),
+            created_by: Some(seeded.admin_id),
+            started_at: chrono::Utc::now(),
+            dataset_version_id: v1.id,
+        },
+    )
+    .await
+    .unwrap();
+
+    let dir = std::env::temp_dir().join(format!("spectra-db-bt-{}", spectra_db::new_id().simple()));
+    let store = ArtifactBackend::Local(ArtifactStore::new(&dir));
+    let bytes = br#"{"kind":"equity","points":[]}"#;
+    let artifact = NewArtifact {
+        workspace_id: ws,
+        run_id,
+        kind: "equity_series",
+        content_type: "application/json",
+        bytes,
+    };
+    let stored = store_for_run(&pool, &store, artifact, 1 << 30).await.unwrap();
+    let found = find_for_run(&pool, ws, run_id, "equity_series").await.unwrap().unwrap();
+    assert_eq!(found.sha256, stored.sha256);
+    assert_eq!(store.get(&found.sha256).await.unwrap(), bytes);
+    assert!(find_for_run(&pool, ws, run_id, "drawdown_series").await.unwrap().is_none());
+    assert!(find_for_run(&pool, spectra_db::new_id(), run_id, "equity_series").await.unwrap().is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}

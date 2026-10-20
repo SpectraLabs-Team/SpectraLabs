@@ -383,6 +383,57 @@
         }
       }
     },
+    "/api/v1/datasets/preview": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Preview a file with ingest settings, or get suggested settings.",
+        "operationId": "preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Suggestions, and the parsed sample when settings were sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The sample is over 1 MB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid settings (`details.errors` lists every field), or the file does not match them (a missing column)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/jobs": {
       "get": {
         "tags": [
@@ -1127,6 +1178,109 @@
           }
         }
       },
+      "IngestColumns": {
+        "type": "object",
+        "description": "Header names (matched without regard to case).",
+        "required": [
+          "timestamp",
+          "open",
+          "high",
+          "low",
+          "close"
+        ],
+        "properties": {
+          "close": {
+            "type": "string",
+            "description": "Close price column."
+          },
+          "high": {
+            "type": "string",
+            "description": "High price column."
+          },
+          "low": {
+            "type": "string",
+            "description": "Low price column."
+          },
+          "open": {
+            "type": "string",
+            "description": "Open price column."
+          },
+          "symbol": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Symbol column, or null for a single-symbol file (then `default_symbol`)."
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "Timestamp column."
+          },
+          "volume": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Volume column, or null if the file has none (volume is then zero)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "IngestSettings": {
+        "type": "object",
+        "description": "Ingest settings (the JSON form of the engine's CSV options). Every field\nbelow without \"optional\" must be given: nothing is guessed.",
+        "required": [
+          "delimiter",
+          "time_format",
+          "utc_offset_minutes",
+          "columns"
+        ],
+        "properties": {
+          "columns": {
+            "$ref": "#/components/schemas/IngestColumns",
+            "description": "Which header name holds each field."
+          },
+          "default_symbol": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The symbol for every row when `columns.symbol` is null; not allowed otherwise."
+          },
+          "delimiter": {
+            "type": "string",
+            "description": "One punctuation character (not `\"`) or a tab."
+          },
+          "quality": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/QualityThresholds",
+                "description": "Optional quality-check thresholds."
+              }
+            ]
+          },
+          "skip_bad_rows": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Optional, default `false`: bad rows abort the load. `true` skips and counts them."
+          },
+          "time_format": {
+            "type": "string",
+            "description": "`iso8601`, `epoch_s`, `epoch_ms`, `epoch_us` or `epoch_ns`."
+          },
+          "utc_offset_minutes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Minutes east of UTC for ISO timestamps written without a zone\n(-720 to 840). A fixed offset: daylight saving is not modelled."
+          }
+        },
+        "additionalProperties": false
+      },
       "JobPage": {
         "type": "object",
         "description": "A page of jobs.",
@@ -1246,6 +1400,294 @@
           }
         }
       },
+      "Preview": {
+        "type": "object",
+        "description": "The sample, parsed.",
+        "required": [
+          "header",
+          "rows",
+          "rows_not_read",
+          "quality"
+        ],
+        "properties": {
+          "header": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The header, trimmed and lower-cased (how columns are matched)."
+          },
+          "quality": {
+            "$ref": "#/components/schemas/QualityReport",
+            "description": "The quality report of the parsed rows. Every bad row in the sample is\ncounted here, whatever `skip_bad_rows` says."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewRow"
+            },
+            "description": "Up to 200 parsed rows, sorted by timestamp then symbol. Prices are exact decimal text."
+          },
+          "rows_not_read": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Data rows in the sample beyond the first 200, not parsed.",
+            "minimum": 0
+          },
+          "would_abort": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why ingesting would stop with these settings (the first bad row when\nbad rows abort, or \"no valid data rows\"); null if these rows would load."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PreviewRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/datasets/preview` body.",
+        "required": [
+          "sample"
+        ],
+        "properties": {
+          "sample": {
+            "type": "string",
+            "description": "The start of the file as UTF-8 text, header included (at most 1 MB)."
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IngestSettings",
+                "description": "Ingest settings. Omit them to get only `suggestions`."
+              }
+            ]
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "`true` when `sample` was cut from a longer file: its last line may be\nincomplete, so it is ignored."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PreviewResponse": {
+        "type": "object",
+        "description": "`POST /api/v1/datasets/preview` response.",
+        "required": [
+          "suggestions"
+        ],
+        "properties": {
+          "preview": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Preview",
+                "description": "The sample parsed with `settings`; null when no settings were sent."
+              }
+            ]
+          },
+          "suggestions": {
+            "$ref": "#/components/schemas/Suggestions",
+            "description": "Proposals from the sample, for the person to confirm. Never applied."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PreviewRow": {
+        "type": "object",
+        "description": "One parsed row.",
+        "required": [
+          "timestamp",
+          "symbol",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "properties": {
+          "close": {
+            "type": "string"
+          },
+          "high": {
+            "type": "string"
+          },
+          "low": {
+            "type": "string"
+          },
+          "open": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "UTC, RFC 3339."
+          },
+          "volume": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "QualityReport": {
+        "type": "object",
+        "description": "A dataset's quality report (also what a dataset version stores).",
+        "required": [
+          "rows_total",
+          "rows_accepted",
+          "rows_rejected",
+          "warnings",
+          "symbols",
+          "first_ts_ns",
+          "last_ts_ns",
+          "bars_sha256",
+          "first_ts",
+          "last_ts",
+          "rejected_by_category",
+          "sample_issues",
+          "input_was_sorted",
+          "notes",
+          "symbol_stats",
+          "thresholds"
+        ],
+        "properties": {
+          "bars_sha256": {
+            "type": "string",
+            "description": "Fingerprint of the bars (recorded in backtest results)."
+          },
+          "first_ts": {
+            "type": "string",
+            "description": "First bar, RFC 3339."
+          },
+          "first_ts_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "First bar, nanoseconds since the epoch."
+          },
+          "input_was_sorted": {
+            "type": "boolean",
+            "description": "Whether rows arrived sorted by timestamp and symbol."
+          },
+          "last_ts": {
+            "type": "string",
+            "description": "Last bar, RFC 3339."
+          },
+          "last_ts_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Last bar, nanoseconds since the epoch."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Standing limitations of the processing."
+          },
+          "rejected_by_category": {
+            "type": "object",
+            "description": "Rejected rows by category (`bad_number`, `bad_timestamp`, `duplicate`, ...).",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "rows_accepted": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows that became bars.",
+            "minimum": 0
+          },
+          "rows_rejected": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows dropped (only when bad rows are skipped).",
+            "minimum": 0
+          },
+          "rows_total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Data rows read (header excluded).",
+            "minimum": 0
+          },
+          "sample_issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RowIssue"
+            },
+            "description": "The first rejected rows (at most 50)."
+          },
+          "symbol_stats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SymbolStats"
+            },
+            "description": "Per-symbol checks."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbol names."
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/QualityThresholds",
+            "description": "Thresholds the checks used."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Things worth a human look."
+          }
+        },
+        "additionalProperties": false
+      },
+      "QualityThresholds": {
+        "type": "object",
+        "description": "Quality-check thresholds.",
+        "properties": {
+          "gap_factor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "A gap is an interval longer than this many median intervals (default 5)."
+          },
+          "outlier_z": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Robust z-score of a close-to-close return that counts as an outlier (default 10)."
+          },
+          "stale_run": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Frozen bars in a row that count as a stale run (default 5).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "RiskRequest": {
         "type": "object",
         "description": "`POST /api/v1/risk` body.",
@@ -1307,6 +1749,32 @@
           }
         }
       },
+      "RowIssue": {
+        "type": "object",
+        "description": "A rejected row.",
+        "required": [
+          "line",
+          "category",
+          "message"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Rejection category."
+          },
+          "line": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based line in the file.",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string",
+            "description": "What was wrong."
+          }
+        },
+        "additionalProperties": false
+      },
       "StressRequest": {
         "type": "object",
         "description": "`POST /api/v1/stress` body (also the `stress` job payload).",
@@ -1344,6 +1812,169 @@
             "minimum": 0
           }
         }
+      },
+      "SuggestedColumns": {
+        "type": "object",
+        "description": "Suggested header name per field.",
+        "properties": {
+          "close": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "high": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "low": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "open": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "symbol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timestamp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "volume": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "Suggestions": {
+        "type": "object",
+        "description": "Suggested settings; null where there is no confident guess.",
+        "required": [
+          "header",
+          "columns"
+        ],
+        "properties": {
+          "columns": {
+            "$ref": "#/components/schemas/SuggestedColumns",
+            "description": "Header names matched by common aliases."
+          },
+          "delimiter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Delimiter that splits every sampled row into the same number of fields."
+          },
+          "header": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The header split with that delimiter, as written."
+          },
+          "time_format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Likely `time_format`."
+          },
+          "timestamps_have_zone": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "For ISO timestamps: whether they carry a zone (then the UTC offset does not apply to them)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SymbolStats": {
+        "type": "object",
+        "description": "Quality checks for one symbol.",
+        "required": [
+          "symbol",
+          "bars",
+          "first_ts",
+          "last_ts",
+          "median_interval_ns",
+          "gaps",
+          "largest_gap_ns",
+          "zero_volume_bars",
+          "outlier_returns",
+          "stale_runs"
+        ],
+        "properties": {
+          "bars": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars.",
+            "minimum": 0
+          },
+          "first_ts": {
+            "type": "string",
+            "description": "First bar, RFC 3339."
+          },
+          "gaps": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Intervals longer than `gap_factor` median intervals.",
+            "minimum": 0
+          },
+          "largest_gap_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Longest gap, nanoseconds."
+          },
+          "last_ts": {
+            "type": "string",
+            "description": "Last bar, RFC 3339."
+          },
+          "median_interval_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Median interval between bars, nanoseconds."
+          },
+          "outlier_returns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Returns beyond `outlier_z` robust sigma.",
+            "minimum": 0
+          },
+          "stale_runs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Runs of `stale_run` or more frozen bars.",
+            "minimum": 0
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol."
+          },
+          "zero_volume_bars": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars with zero volume.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       }
     }
   },
@@ -1363,6 +1994,10 @@
     {
       "name": "backtests",
       "description": "Backtests: jobs of kind backtest, and the built-in strategies"
+    },
+    {
+      "name": "datasets",
+      "description": "Data Studio: ingest settings, previews and datasets"
     }
   ]
 }

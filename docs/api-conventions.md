@@ -50,6 +50,16 @@ Every error has one shape, whatever produced it:
 `payload_too_large`, `unavailable`, `no_workspace`, …), `message` for people. `detail` is a
 deprecated copy of `message`, removed together with the old `/api/...` route aliases.
 
+Validation errors that concern several fields list them all at once in `details.errors`, each with
+a dotted field path (the Data Studio routes; see [datasets.md](datasets.md)):
+
+```json
+{ "code": "invalid_request", "message": "settings.delimiter: ...; settings.columns.close: required",
+  "details": { "errors": [ { "field": "settings.columns.close", "message": "required" } ] }, ... }
+```
+
+Other errors keep `details: null`.
+
 ## Request ids
 
 Each response carries `X-Request-Id`: the proxy's id when it sent a valid one (1–128 characters of

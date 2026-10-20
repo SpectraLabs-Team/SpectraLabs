@@ -96,6 +96,7 @@ pub struct StressRequest {
         crate::backtests_api::backtest_artifact,
         crate::backtests_api::list_datasets,
         crate::backtests_api::builtin_strategies,
+        crate::datasets_api::preview,
     ),
     components(schemas(
         ErrorDoc,
@@ -111,12 +112,25 @@ pub struct StressRequest {
         crate::backtests_api::BacktestPage,
         crate::backtests_api::DatasetVersionView,
         crate::backtests_api::DatasetList,
+        crate::datasets_api::PreviewRequest,
+        crate::datasets_api::IngestSettings,
+        crate::datasets_api::IngestColumns,
+        crate::datasets_api::QualityThresholds,
+        crate::datasets_api::PreviewResponse,
+        crate::datasets_api::Suggestions,
+        crate::datasets_api::SuggestedColumns,
+        crate::datasets_api::Preview,
+        crate::datasets_api::PreviewRow,
+        crate::datasets_api::QualityReport,
+        crate::datasets_api::RowIssue,
+        crate::datasets_api::SymbolStats,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
         (name = "engine", description = "Synchronous engine calls"),
         (name = "jobs", description = "Queued engine work, run by spectra-worker"),
         (name = "backtests", description = "Backtests: jobs of kind backtest, and the built-in strategies"),
+        (name = "datasets", description = "Data Studio: ingest settings, previews and datasets"),
     )
 )]
 pub struct ApiDoc;
@@ -150,6 +164,7 @@ mod tests {
             "/api/v1/backtests/{id}/artifacts/{kind}",
             "/api/v1/datasets",
             "/api/v1/strategies/builtin",
+            "/api/v1/datasets/preview",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

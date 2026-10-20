@@ -5,12 +5,16 @@
 
 pub mod dataset;
 pub mod datastore;
+pub mod report;
+pub mod settings;
 pub mod time;
 
 pub use dataset::{
     assess_quality, compute_dataset_id, derive_dataset, format_quality_report, load_csv, load_csv_file,
-    CsvOptions, DataQualityReport, Dataset, DatasetInfo, InvalidRowPolicy, RowIssue, SymbolStats,
-    SymbolTable,
+    preview_csv, CsvOptions, CsvPreview, DataQualityReport, Dataset, DatasetInfo, InvalidRowPolicy, RowIssue,
+    SymbolStats, SymbolTable,
 };
 pub use datastore::DataStore;
+pub use report::{preview_json, quality_report_json};
+pub use settings::{parse_settings, settings_json, suggest, SettingsError, Suggestions};
 pub use time::{format_timestamp, parse_fixed, parse_timestamp, ParsedTime, TimeFormat, TimeOptions};

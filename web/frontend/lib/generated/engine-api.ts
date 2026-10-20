@@ -128,6 +128,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasets/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview a file with ingest settings, or get suggested settings. */
+        post: operations["preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -507,6 +524,44 @@ export interface components {
             /** @description Matches the `X-Request-Id` response header. */
             request_id: string;
         };
+        /** @description Header names (matched without regard to case). */
+        IngestColumns: {
+            /** @description Close price column. */
+            close: string;
+            /** @description High price column. */
+            high: string;
+            /** @description Low price column. */
+            low: string;
+            /** @description Open price column. */
+            open: string;
+            /** @description Symbol column, or null for a single-symbol file (then `default_symbol`). */
+            symbol?: string | null;
+            /** @description Timestamp column. */
+            timestamp: string;
+            /** @description Volume column, or null if the file has none (volume is then zero). */
+            volume?: string | null;
+        };
+        /** @description Ingest settings (the JSON form of the engine's CSV options). Every field
+         *     below without "optional" must be given: nothing is guessed. */
+        IngestSettings: {
+            /** @description Which header name holds each field. */
+            columns: components["schemas"]["IngestColumns"];
+            /** @description The symbol for every row when `columns.symbol` is null; not allowed otherwise. */
+            default_symbol?: string | null;
+            /** @description One punctuation character (not `"`) or a tab. */
+            delimiter: string;
+            quality?: null | components["schemas"]["QualityThresholds"];
+            /** @description Optional, default `false`: bad rows abort the load. `true` skips and counts them. */
+            skip_bad_rows?: boolean | null;
+            /** @description `iso8601`, `epoch_s`, `epoch_ms`, `epoch_us` or `epoch_ns`. */
+            time_format: string;
+            /**
+             * Format: int32
+             * @description Minutes east of UTC for ISO timestamps written without a zone
+             *     (-720 to 840). A fixed offset: daylight saving is not modelled.
+             */
+            utc_offset_minutes: number;
+        };
         /** @description A page of jobs. */
         JobPage: {
             /** @description Newest first. */
@@ -575,6 +630,120 @@ export interface components {
             /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
             status: string;
         };
+        /** @description The sample, parsed. */
+        Preview: {
+            /** @description The header, trimmed and lower-cased (how columns are matched). */
+            header: string[];
+            /** @description The quality report of the parsed rows. Every bad row in the sample is
+             *     counted here, whatever `skip_bad_rows` says. */
+            quality: components["schemas"]["QualityReport"];
+            /** @description Up to 200 parsed rows, sorted by timestamp then symbol. Prices are exact decimal text. */
+            rows: components["schemas"]["PreviewRow"][];
+            /**
+             * Format: int64
+             * @description Data rows in the sample beyond the first 200, not parsed.
+             */
+            rows_not_read: number;
+            /** @description Why ingesting would stop with these settings (the first bad row when
+             *     bad rows abort, or "no valid data rows"); null if these rows would load. */
+            would_abort?: string | null;
+        };
+        /** @description `POST /api/v1/datasets/preview` body. */
+        PreviewRequest: {
+            /** @description The start of the file as UTF-8 text, header included (at most 1 MB). */
+            sample: string;
+            settings?: null | components["schemas"]["IngestSettings"];
+            /** @description `true` when `sample` was cut from a longer file: its last line may be
+             *     incomplete, so it is ignored. */
+            truncated?: boolean;
+        };
+        /** @description `POST /api/v1/datasets/preview` response. */
+        PreviewResponse: {
+            preview?: null | components["schemas"]["Preview"];
+            /** @description Proposals from the sample, for the person to confirm. Never applied. */
+            suggestions: components["schemas"]["Suggestions"];
+        };
+        /** @description One parsed row. */
+        PreviewRow: {
+            close: string;
+            high: string;
+            low: string;
+            open: string;
+            symbol: string;
+            /** @description UTC, RFC 3339. */
+            timestamp: string;
+            volume: string;
+        };
+        /** @description A dataset's quality report (also what a dataset version stores). */
+        QualityReport: {
+            /** @description Fingerprint of the bars (recorded in backtest results). */
+            bars_sha256: string;
+            /** @description First bar, RFC 3339. */
+            first_ts: string;
+            /**
+             * Format: int64
+             * @description First bar, nanoseconds since the epoch.
+             */
+            first_ts_ns: number;
+            /** @description Whether rows arrived sorted by timestamp and symbol. */
+            input_was_sorted: boolean;
+            /** @description Last bar, RFC 3339. */
+            last_ts: string;
+            /**
+             * Format: int64
+             * @description Last bar, nanoseconds since the epoch.
+             */
+            last_ts_ns: number;
+            /** @description Standing limitations of the processing. */
+            notes: string[];
+            /** @description Rejected rows by category (`bad_number`, `bad_timestamp`, `duplicate`, ...). */
+            rejected_by_category: {
+                [key: string]: number;
+            };
+            /**
+             * Format: int64
+             * @description Rows that became bars.
+             */
+            rows_accepted: number;
+            /**
+             * Format: int64
+             * @description Rows dropped (only when bad rows are skipped).
+             */
+            rows_rejected: number;
+            /**
+             * Format: int64
+             * @description Data rows read (header excluded).
+             */
+            rows_total: number;
+            /** @description The first rejected rows (at most 50). */
+            sample_issues: components["schemas"]["RowIssue"][];
+            /** @description Per-symbol checks. */
+            symbol_stats: components["schemas"]["SymbolStats"][];
+            /** @description Symbol names. */
+            symbols: string[];
+            /** @description Thresholds the checks used. */
+            thresholds: components["schemas"]["QualityThresholds"];
+            /** @description Things worth a human look. */
+            warnings: string[];
+        };
+        /** @description Quality-check thresholds. */
+        QualityThresholds: {
+            /**
+             * Format: double
+             * @description A gap is an interval longer than this many median intervals (default 5).
+             */
+            gap_factor?: number | null;
+            /**
+             * Format: double
+             * @description Robust z-score of a close-to-close return that counts as an outlier (default 10).
+             */
+            outlier_z?: number | null;
+            /**
+             * Format: int64
+             * @description Frozen bars in a row that count as a stale run (default 5).
+             */
+            stale_run?: number | null;
+        };
         /** @description `POST /api/v1/risk` body. */
         RiskRequest: {
             /** @description `auto`, `cpu` or `parallel`. */
@@ -604,6 +773,18 @@ export interface components {
              */
             simulations?: number | null;
         };
+        /** @description A rejected row. */
+        RowIssue: {
+            /** @description Rejection category. */
+            category: string;
+            /**
+             * Format: int64
+             * @description 1-based line in the file.
+             */
+            line: number;
+            /** @description What was wrong. */
+            message: string;
+        };
         /** @description `POST /api/v1/stress` body (also the `stress` job payload). */
         StressRequest: {
             /** @description Portfolio CSV. */
@@ -620,6 +801,73 @@ export interface components {
              * @description Default 1,000,000.
              */
             simulations?: number | null;
+        };
+        /** @description Suggested header name per field. */
+        SuggestedColumns: {
+            close?: string | null;
+            high?: string | null;
+            low?: string | null;
+            open?: string | null;
+            symbol?: string | null;
+            timestamp?: string | null;
+            volume?: string | null;
+        };
+        /** @description Suggested settings; null where there is no confident guess. */
+        Suggestions: {
+            /** @description Header names matched by common aliases. */
+            columns: components["schemas"]["SuggestedColumns"];
+            /** @description Delimiter that splits every sampled row into the same number of fields. */
+            delimiter?: string | null;
+            /** @description The header split with that delimiter, as written. */
+            header: string[];
+            /** @description Likely `time_format`. */
+            time_format?: string | null;
+            /** @description For ISO timestamps: whether they carry a zone (then the UTC offset does not apply to them). */
+            timestamps_have_zone?: boolean | null;
+        };
+        /** @description Quality checks for one symbol. */
+        SymbolStats: {
+            /**
+             * Format: int64
+             * @description Bars.
+             */
+            bars: number;
+            /** @description First bar, RFC 3339. */
+            first_ts: string;
+            /**
+             * Format: int64
+             * @description Intervals longer than `gap_factor` median intervals.
+             */
+            gaps: number;
+            /**
+             * Format: int64
+             * @description Longest gap, nanoseconds.
+             */
+            largest_gap_ns: number;
+            /** @description Last bar, RFC 3339. */
+            last_ts: string;
+            /**
+             * Format: int64
+             * @description Median interval between bars, nanoseconds.
+             */
+            median_interval_ns: number;
+            /**
+             * Format: int64
+             * @description Returns beyond `outlier_z` robust sigma.
+             */
+            outlier_returns: number;
+            /**
+             * Format: int64
+             * @description Runs of `stale_run` or more frozen bars.
+             */
+            stale_runs: number;
+            /** @description Symbol. */
+            symbol: string;
+            /**
+             * Format: int64
+             * @description Bars with zero volume.
+             */
+            zero_volume_bars: number;
         };
     };
     responses: never;
@@ -897,6 +1145,48 @@ export interface operations {
                 };
             };
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Suggestions, and the parsed sample when settings were sent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewResponse"];
+                };
+            };
+            /** @description The sample is over 1 MB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid settings (`details.errors` lists every field), or the file does not match them (a missing column) */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

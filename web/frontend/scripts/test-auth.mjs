@@ -691,6 +691,10 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
     assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
     assert.ok(!engineRoutes.allowsMethod(routes[p], 'POST'), `${p} is read-only`);
   }
+  // Data Studio (M1): previewing a file is part of uploading one, so viewers can't.
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/preview'], 'POST'), 'editor');
+  assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/preview'], 'GET'), 'preview is POST only');
+  assert.equal(engineRoutes.routePolicyKey('api/v1/datasets/preview'), 'api/v1/datasets/preview');
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {

@@ -5,8 +5,8 @@ import type { WorkspaceRole } from './workspaces';
  * workspace role (in the caller's active workspace) needed to call it. Anything not listed is a
  * 404, so new engine routes stay private until added here.
  *
- *   viewer → reads (sample data, telemetry)
- *   editor → computations ("create and run") and broker account data
+ *   viewer → reads (sample data, telemetry, datasets and backtests)
+ *   editor → computations ("create and run"), data uploads, and broker account data
  */
 export type EngineMethod = 'GET' | 'POST';
 export type EngineRoute = {
@@ -35,6 +35,8 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/backtests/{id}/series': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/backtests/{id}/artifacts/{kind}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   'api/v1/datasets': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  // Data Studio (M1). A preview stores nothing, but it is the first step of an upload: editors only.
+  'api/v1/datasets/preview': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
 };
 

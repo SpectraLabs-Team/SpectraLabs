@@ -498,6 +498,7 @@ async fn openapi_spec_is_served_unsigned() {
         "/api/v1/backtests/{id}/artifacts/{kind}",
         "/api/v1/datasets",
         "/api/v1/strategies/builtin",
+        "/api/v1/datasets/preview",
         "/api/v1/risk",
         "/ready",
     ] {
@@ -513,4 +514,133 @@ async fn prometheus_metrics_are_served_unsigned() {
     let (status, headers, _) = send(cfg(), unsigned("GET", "/metrics")).await;
     assert_eq!(status, 200);
     assert!(headers.get("content-type").unwrap().to_str().unwrap().starts_with("text/plain"));
+}
+
+// ---------------------------------------------------------------------------
+// Data Studio: POST /api/v1/datasets/preview (M1 tasks 2-3)
+// ---------------------------------------------------------------------------
+
+const PREVIEW_CSV: &str = "Date,Open,High,Low,Close,Volume\n\
+    2024-01-02,470.10,472,469,471.5,100\n\
+    2024-01-03,471.5,473,470,472.25,0\n\
+    2024-01-04,abc,1,1,1,1\n";
+
+fn preview_settings() -> Json {
+    Json::parse(
+        r#"{"delimiter":",","time_format":"iso8601","utc_offset_minutes":0,"default_symbol":"SPY",
+            "columns":{"timestamp":"Date","open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"}}"#,
+    )
+    .unwrap()
+}
+
+fn preview_body(sample: &str, settings: Option<Json>) -> Json {
+    let mut b = Json::object().with("sample", Json::string(sample));
+    if let Some(s) = settings {
+        b = b.with("settings", s);
+    }
+    b
+}
+
+#[tokio::test]
+async fn preview_without_settings_only_suggests() {
+    let (status, j) = call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, None))).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    assert!(j.at("preview").unwrap().is_null());
+    let s = j.at("suggestions").unwrap();
+    assert_eq!(s.at("delimiter").unwrap().as_str().unwrap(), ",");
+    assert_eq!(s.at("time_format").unwrap().as_str().unwrap(), "iso8601");
+    assert_eq!(s.at("columns").unwrap().at("close").unwrap().as_str().unwrap(), "Close");
+    assert!(s.at("columns").unwrap().at("symbol").unwrap().is_null());
+}
+
+#[tokio::test]
+async fn preview_parses_the_sample_and_reports_every_bad_row() {
+    let (status, j) =
+        call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, Some(preview_settings())))).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    // The response is exactly the documented schema (deny_unknown_fields on every type).
+    let typed: spectra_api::datasets_api::PreviewResponse = serde_json::from_str(&j.dump()).unwrap();
+    let p = typed.preview.expect("preview");
+    assert_eq!(p.rows.len(), 2);
+    assert_eq!((p.rows[0].symbol.as_str(), p.rows[0].open.as_str()), ("SPY", "470.1"));
+    assert_eq!(p.quality.rows_rejected, 1);
+    assert_eq!(p.quality.rejected_by_category.get("bad_number"), Some(&1));
+    assert!(p.would_abort.as_deref().unwrap().starts_with("line 4"), "bad rows abort by default");
+    assert_eq!(p.quality.symbol_stats[0].zero_volume_bars, 1);
+
+    let mut skip = preview_settings();
+    skip.set("skip_bad_rows", Json::boolean(true)).unwrap();
+    let (_, j) = call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, Some(skip)))).await;
+    assert!(j.at("preview").unwrap().at("would_abort").unwrap().is_null());
+}
+
+#[tokio::test]
+async fn preview_lists_every_invalid_setting_with_its_path() {
+    let settings = Json::parse(r#"{"delimiter":"::","columns":{"open":"Open"},"colour":1}"#).unwrap();
+    let (status, j) =
+        call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, Some(settings)))).await;
+    assert_eq!(status, 422, "{}", j.dump());
+    assert_eq!(j.at("code").unwrap().as_str().unwrap(), "invalid_request");
+    let fields: Vec<String> = j
+        .at("details")
+        .unwrap()
+        .at("errors")
+        .unwrap()
+        .items()
+        .unwrap()
+        .iter()
+        .map(|e| e.at("field").unwrap().as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            "settings.colour",
+            "settings.delimiter",
+            "settings.time_format",
+            "settings.utc_offset_minutes",
+            "settings.columns.timestamp",
+            "settings.columns.high",
+            "settings.columns.low",
+            "settings.columns.close",
+            "settings.default_symbol",
+        ]
+    );
+    assert!(j.at("message").unwrap().as_str().unwrap().contains("settings.time_format: required"));
+}
+
+#[tokio::test]
+async fn preview_refuses_a_file_that_does_not_match_the_settings() {
+    let mut settings = preview_settings();
+    let cols = Json::parse(
+        r#"{"timestamp":"Date","open":"Open","high":"High","low":"Low","close":"Adj Close","volume":null}"#,
+    )
+    .unwrap();
+    settings.set("columns", cols).unwrap();
+    let (status, j) =
+        call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, Some(settings)))).await;
+    assert_eq!(status, 422, "{}", j.dump());
+    let e = &j.at("details").unwrap().at("errors").unwrap().items().unwrap()[0];
+    assert_eq!(e.at("field").unwrap().as_str().unwrap(), "sample");
+    assert!(e.at("message").unwrap().as_str().unwrap().contains("missing required column: close"));
+}
+
+#[tokio::test]
+async fn preview_limits_the_sample_and_drops_a_cut_last_line() {
+    let big = "x".repeat(spectra_api::datasets_api::MAX_PREVIEW_SAMPLE + 1);
+    assert_eq!(call(post("/api/v1/datasets/preview", &preview_body(&big, None))).await.0, 413);
+
+    // The last line was cut mid-row: with `truncated` it is ignored rather than reported as bad.
+    let cut = "Date,Open,High,Low,Close,Volume\n2024-01-02,470.10,472,469,471.5,100\n2024-01-03,47";
+    let body = preview_body(cut, Some(preview_settings())).with("truncated", Json::boolean(true));
+    let (status, j) = call(post("/api/v1/datasets/preview", &body)).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let q = j.at("preview").unwrap().at("quality").unwrap();
+    assert_eq!(
+        (q.at("rows_total").unwrap().as_int().unwrap(), q.at("rows_rejected").unwrap().as_int().unwrap()),
+        (1, 0)
+    );
+
+    let extra = preview_body(PREVIEW_CSV, None).with("file", Json::string("x"));
+    assert_eq!(call(post("/api/v1/datasets/preview", &extra)).await.0, 422, "unknown fields are refused");
+    assert_eq!(call(unsigned("POST", "/api/v1/datasets/preview")).await.0, 401);
 }

@@ -4,6 +4,76 @@
  */
 
 export interface paths {
+    "/api/v1/backtests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a backtest. */
+        post: operations["create_backtest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One backtest: status and progress, then the summary and fingerprints. */
+        get: operations["get_backtest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a backtest: a queued one stops at once, a running one at its next
+         *     bar group (the worker checks within a few seconds). */
+        post: operations["cancel_backtest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{id}/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A finished backtest's equity or drawdown series, downsampled for charts:
+         *     `{kind, total_points, downsampled, points: [[ts_ns, value], ...]}`. */
+        get: operations["backtest_series"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/benchmark": {
         parameters: {
             query?: never;
@@ -125,6 +195,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategies/builtin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Built-in strategies with their parameter schemas, the configuration form's
+         *     JSON Schema, and the configuration presets: everything the Studio needs to
+         *     build the backtest form. */
+        get: operations["builtin_strategies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stress": {
         parameters: {
             query?: never;
@@ -181,6 +270,53 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description A backtest as the API shows it. */
+        BacktestView: {
+            /** @description Stored files `[{kind, file_name, content_type, sha256, size}]`, once finished. */
+            artifacts?: Record<string, never> | null;
+            /** @description A cancel was asked for while it ran. */
+            cancel_requested: boolean;
+            /**
+             * Format: date-time
+             * @description Queued at (UTC, RFC 3339).
+             */
+            created_at: string;
+            /** @description Why it failed (or the latest retryable error). */
+            error?: string | null;
+            /** @description Engine, dataset, config, result and strategy hashes, once finished. */
+            fingerprints?: Record<string, never> | null;
+            /**
+             * Format: date-time
+             * @description Finished at.
+             */
+            finished_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The job id (UUIDv7); use it for every `/backtests/{id}` route.
+             */
+            id: string;
+            /**
+             * Format: float
+             * @description 0..1, updated with every worker heartbeat while it runs.
+             */
+            progress: number;
+            /** @description What was asked for: dataset version, strategy, params, config. */
+            request: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The recorded run, once finished.
+             */
+            run_id?: string | null;
+            /**
+             * Format: date-time
+             * @description Latest attempt started at.
+             */
+            started_at?: string | null;
+            /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
+            status: string;
+            /** @description Metrics, drawdown, tail, activity and trade statistics, once finished. */
+            summary?: Record<string, never> | null;
+        };
         /** @description `POST /api/v1/benchmark` body (also the `benchmark` job payload). */
         BenchmarkRequest: {
             /** @description Portfolio CSV. */
@@ -200,6 +336,25 @@ export interface components {
              * @description 0..5, default 1.
              */
             warmups?: number | null;
+        };
+        /** @description `POST /api/v1/backtests` body: the `backtest` job payload, plus a priority. */
+        CreateBacktest: {
+            /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
+            config?: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description A dataset version of the caller's workspace.
+             */
+            dataset_version_id: string;
+            /** @description Strategy parameters; missing ones take their defaults. */
+            params?: Record<string, never> | null;
+            /**
+             * Format: int32
+             * @description -10..10; higher runs first. Default 0.
+             */
+            priority?: number;
+            /** @description A built-in strategy name (see `GET /api/v1/strategies/builtin`). */
+            strategy: string;
         };
         /** @description `POST /api/v1/jobs` body. */
         CreateJob: {
@@ -349,6 +504,150 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    create_backtest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBacktest"];
+            };
+        };
+        responses: {
+            /** @description Queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestView"];
+                };
+            };
+            /** @description The account has no workspace (code `no_workspace`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every problem with the strategy, params, config or dataset version */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_backtest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest (job) id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    cancel_backtest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest (job) id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    backtest_series: {
+        parameters: {
+            query?: {
+                /** @description equity (default) or drawdown */
+                kind?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Backtest (job) id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The series */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such backtest, or no such series */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The backtest has not succeeded (yet) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     benchmark_handler: {
         parameters: {
             query?: never;
@@ -573,6 +872,24 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description `{csv}` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    builtin_strategies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description {strategies, config_schema, presets} */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -2729,8 +2729,10 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
+ "spectra-backtest",
  "spectra-core",
  "spectra-db",
+ "spectra-engine",
  "spectra-risk",
  "tokio",
  "tower",
@@ -2746,6 +2748,7 @@ name = "spectra-backtest"
 version = "0.1.0"
 dependencies = [
  "spectra-core",
+ "spectra-data",
  "spectra-engine",
  "spectra-registry",
  "spectra-research",
@@ -2783,6 +2786,7 @@ dependencies = [
  "object_store",
  "serde_json",
  "spectra-core",
+ "spectra-data",
  "sqlx",
  "tokio",
  "uuid",

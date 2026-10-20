@@ -17,16 +17,21 @@
 //! (for container health checks) and Prometheus `/metrics` (job counts and
 //! durations, which only the worker process records).
 
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use spectra_api::config::{ArtifactStorage, WorkerConfig};
 use spectra_api::{engine, observability, shutdown_signal};
+use spectra_backtest::{run_job_from_store, JobFailure, JobProducts};
 use spectra_core::{Json, ENGINE_VERSION};
 use spectra_db::artifacts::{store_for_run, ArtifactBackend, ArtifactStore, NewArtifact};
+use spectra_db::datasets::{self, NewBacktestRun};
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
 use spectra_db::{PgPool, PoolConfig};
+use spectra_engine::{Progress, RunControl, RunLimits};
 use std::time::Instant;
 use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
@@ -47,6 +52,11 @@ struct Ctx {
     store: ArtifactBackend,
     worker_id: String,
     quota: i64,
+    /// Dataset store that backtests read.
+    data_dir: PathBuf,
+    /// Size limits for one backtest.
+    backtest_max_bars: usize,
+    backtest_max_instruments: usize,
 }
 
 /// The configured artifact backend.
@@ -131,6 +141,7 @@ async fn main() -> ExitCode {
         concurrency = cfg.concurrency,
         workspace_max_running = cfg.workspace_max_running,
         artifact_store = %store.describe(),
+        data_dir = %cfg.data_dir.display(),
         "worker started"
     );
 
@@ -198,6 +209,9 @@ async fn main() -> ExitCode {
         store,
         worker_id: worker_id.clone(),
         quota: cfg.artifact_quota_bytes,
+        data_dir: cfg.data_dir.clone(),
+        backtest_max_bars: cfg.backtest_max_bars,
+        backtest_max_instruments: cfg.backtest_max_instruments,
     });
     let slots = Arc::new(Semaphore::new(cfg.concurrency));
     let mut running = JoinSet::new();
@@ -262,6 +276,10 @@ enum Outcome {
 /// Runs one claimed job to a terminal state (or until another worker takes it over).
 #[allow(clippy::needless_pass_by_value)] // the spawned task owns its job and permit
 async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
+    if job.kind == spectra_backtest::JOB_KIND {
+        run_backtest_job(ctx, job, permit).await;
+        return;
+    }
     let job_start = Instant::now();
     let (kind, payload_text) = (job.kind.clone(), job.payload.to_string());
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -427,5 +445,238 @@ async fn finish(ctx: &Ctx, job: &Job, report: &Json) -> Result<(), spectra_db::E
     if jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await?.is_none() {
         warn!(job_id = %job.id, "job finished, but another worker had taken it over");
     }
+    Ok(())
+}
+
+/// Records a job's terminal status in the metrics.
+fn record_metrics(kind: &str, status: &str, started: Instant) {
+    observability::JobMetrics::job_completed(kind, status);
+    observability::JobMetrics::job_duration(kind, status, started.elapsed().as_secs_f64());
+}
+
+/// Fails a job (retryable failures go back to the queue) and records the metrics.
+async fn fail_job(ctx: &Ctx, job: &Job, started: Instant, message: &str, retryable: bool) {
+    record_metrics(&job.kind, if retryable { "failed_retryable" } else { "failed_permanent" }, started);
+    if let Err(e) = jobs::fail(&ctx.pool, job.id, &ctx.worker_id, message, retryable).await {
+        error!(job_id = %job.id, "could not record the failure: {e}");
+    }
+}
+
+/// Converts an engine JSON document to the database's JSON type.
+fn to_db_json(j: &Json) -> serde_json::Value {
+    serde_json::from_str(&engine::to_text(j)).unwrap_or(serde_json::Value::Null)
+}
+
+/// How a backtest's blocking part ended.
+#[allow(clippy::large_enum_variant)] // one value per job, moved once
+enum BacktestEnd {
+    Done(Result<JobProducts, JobFailure>),
+    Panicked,
+    /// The run ignored cancellation past its deadline; its result is discarded.
+    Overran(Duration),
+}
+
+/// A `backtest` job (M3 task 5). Unlike the other kinds, the engine reports
+/// progress (sent with each heartbeat) and stops cleanly when cancelled or out
+/// of time, so the slot is freed as soon as the job ends.
+#[allow(clippy::needless_pass_by_value)] // the spawned task owns its job and permit
+async fn run_backtest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
+    let started = Instant::now();
+    let pool = &ctx.pool;
+    let wid = ctx.worker_id.as_str();
+
+    // The payload was validated when queued; check again, it may predate a change.
+    let parsed = Json::parse(&job.payload.to_string())
+        .map_err(|e| format!("Invalid payload: {e}"))
+        .and_then(|p| engine::backtest_job(&p).map_err(|(_, m)| m));
+    let bt = match parsed {
+        Ok(j) => j,
+        Err(msg) => return fail_job(&ctx, &job, started, &msg, false).await,
+    };
+    let Ok(version_id) = Uuid::parse_str(&bt.dataset_version_id) else {
+        return fail_job(&ctx, &job, started, "dataset_version_id must be a UUID.", false).await;
+    };
+    let version = match datasets::resolve_version(pool, job.workspace_id, version_id).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            let msg = "The dataset version no longer exists in this workspace.";
+            return fail_job(&ctx, &job, started, msg, false).await;
+        }
+        Err(e) => {
+            let msg = format!("Could not look up the dataset version: {e}");
+            return fail_job(&ctx, &job, started, &msg, true).await;
+        }
+    };
+
+    // The engine stops itself shortly before the job's limit; the deadline below is a backstop.
+    let timeout = engine::job_timeout(&job.kind);
+    let cancel = Arc::new(AtomicBool::new(false));
+    let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+    let mut work = {
+        let (cancel, progress) = (Arc::clone(&cancel), Arc::clone(&progress));
+        let (data_dir, checksum, bt) = (ctx.data_dir.clone(), version.checksum.clone(), bt.clone());
+        let limits = RunLimits {
+            max_bars: Some(ctx.backtest_max_bars),
+            max_instruments: Some(ctx.backtest_max_instruments),
+            max_wall_time: Some(timeout.saturating_sub(Duration::from_secs(15))),
+        };
+        tokio::task::spawn_blocking(move || {
+            let mut report = |p: Progress| progress.store((p.fraction() as f32).to_bits(), Ordering::Relaxed);
+            let mut ctl = RunControl {
+                limits,
+                cancel: Some(&*cancel),
+                progress: Some(&mut report),
+                progress_every: 1000,
+            };
+            run_job_from_store(&data_dir, &checksum, &bt, &mut ctl)
+        })
+    };
+
+    let deadline = tokio::time::Instant::now() + timeout + Duration::from_secs(30);
+    let mut beat = tokio::time::interval(HEARTBEAT);
+    beat.tick().await; // the first tick is immediate; the claim was the first heartbeat
+    let (mut cancel_requested, mut lost) = (false, false);
+    let end = loop {
+        tokio::select! {
+            res = &mut work => break match res {
+                Ok(r) => BacktestEnd::Done(r),
+                Err(_) => BacktestEnd::Panicked,
+            },
+            _ = beat.tick() => {
+                let p = f32::from_bits(progress.load(Ordering::Relaxed));
+                match jobs::heartbeat(pool, job.id, wid, Some(p)).await {
+                    Ok(Beat::Continue) => {}
+                    Ok(Beat::CancelRequested) => {
+                        cancel_requested = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Ok(Beat::Lost) => {
+                        lost = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Err(e) => error!(job_id = %job.id, "heartbeat failed: {e}"),
+                }
+            },
+            () = tokio::time::sleep_until(deadline) => {
+                cancel.store(true, Ordering::Relaxed);
+                break BacktestEnd::Overran(timeout);
+            }
+        }
+    };
+
+    if matches!(end, BacktestEnd::Overran(_)) {
+        // Keep the slot until the computation really returns.
+        tokio::spawn(async move {
+            let _ = work.await;
+            drop(permit);
+        });
+    } else {
+        drop(permit);
+    }
+
+    if lost {
+        warn!(job_id = %job.id, "job was taken over after a missed heartbeat; dropping it");
+        record_metrics(&job.kind, "lost", started);
+        return;
+    }
+    match end {
+        BacktestEnd::Done(Ok(products)) => {
+            match finish_backtest(&ctx, &job, &bt, &version, &products).await {
+                Ok(()) => record_metrics(&job.kind, "succeeded", started),
+                // The job stays running without heartbeats, so the stale sweep requeues it.
+                Err(e) => error!(job_id = %job.id, "could not record the backtest: {e}"),
+            }
+        }
+        BacktestEnd::Done(Err(JobFailure::Cancelled)) => {
+            if !cancel_requested {
+                warn!(job_id = %job.id, "backtest stopped without a cancel request");
+            }
+            record_metrics(&job.kind, "cancelled", started);
+            if let Err(e) = jobs::mark_cancelled(pool, job.id, wid).await {
+                error!(job_id = %job.id, "could not record the cancellation: {e}");
+            }
+        }
+        BacktestEnd::Done(Err(JobFailure::Failed { retryable, message })) => {
+            fail_job(&ctx, &job, started, &message, retryable).await;
+        }
+        BacktestEnd::Panicked => {
+            fail_job(&ctx, &job, started, "The engine crashed while running this backtest.", true).await;
+        }
+        BacktestEnd::Overran(t) => {
+            let msg = format!("The backtest ran longer than its {} s limit.", t.as_secs());
+            fail_job(&ctx, &job, started, &msg, false).await;
+        }
+    }
+}
+
+/// Records the run and stores every output file, then completes the job.
+async fn finish_backtest(
+    ctx: &Ctx,
+    job: &Job,
+    bt: &spectra_backtest::BacktestJob,
+    version: &datasets::DatasetVersion,
+    products: &JobProducts,
+) -> Result<(), spectra_db::Error> {
+    let summary = to_db_json(&products.summary);
+    let run_id = datasets::insert_backtest_run(
+        &ctx.pool,
+        &NewBacktestRun {
+            id: spectra_db::new_id(),
+            workspace_id: job.workspace_id,
+            job_id: job.id,
+            params: to_db_json(&products.params),
+            metrics: summary.clone(),
+            seed: i64::try_from(bt.request.config.seed).ok(),
+            engine_version: products.run.engine_version.clone(),
+            created_by: job.created_by,
+            started_at: job.started_at.unwrap_or_else(chrono::Utc::now),
+            dataset_version_id: version.id,
+        },
+    )
+    .await?;
+
+    let mut stored = Vec::new();
+    let mut problems = Vec::new();
+    for f in &products.files {
+        let artifact = NewArtifact {
+            workspace_id: job.workspace_id,
+            run_id,
+            kind: f.kind,
+            content_type: f.media_type,
+            bytes: &f.bytes,
+        };
+        match store_for_run(&ctx.pool, &ctx.store, artifact, ctx.quota).await {
+            Ok(s) => stored.push(serde_json::json!({
+                "kind": f.kind,
+                "file_name": f.file_name,
+                "content_type": f.media_type,
+                "sha256": s.sha256,
+                "size": s.size,
+            })),
+            Err(e) => {
+                error!(job_id = %job.id, kind = f.kind, "artifact not stored: {e}");
+                problems.push(serde_json::json!({ "kind": f.kind, "error": e.to_string() }));
+            }
+        }
+    }
+
+    let result = serde_json::json!({
+        "run_id": run_id,
+        "dataset_version_id": version.id,
+        "fingerprints": {
+            "engine_version": products.run.engine_version,
+            "dataset_sha256": products.run.dataset_sha256,
+            "config_sha256": products.run.config_sha256,
+            "result_sha256": products.run.result_sha256,
+            "strategy_sha256": bt.request.strategy.source_sha256(),
+        },
+        "summary": summary,
+        "artifacts": stored,
+        "artifact_errors": problems,
+    });
+    if jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await?.is_none() {
+        warn!(job_id = %job.id, "backtest finished, but another worker had taken it over");
+    }
+    info!(job_id = %job.id, run_id = %run_id, result_sha256 = %products.run.result_sha256, "backtest recorded");
     Ok(())
 }

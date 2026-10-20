@@ -218,15 +218,24 @@ pub fn validate_job(kind: &str, payload: &Json) -> Result<(), (u16, String)> {
         return Err(unprocessable("payload must be a JSON object."));
     }
     match kind {
+        "backtest" => backtest_job(payload).map(|_| ()),
         "benchmark" => benchmark_args(payload).map(|_| ()),
         "risk" => risk_args(payload).map(|_| ()),
         "stress" => stress_args(payload).map(|_| ()),
-        _ => Err(unprocessable(format!("Unknown job kind {kind:?}; use benchmark, risk or stress."))),
+        _ => Err(unprocessable(format!("Unknown job kind {kind:?}; use {}.", JOB_KINDS.join(", ")))),
     }
 }
 
 /// Job kinds supported by the background worker.
-pub const JOB_KINDS: [&str; 3] = ["benchmark", "risk", "stress"];
+pub const JOB_KINDS: [&str; 4] = ["backtest", "benchmark", "risk", "stress"];
+
+/// A validated `backtest` payload, or a 422 listing every problem.
+///
+/// # Errors
+/// 422 with the field errors joined into one message.
+pub fn backtest_job(payload: &Json) -> Result<spectra_backtest::BacktestJob, (u16, String)> {
+    spectra_backtest::BacktestJob::from_payload(payload).map_err(|e| unprocessable(e.to_string()))
+}
 
 /// Execute the computation associated with a queued job.
 ///
@@ -237,6 +246,9 @@ pub fn run_job(kind: &str, payload: &Json) -> Reply {
         "benchmark" => benchmark_route(payload),
         "risk" => risk(payload),
         "stress" => stress(payload),
+        // Backtests need the database (dataset version) and report progress; the worker runs
+        // them on its own path and never calls this for them.
+        "backtest" => Err((500, "backtest jobs run on the worker's backtest path".into())),
         _ => Err(unprocessable(format!("Unknown job kind {kind:?}."))),
     }
 }
@@ -266,11 +278,18 @@ pub fn run_job_with_progress(kind: &str, payload: &Json, mut on_progress: impl F
 
 /// Maximum duration allowed for a job before its result is discarded.
 pub fn job_timeout(kind: &str) -> std::time::Duration {
-    std::time::Duration::from_secs(if kind == "benchmark" { 600 } else { 300 })
+    std::time::Duration::from_secs(match kind {
+        "backtest" => 900,
+        "benchmark" => 600,
+        _ => 300,
+    })
 }
 
 /// Seed recorded for a job run, when the payload explicitly provides one.
 pub fn job_seed(kind: &str, payload: &Json) -> Option<i64> {
+    if kind == "backtest" {
+        return backtest_job(payload).ok().and_then(|j| i64::try_from(j.request.config.seed).ok());
+    }
     if !matches!(kind, "risk" | "stress") {
         return None;
     }

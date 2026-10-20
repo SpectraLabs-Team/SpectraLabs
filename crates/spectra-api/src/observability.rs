@@ -7,6 +7,12 @@ use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use tracing_subscriber::fmt;
 use tracing_subscriber::prelude::*;
 
+/// Histogram buckets in seconds, from fast API calls to long benchmark jobs.
+/// With buckets set, histograms export as `_bucket` series, so
+/// `histogram_quantile` works across API and worker replicas.
+const BUCKETS: &[f64] =
+    &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0];
+
 /// The installed Prometheus recorder, rendered by `GET /metrics`.
 static PROMETHEUS: OnceLock<PrometheusHandle> = OnceLock::new();
 
@@ -23,7 +29,14 @@ pub fn init_observability() {
     let _ = tracing_subscriber::registry().with(env_filter).with(json_layer).try_init();
 
     if PROMETHEUS.get().is_none() {
-        match PrometheusBuilder::new().install_recorder() {
+        let builder = match PrometheusBuilder::new().set_buckets(BUCKETS) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("histogram buckets rejected, exporting summaries: {e}");
+                PrometheusBuilder::new()
+            }
+        };
+        match builder.install_recorder() {
             Ok(handle) => {
                 let _ = PROMETHEUS.set(handle);
                 tracing::info!("prometheus metrics initialized");

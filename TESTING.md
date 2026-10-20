@@ -1,494 +1,165 @@
-# Complete M20a + M20b Testing Guide
+# Testing M20 (platform ops)
 
-## Prerequisites
+How to check that everything M20 added works: automated checks first, then a manual run through
+the stack. Commands are for bash (Linux, macOS, WSL or Git Bash on Windows); `just` recipes also
+work from PowerShell.
+
+## 1. Automated checks (run these first)
 
 ```bash
-# Clone and setup
-git clone https://github.com/SpectraLabs-Team/spectralabs.git
-cd spectralabs
-git checkout m20/axum-swap  # or apply m20-steps-4-6-7-10.patch
-
-# Install dependencies
-rustup update
-npm install -g openapi-generator-cli
-
-# Generate secrets
-openssl rand -base64 48  # for ENGINE_SECRET
-openssl rand -base64 48  # for AUTH_SECRET
+just check          # cargo fmt --check, clippy -D warnings, cargo test --workspace, schema checks
+just check-web      # npm run typecheck && npm test (in web/frontend)
+cargo test -p spectra-db --features s3 --lib     # S3 artifact store against an in-memory bucket
 ```
 
-## Phase M20a Testing (1–10: Core Platform)
+CI runs all of that plus, against a real Postgres: the queue and schema SQL checks, a backup,
+a restore into a second database with integrity checks, a registry anchor, and a check that the
+generated TypeScript API types are current. A green CI run on the branch is the main signal.
 
-### 1. **Step 1: HTTP Layer Swap (axum)**
+> First time after pulling M20 steps 12–13: `cargo check` updates `Cargo.lock` (the new optional
+> `object_store` dependency). Commit it, or `docker build` fails (it uses `--locked`).
 
-```bash
-# Build
-just check  # or: cargo test --workspace
-
-# Test basic routes
-cd /path/to/repo
-cargo run --bin spectra-api &
-sleep 2
-
-# Test health endpoints
-curl -s http://localhost:8000/health | jq
-# Expected: {"status":"healthy","engine":"spectra-risk","cli_exists":true}
-
-curl -s http://localhost:8000/ready | jq
-# Expected: {"status":"not_ready", "checks":{"database":"not_configured"}}
-
-# Test risk endpoint (synchronous)
-curl -s -X POST http://localhost:8000/api/v1/risk \
-  -H "Content-Type: application/json" \
-  -d '{"portfolio_csv":"AAPL,100,150\nGOOGL,50,2500"}' | jq .code
-# Expected: 401 (unauthenticated, no HMAC signature)
-
-kill %1
-```
-
-### 2. **Steps 2–3: API Conventions + Database Schema**
+## 2. Bring the stack up
 
 ```bash
-# Start services with docker compose
-cp .env.example .env
-# Fill in ENGINE_SECRET and AUTH_SECRET
-echo "POSTGRES_PASSWORD=testpass" >> .env
-
-docker compose up -d postgres migrate
-sleep 5
-
-# Test database is ready
-docker compose exec postgres psql -U spectra -d spectra -c "\dt"
-# Expected: List of tables (users, workspaces, jobs, runs, artifacts, etc.)
-
-# Test migrations
-docker compose exec api spectra-db status
-# Expected: All migrations applied
-
-# Test seeded data
-docker compose exec postgres psql -U spectra -d spectra \
-  -c "SELECT COUNT(*) FROM users"
-# Expected: 1 (admin user)
-
-docker compose down
-```
-
-### 3. **Step 4: Users in Postgres**
-
-```bash
-# Start stack
+cp .env.example .env                       # set POSTGRES_PASSWORD, ENGINE_SECRET (openssl rand -base64 48), ADMIN_EMAIL
+cp web/frontend/.env.example web/frontend/.env.local   # same ENGINE_SECRET; AUTH_SECRET etc.
 docker compose up -d --build
-
-# Test sign-up
-curl -s -X POST http://localhost:3000/api/auth/signin \
-  -H "Content-Type: application/json" \
-  -d '{"email":"test@example.com"}' | jq
-
-# Check database
-docker compose exec postgres psql -U spectra -d spectra \
-  -c "SELECT email, workspace_id FROM users WHERE email = 'test@example.com'"
-# Expected: email | workspace_id = UUID
-
-# Test that users don't exist in old users.json
-ls -la web/frontend/users.json 2>/dev/null && echo "ERROR: users.json still exists" || echo "OK: users.json removed"
+docker compose ps                          # postgres, api, worker, frontend: healthy; migrate: exited 0
 ```
 
-### 4. **Step 5: HMAC Trust**
+The `migrate` service seeds an admin and a `dev` workspace when `ADMIN_EMAIL` is set. Keep the
+workspace id for the job tests:
 
 ```bash
-# Test unsigned request (should fail)
-curl -s http://localhost:8000/api/v1/risk -d '{}' | jq .code
-# Expected: 401 "unauthenticated"
-
-# Test with invalid signature
-curl -s http://localhost:8000/api/v1/risk \
-  -H "X-Spectra-Signature: invalid" \
-  -d '{}' | jq .code
-# Expected: 401 "unauthenticated"
-
-# Test with stale timestamp (>60s)
-curl -s http://localhost:8000/api/v1/risk \
-  -H "X-Spectra-Timestamp: $(date -u -d '2 minutes ago' +%s)" \
-  -d '{}' | jq .code
-# Expected: 401 "unauthenticated"
+export SPECTRA_WORKSPACE=$(docker compose exec -T postgres psql -U spectra -d spectra -At -c "select id from workspaces where slug='dev'")
 ```
 
-### 5. **Step 6: Job Queue**
+The engine port is private, so engine calls below run inside the containers. `engine-call` signs a
+request the way the dashboard's proxy does; the frontend container already has `ENGINE_URL` and
+`ENGINE_SECRET`:
 
 ```bash
-# Submit a job via API
-curl -s -X POST http://localhost:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "kind": "risk",
-    "payload": {"portfolio_csv": "AAPL,100,150"},
-    "priority": 0
-  }' | jq .id
-# Save job_id
-
-# Check job status
-JOB_ID=$(curl -s -X POST http://localhost:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"kind":"risk","payload":{"portfolio_csv":"AAPL,100,150"}}' | jq -r .id)
-
-curl -s http://localhost:8000/api/v1/jobs/$JOB_ID | jq .status
-# Expected: "queued" → "running" → "succeeded"
-
-# Test job cancellation
-curl -s -X POST http://localhost:8000/api/v1/jobs/$JOB_ID/cancel | jq .status
-# Expected: "cancelled"
-
-# Test job list
-curl -s 'http://localhost:8000/api/v1/jobs?status=succeeded&limit=10' | jq '.items | length'
-# Expected: 1+
+engine() { docker compose exec -T -e SPECTRA_WORKSPACE frontend node --input-type=module - "$@" < scripts/engine-call.mjs; }
 ```
 
-### 6. **Step 7: Artifact Storage**
+## 3. Probes, OpenAPI and signatures (steps 1, 2, 5)
 
 ```bash
-# Run a job and wait for completion
-JOB_ID=$(curl -s -X POST http://localhost:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"kind":"risk","payload":{"portfolio_csv":"AAPL,100,150"}}' | jq -r .id)
+docker compose exec api curl -fsS localhost:8000/health
+#  {"status":"healthy",...}
+docker compose exec api curl -fsS localhost:8000/ready
+#  {"status":"ready","checks":{"database":"ok","worker":"ok"}}
+docker compose stop worker; sleep 35
+docker compose exec api curl -fsS localhost:8000/ready
+#  ... "worker":"none_alive"  (still 200: the API does not need a worker)
+docker compose start worker
 
-# Wait for completion
-sleep 5
-while true; do
-  STATUS=$(curl -s http://localhost:8000/api/v1/jobs/$JOB_ID | jq -r .status)
-  [ "$STATUS" = "succeeded" ] && break
-  sleep 1
-done
+docker compose exec api curl -fsS localhost:8000/api/v1/openapi.json | head -c 300
+#  {"openapi":"3.1.0","info":{"title":"Spectra Labs engine API",...
 
-# Check artifact was stored
-curl -s http://localhost:8000/api/v1/jobs/$JOB_ID | jq .result.artifact
-# Expected: {"sha256":"...", "path":"sha256/ab/cd/...", "size":1234}
-
-# Verify file exists
-ls -la var/lib/spectra/artifacts/sha256/*/*/
-# Expected: Report JSON file
+docker compose exec api curl -s -o /dev/null -w '%{http_code}\n' localhost:8000/api/v1/jobs
+#  401  (unsigned)
+engine GET /api/v1/metrics
+#  200 and the list of risk metric names (signed)
 ```
 
-### 7. **Step 8: Configuration**
+## 4. Jobs and artifacts (steps 6, 7)
 
 ```bash
-# Test missing env vars
-unset DATABASE_URL ENGINE_SECRET
-cargo run --bin spectra-api 2>&1 | grep -i "error\|missing"
-# Expected: Error about missing DATABASE_URL and ENGINE_SECRET
+engine POST /api/v1/jobs '{"kind":"risk","payload":{"portfolio_csv":"symbol,quantity,price\nAAPL,10,190\nMSFT,5,410","simulations":20000}}'
+#  202, "status":"queued". Copy the id:
+JOB=<id>
+engine GET /api/v1/jobs/$JOB
+#  after a second or two: "status":"succeeded", "progress":1,
+#  "result":{"run_id":...,"report":{...},"artifact":{"sha256":"...","path":"sha256/..","size":...},"artifact_error":null}
 
-# Test invalid env vars
-ENGINE_SECRET="short" cargo run --bin spectra-api 2>&1 | grep -i "error"
-# Expected: Error about ENGINE_SECRET too short
-
-# Test all env vars read correctly
-export RUST_LOG=debug
-cargo run --bin spectra-api 2>&1 | grep "structured logging initialized"
-# Expected: Log message about logging init
+engine GET '/api/v1/jobs?status=succeeded&limit=5'          # newest first, with next_cursor
+engine POST /api/v1/jobs '{"kind":"risk","payload":{}}'       # 422: Portfolio CSV is required (checked before queueing)
+engine POST /api/v1/jobs '{"kind":"nope","payload":{}}'       # 422: unknown kind
+engine GET /api/v1/jobs/00000000-0000-7000-8000-000000000000  # 404
 ```
 
-### 8. **Step 9: Docker & Development**
+Cancel: queue a large benchmark and cancel it while it runs.
 
 ```bash
-# Build Docker images
-docker compose build
-
-# Test containers start
-docker compose up -d --build
-sleep 10
-
-# Check all services are healthy
-docker compose ps
-# Expected: All services "healthy" or "Up"
-
-# Test api container
-docker compose exec api curl -s http://127.0.0.1:8000/health | jq .status
-# Expected: "healthy"
-
-# Test worker container  
-docker compose logs worker | head -20
-# Expected: Worker initialization logs
-
-# Test scaling workers
-docker compose up --scale worker=3 -d
-sleep 5
-docker compose ps | grep worker | wc -l
-# Expected: 3
+engine POST /api/v1/jobs '{"kind":"benchmark","payload":{"portfolio_csv":"symbol,quantity,price\nAAPL,10,190","simulations":1000000,"repetitions":3,"warmups":0}}'
+engine POST /api/v1/jobs/<id>/cancel     # "cancel_requested":true; a few seconds later "status":"cancelled"
 ```
 
-### 9. **Step 10: CI**
+The artifact is on the volume under its hash, and re-hashing it gives the same value:
 
 ```bash
-# Run locally what CI runs
-cargo test --workspace
-
-# Type checking (frontend)
-cd web/frontend
-tsc --noEmit
-
-# Build frontend
-next build
-
-# Test auth signatures
-node scripts/test-auth.mjs
-# Expected: 11/11 tests pass
-
-cd ../..
+docker compose exec worker sh -c 'f=$(find /var/lib/spectra/artifacts/sha256 -type f | head -1); echo $f; sha256sum $f'
 ```
 
----
+Worker crash recovery: start a long benchmark, then `docker compose kill worker` and
+`docker compose start worker`. Within ~45 s the job is requeued and finishes, with `attempts: 2`.
 
-## Phase M20b Testing (11–13: Production-Ready)
+## 5. Users in Postgres (step 4)
 
-### 11. **Observability: Structured Logging + Metrics**
+Sign up and sign in at http://localhost:3000, then:
 
 ```bash
-# Start API with debug logging
-RUST_LOG=debug cargo run --bin spectra-api &
-sleep 2
-
-# Test JSON structured logs (stderr)
-curl -s http://localhost:8000/health 2>&1 | grep '{"timestamp' 
-# Expected: JSON log entries
-
-# Submit job and check logs include job_id
-JOB_ID=$(curl -s -X POST http://localhost:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"kind":"risk","payload":{"portfolio_csv":"AAPL,100,150"}}' | jq -r .id)
-
-sleep 2
-tail -5 job.log 2>/dev/null | grep "$JOB_ID"
-# Expected: Job logs with job_id context
-
-# Test /metrics endpoint
-curl -s http://localhost:8000/metrics
-# Expected: Prometheus format output with:
-# - api_request_duration_seconds_*
-# - api_responses_total
-# - jobs_claimed_total
-# - jobs_completed_total
-
-# Check metrics for your requests
-curl -s http://localhost:8000/metrics | grep 'api_responses_total{.*status="200"'
-# Expected: Counter with value ≥ 1
-
-kill %1
+docker compose exec -T postgres psql -U spectra -d spectra -c "select email, role, created_at from users order by created_at desc limit 5"
+just import-users-dry-run      # previews importing the old web/frontend/.data/users.json, changes nothing
 ```
 
-### 12. **Deployment: Caddy, Backups, Staging/Production**
+## 6. Metrics and logs (step 11)
 
 ```bash
-# Test Caddy reverse proxy
-caddy run --config Caddyfile &
-sleep 2
-
-# Test reverse proxy works
-curl -s http://localhost:8080/health | jq .status
-# Expected: "healthy"
-
-kill %1
-
-# Test backup script
-bash scripts/backup-postgres.sh spectra /tmp/backups
-
-# Verify backup file
-ls -lh /tmp/backups/postgres-spectra-*.sql.gz
-# Expected: Backup file created
-
-# Test restore (partial)
-gunzip -c /tmp/backups/postgres-spectra-*.sql.gz | head -100 | psql -U spectra -d spectra_test
-# Expected: Schema loads without error
-
-# Test registry hash anchoring
-bash scripts/anchor-registry-hash.sh
-cat .registry-head-hash.txt
-# Expected: SHA-256 hash
+docker compose exec api curl -fsS localhost:8000/metrics | grep -E '^api_(request_duration_seconds_bucket|responses_total)' | head
+docker compose exec worker curl -fsS localhost:9100/metrics | grep -E '^jobs_(claimed|completed)_total|^job_duration_seconds_count'
+docker compose logs --tail 5 api worker        # JSON lines with level, target, fields (job_id on worker lines)
 ```
 
-### 13. **Scaling: S3, TypeScript Client, Multiple Workers**
+With `docker compose --profile monitoring up -d`, http://127.0.0.1:9090/targets shows `spectra-api`
+and one `spectra-worker` target per replica, all UP.
+
+## 7. Deployment (step 12)
 
 ```bash
-# Test TypeScript client generation
-./scripts/generate-typescript-client.sh http://localhost:8000/api/v1/openapi.json ./web/frontend/src/lib/api-client
-
-# Check client generated
-ls -la web/frontend/src/lib/api-client/*.ts
-# Expected: models, api, configuration files
-
-# Test multiple workers in docker compose
-docker compose up --scale worker=3 -d
-sleep 5
-
-# Submit 5 jobs
-for i in {1..5}; do
-  curl -s -X POST http://localhost:8000/api/v1/jobs \
-    -H "Content-Type: application/json" \
-    -d "{\"kind\":\"risk\",\"payload\":{\"portfolio_csv\":\"AAPL,100,150\"}}" &
-done
-wait
-
-# Watch workers process jobs
-docker compose logs -f worker | head -50
-# Expected: Multiple workers claiming and processing jobs
-
-# Verify load distributed
-docker compose exec postgres psql -U spectra -d spectra \
-  -c "SELECT worker_id, COUNT(*) as completed FROM job_events WHERE event_type='completed' GROUP BY worker_id"
-# Expected: Multiple worker_ids with job counts
+just backup                                     # writes backups/spectra-<time>.dump and .sha256
+docker compose exec -T postgres createdb -U spectra spectra_restore_check
+RESTORE_DATABASE_URL=postgres://spectra:<POSTGRES_PASSWORD>@127.0.0.1:5432/spectra_restore_check \
+  scripts/restore-postgres.sh backups/spectra-*.dump
+#  checksum ok ... registry chains intact ... restore: ok
+just anchor                                     # anchors/anchors.log gains a line
 ```
 
----
+(`just backup` and the restore need `pg_dump`/`psql` 16 on the host and the database reachable on
+127.0.0.1:5432: run `just db`, or add a port mapping, or run them in the postgres container.)
 
-## End-to-End Test Scenarios
+Edge proxy: `docker compose --profile proxy up -d`, then `curl -sI http://localhost/` shows
+`strict-transport-security`, `x-frame-options: DENY` and no `server` header. With
+`SITE_ADDRESS=<your domain>` and DNS pointed at the host, Caddy serves HTTPS with a real certificate.
 
-### Scenario 1: Full Backtest Flow
+## 8. Scaling (step 13)
 
 ```bash
-# 1. Start stack
-docker compose up -d
+just scale-workers 3
+docker compose exec -T postgres psql -U spectra -d spectra -c "select id, hostname, heartbeat_at from workers"
+#  three rows. Queue ten jobs (step 4) and check jobs.worker_id: several workers took them.
 
-# 2. Create account
-curl -X POST http://localhost:3000/api/auth/signin \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com"}'
+just up-s3                                      # MinIO + worker with ARTIFACT_STORAGE=s3
+docker compose logs worker | grep artifact_store     # "artifact_store":"s3://spectra-artifacts/"
+#  queue a job, then open the MinIO console at http://127.0.0.1:9001: the object is at sha256/<..>/<..>/<hash>
 
-# 3. Submit benchmark job via API
-JOB=$(curl -s -X POST http://localhost:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "kind": "benchmark",
-    "payload": {
-      "portfolio_csv": "AAPL,100,150\nGOOGL,50,2500",
-      "simulations": 10000,
-      "repetitions": 3
-    }
-  }')
-
-JOB_ID=$(echo $JOB | jq -r .id)
-
-# 4. Poll job status
-while true; do
-  STATUS=$(curl -s http://localhost:8000/api/v1/jobs/$JOB_ID | jq -r .status)
-  PROGRESS=$(curl -s http://localhost:8000/api/v1/jobs/$JOB_ID | jq -r .progress)
-  echo "Status: $STATUS, Progress: $PROGRESS"
-  [ "$STATUS" = "succeeded" ] && break
-  sleep 2
-done
-
-# 5. Retrieve result
-curl -s http://localhost:8000/api/v1/jobs/$JOB_ID | jq .result
-# Expected: run_id, report, artifact info
-
-# 6. Check metrics
-curl -s http://localhost:8000/metrics | grep 'job_duration_seconds{kind="benchmark"'
-# Expected: Histogram metrics with duration
-
-# 7. Verify artifacts stored
-curl -s http://localhost:8000/api/v1/jobs/$JOB_ID | jq .result.artifact.sha256
-# Expected: Valid SHA-256 hash
-
-echo "✅ Full backtest flow complete"
+just api-client                                 # regenerates web/frontend/lib/generated/engine-api.{json,ts}
+git status web/frontend/lib/generated           # commit them the first time
 ```
 
-### Scenario 2: Error Handling & Recovery
-
-```bash
-# Test invalid job payload
-curl -s -X POST http://localhost:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"kind":"risk","payload":{"invalid":"data"}}' | jq .code
-# Expected: 422 "invalid_request"
-
-# Test concurrent writes (artifact quota)
-# (This would require a workspace with very low quota to test)
-
-# Test worker restart during job
-docker compose restart worker
-sleep 2
-
-# Verify job is requeued
-JOB_ID=$(curl -s -X POST http://localhost:8000/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"kind":"risk","payload":{"portfolio_csv":"AAPL,100,150"}}' | jq -r .id)
-
-sleep 2
-docker compose restart worker
-sleep 5
-
-curl -s http://localhost:8000/api/v1/jobs/$JOB_ID | jq .attempts
-# Expected: > 1 (job was requeued after worker restart)
-
-echo "✅ Error handling tests pass"
-```
-
-### Scenario 3: Performance & Scalability
-
-```bash
-# Submit 20 jobs in parallel
-echo "Submitting 20 jobs..."
-for i in {1..20}; do
-  curl -s -X POST http://localhost:8000/api/v1/jobs \
-    -H "Content-Type: application/json" \
-    -d '{"kind":"risk","payload":{"portfolio_csv":"AAPL,100,150"}}' &
-done
-wait
-
-# Measure queue depth
-docker compose exec postgres psql -U spectra -d spectra \
-  -c "SELECT COUNT(*) as queue_depth FROM jobs WHERE status = 'queued' OR status = 'running'"
-# Expected: ~20 jobs
-
-# Measure request latency
-time curl -s http://localhost:8000/api/v1/jobs | jq . > /dev/null
-# Expected: <500ms
-
-# Check metrics for request distribution
-curl -s http://localhost:8000/metrics | grep 'api_request_duration_seconds' | head -5
-# Expected: Histogram buckets showing latency distribution
-
-# Scale workers
-docker compose up --scale worker=5 -d
-sleep 5
-
-# Wait for queue to drain
-while [ "$(docker compose exec postgres psql -U spectra -d spectra -t -c "SELECT COUNT(*) FROM jobs WHERE status = 'queued'")" -gt 0 ]; do
-  sleep 2
-done
-
-echo "✅ Performance tests pass"
-```
-
----
-
-## Test Checklist
-
-- [ ] **M20a Step 1:** HTTP routes work, old HTTP layer removed
-- [ ] **M20a Step 2:** /api/v1 routes exist with correct error format, /ready checks DB
-- [ ] **M20a Step 3:** Migrations applied, schema has all 8 tables
-- [ ] **M20a Step 4:** Users table has data, sign-up creates workspace
-- [ ] **M20a Step 5:** Unsigned requests fail, stale signatures rejected
-- [ ] **M20a Step 6:** Jobs queue, execute, and complete; cancellation works
-- [ ] **M20a Step 7:** Artifacts stored by SHA-256, quota enforced
-- [ ] **M20a Step 8:** Config loads from env, missing vars error at startup
-- [ ] **M20a Step 9:** Docker compose starts all services, scales workers
-- [ ] **M20a Step 10:** CI runs migrations, tests, builds frontend
-- [ ] **M20b Step 11:** JSON logs output, /metrics returns Prometheus format
-- [ ] **M20b Step 12:** Caddy reverse proxy works, backup script creates file
-- [ ] **M20b Step 13:** TypeScript client generates, multiple workers process jobs
-
----
+Plugins: `cargo test -p spectra-risk --test risk plugins` (registration, listing with versions,
+refusal of a plugin built for another API version).
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| `DATABASE_URL not set` | `cp .env.example .env && fill in values` |
-| `Port 8000 already in use` | `lsof -i :8000 && kill -9 <PID>` |
-| `Docker build fails` | `docker system prune && docker compose build --no-cache` |
-| `Postgres won't start` | `docker compose down -v && docker compose up postgres` |
-| `Worker not claiming jobs` | Check logs: `docker compose logs worker`, verify DB connection |
-| `/metrics returns 404` | Ensure API is running, check `RUST_LOG=debug` for init logs |
-| `Tests fail with "table does not exist"` | Ensure migrations ran: `docker compose exec api spectra-db migrate` |
-
----
-
-**All M20a + M20b tests are comprehensive, end-to-end, and production-ready.**
+| Symptom | Cause and fix |
+|---|---|
+| `docker build` fails with "lock file needs to be updated" | run `cargo check` once with network access and commit `Cargo.lock` |
+| `api` never becomes healthy | `docker compose logs api migrate`; usually a wrong `POSTGRES_PASSWORD` or a failed migration |
+| `/ready` says `"worker":"none_alive"` | `docker compose logs worker`; a worker that cannot reach the database exits |
+| Job stays `queued` | no worker for that kind (`SPECTRA_WORKER_KINDS`), or the workspace is at `SPECTRA_WORKSPACE_MAX_RUNNING` |
+| `engine` calls return 401 | `ENGINE_SECRET` differs between `.env` and `web/frontend/.env.local`, or the clock is off by more than 60 s |
+| Job result has `artifact_error` | quota reached (`SPECTRA_ARTIFACT_QUOTA_BYTES`) or the artifact store is unwritable; the report is still in `result.report` |
+| `next build` fails: `AUTH_SECRET environment variable is missing` | set `AUTH_SECRET` in `web/frontend/.env.local` |

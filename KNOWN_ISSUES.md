@@ -46,10 +46,26 @@ time and answers 503 to further compute requests instead of queueing them.
 
 ## Platform ops (M20)
 
-The M20 platform features are implemented on branch `m20/finish`: the jobs API and worker, artifact
-storage, OpenAPI endpoint, Prometheus `/metrics`, worker-aware `/ready`, Postgres-backed frontend
-authentication, and the `just import-users` recipe. The worker and API routes are wired into the
-workspace. These items are not present on `main` until `m20/finish` is merged.
+M20 is implemented on branch `m20/finish` and reaches `main` when it is merged. Status by step is in
+[M20-COMPLETE.md](M20-COMPLETE.md); deployment is in [docs/operations.md](docs/operations.md) and
+scaling in [docs/scaling-guide.md](docs/scaling-guide.md).
+
+- **`Cargo.lock` must be regenerated once.** Steps 12 and 13 add the optional `object_store`
+  dependency (the `s3` feature). Optional dependencies are recorded in the lock file, so the first
+  `cargo check` with crates.io access updates `Cargo.lock`; commit it. Until then
+  `docker build` (which uses `--locked`) fails.
+- **Parts of steps 12 and 13 were written without a compiler.** `spectra-db/src/artifacts.rs` (the
+  `ArtifactBackend` and the S3 store), the worker's `/health` and `/metrics` listener and the
+  OpenAPI binary were reviewed but not compiled before commit; CI is their first build. The plugin
+  versioning in `spectra-risk` and the worker configuration were compiled, linted and tested.
+- **Verified against Postgres 16, not in containers.** The backup, restore and anchor scripts were
+  run end to end against the real schema (including a corrupted backup, a refused restore over the
+  live database and a broken registry link); CI runs them on every push. The Caddy and Prometheus
+  profiles and the MinIO override were not started: no Docker daemon was available.
+- **S3 storage is tested against an in-memory object store only.** Run `just up-s3` (MinIO) once
+  before relying on it, and copy existing artifacts across before switching (the key layout is the
+  same).
+- **Job progress stays at 0 until a job finishes.** Engine calls are single blocking computations.
 
 ## Security
 

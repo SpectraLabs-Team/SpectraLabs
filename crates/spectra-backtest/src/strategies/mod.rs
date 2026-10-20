@@ -10,6 +10,7 @@
 //! changes the `strategy_sha256` recorded with its runs.
 
 mod buy_and_hold;
+mod equal_weight;
 mod sma_cross;
 mod zscore_reversion;
 
@@ -211,7 +212,7 @@ impl BuiltinStrategy {
     }
 }
 
-const BUILTINS: [BuiltinStrategy; 3] = [
+const BUILTINS: [BuiltinStrategy; 4] = [
     BuiltinStrategy {
         name: "buy_and_hold",
         label: "Buy and hold",
@@ -221,6 +222,16 @@ const BUILTINS: [BuiltinStrategy; 3] = [
         source: include_str!("buy_and_hold.rs"),
         build: buy_and_hold::build,
         check: buy_and_hold::check,
+    },
+    BuiltinStrategy {
+        name: "equal_weight",
+        label: "Equal weight",
+        description: "Holds every instrument at the same share of equity, rebalanced on a schedule or when \
+                      weights drift. Uses target-weight mode.",
+        params: equal_weight::PARAMS,
+        source: include_str!("equal_weight.rs"),
+        build: equal_weight::build,
+        check: equal_weight::check,
     },
     BuiltinStrategy {
         name: "sma_cross",

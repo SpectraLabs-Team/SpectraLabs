@@ -461,3 +461,40 @@ fn property_ledger_reconciles_with_leverage_limits() {
     assert!(stats.fills > 1000);
     assert!(stats.rejected > 0);
 }
+
+#[test]
+fn financing_entries_reconcile_and_replay() {
+    use spectra_core::{EntryType, Ledger, LedgerConfig, Money, Reject};
+    let m = |v: f64| Money::from_f64(v).unwrap();
+    let mut l = Ledger::new(LedgerConfig { allow_short: true, ..LedgerConfig::default() });
+    l.deposit(m(100.0), 1).unwrap();
+    l.apply_interest(m(2.5), 2).unwrap();
+    l.apply_interest(m(-0.5), 3).unwrap();
+    l.charge_borrow_fee(7, m(1.25), 4).unwrap();
+    assert_eq!(l.cash(), m(100.75));
+    assert_eq!(l.financing(), m(0.75));
+    assert_eq!(l.equity().unwrap(), m(100.75));
+    let kinds: Vec<EntryType> = l.journal().iter().map(|e| e.kind).collect();
+    assert_eq!(kinds, [EntryType::Deposit, EntryType::Interest, EntryType::Interest, EntryType::BorrowFee]);
+    assert_eq!(l.journal()[3].fill.instrument, 7);
+    l.check_invariants().unwrap();
+
+    // Zero and negative amounts are refused where they make no sense.
+    assert_eq!(l.apply_interest(Money::ZERO, 5), Err(Reject::InvalidAmount.into()));
+    assert_eq!(l.charge_borrow_fee(7, m(-1.0), 5), Err(Reject::InvalidAmount.into()));
+    assert_eq!(l.journal().len(), 4);
+}
+
+#[test]
+fn financing_charges_may_take_cash_below_zero() {
+    use spectra_core::{Ledger, LedgerConfig, Money};
+    let m = |v: f64| Money::from_f64(v).unwrap();
+    // Negative cash is otherwise disabled; a borrow fee is a debt and still posts.
+    let mut l = Ledger::new(LedgerConfig { allow_short: true, ..LedgerConfig::default() });
+    l.deposit(m(1.0), 1).unwrap();
+    l.charge_borrow_fee(3, m(1.5), 2).unwrap();
+    assert_eq!(l.cash(), m(-0.5));
+    l.check_invariants().unwrap();
+    // A withdrawal still may not.
+    assert!(l.withdraw(m(0.1), 3).is_err());
+}

@@ -139,7 +139,8 @@ fn fields_override_the_preset() {
         r#"{"preset":"zero_cost","initial_cash":250000.5,"allow_short":true,"allow_negative_cash":true,
             "max_gross_leverage":2.5,"commission_per_unit":0.005,"commission_bps":0.5,"commission_min":1,
             "slippage_bps":3,"delay_bars":2,"max_participation":0.25,"seed":42,
-            "periods_per_year":98280,"risk_free_rate":0.04}"#,
+            "periods_per_year":98280,"risk_free_rate":0.04,
+            "borrow_fee_rate":0.03,"cash_interest_rate":0.02,"margin_interest_rate":0.06}"#,
     ))
     .unwrap();
     assert_eq!(c.initial_cash, Money::from_f64(250_000.5).unwrap());
@@ -154,6 +155,11 @@ fn fields_override_the_preset() {
     assert_eq!(c.seed, 42);
     assert_eq!(c.periods_per_year, 98_280.0);
     assert_eq!(c.risk_free_rate, 0.04);
+    assert_eq!((c.financing.borrow_rate, c.financing.cash_rate, c.financing.margin_rate), (0.03, 0.02, 0.06));
+    // The stored form keeps the rates, and they change the fingerprint.
+    assert_eq!(config_from_stored_json(&stored_config_json(&c).unwrap()).unwrap(), c);
+    let no_fin = BacktestConfig { financing: spectra_engine::FinancingConfig::default(), ..c };
+    assert_ne!(config_fingerprint(&no_fin), config_fingerprint(&c));
 
     // User form round trip.
     assert_eq!(parse_config(&config_to_user_json(&c).unwrap()).unwrap(), c);
@@ -174,7 +180,8 @@ fn leverage_null_disables_the_limit_and_big_seeds_travel_as_strings() {
 fn every_problem_is_reported_with_its_field() {
     let err = parse_config(&json(
         r#"{"preset":"nope","initial_cash":-5,"max_gross_leverage":-1,"bogus":1,"seed":"x",
-            "delay_bars":1.5,"allow_short":"yes","max_participation":2,"periods_per_year":0}"#,
+            "delay_bars":1.5,"allow_short":"yes","max_participation":2,"periods_per_year":0,
+            "borrow_fee_rate":-0.01}"#,
     ))
     .unwrap_err();
     let expected: BTreeSet<String> = [
@@ -187,6 +194,7 @@ fn every_problem_is_reported_with_its_field() {
         "allow_short",
         "max_participation",
         "periods_per_year",
+        "borrow_fee_rate",
     ]
     .into_iter()
     .map(String::from)
@@ -235,7 +243,7 @@ fn schema_describes_every_field() {
 #[test]
 fn builtins_are_listed_with_schemas_and_distinct_source_hashes() {
     let names: Vec<&str> = builtin_strategies().iter().map(|s| s.name).collect();
-    assert_eq!(names, ["buy_and_hold", "sma_cross", "zscore_reversion"]);
+    assert_eq!(names, ["buy_and_hold", "equal_weight", "sma_cross", "zscore_reversion"]);
     let mut hashes = BTreeSet::new();
     for s in builtin_strategies() {
         let h = s.source_sha256();
@@ -245,8 +253,8 @@ fn builtins_are_listed_with_schemas_and_distinct_source_hashes() {
         assert_eq!(j.find("name").unwrap().as_str().unwrap(), s.name);
         assert_eq!(j.find("params").unwrap().items().unwrap().len(), s.params.len());
     }
-    assert_eq!(hashes.len(), 3);
-    assert_eq!(builtins_json().unwrap().items().unwrap().len(), 3);
+    assert_eq!(hashes.len(), 4);
+    assert_eq!(builtins_json().unwrap().items().unwrap().len(), 4);
     assert!(builtin("nope").unwrap_err().to_string().contains("sma_cross"));
 }
 
@@ -311,6 +319,12 @@ fn every_builtin_trades_multi_instrument_data_cleanly() {
     let long_short = parse_config(&json(r#"{"allow_short":true,"max_gross_leverage":2}"#)).unwrap();
     let cases = [
         ("buy_and_hold", r"{}", Preset::Default.config()),
+        ("equal_weight", r#"{"rebalance_every":20}"#, Preset::Default.config()),
+        (
+            "equal_weight",
+            r#"{"rebalance_every":0,"drift":0.02,"min_trade":500}"#,
+            Preset::ConservativeCosts.config(),
+        ),
         ("sma_cross", r#"{"fast":5,"slow":20,"qty":50}"#, Preset::Default.config()),
         ("sma_cross", r#"{"fast":5,"slow":20,"qty":50,"allow_short":true}"#, long_short),
         ("zscore_reversion", r#"{"lookback":30,"qty":50}"#, Preset::ConservativeCosts.config()),

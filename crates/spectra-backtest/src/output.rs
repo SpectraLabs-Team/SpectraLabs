@@ -209,6 +209,7 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("fill_count", Json::integer(r.fill_count() as i64))
         .with("turnover_annualized", num(r.turnover(req.config.periods_per_year)))
         .with("total_fees", money(r.ledger.total_fees()))
+        .with("financing", money(r.ledger.financing()))
         .with("realized_pnl", money(r.ledger.realized_pnl()))
         .with("final_cash", money(r.ledger.cash()))
         .with("final_equity", money(r.ledger.equity()?))

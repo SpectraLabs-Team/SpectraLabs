@@ -97,6 +97,9 @@ fn run_script(script: &str) -> String {
             EntryType::Deposit => "D",
             EntryType::Withdrawal => "W",
             EntryType::Fill => "F",
+            // Not produced by the reference engine; never in the goldens.
+            EntryType::Interest => "I",
+            EntryType::BorrowFee => "B",
         };
         let side = if e.fill.side == Side::Buy { 'B' } else { 'S' };
         writeln!(

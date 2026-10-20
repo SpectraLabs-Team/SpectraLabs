@@ -37,8 +37,8 @@ POST /api/v1/backtests
 ```
 
 - `GET /api/v1/strategies/builtin` returns everything a form needs: the strategies with their
-  parameter schemas (`buy_and_hold`, `sma_cross`, `zscore_reversion`), the configuration's JSON
-  Schema, and the presets (`default`, `zero_cost`, `conservative_costs`).
+  parameter schemas (`buy_and_hold`, `equal_weight`, `sma_cross`, `zscore_reversion`), the
+  configuration's JSON Schema, and the presets (`default`, `zero_cost`, `conservative_costs`).
 - `params` and `config` are optional. A bad request is a 422 listing every problem
   (`params.fast: must be shorter than slow`, `config.slippage_bps: ...`), and so is a dataset
   version outside the workspace.
@@ -66,6 +66,28 @@ spectra-backtest run request.json --store "$SPECTRA_DATA_DIR" --dataset <checksu
 ```
 
 where `request.json` is the payload without `dataset_version_id`.
+
+## Target weights
+
+`equal_weight` is a target-weight strategy: it sets each instrument's share of equity and the
+engine's `Rebalancer` turns that into orders at the next open. Its parameters choose when to trade
+(`rebalance_every` bars, or `rebalance_every: 0` with a `drift` threshold), how much to invest
+(`gross`, a share of the leverage limit), lot rounding (`lot_size`) and the smallest trade
+(`min_trade`). Sells go before buys, and no new orders are sent while earlier ones wait to fill.
+
+## Financing
+
+Three optional annual rates in `config`, charged once per bar on the previous bar's books:
+
+| Field | |
+| --- | --- |
+| `borrow_fee_rate` | on the market value of each short position |
+| `cash_interest_rate` | earned on positive cash, including short-sale proceeds |
+| `margin_interest_rate` | paid on negative cash (needs `allow_negative_cash`) |
+
+Each charge is a ledger journal entry (`Interest` or `BorrowFee`), so the books still re-derive
+from the journal, and the summary's `activity.financing` is the net total. With all three at zero
+(the default) nothing is charged and fingerprints match earlier runs.
 
 ## Limits
 

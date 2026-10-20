@@ -7,11 +7,12 @@ pub mod backtest;
 pub mod costs;
 pub mod metrics;
 pub mod performance;
+pub mod rebalance;
 
 pub use backtest::{
     canonical_config, config_fingerprint, run_backtest, run_backtest_controlled, BacktestConfig,
-    BacktestResult, Context, ExecutionConfig, Order, OrderId, OrderState, OrderType, Progress, RunControl,
-    RunError, RunLimits, RunRecord, Strategy,
+    BacktestResult, Context, ExecutionConfig, FinancingConfig, Order, OrderId, OrderState, OrderType,
+    Progress, RunControl, RunError, RunLimits, RunRecord, Strategy,
 };
 pub use costs::{commission_fee, slipped_price, CommissionModel, CostModel};
 pub use metrics::{
@@ -19,3 +20,4 @@ pub use metrics::{
     nearest_rank_index, returns_from_curve, returns_from_equity, DrawdownStats, EquityPoint, Metrics,
     TailStats,
 };
+pub use rebalance::{RebalanceConfig, RebalanceRule, Rebalancer, WeightStrategy};

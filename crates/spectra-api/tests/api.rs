@@ -460,7 +460,7 @@ async fn builtin_strategies_describe_the_backtest_form() {
         .iter()
         .map(|s| s.at("name").unwrap().as_str().unwrap().to_string())
         .collect();
-    assert_eq!(names, ["buy_and_hold", "sma_cross", "zscore_reversion"]);
+    assert_eq!(names, ["buy_and_hold", "equal_weight", "sma_cross", "zscore_reversion"]);
     assert!(j.at("config_schema").unwrap().at("properties").unwrap().at("slippage_bps").is_ok());
     assert_eq!(j.at("presets").unwrap().items().unwrap().len(), 3);
 }

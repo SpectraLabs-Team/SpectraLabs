@@ -24,6 +24,7 @@ const { pageHeaders, apiHeaders } = require('./lib/securityHeaders');
 
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || defaultDistDir,
+  outputFileTracingRoot: __dirname,
   // The Docker image runs the standalone server (docker/frontend.Dockerfile sets NEXT_OUTPUT).
   ...(process.env.NEXT_OUTPUT === 'standalone' ? { output: 'standalone' } : {}),
   poweredByHeader: false,

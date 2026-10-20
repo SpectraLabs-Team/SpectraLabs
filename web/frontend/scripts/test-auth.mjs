@@ -1217,18 +1217,18 @@ test('mfa: each authenticator code works once (replay protection), also under pa
 
 test('mfa: recovery codes work once, any case or spacing; regenerating replaces them', async () => {
   const { user, codes } = mfaFixture;
-  const r = await mfa.useRecoveryCode(user.id, codes[0].toLowerCase().replace('-', ' '));
+  const r = await mfa.consumeRecoveryCode(user.id, codes[0].toLowerCase().replace('-', ' '));
   assert.deepEqual(r, { ok: true, left: 9 });
-  assert.equal((await mfa.useRecoveryCode(user.id, codes[0])).ok, false, 'single use');
-  assert.equal((await mfa.useRecoveryCode(user.id, 'ZZZZZ-ZZZZZ')).ok, false);
-  assert.equal((await mfa.useRecoveryCode(user.id, '123456')).ok, false, 'digits are never treated as a recovery code');
+  assert.equal((await mfa.consumeRecoveryCode(user.id, codes[0])).ok, false, 'single use');
+  assert.equal((await mfa.consumeRecoveryCode(user.id, 'ZZZZZ-ZZZZZ')).ok, false);
+  assert.equal((await mfa.consumeRecoveryCode(user.id, '123456')).ok, false, 'digits are never treated as a recovery code');
 
   const viaDispatch = await mfa.verifySecondFactor(user.id, codes[1]);
   assert.deepEqual(viaDispatch, { ok: true, method: 'recovery_code', recoveryCodesLeft: 8 });
 
   const fresh = await mfa.regenerateRecoveryCodes(user.id);
-  assert.equal((await mfa.useRecoveryCode(user.id, codes[2])).ok, false, 'old codes stop working');
-  assert.equal((await mfa.useRecoveryCode(user.id, fresh[0])).ok, true);
+  assert.equal((await mfa.consumeRecoveryCode(user.id, codes[2])).ok, false, 'old codes stop working');
+  assert.equal((await mfa.consumeRecoveryCode(user.id, fresh[0])).ok, true);
   assert.equal((await mfa.getMfaStatus(user.id)).recoveryCodesLeft, 9);
   mfaFixture.codes = fresh;
 });

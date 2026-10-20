@@ -86,8 +86,8 @@ export const listJobs = (opts: { status?: JobStatus; cursor?: string; limit?: nu
 };
 
 /** Queued jobs stop at once; running ones within a few seconds. Finished jobs come back unchanged. */
-export const cancelJob = (id: string) =>
-  request<Job>(`/api/v1/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST', timeoutMs: 10_000 });
+export const cancelJob = <Report = unknown>(id: string) =>
+  request<Job<Report>>(`/api/v1/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST', timeoutMs: 10_000 });
 
 /**
  * Poll until the job finishes, the signal aborts, or `timeoutMs` passes. Calls `onUpdate` with
@@ -102,7 +102,17 @@ export async function waitForJob<Report = unknown>(
   const deadline = Date.now() + (opts.timeoutMs ?? 15 * 60_000);
   for (;;) {
     if (opts.signal?.aborted) throw new ApiError('Stopped waiting for the job.', 0);
-    const job = await getJob<Report>(id);
+    let job: Job<Report>;
+    try {
+      job = await getJob<Report>(id);
+    } catch (error) {
+      // A rolling API restart or short proxy outage should not lose a durable
+      // job. Keep polling until the overall deadline; callers can still abort.
+      const retryable = error instanceof ApiError && (error.status === 0 || [502, 503, 504].includes(error.status));
+      if (!retryable || Date.now() + interval > deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, interval));
+      continue;
+    }
     opts.onUpdate?.(job);
     if (isFinished(job)) return job;
     if (Date.now() + interval > deadline) throw new ApiError('The job is still running; check back later.', 0);

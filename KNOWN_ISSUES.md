@@ -10,12 +10,13 @@
 
 ## Verification gaps
 
-- **CI still needs to verify the latest commit.** On `m20/finish`, `cargo check --workspace` and
-  `cargo test --workspace` passed locally on Windows. Confirm the same checks pass in CI for the
-  exact commit being merged.
-- **Frontend checks passed locally on Windows.** `npm run typecheck`, `npm run build`, and the
-  frontend `npm test` suite passed. These local results do not replace the CI run for the commit
-  being merged.
+- **CI still needs to verify the latest commit.** Rust workspace tests, formatting, clippy, frontend
+  lint, typecheck and production build pass locally on Windows. The frontend integration tests need
+  Postgres and are run by CI. Confirm CI is green for the exact commit being merged.
+- **Compose cannot be run from this Windows environment** because Docker is not installed. The PR
+  workflow now has steps to build both images, start a fresh stack and check `/ready`, exercise the
+  proxy and monitoring profiles, and store a real job artifact through the MinIO profile. Confirm
+  those steps pass before merging.
 - **Bit-exact parity tests run only on Linux with glibc.** The goldens depend on glibc's `exp`,
   `log` and `pow`, so those tests are compiled out elsewhere. All behavioural tests run on every
   platform.
@@ -54,18 +55,11 @@ scaling in [docs/scaling-guide.md](docs/scaling-guide.md).
   dependency (the `s3` feature). Optional dependencies are recorded in the lock file, so the first
   `cargo check` with crates.io access updates `Cargo.lock`; commit it. Until then
   `docker build` (which uses `--locked`) fails.
-- **Parts of steps 12 and 13 were written without a compiler.** `spectra-db/src/artifacts.rs` (the
-  `ArtifactBackend` and the S3 store), the worker's `/health` and `/metrics` listener and the
-  OpenAPI binary were reviewed but not compiled before commit; CI is their first build. The plugin
-  versioning in `spectra-risk` and the worker configuration were compiled, linted and tested.
-- **Verified against Postgres 16, not in containers.** The backup, restore and anchor scripts were
-  run end to end against the real schema (including a corrupted backup, a refused restore over the
-  live database and a broken registry link); CI runs them on every push. The Caddy and Prometheus
-  profiles and the MinIO override were not started: no Docker daemon was available.
-- **S3 storage is tested against an in-memory object store only.** Run `just up-s3` (MinIO) once
-  before relying on it, and copy existing artifacts across before switching (the key layout is the
-  same).
-- **Job progress stays at 0 until a job finishes.** Engine calls are single blocking computations.
+- **Deployment is CI-verified, not manually operated here.** Container startup and MinIO artifact
+  storage are smoke-tested in the PR workflow; configure `SENTRY_DSN` and confirm delivery in the
+  selected Sentry or GlitchTip instance before relying on remote error reports.
+- **S3 migration needs an explicit copy.** Existing local-volume artifacts are not copied when
+  switching to S3; use the documented sync procedure before switching a deployment.
 
 ## Security
 

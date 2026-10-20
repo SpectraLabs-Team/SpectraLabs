@@ -26,6 +26,17 @@ The engine refuses unsigned or altered requests, and signatures more than 60 sec
 `scripts/test-auth.mjs`). `/health`, `/ready` and `/api/v1/openapi.json` need no signature. Bind the
 engine to 127.0.0.1 or a private network only.
 
+## Database query mode
+
+The service uses SQLx runtime queries (`sqlx::query` / `query_as`) rather than
+compile-time `query!` macros. This keeps builds independent of a live database
+and avoids committing SQLx metadata for every migration state. Statements are
+kept in `crates/spectra-db/queries/` and included by the Rust code; migrations
+define their schema. CI applies migrations to PostgreSQL 16 and executes the
+schema and queue SQL checks against that database. When a query changes, update
+the corresponding SQL check so CI validates the statement and its expected
+behavior.
+
 ## Errors
 
 Every error has one shape, whatever produced it:

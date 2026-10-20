@@ -337,6 +337,20 @@ impl RiskReport {
 /// refuses plugins written against another version.
 pub const PLUGIN_API_VERSION: u32 = 1;
 
+/// Common metadata contract for compiled Spectra extensions.
+///
+/// This trait is intentionally independent of a particular extension point.
+/// Risk plugins receive a blanket implementation, while future data, storage,
+/// or execution plugins can implement it directly.
+pub trait Plugin: Send + Sync {
+    /// Stable identifier used in configuration and logs.
+    fn plugin_id(&self) -> &str;
+    /// Extension version.
+    fn plugin_version(&self) -> &str;
+    /// Plugin API version supported by this implementation.
+    fn plugin_api_version(&self) -> u32;
+}
+
 /// A user-supplied risk measure over simulated losses.
 pub trait RiskPlugin: Send + Sync {
     /// Unique name.
@@ -357,6 +371,20 @@ pub trait RiskPlugin: Send + Sync {
     /// # Errors
     /// Whatever the plugin reports.
     fn compute(&self, losses: &[f64], confidence: f64) -> Result<f64>;
+}
+
+impl<T: RiskPlugin + ?Sized> Plugin for T {
+    fn plugin_id(&self) -> &str {
+        self.name()
+    }
+
+    fn plugin_version(&self) -> &str {
+        self.version()
+    }
+
+    fn plugin_api_version(&self) -> u32 {
+        self.api_version()
+    }
 }
 
 /// A registered plugin, as [`RiskEngine::plugins`] lists it.
@@ -597,6 +625,22 @@ pub fn benchmark(
     repetitions: usize,
     warmups: usize,
 ) -> Result<Json> {
+    benchmark_with_progress(portfolio, simulations, repetitions, warmups, |_| {})
+}
+
+/// Benchmark like [`benchmark`], reporting completed warmup and measured runs.
+/// The callback is invoked once after each backend repetition and can be used
+/// by a job worker to persist coarse-grained progress.
+///
+/// # Errors
+/// Returns the same validation or simulation error as [`benchmark`].
+pub fn benchmark_with_progress(
+    portfolio: &Portfolio,
+    simulations: u64,
+    repetitions: usize,
+    warmups: usize,
+    mut on_progress: impl FnMut(f32),
+) -> Result<Json> {
     let (lo, hi, max_rep, max_warm) = BENCHMARK_LIMITS;
     if !(lo..=hi).contains(&simulations) || !(1..=max_rep).contains(&repetitions) || warmups > max_warm {
         return Err(Error::InvalidArgument(
@@ -605,11 +649,15 @@ pub fn benchmark(
     }
     let engine = RiskEngine::new();
     let mut results = Vec::new();
+    let total_runs = 3 * (warmups + repetitions);
+    let mut completed_runs = 0;
     for requested in [Backend::Cpu, Backend::Parallel, Backend::Cuda] {
         let config = RiskConfig { simulations, backend: requested, seed: 42, ..RiskConfig::default() };
         let mut actual = requested;
         for _ in 0..warmups {
             actual = engine.calculate(Metric::VaR, portfolio, &config)?.backend_used;
+            completed_runs += 1;
+            on_progress(completed_runs as f32 / total_runs as f32);
         }
         let (mut total, mut compute_t) = (Vec::new(), Vec::new());
         for _ in 0..repetitions {
@@ -617,6 +665,8 @@ pub fn benchmark(
             actual = r.backend_used;
             total.push(r.total_ms);
             compute_t.push(r.compute_ms);
+            completed_runs += 1;
+            on_progress(completed_runs as f32 / total_runs as f32);
         }
         let mut st = total.clone();
         st.sort_by(f64::total_cmp);

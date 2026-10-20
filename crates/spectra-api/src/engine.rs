@@ -241,6 +241,29 @@ pub fn run_job(kind: &str, payload: &Json) -> Reply {
     }
 }
 
+/// Execute queued work and report benchmark progress after each repetition.
+///
+/// # Errors
+/// Returns the matching engine route's validation or computation error.
+pub fn run_job_with_progress(kind: &str, payload: &Json, mut on_progress: impl FnMut(f32)) -> Reply {
+    if kind == "benchmark" {
+        let (portfolio, simulations, repetitions, warmups) = benchmark_args(payload)?;
+        return spectra_risk::benchmark_with_progress(
+            &portfolio,
+            simulations,
+            repetitions,
+            warmups,
+            on_progress,
+        )
+        .map_err(|e| engine_error(&e));
+    }
+    let result = run_job(kind, payload);
+    if result.is_ok() {
+        on_progress(1.0);
+    }
+    result
+}
+
 /// Maximum duration allowed for a job before its result is discarded.
 pub fn job_timeout(kind: &str) -> std::time::Duration {
     std::time::Duration::from_secs(if kind == "benchmark" { 600 } else { 300 })

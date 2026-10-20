@@ -252,6 +252,16 @@ async fn track_metrics(req: Request, next: Next) -> Response {
         resp.status().as_u16(),
         start.elapsed().as_secs_f64(),
     );
+    let request_id =
+        resp.headers().get(auth::headers::REQUEST_ID).and_then(|v| v.to_str().ok()).unwrap_or("missing");
+    tracing::info!(
+        request_id,
+        method,
+        route = path,
+        status = resp.status().as_u16(),
+        duration_ms = start.elapsed().as_secs_f64() * 1000.0,
+        "http request completed"
+    );
     resp
 }
 
@@ -572,7 +582,24 @@ pub async fn serve(
     db: Option<PgPool>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
-    axum::serve(listener, router(cfg, db)).with_graceful_shutdown(shutdown).await
+    let sampler = db.clone().map(|pool| {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(15));
+            loop {
+                interval.tick().await;
+                observability::DatabaseMetrics::pool_stats(pool.size(), pool.num_idle());
+                match spectra_db::jobs::queue_depth(&pool).await {
+                    Ok((queued, running)) => observability::DatabaseMetrics::queue_depth(queued, running),
+                    Err(error) => tracing::warn!(%error, "could not sample job queue depth"),
+                }
+            }
+        })
+    });
+    let result = axum::serve(listener, router(cfg, db)).with_graceful_shutdown(shutdown).await;
+    if let Some(sampler) = sampler {
+        sampler.abort();
+    }
+    result
 }
 
 /// Resolves on Ctrl-C, or on SIGTERM on Unix (what `docker stop` sends).

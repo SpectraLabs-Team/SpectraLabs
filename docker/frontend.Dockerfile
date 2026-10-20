@@ -10,6 +10,12 @@ RUN --mount=type=cache,target=/root/.npm npm ci
 FROM node:20-bookworm-slim AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1 NEXT_OUTPUT=standalone
+# Build-only placeholders: auth configuration is validated when the server
+# starts, while Next may import route modules during static data collection.
+ENV AUTH_SECRET=ci-build-only-secret-value-not-for-runtime \
+    DATABASE_URL=postgresql://build:build@127.0.0.1:5432/build \
+    GMAIL_USER=build-not-a-real-account@example.test \
+    GMAIL_APP_PASSWORD=build-only-placeholder-not-a-real-password
 COPY --from=deps /app/node_modules ./node_modules
 COPY web/frontend ./
 RUN npm run build

@@ -54,6 +54,7 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-spectra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-spectra}
       ENGINE_SECRET: ${ENGINE_SECRET:?set ENGINE_SECRET in .env (openssl rand -base64 48)}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       SPECTRA_API_ADDR: 0.0.0.0:8000
       SPECTRA_CORS_ORIGINS: http://localhost:3000
       SPECTRA_MIGRATE_ON_START: "false"
@@ -82,6 +83,7 @@ services:
     # Scale out with: docker compose up -d --scale worker=3 (each claims jobs with SKIP LOCKED).
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-spectra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-spectra}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       ARTIFACT_STORAGE: local # s3: see deploy/compose.s3.yml
       ARTIFACT_DIR: /var/lib/spectra/artifacts
       SPECTRA_WORKER_CONCURRENCY: ${SPECTRA_WORKER_CONCURRENCY:-2}
@@ -159,6 +161,24 @@ services:
       - api
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:11.4.0
+    profiles: ["monitoring"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-local-only-grafana-password}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
 volumes:
   pgdata:
   artifacts:
@@ -166,3 +186,4 @@ volumes:
   caddy-data:
   caddy-config:
   prometheus-data:
+  grafana-data:

@@ -146,7 +146,7 @@ export async function verifyTotpCode(userId: string, code: string): Promise<bool
 }
 
 /** A recovery code. Each works once. */
-export async function useRecoveryCode(userId: string, code: string): Promise<{ ok: boolean; left: number }> {
+export async function consumeRecoveryCode(userId: string, code: string): Promise<{ ok: boolean; left: number }> {
   if (!looksLikeRecoveryCode(code)) return { ok: false, left: -1 };
   const used = await query('UPDATE recovery_codes SET used_at = now() WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL RETURNING user_id', [userId, recoveryHash(code)]);
   const [{ left }] = await query<{ left: number }>('SELECT count(*)::int AS left FROM recovery_codes WHERE user_id = $1 AND used_at IS NULL', [userId]);
@@ -156,7 +156,7 @@ export async function useRecoveryCode(userId: string, code: string): Promise<{ o
 /** Authenticator code or recovery code. */
 export async function verifySecondFactor(userId: string, code: string): Promise<{ ok: false } | { ok: true; method: 'totp' | 'recovery_code'; recoveryCodesLeft?: number }> {
   if (/^\s*\d{6}\s*$/.test(code)) return (await verifyTotpCode(userId, code)) ? { ok: true, method: 'totp' } : { ok: false };
-  const r = await useRecoveryCode(userId, code);
+  const r = await consumeRecoveryCode(userId, code);
   return r.ok ? { ok: true, method: 'recovery_code', recoveryCodesLeft: r.left } : { ok: false };
 }
 

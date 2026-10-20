@@ -93,6 +93,11 @@ The artifact is on the volume under its hash, and re-hashing it gives the same v
 docker compose exec worker sh -c 'f=$(find /var/lib/spectra/artifacts/sha256 -type f | head -1); echo $f; sha256sum $f'
 ```
 
+Studio benchmark restart recovery: open the Benchmark tab, start a sweep, and immediately run
+`docker compose restart api` in another terminal. The page should keep the durable job ID, retry
+polling through the brief API outage, then show the finished result. Progress advances as the worker
+completes each backend repetition; use Cancel to request cancellation and wait for `cancelled`.
+
 Worker crash recovery: start a long benchmark, then `docker compose kill worker` and
 `docker compose start worker`. Within ~45 s the job is requeued and finishes, with `attempts: 2`.
 
@@ -110,11 +115,24 @@ just import-users-dry-run      # previews importing the old web/frontend/.data/u
 ```bash
 docker compose exec api curl -fsS localhost:8000/metrics | grep -E '^api_(request_duration_seconds_bucket|responses_total)' | head
 docker compose exec worker curl -fsS localhost:9100/metrics | grep -E '^jobs_(claimed|completed)_total|^job_duration_seconds_count'
-docker compose logs --tail 5 api worker        # JSON lines with level, target, fields (job_id on worker lines)
+docker compose logs --tail 5 api worker        # JSON API lines include request_id; worker job lines include job_id
 ```
 
 With `docker compose --profile monitoring up -d`, http://127.0.0.1:9090/targets shows `spectra-api`
-and one `spectra-worker` target per replica, all UP.
+and one `spectra-worker` target per replica, all UP. The provisioned Grafana dashboard is at
+http://127.0.0.1:3001 (credentials from `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` in `.env`);
+it charts API rate and latency, queue depth, DB pool use, and job duration.
+
+Compose deployment profiles can be checked before starting containers with:
+
+```bash
+docker compose --profile proxy --profile monitoring config --quiet
+docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile minio config --quiet
+```
+
+For a fresh-stack smoke check, use an empty Postgres volume and run `docker compose up -d --build`;
+wait for `api` to become healthy, then `docker compose exec api curl -fsS localhost:8000/ready` should
+return `{"status":"ready",...}`. The CI container job performs this check from a clean database.
 
 ## 7. Deployment (step 12)
 

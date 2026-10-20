@@ -12,6 +12,7 @@ and monitoring. `just --list` shows the shortcuts used below.
 | `postgres` | compose network only | data in the `pgdata` volume |
 | `caddy` (profile `proxy`) | ports 80 and 443 | TLS and security headers in front of `frontend` |
 | `prometheus` (profile `monitoring`) | `127.0.0.1:9090` | scrapes the API and every worker |
+| `grafana` (profile `monitoring`) | `127.0.0.1:3001` | provisioned overview dashboard; configure `GRAFANA_ADMIN_PASSWORD` in `.env` |
 
 ## Staging and production
 
@@ -100,3 +101,9 @@ git pull && docker compose --profile proxy --profile monitoring up -d --build
 ```
 
 The `migrate` service applies new migrations before `api` and `worker` start. Back up first.
+# Error reporting
+
+Set `SENTRY_DSN` in the root `.env` to enable error and panic reporting from both `spectra-api` and
+`spectra-worker`. The SDK accepts a Sentry DSN or a Sentry-compatible GlitchTip DSN. Leave it empty
+to keep errors in the structured JSON logs only. Do not put auth secrets, request bodies, or other
+credentials in DSN values or event messages.

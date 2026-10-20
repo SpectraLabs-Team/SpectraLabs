@@ -47,6 +47,18 @@ SELECT pg_temp.check((SELECT checksum FROM s1) = :'sum1' AND (SELECT row_count F
                      AND (SELECT dataset_name FROM s1) = 'spy daily' AND (SELECT version FROM s1) = 1, 'resolve');
 SELECT pg_temp.check((SELECT count(*) FROM s2) = 0, 'another workspace cannot resolve it');
 
+-- List a workspace's versions, newest first, with the dataset name.
+CREATE TEMP TABLE l1 AS EXECUTE dataset_version_list('00000000-0000-7000-8000-0000000000c1', 100);
+CREATE TEMP TABLE l2 AS EXECUTE dataset_version_list('00000000-0000-7000-8000-0000000000c1', 1);
+CREATE TEMP TABLE l3 AS EXECUTE dataset_version_list('00000000-0000-7000-8000-0000000000d1', 100);
+SELECT pg_temp.check((SELECT count(*) FROM l1) = 2 AND (SELECT array_agg(version) FROM l1) = '{2,1}'
+                     AND (SELECT bool_and(dataset_name = 'spy daily') FROM l1), 'list newest first');
+SELECT pg_temp.check((SELECT checksum FROM l1 WHERE version = 1) = :'sum1'
+                     AND (SELECT row_count FROM l1 WHERE version = 2) = 2500
+                     AND (SELECT byte_size FROM l1 WHERE version = 2) = 9100, 'list fields');
+SELECT pg_temp.check((SELECT count(*) FROM l2) = 1 AND (SELECT version FROM l2) = 2, 'list limit');
+SELECT pg_temp.check((SELECT count(*) FROM l3) = 1 AND (SELECT id FROM l3) = (SELECT id FROM r4), 'list is workspace scoped');
+
 -- A backtest run links its job and dataset version.
 CREATE TEMP TABLE j AS EXECUTE job_enqueue('00000000-0000-7000-8000-0000000000c1', 'backtest', '{}', 0, 3, NULL);
 SELECT id AS job FROM j \gset

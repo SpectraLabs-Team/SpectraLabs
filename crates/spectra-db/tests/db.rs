@@ -104,6 +104,13 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
         (checksum.as_str(), 2400, name.as_str())
     );
     assert!(resolve_version(&pool, spectra_db::new_id(), v1.id).await.unwrap().is_none(), "other workspace");
+    let listed = spectra_db::datasets::list_versions(&pool, ws, 500).await.unwrap();
+    let mine = listed.iter().find(|v| v.id == v1.id).expect("listed");
+    assert_eq!(
+        (mine.dataset_name.as_str(), mine.version, mine.row_count, mine.byte_size),
+        (name.as_str(), 1, 2400, 9000)
+    );
+    assert!(spectra_db::datasets::list_versions(&pool, spectra_db::new_id(), 500).await.unwrap().is_empty());
 
     let job_id: uuid::Uuid = sqlx::query_scalar(
         "INSERT INTO jobs (workspace_id, kind, payload, status, attempts, started_at, finished_at, created_by) \
@@ -115,6 +122,9 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    let page = spectra_db::jobs::list_kind(&pool, ws, "backtest", None, None, 200).await.unwrap();
+    assert!(page.items.iter().all(|j| j.kind == "backtest"));
+    assert!(page.items.iter().any(|j| j.id == job_id), "listed by kind");
     let run_id = insert_backtest_run(
         &pool,
         &NewBacktestRun {

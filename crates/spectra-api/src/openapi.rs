@@ -88,6 +88,11 @@ pub struct StressRequest {
         crate::jobs_api::list_jobs,
         crate::jobs_api::get_job,
         crate::jobs_api::cancel_job,
+        crate::backtests_api::create_backtest,
+        crate::backtests_api::get_backtest,
+        crate::backtests_api::cancel_backtest,
+        crate::backtests_api::backtest_series,
+        crate::backtests_api::builtin_strategies,
     ),
     components(schemas(
         ErrorDoc,
@@ -97,11 +102,14 @@ pub struct StressRequest {
         crate::jobs_api::CreateJob,
         crate::jobs_api::JobView,
         crate::jobs_api::JobPage,
+        crate::backtests_api::CreateBacktest,
+        crate::backtests_api::BacktestView,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
         (name = "engine", description = "Synchronous engine calls"),
         (name = "jobs", description = "Queued engine work, run by spectra-worker"),
+        (name = "backtests", description = "Backtests: jobs of kind backtest, and the built-in strategies"),
     )
 )]
 pub struct ApiDoc;
@@ -128,6 +136,11 @@ mod tests {
             "/api/v1/jobs",
             "/api/v1/jobs/{id}",
             "/api/v1/jobs/{id}/cancel",
+            "/api/v1/backtests",
+            "/api/v1/backtests/{id}",
+            "/api/v1/backtests/{id}/cancel",
+            "/api/v1/backtests/{id}/series",
+            "/api/v1/strategies/builtin",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

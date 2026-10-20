@@ -10,6 +10,198 @@
     "version": "1"
   },
   "paths": {
+    "/api/v1/backtests": {
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Queue a backtest.",
+        "operationId": "create_backtest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBacktest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The account has no workspace (code `no_workspace`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the strategy, params, config or dataset version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{id}": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "One backtest: status and progress, then the summary and fingerprints.",
+        "operationId": "get_backtest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest (job) id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{id}/cancel": {
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Cancel a backtest: a queued one stops at once, a running one at its next\nbar group (the worker checks within a few seconds).",
+        "operationId": "cancel_backtest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest (job) id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{id}/series": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "A finished backtest's equity or drawdown series, downsampled for charts:\n`{kind, total_points, downsampled, points: [[ts_ns, value], ...]}`.",
+        "operationId": "backtest_series",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest (job) id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "equity (default) or drawdown",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The series"
+          },
+          "404": {
+            "description": "No such backtest, or no such series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The backtest has not succeeded (yet)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/benchmark": {
       "post": {
         "tags": [
@@ -304,6 +496,20 @@
         }
       }
     },
+    "/api/v1/strategies/builtin": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Built-in strategies with their parameter schemas, the configuration form's\nJSON Schema, and the configuration presets: everything the Studio needs to\nbuild the backtest form.",
+        "operationId": "builtin_strategies",
+        "responses": {
+          "200": {
+            "description": "{strategies, config_schema, presets}"
+          }
+        }
+      }
+    },
     "/api/v1/stress": {
       "post": {
         "tags": [
@@ -372,6 +578,99 @@
   },
   "components": {
     "schemas": {
+      "BacktestView": {
+        "type": "object",
+        "description": "A backtest as the API shows it.",
+        "required": [
+          "id",
+          "status",
+          "progress",
+          "cancel_requested",
+          "request",
+          "created_at"
+        ],
+        "properties": {
+          "artifacts": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Stored files `[{kind, file_name, content_type, sha256, size}]`, once finished."
+          },
+          "cancel_requested": {
+            "type": "boolean",
+            "description": "A cancel was asked for while it ran."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Queued at (UTC, RFC 3339)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed (or the latest retryable error)."
+          },
+          "fingerprints": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Engine, dataset, config, result and strategy hashes, once finished."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Finished at."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The job id (UUIDv7); use it for every `/backtests/{id}` route."
+          },
+          "progress": {
+            "type": "number",
+            "format": "float",
+            "description": "0..1, updated with every worker heartbeat while it runs."
+          },
+          "request": {
+            "type": "object",
+            "description": "What was asked for: dataset version, strategy, params, config."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The recorded run, once finished."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Latest attempt started at."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`."
+          },
+          "summary": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Metrics, drawdown, tail, activity and trade statistics, once finished."
+          }
+        }
+      },
       "BenchmarkRequest": {
         "type": "object",
         "description": "`POST /api/v1/benchmark` body (also the `benchmark` job payload).",
@@ -411,6 +710,45 @@
             "minimum": 0
           }
         }
+      },
+      "CreateBacktest": {
+        "type": "object",
+        "description": "`POST /api/v1/backtests` body: the `backtest` job payload, plus a priority.",
+        "required": [
+          "dataset_version_id",
+          "strategy"
+        ],
+        "properties": {
+          "config": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...)."
+          },
+          "dataset_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A dataset version of the caller's workspace."
+          },
+          "params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Strategy parameters; missing ones take their defaults."
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "-10..10; higher runs first. Default 0."
+          },
+          "strategy": {
+            "type": "string",
+            "description": "A built-in strategy name (see `GET /api/v1/strategies/builtin`)."
+          }
+        },
+        "additionalProperties": false
       },
       "CreateJob": {
         "type": "object",
@@ -703,6 +1041,10 @@
     {
       "name": "jobs",
       "description": "Queued engine work, run by spectra-worker"
+    },
+    {
+      "name": "backtests",
+      "description": "Backtests: jobs of kind backtest, and the built-in strategies"
     }
   ]
 }

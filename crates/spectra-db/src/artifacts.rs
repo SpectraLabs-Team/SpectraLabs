@@ -276,6 +276,36 @@ pub async fn store_for_run(
     Ok(stored)
 }
 
+/// A stored artifact of a run, as recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactRef {
+    /// Lower-case hex SHA-256 (the key in [`ArtifactStore`]).
+    pub sha256: String,
+    /// MIME type.
+    pub content_type: String,
+    /// Byte count.
+    pub size: i64,
+}
+
+/// The newest artifact of `kind` for `run_id`, if that run belongs to `workspace_id`.
+///
+/// # Errors
+/// Any database error.
+pub async fn find_for_run(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    kind: &str,
+) -> Result<Option<ArtifactRef>, sqlx::Error> {
+    let row: Option<(String, String, i64)> = sqlx::query_as(include_str!("../queries/run_artifact_get.sql"))
+        .bind(workspace_id)
+        .bind(run_id)
+        .bind(kind)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(sha256, content_type, size)| ArtifactRef { sha256, content_type, size }))
+}
+
 /// S3-compatible artifact storage (the `s3` feature).
 #[cfg(feature = "s3")]
 pub mod s3 {

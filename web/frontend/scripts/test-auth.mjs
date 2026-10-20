@@ -671,6 +671,17 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.routePolicyKey('api/v1/jobs/0192f3a4-0000-7000-8000-000000000002/cancel'), 'api/v1/jobs/{id}/cancel');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/jobs'], 'GET'), 'viewer');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/jobs'], 'POST'), 'editor');
+  const bt = '0192f3a4-0000-7000-8000-000000000002';
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}`), 'api/v1/backtests/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/cancel`), 'api/v1/backtests/{id}/cancel');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/series`), 'api/v1/backtests/{id}/series');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/other`), `api/v1/backtests/${bt}/other`, 'unknown sub-routes stay unlisted');
+  assert.equal(engineRoutes.routePolicyKey('api/v1/backtests/not-a-uuid'), 'api/v1/backtests/not-a-uuid');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests'], 'POST'), 'editor', 'running a backtest needs editor');
+  for (const p of ['api/v1/backtests/{id}', 'api/v1/backtests/{id}/series', 'api/v1/strategies/builtin']) {
+    assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
+  }
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests/{id}/cancel'], 'POST'), 'editor');
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {

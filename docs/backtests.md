@@ -24,39 +24,38 @@ cargo run -p spectra-db -- dataset-add --workspace dev --name "spy daily" \
 The same checksum registered again under the same name returns the existing version; a new
 checksum becomes the next version. A job can only run on versions of its own workspace.
 
-## 3. Queue the job
+## 3. Queue the backtest
 
 ```http
-POST /api/v1/jobs
+POST /api/v1/backtests
 {
-  "kind": "backtest",
-  "payload": {
-    "dataset_version_id": "<version id>",
-    "strategy": "sma_cross",
-    "params": { "fast": 10, "slow": 30 },
-    "config": { "preset": "default", "initial_cash": 100000 }
-  }
+  "dataset_version_id": "<version id>",
+  "strategy": "sma_cross",
+  "params": { "fast": 10, "slow": 30 },
+  "config": { "preset": "default", "initial_cash": 100000 }
 }
 ```
 
-- `strategy`: `buy_and_hold`, `sma_cross` or `zscore_reversion`
-  (`spectra-backtest strategies` lists them with their parameters).
-- `params` and `config` are optional. `config` is the user form described by
-  `spectra-backtest schema`; presets are `default`, `zero_cost` and `conservative_costs`.
-- A bad payload is a 422 listing every problem (`params.fast: must be shorter than slow`,
-  `config.slippage_bps: ...`), and so is a dataset version outside the workspace.
+- `GET /api/v1/strategies/builtin` returns everything a form needs: the strategies with their
+  parameter schemas (`buy_and_hold`, `sma_cross`, `zscore_reversion`), the configuration's JSON
+  Schema, and the presets (`default`, `zero_cost`, `conservative_costs`).
+- `params` and `config` are optional. A bad request is a 422 listing every problem
+  (`params.fast: must be shorter than slow`, `config.slippage_bps: ...`), and so is a dataset
+  version outside the workspace.
+- The same request also works as a generic job: `POST /api/v1/jobs` with
+  `{"kind": "backtest", "payload": {...}}`.
 
 ## 4. Follow it
 
-`GET /api/v1/jobs/{id}` shows `progress` (0 to 1, updated every heartbeat) while it runs.
-`POST /api/v1/jobs/{id}/cancel` stops it at the next bar group. When it succeeds, `result` holds:
+| Route | Role | |
+| --- | --- | --- |
+| `GET /api/v1/backtests/{id}` | viewer | `status`, `progress` (0 to 1, every heartbeat), then `run_id`, `fingerprints`, `summary`, `artifacts` |
+| `POST /api/v1/backtests/{id}/cancel` | editor | stops it at the next bar group |
+| `GET /api/v1/backtests/{id}/series?kind=equity\|drawdown` | viewer | the chart series (at most 1,000 points; the maximum drawdown is always kept). 409 until it has succeeded |
 
-| Field | |
-| --- | --- |
-| `run_id` | the `runs` row (kind `backtest`, linked to the dataset version) |
-| `fingerprints` | engine version, dataset, config, result and strategy hashes |
-| `summary` | metrics, drawdown, VaR/ES, activity and trade statistics |
-| `artifacts` | `summary`, `equity_series`, `drawdown_series`, `request`, and the CSVs `equity_csv`, `orders_csv`, `fills_csv`, `returns_csv`, each with its SHA-256 |
+A finished backtest stores `summary`, `equity_series`, `drawdown_series`, `request`, and the CSVs
+`equity_csv`, `orders_csv`, `fills_csv`, `returns_csv`, each with its SHA-256. The API reads the
+series from `ARTIFACT_DIR` (mounted read-only under docker compose).
 
 ## Checking a job against the CLI
 

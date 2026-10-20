@@ -55,6 +55,18 @@ SELECT pg_temp.check((SELECT kind FROM runs WHERE id = '00000000-0000-7000-8000-
 SELECT pg_temp.check((SELECT dataset_version_id FROM runs WHERE id = '00000000-0000-7000-8000-0000000000e1') = :'v1', 'run dataset version');
 SELECT pg_temp.check((SELECT status FROM runs WHERE id = '00000000-0000-7000-8000-0000000000e1') = 'succeeded', 'run status');
 
+-- Artifacts are found by run and kind, only inside the run's workspace.
+INSERT INTO run_artifacts (workspace_id, run_id, kind, sha256, path, size_bytes, content_type)
+VALUES ('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000e1', 'equity_series',
+        :'sum2', 'sha256/22/22/x', 42, 'application/json');
+CREATE TEMP TABLE a1 AS EXECUTE run_artifact_get('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000e1', 'equity_series');
+CREATE TEMP TABLE a2 AS EXECUTE run_artifact_get('00000000-0000-7000-8000-0000000000d1', '00000000-0000-7000-8000-0000000000e1', 'equity_series');
+CREATE TEMP TABLE a3 AS EXECUTE run_artifact_get('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-0000000000e1', 'drawdown_series');
+SELECT pg_temp.check((SELECT sha256 FROM a1) = :'sum2' AND (SELECT size_bytes FROM a1) = 42
+                     AND (SELECT content_type FROM a1) = 'application/json', 'artifact by kind');
+SELECT pg_temp.check((SELECT count(*) FROM a2) = 0, 'another workspace cannot read the artifact');
+SELECT pg_temp.check((SELECT count(*) FROM a3) = 0, 'missing kind');
+
 -- A run cannot point at another workspace's dataset version (composite foreign key).
 DO $$
 BEGIN

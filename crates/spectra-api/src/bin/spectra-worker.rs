@@ -23,11 +23,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use spectra_api::config::{ArtifactStorage, WorkerConfig};
+use spectra_api::config::WorkerConfig;
 use spectra_api::{engine, observability, shutdown_signal};
 use spectra_backtest::{run_job_from_store, JobFailure, JobProducts};
 use spectra_core::{Json, ENGINE_VERSION};
-use spectra_db::artifacts::{store_for_run, ArtifactBackend, ArtifactStore, NewArtifact};
+use spectra_db::artifacts::{store_for_run, ArtifactBackend, NewArtifact};
 use spectra_db::datasets::{self, NewBacktestRun};
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
 use spectra_db::{PgPool, PoolConfig};
@@ -59,25 +59,6 @@ struct Ctx {
     backtest_max_instruments: usize,
 }
 
-/// The configured artifact backend.
-fn artifact_backend(storage: &ArtifactStorage) -> Result<ArtifactBackend, String> {
-    match storage {
-        ArtifactStorage::Local(dir) => Ok(ArtifactBackend::Local(ArtifactStore::new(dir))),
-        #[cfg(feature = "s3")]
-        ArtifactStorage::S3 { bucket, prefix } => {
-            spectra_db::artifacts::s3::S3ArtifactStore::from_env(bucket, prefix)
-                .map(ArtifactBackend::S3)
-                .map_err(|e| format!("cannot use artifact bucket {bucket}: {e}"))
-        }
-        #[cfg(not(feature = "s3"))]
-        ArtifactStorage::S3 { .. } => {
-            Err("ARTIFACT_STORAGE=s3, but this worker was built without the `s3` feature \
-                 (cargo build --features s3)"
-                .into())
-        }
-    }
-}
-
 /// Prometheus text for the worker's own metrics.
 #[allow(clippy::unused_async)] // axum handlers are async fns
 async fn metrics_text() -> axum::response::Response {
@@ -101,7 +82,7 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let store = match artifact_backend(&cfg.artifact_storage) {
+    let store = match spectra_api::config::artifact_backend(&cfg.artifact_storage) {
         Ok(s) => s,
         Err(e) => {
             error!("{e}");

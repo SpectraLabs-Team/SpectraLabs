@@ -154,4 +154,13 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
     assert!(find_for_run(&pool, ws, run_id, "drawdown_series").await.unwrap().is_none());
     assert!(find_for_run(&pool, spectra_db::new_id(), run_id, "equity_series").await.unwrap().is_none());
     let _ = std::fs::remove_dir_all(dir);
+
+    // Leave the shared database as found: the SQL checks that run later count jobs and events.
+    for (sql, id) in [
+        ("DELETE FROM runs WHERE id = $1", run_id),
+        ("DELETE FROM jobs WHERE id = $1", job.id),
+        ("DELETE FROM datasets WHERE id = (SELECT dataset_id FROM dataset_versions WHERE id = $1)", v1.id),
+    ] {
+        sqlx::query(sql).bind(id).execute(&pool).await.unwrap();
+    }
 }

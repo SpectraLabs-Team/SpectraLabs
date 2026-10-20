@@ -140,7 +140,8 @@ fn fields_override_the_preset() {
             "max_gross_leverage":2.5,"commission_per_unit":0.005,"commission_bps":0.5,"commission_min":1,
             "slippage_bps":3,"delay_bars":2,"max_participation":0.25,"seed":42,
             "periods_per_year":98280,"risk_free_rate":0.04,
-            "borrow_fee_rate":0.03,"cash_interest_rate":0.02,"margin_interest_rate":0.06}"#,
+            "borrow_fee_rate":0.03,"cash_interest_rate":0.02,"margin_interest_rate":0.06,
+            "impact_coefficient":0.8,"impact_window":30}"#,
     ))
     .unwrap();
     assert_eq!(c.initial_cash, Money::from_f64(250_000.5).unwrap());
@@ -156,7 +157,8 @@ fn fields_override_the_preset() {
     assert_eq!(c.periods_per_year, 98_280.0);
     assert_eq!(c.risk_free_rate, 0.04);
     assert_eq!((c.financing.borrow_rate, c.financing.cash_rate, c.financing.margin_rate), (0.03, 0.02, 0.06));
-    // The stored form keeps the rates, and they change the fingerprint.
+    assert_eq!((c.impact.coefficient, c.impact.window), (0.8, 30));
+    // The stored form keeps the rates and the impact model, and they change the fingerprint.
     assert_eq!(config_from_stored_json(&stored_config_json(&c).unwrap()).unwrap(), c);
     let no_fin = BacktestConfig { financing: spectra_engine::FinancingConfig::default(), ..c };
     assert_ne!(config_fingerprint(&no_fin), config_fingerprint(&c));

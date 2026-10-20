@@ -19,7 +19,7 @@ use std::fmt::Write as _;
 use spectra_core::{EntryType, Error, Json, Money, Result, Side};
 use spectra_engine::{
     compute_drawdown_stats, compute_tail_stats, returns_from_curve, BacktestResult, EquityPoint, OrderState,
-    OrderType,
+    TimeInForce,
 };
 use spectra_research::{compute_trade_stats, extract_trades};
 
@@ -63,20 +63,27 @@ pub fn equity_csv(r: &BacktestResult) -> String {
 /// Every order with its final state.
 pub fn orders_csv(r: &BacktestResult) -> String {
     let mut s = String::from(
-        "id,instrument,side,type,qty,remaining,limit,submit_ts_ns,submit_step,state,reject_reason\n",
+        "id,instrument,side,type,qty,remaining,limit,stop,time_in_force,submit_ts_ns,submit_step,state,reject_reason\n",
     );
     for o in &r.orders {
-        let limit = if o.kind == OrderType::Limit { o.limit.to_string() } else { String::new() };
+        let limit = if o.limit.is_zero() { String::new() } else { o.limit.to_string() };
+        let stop = if o.stop.is_zero() { String::new() } else { o.stop.to_string() };
+        let tif = match o.tif {
+            TimeInForce::GoodTillDate(t) => format!("gtd:{t}"),
+            other => other.as_str().to_string(),
+        };
         let _ = writeln!(
             s,
-            "{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{}",
             o.id,
             o.instrument,
             side_str(o.side),
-            if o.kind == OrderType::Limit { "limit" } else { "market" },
+            o.kind.as_str(),
             o.qty,
             o.remaining,
             limit,
+            stop,
+            tif,
             o.submit_ts,
             o.submit_step,
             o.state.as_str(),
@@ -163,6 +170,7 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         OrderState::Filled,
         OrderState::Cancelled,
         OrderState::Rejected,
+        OrderState::Expired,
     ] {
         let n = r.orders.iter().filter(|o| o.state == state).count();
         by_state.set(state.as_str(), Json::integer(n as i64))?;

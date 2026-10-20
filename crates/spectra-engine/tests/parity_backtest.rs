@@ -122,6 +122,7 @@ fn print(out: &mut String, name: &str, r: &BacktestResult) {
             OrderState::Filled => 2,
             OrderState::Cancelled => 3,
             OrderState::Rejected => 4,
+            OrderState::Expired => unreachable!("the reference engine has no time in force"),
         }] += 1;
         reasons[match o.reject_reason {
             None => 0,
@@ -239,6 +240,7 @@ fn backtester_matches_cpp_reference() {
             periods_per_year: if c % 2 == 0 { 252.0 } else { 98_280.0 },
             risk_free_rate: if c % 3 == 0 { 0.0 } else { 0.035 },
             financing: spectra_engine::FinancingConfig::default(), // the reference engine had none
+            impact: spectra_engine::ImpactConfig::default(),
         };
         for seed in 1..=3u64 {
             let bars = random_market(seed * 101 + c as u64, 1 + (c % 4) as usize, 300);

@@ -89,6 +89,20 @@ Each charge is a ledger journal entry (`Interest` or `BorrowFee`), so the books 
 from the journal, and the summary's `activity.financing` is the net total. With all three at zero
 (the default) nothing is charged and fingerprints match earlier runs.
 
+## Execution
+
+Strategies written in Rust can place, besides market and limit orders:
+
+| Order | Fills |
+| --- | --- |
+| `ctx.stop(..)` | when the bar trades through the stop (buy: high reaches it; sell: low does), at the stop or a gapped open, plus slippage; a partial fill continues as a market order |
+| `ctx.stop_limit(..)` | on the trigger bar at the stop (or gapped open) if within the limit, otherwise rests as a limit order |
+| `ctx.order(OrderSpec { tif, .. })` | any of the above with a time in force: `GoodTillCancelled` (default), `Day` (one bar, then `Expired`) or `GoodTillDate(ts)` |
+
+Market impact (off by default) adds `impact_coefficient x volatility x sqrt(qty / bar volume)` to
+market and stop fills, capped at 10%; volatility is measured over the `impact_window` bars before
+the fill bar. Both are `config` fields.
+
 ## Limits
 
 | Variable | Default | |

@@ -172,7 +172,7 @@ const fn num_positive(max: f64) -> Kind {
 /// strategy can grow it a hundredfold without overflow.
 const MAX_CASH: f64 = 1e9;
 
-const FIELDS: [Field; 17] = [
+const FIELDS: [Field; 19] = [
     Field { name: "preset", kind: Kind::Preset, description: "Starting point for every field not given" },
     Field { name: "initial_cash", kind: num_positive(MAX_CASH), description: "Starting cash" },
     Field { name: "allow_short", kind: Kind::Bool, description: "Allow negative positions" },
@@ -229,6 +229,17 @@ const FIELDS: [Field; 17] = [
         name: "margin_interest_rate",
         kind: num(0.0, 1.0),
         description: "Annual interest paid on negative cash (a margin debit)",
+    },
+    Field {
+        name: "impact_coefficient",
+        kind: num(0.0, 10.0),
+        description: "Square-root market impact on market and stop fills: coefficient x volatility x \
+                      sqrt(qty / bar volume); 0 turns it off, around 1 is typical",
+    },
+    Field {
+        name: "impact_window",
+        kind: Kind::Integer { min: 2, max: 1000 },
+        description: "Bars of history for the impact model's volatility estimate",
     },
 ];
 
@@ -345,7 +356,8 @@ pub fn parse_config(doc: &Json) -> std::result::Result<BacktestConfig, ConfigErr
                     c.seed = s;
                 }
             }
-            (_, Kind::Integer { min, max }) => match v.as_int() {
+            (name, Kind::Integer { min, max }) => match v.as_int() {
+                Ok(n) if (min..=max).contains(&n) && name == "impact_window" => c.impact.window = n as usize,
                 Ok(n) if (min..=max).contains(&n) => c.exec.delay_bars = n as usize,
                 _ => errs.add(f.name, format!("must be a whole number from {min} to {max}")),
             },
@@ -387,6 +399,7 @@ pub fn parse_config(doc: &Json) -> std::result::Result<BacktestConfig, ConfigErr
                     "borrow_fee_rate" => c.financing.borrow_rate = x,
                     "cash_interest_rate" => c.financing.cash_rate = x,
                     "margin_interest_rate" => c.financing.margin_rate = x,
+                    "impact_coefficient" => c.impact.coefficient = x,
                     _ => errs.add(name, "internal: field has no target"),
                 }
             }
@@ -429,7 +442,9 @@ pub fn config_to_user_json(c: &BacktestConfig) -> Result<Json> {
         .with("risk_free_rate", Json::number(c.risk_free_rate)?)
         .with("borrow_fee_rate", Json::number(c.financing.borrow_rate)?)
         .with("cash_interest_rate", Json::number(c.financing.cash_rate)?)
-        .with("margin_interest_rate", Json::number(c.financing.margin_rate)?))
+        .with("margin_interest_rate", Json::number(c.financing.margin_rate)?)
+        .with("impact_coefficient", Json::number(c.impact.coefficient)?)
+        .with("impact_window", Json::integer(c.impact.window as i64)))
 }
 
 /// The exact stored form recorded with a run (raw fixed-point integers);

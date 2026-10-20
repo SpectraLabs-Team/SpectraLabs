@@ -11,6 +11,67 @@
   },
   "paths": {
     "/api/v1/backtests": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "The workspace's backtests, newest first, with headline numbers once finished.",
+        "operationId": "list_backtests",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "queued, running, succeeded, failed or cancelled",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "next_cursor from the previous page",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1..200, default 50",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "backtests"
@@ -93,6 +154,61 @@
           },
           "404": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{id}/artifacts/{kind}": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "A stored file of a finished backtest, as stored (CSV or JSON), with a\ndownload file name. `kind` is one of `summary`, `request`, `equity_csv`,\n`orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`.",
+        "operationId": "backtest_artifact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest (job) id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "summary, request, equity_csv, orders_csv, fills_csv, returns_csv or strategies_csv",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file"
+          },
+          "404": {
+            "description": "No such backtest, kind or file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The backtest has not succeeded (yet)",
             "content": {
               "application/json": {
                 "schema": {
@@ -224,6 +340,37 @@
             "description": "Benchmark report"
           },
           "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "The dataset versions of the caller's workspace, newest first (for the backtest form).",
+        "operationId": "list_datasets",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetList"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "",
             "content": {
               "application/json": {
@@ -578,6 +725,101 @@
   },
   "components": {
     "schemas": {
+      "BacktestListItem": {
+        "type": "object",
+        "description": "One backtest in a list: what was asked for, its state and headline numbers.",
+        "required": [
+          "id",
+          "status",
+          "progress",
+          "cancel_requested",
+          "request",
+          "created_at"
+        ],
+        "properties": {
+          "cancel_requested": {
+            "type": "boolean",
+            "description": "A cancel was asked for while it ran."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Queued at (UTC, RFC 3339)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Finished at."
+          },
+          "headline": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "`{total_return, sharpe, max_drawdown, final_equity, fill_count}`, once finished."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The job id (UUIDv7)."
+          },
+          "progress": {
+            "type": "number",
+            "format": "float",
+            "description": "0..1."
+          },
+          "request": {
+            "type": "object",
+            "description": "What was asked for: dataset version, strategy or strategies, params, config."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The recorded run, once finished."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`."
+          }
+        }
+      },
+      "BacktestPage": {
+        "type": "object",
+        "description": "A page of backtests, newest first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BacktestListItem"
+            },
+            "description": "This page."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Pass as `cursor` for the next page; null on the last."
+          }
+        }
+      },
       "BacktestView": {
         "type": "object",
         "description": "A backtest as the API shows it.",
@@ -785,6 +1027,70 @@
           }
         },
         "additionalProperties": false
+      },
+      "DatasetList": {
+        "type": "object",
+        "description": "The workspace's dataset versions, newest first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetVersionView"
+            },
+            "description": "At most 500."
+          }
+        }
+      },
+      "DatasetVersionView": {
+        "type": "object",
+        "description": "A dataset version a backtest can run on.",
+        "required": [
+          "id",
+          "dataset_name",
+          "version",
+          "checksum",
+          "row_count",
+          "byte_size",
+          "created_at"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Stored size in bytes."
+          },
+          "checksum": {
+            "type": "string",
+            "description": "Dataset-store checksum."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Registered at."
+          },
+          "dataset_name": {
+            "type": "string",
+            "description": "The dataset's name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Version id: a backtest's `dataset_version_id`."
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of bars."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Version number within the dataset."
+          }
+        }
       },
       "ErrorDoc": {
         "type": "object",

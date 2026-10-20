@@ -148,7 +148,7 @@ jobs:
           GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
         run: |
           docker compose --profile proxy --profile monitoring config --quiet
-          docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile minio config --quiet
+          docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 config --quiet
       - name: Build engine and worker image
         run: docker build --file docker/engine.Dockerfile --tag spectralabs/engine:ci .
       - name: Build frontend image
@@ -159,7 +159,7 @@ jobs:
           ENGINE_SECRET: ci-only-engine-secret-value-at-least-32-bytes
           GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
         run: |
-          trap 'docker compose -f docker-compose.yml -f deploy/compose.s3.yml down -v; docker compose down -v; rm -f .env web/frontend/.env.local' EXIT
+          trap 'docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 --profile proxy --profile monitoring down -v --remove-orphans; rm -f .env web/frontend/.env.local' EXIT
           cat > .env <<EOF
           POSTGRES_USER=spectra
           POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -197,7 +197,7 @@ jobs:
           curl -fsS http://127.0.0.1:3001/api/health >/dev/null
           curl -fsS http://127.0.0.1:9090/api/v1/targets | grep -q 'spectra-api'
           test "$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1/)" = 200
-          docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile minio up -d --build minio minio-init worker
+          docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 up -d --build rustfs rustfs-init worker
           for attempt in $(seq 1 90); do
             if docker compose -f docker-compose.yml -f deploy/compose.s3.yml exec -T worker curl -fsS http://127.0.0.1:9100/health >/dev/null; then
               break
@@ -221,5 +221,5 @@ jobs:
             fi
             sleep 1
           done
-          docker compose -f docker-compose.yml -f deploy/compose.s3.yml logs --tail 100 minio minio-init worker
+          docker compose -f docker-compose.yml -f deploy/compose.s3.yml logs --tail 100 rustfs rustfs-init worker
           exit 1

@@ -127,7 +127,7 @@ Compose deployment profiles can be checked before starting containers with:
 
 ```bash
 docker compose --profile proxy --profile monitoring config --quiet
-docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile minio config --quiet
+docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 config --quiet
 ```
 
 For a fresh-stack smoke check, use an empty Postgres volume and run `docker compose up -d --build`;
@@ -159,9 +159,9 @@ just scale-workers 3
 docker compose exec -T postgres psql -U spectra -d spectra -c "select id, hostname, heartbeat_at from workers"
 #  three rows. Queue ten jobs (step 4) and check jobs.worker_id: several workers took them.
 
-just up-s3                                      # MinIO + worker with ARTIFACT_STORAGE=s3
+just up-s3                                      # RustFS + worker with ARTIFACT_STORAGE=s3
 docker compose logs worker | grep artifact_store     # "artifact_store":"s3://spectra-artifacts/"
-#  queue a job, then open the MinIO console at http://127.0.0.1:9001: the object is at sha256/<..>/<..>/<hash>
+#  queue a job, then open the RustFS console at http://127.0.0.1:9001: the object is at sha256/<..>/<..>/<hash>
 
 just api-client                                 # regenerates web/frontend/lib/generated/engine-api.{json,ts}
 git status web/frontend/lib/generated           # commit them the first time

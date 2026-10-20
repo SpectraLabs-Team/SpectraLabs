@@ -9,6 +9,8 @@ rust-version.workspace = true
 
 [dependencies]
 spectra-core = { path = "../spectra-core" }
+spectra-backtest = { path = "../spectra-backtest" }
+spectra-engine = { path = "../spectra-engine" }
 spectra-risk = { path = "../spectra-risk" }
 spectra-db = { path = "../spectra-db" }
 axum.workspace = true

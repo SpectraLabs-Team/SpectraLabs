@@ -174,6 +174,21 @@ pub(crate) async fn create_job(
         Ok(Err((code, msg))) => return error_response(code, msg),
         Err(_) => return error_response(500, "Could not validate the job."),
     }
+    // A backtest must name a dataset version of this workspace; say so now rather than on the worker.
+    if req.kind == spectra_backtest::JOB_KIND {
+        let version = Json::parse(&req.payload.to_string())
+            .ok()
+            .and_then(|p| engine::backtest_job(&p).ok())
+            .and_then(|j| Uuid::parse_str(&j.dataset_version_id).ok());
+        let Some(version) = version else { return error_response(422, "Invalid backtest payload.") };
+        match spectra_db::datasets::resolve_version(&pool, ws, version).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return error_response(422, "dataset_version_id: no such dataset version in this workspace.")
+            }
+            Err(e) => return db_error(&e),
+        }
+    }
     let new = NewJob {
         workspace_id: ws,
         kind: req.kind,

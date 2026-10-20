@@ -2746,6 +2746,7 @@ name = "spectra-backtest"
 version = "0.1.0"
 dependencies = [
  "spectra-core",
+ "spectra-data",
  "spectra-engine",
  "spectra-registry",
  "spectra-research",

@@ -86,12 +86,14 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       ARTIFACT_STORAGE: local # s3: see deploy/compose.s3.yml
       ARTIFACT_DIR: /var/lib/spectra/artifacts
+      SPECTRA_DATA_DIR: /var/lib/spectra/datasets
       SPECTRA_WORKER_CONCURRENCY: ${SPECTRA_WORKER_CONCURRENCY:-2}
       SPECTRA_WORKSPACE_MAX_RUNNING: ${SPECTRA_WORKSPACE_MAX_RUNNING:-2}
       SPECTRA_WORKER_METRICS_ADDR: 0.0.0.0:9100 # /health and Prometheus /metrics, private network only
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - artifacts:/var/lib/spectra/artifacts
+      - datasets:/var/lib/spectra/datasets
     expose:
       - "9100"
     healthcheck:
@@ -182,6 +184,7 @@ services:
 volumes:
   pgdata:
   artifacts:
+  datasets:
   web-data:
   caddy-data:
   caddy-config:

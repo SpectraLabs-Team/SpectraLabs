@@ -19,6 +19,7 @@ pub use sqlx::PgPool;
 use uuid::Uuid;
 
 pub mod artifacts;
+pub mod datasets;
 pub mod jobs;
 
 /// The migrations in `crates/spectra-db/migrations`, embedded at build time.

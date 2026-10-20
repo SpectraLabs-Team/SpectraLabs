@@ -204,6 +204,12 @@ pub struct WorkerConfig {
     pub kinds: Vec<String>,
     /// Default artifact quota per workspace.
     pub artifact_quota_bytes: i64,
+    /// Root of the content-addressed dataset store that backtests read (`SPECTRA_DATA_DIR`).
+    pub data_dir: std::path::PathBuf,
+    /// Most bars one backtest may load (`SPECTRA_BACKTEST_MAX_BARS`).
+    pub backtest_max_bars: usize,
+    /// Most instruments one backtest may trade (`SPECTRA_BACKTEST_MAX_INSTRUMENTS`).
+    pub backtest_max_instruments: usize,
 }
 
 impl WorkerConfig {
@@ -239,6 +245,9 @@ impl WorkerConfig {
         let concurrency = number("SPECTRA_WORKER_CONCURRENCY", 2, 1..=64) as usize;
         let workspace_max_running = number("SPECTRA_WORKSPACE_MAX_RUNNING", 2, 1..=1000);
         let artifact_quota_bytes = number("SPECTRA_ARTIFACT_QUOTA_BYTES", 1 << 30, 0..=i64::MAX);
+        let backtest_max_bars = number("SPECTRA_BACKTEST_MAX_BARS", 20_000_000, 1..=1_000_000_000) as usize;
+        let backtest_max_instruments =
+            number("SPECTRA_BACKTEST_MAX_INSTRUMENTS", 1000, 1..=1_000_000) as usize;
         let all: Vec<String> = crate::engine::JOB_KINDS.iter().map(|kind| (*kind).to_string()).collect();
         let kinds = match val("SPECTRA_WORKER_KINDS") {
             None => all,
@@ -288,6 +297,7 @@ impl WorkerConfig {
             }
             addr
         });
+        let data_dir = val("SPECTRA_DATA_DIR").map_or_else(|| std::path::PathBuf::from("data"), Into::into);
         if problems.is_empty() {
             Ok(Self {
                 database_url,
@@ -297,6 +307,9 @@ impl WorkerConfig {
                 workspace_max_running,
                 kinds,
                 artifact_quota_bytes,
+                data_dir,
+                backtest_max_bars,
+                backtest_max_instruments,
             })
         } else {
             Err(ConfigError(problems))
@@ -387,5 +400,29 @@ mod tests {
         .unwrap();
         let shown = format!("{c:?}");
         assert!(!shown.contains("hunter2") && !shown.contains(SECRET), "{shown}");
+    }
+
+    #[test]
+    fn worker_config_reads_backtest_settings() {
+        let db = ("DATABASE_URL", "postgres://u:p@localhost/db");
+        let w = WorkerConfig::from_lookup(lookup(&[db])).unwrap();
+        assert_eq!(w.data_dir, std::path::PathBuf::from("data"));
+        assert_eq!((w.backtest_max_bars, w.backtest_max_instruments), (20_000_000, 1000));
+        assert!(w.kinds.iter().any(|k| k == "backtest"));
+
+        let w = WorkerConfig::from_lookup(lookup(&[
+            db,
+            ("SPECTRA_DATA_DIR", "/var/lib/spectra/datasets"),
+            ("SPECTRA_BACKTEST_MAX_BARS", "5000"),
+            ("SPECTRA_BACKTEST_MAX_INSTRUMENTS", "3"),
+            ("SPECTRA_WORKER_KINDS", "backtest"),
+        ]))
+        .unwrap();
+        assert_eq!(w.data_dir, std::path::PathBuf::from("/var/lib/spectra/datasets"));
+        assert_eq!((w.backtest_max_bars, w.backtest_max_instruments), (5000, 3));
+        assert_eq!(w.kinds, ["backtest"]);
+
+        let err = WorkerConfig::from_lookup(lookup(&[db, ("SPECTRA_BACKTEST_MAX_BARS", "0")])).unwrap_err();
+        assert!(err.to_string().contains("SPECTRA_BACKTEST_MAX_BARS"), "{err}");
     }
 }

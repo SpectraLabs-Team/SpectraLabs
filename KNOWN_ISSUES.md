@@ -10,15 +10,17 @@
 
 ## Verification gaps
 
-- **The dashboard was not rebuilt.** The npm registry was not reachable, so `npm install`,
-  `next build` and type-checking were not run after the edits (rebranding, the OpenMP to Parallel
-  rename, the trimmed metric list, the `.env.example` port fix). The API it calls is tested in
-  `crates/spectra-api/tests`. Run `npm install && npm run build` before deploying.
+- **CI still needs to verify the latest commit.** On `m20/finish`, `cargo check --workspace` and
+  `cargo test --workspace` passed locally on Windows. Confirm the same checks pass in CI for the
+  exact commit being merged.
+- **Frontend checks passed locally on Windows.** `npm run typecheck`, `npm run build`, and the
+  frontend `npm test` suite passed. These local results do not replace the CI run for the commit
+  being merged.
 - **Bit-exact parity tests run only on Linux with glibc.** The goldens depend on glibc's `exp`,
   `log` and `pow`, so those tests are compiled out elsewhere. All behavioural tests run on every
   platform.
-- **Not tested on Windows or macOS.** The code uses only portable standard-library APIs, including the
-  registry's file locks, but no test has been run on those systems.
+- **Not tested on macOS.** The full Rust test suite and frontend checks passed locally on Windows;
+  no macOS run has been reported.
 
 ## Model limits (inherited)
 
@@ -34,21 +36,20 @@
   it: anchor the head hash somewhere you trust.
 - The holdout vault is process discipline plus an audit trail, not access control.
 
-## API hardening before public exposure
+## API deployment boundary
 
-`spectra-api` is meant for local use or to sit behind a reverse proxy. Before exposing it, add TLS,
-authentication and rate limiting in front of it. It runs at most 32 engine computations at a time
-and answers 503 to further compute requests instead of queueing them.
+`spectra-api` is designed to stay on loopback/private networking behind the Next.js proxy or a
+trusted reverse proxy. Engine routes verify HMAC-signed requests; browser authentication and
+rate-limiting are handled by the frontend. Terminate public TLS at the edge proxy and do not expose
+the engine listener directly to the internet. The API runs at most 32 engine computations at a
+time and answers 503 to further compute requests instead of queueing them.
 
-## Platform ops (M20) in progress
+## Platform ops (M20)
 
-- **Rust service code was written without a compiler.** The build environment could not reach
-  crates.io, so `spectra-api` (axum) and `spectra-db` (sqlx) were not compiled before review. The
-  HMAC signing was compiled and tested against RFC 4231 and against the Node signer, and the SQL
-  migration and seed were run against Postgres 16. Run `just check` before merging.
-- **No OpenAPI spec yet.** `utoipa` lands with the first serde-typed routes (jobs, step 6).
-- **`/ready` checks only the database.** The worker check joins it with the worker (step 6).
-- **Users still live in `users.json`** until step 4 moves them to Postgres.
+The M20 platform features are implemented on branch `m20/finish`: the jobs API and worker, artifact
+storage, OpenAPI endpoint, Prometheus `/metrics`, worker-aware `/ready`, Postgres-backed frontend
+authentication, and the `just import-users` recipe. The worker and API routes are wired into the
+workspace. These items are not present on `main` until `m20/finish` is merged.
 
 ## Security
 

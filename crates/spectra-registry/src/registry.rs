@@ -55,7 +55,7 @@ pub fn system_clock_ns() -> Clock {
     })
 }
 
-const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+pub(crate) const GENESIS: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 /// An exclusive or shared lock on the registry's lock file, released on drop.
 struct FileLock(File);
@@ -236,7 +236,7 @@ pub struct Event {
     pub hash: String,
 }
 
-fn body_dump(seq: u64, kind: &str, ts: i64, payload: &Json) -> String {
+pub(crate) fn body_dump(seq: u64, kind: &str, ts: i64, payload: &Json) -> String {
     Json::object()
         .with("seq", Json::integer(seq as i64))
         .with("type", Json::string(kind))
@@ -245,7 +245,7 @@ fn body_dump(seq: u64, kind: &str, ts: i64, payload: &Json) -> String {
         .dump()
 }
 
-fn event_hash(prev: &str, seq: u64, kind: &str, ts: i64, payload: &Json) -> String {
+pub(crate) fn event_hash(prev: &str, seq: u64, kind: &str, ts: i64, payload: &Json) -> String {
     sha256_hex(format!("{prev}\n{}", body_dump(seq, kind, ts, payload)).as_bytes())
 }
 
@@ -404,6 +404,12 @@ pub struct RunInfo {
     pub counts_as_trial: bool,
     /// When recorded.
     pub recorded_ts: i64,
+    /// Lifecycle status for database-backed runs; file-only runs are succeeded.
+    pub status: String,
+    /// Job id when a queued run is backed by the shared worker queue.
+    pub job_id: String,
+    /// Failure details, if the run failed.
+    pub error: String,
     /// Notes.
     pub notes: Vec<String>,
 }
@@ -517,6 +523,9 @@ fn parse_run(e: &Event) -> Result<RunInfo> {
         n_obs: usize::try_from(p.at("n_obs")?.as_int()?).unwrap_or(0),
         counts_as_trial: p.at("counts_as_trial")?.as_bool()?,
         recorded_ts: e.ts_ns,
+        status: "succeeded".into(),
+        job_id: String::new(),
+        error: String::new(),
         notes: if note.is_empty() { Vec::new() } else { vec![note] },
     })
 }

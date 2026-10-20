@@ -59,6 +59,72 @@ INSERT INTO dataset_versions (workspace_id, dataset_id, version, checksum, row_c
     VALUES ('00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-0000000000d1', 1,
             repeat('a', 64), 10, 100);
 
+-- M5: experiments carry tags and same-workspace lineage; runs freeze their results at completion.
+INSERT INTO experiments (id, workspace_id, name, tags, registry_id)
+    VALUES ('00000000-0000-7000-8000-00000000e001', '00000000-0000-7000-8000-0000000000a1',
+            'M5 parent', ARRAY['baseline', 'daily'], 'import-exp-1');
+INSERT INTO experiments (id, workspace_id, name, parent_id, registry_id)
+    VALUES ('00000000-0000-7000-8000-00000000e002', '00000000-0000-7000-8000-0000000000a1',
+            'M5 child', '00000000-0000-7000-8000-00000000e001', 'import-exp-2');
+INSERT INTO experiment_notes (workspace_id, experiment_id, body)
+    VALUES ('00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-00000000e001', 'Initial note');
+DO $$ BEGIN
+    INSERT INTO experiments (workspace_id, name, parent_id)
+        VALUES ('00000000-0000-7000-8000-0000000000b1', 'cross-workspace child',
+                '00000000-0000-7000-8000-00000000e001');
+    RAISE EXCEPTION 'cross-workspace experiment parent accepted';
+EXCEPTION WHEN foreign_key_violation THEN NULL; END $$;
+
+INSERT INTO runs (id, workspace_id, experiment_id, kind, status)
+    VALUES ('00000000-0000-7000-8000-00000000e101', '00000000-0000-7000-8000-0000000000a1',
+            '00000000-0000-7000-8000-00000000e002', 'backtest', 'queued');
+UPDATE runs SET status = 'running', started_at = now()
+ WHERE id = '00000000-0000-7000-8000-00000000e101';
+DO $$ BEGIN
+    UPDATE runs SET metrics = '{"sharpe":1.0}'::jsonb WHERE id = '00000000-0000-7000-8000-00000000e101';
+    RAISE EXCEPTION 'running run results changed before completion';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'run results may only be written when the run succeeds' THEN RAISE; END IF;
+END $$;
+UPDATE runs SET status = 'succeeded', finished_at = now(),
+    dataset_bars_sha256 = repeat('a', 64), strategy_sha256 = repeat('b', 64),
+    config = '{"seed":1}'::jsonb, config_sha256 = repeat('c', 64), result_sha256 = repeat('d', 64),
+    sharpe_per_period = 0.5, n_obs = 10, bar_count = 11, metrics = '{"sharpe":1.0}'::jsonb,
+    registry_id = 'import-run-1'
+ WHERE id = '00000000-0000-7000-8000-00000000e101';
+DO $$ BEGIN
+    UPDATE runs SET metrics = '{"sharpe":2.0}'::jsonb WHERE id = '00000000-0000-7000-8000-00000000e101';
+    RAISE EXCEPTION 'finished run was mutable';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'finished runs are immutable' THEN RAISE; END IF;
+END $$;
+INSERT INTO run_notes (workspace_id, run_id, body)
+    VALUES ('00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-00000000e101', 'Reviewed');
+DO $$ BEGIN
+    INSERT INTO runs (workspace_id, experiment_id, kind, status, finished_at)
+        VALUES ('00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-00000000e002',
+                'backtest', 'succeeded', now());
+    RAISE EXCEPTION 'registry run created already finished';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'registry runs must be created in queued status' THEN RAISE; END IF;
+END $$;
+-- A plain job result (no experiment) is recorded once, already finished, and then frozen.
+INSERT INTO runs (id, workspace_id, kind, status, finished_at)
+    VALUES ('00000000-0000-7000-8000-00000000e102', '00000000-0000-7000-8000-0000000000a1',
+            'benchmark', 'succeeded', now());
+DO $$ BEGIN
+    UPDATE runs SET metrics = '{"x":1}'::jsonb WHERE id = '00000000-0000-7000-8000-00000000e102';
+    RAISE EXCEPTION 'finished job run was mutable';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'finished runs are immutable' THEN RAISE; END IF;
+END $$;
+DO $$ BEGIN
+    UPDATE run_notes SET body = 'edited' WHERE run_id = '00000000-0000-7000-8000-00000000e101';
+    RAISE EXCEPTION 'run note was mutable';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'run notes are append-only' THEN RAISE; END IF;
+END $$;
+
 -- Jobs: finished_at is set exactly when the job is in a terminal state.
 DO $$ BEGIN
     INSERT INTO jobs (workspace_id, kind, status) VALUES ('00000000-0000-7000-8000-0000000000a1', 'benchmark', 'succeeded');

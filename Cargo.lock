@@ -2730,8 +2730,13 @@ dependencies = [
  "serde",
  "serde_json",
  "spectra-core",
+ "spectra-data",
  "spectra-db",
+ "spectra-engine",
+ "spectra-registry",
+ "spectra-research",
  "spectra-risk",
+ "sqlx",
  "tokio",
  "tower",
  "tower-http",
@@ -2747,10 +2752,13 @@ version = "0.1.0"
 dependencies = [
  "spectra-core",
  "spectra-data",
+ "spectra-db",
  "spectra-engine",
  "spectra-registry",
  "spectra-research",
  "spectra-risk",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -2790,8 +2798,12 @@ version = "0.1.0"
 dependencies = [
  "spectra-core",
  "spectra-data",
+ "spectra-db",
  "spectra-engine",
  "spectra-research",
+ "sqlx",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

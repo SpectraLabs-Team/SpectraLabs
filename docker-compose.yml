@@ -58,6 +58,8 @@ services:
       SPECTRA_API_ADDR: 0.0.0.0:8000
       SPECTRA_CORS_ORIGINS: http://localhost:3000
       SPECTRA_MIGRATE_ON_START: "false"
+      ARTIFACT_STORAGE: local # read side of run artifacts; must match the worker
+      ARTIFACT_DIR: /var/lib/spectra/artifacts
     volumes:
       - artifacts:/var/lib/spectra/artifacts
     expose:

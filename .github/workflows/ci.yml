@@ -47,6 +47,11 @@ jobs:
         run: cargo test --workspace
       - name: Test (release)
         run: cargo test --workspace --release
+      - name: Postgres experiment registry
+        run: |
+          cargo clippy -p spectra-registry --features postgres --all-targets -- -D warnings
+          cargo test -p spectra-registry --features postgres --test pg_registry
+          cargo clippy -p spectra-cli --features postgres --all-targets -- -D warnings
       - name: Parity scripts are reproducible
         run: |
           python3 parity/gen_ops.py parity/ops

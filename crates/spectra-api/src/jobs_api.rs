@@ -158,6 +158,9 @@ pub(crate) async fn create_job(
         Ok(r) => r,
         Err(e) => return error_response(422, format!("Invalid job request: {e}")),
     };
+    if req.kind == "backtest" {
+        return error_response(422, "Backtests must be created under an experiment so their run record and job are linked atomically.");
+    }
     if !(-10..=10).contains(&req.priority) {
         return error_response(422, "priority must be between -10 and 10.");
     }

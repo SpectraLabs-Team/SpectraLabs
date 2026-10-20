@@ -671,6 +671,28 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.routePolicyKey('api/v1/jobs/0192f3a4-0000-7000-8000-000000000002/cancel'), 'api/v1/jobs/{id}/cancel');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/jobs'], 'GET'), 'viewer');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/jobs'], 'POST'), 'editor');
+  // M5 registry: reads are viewer, writes editor, whole-chain operations owner.
+  const run = '0192f3a4-0000-7000-8000-000000000003';
+  const key = (p) => engineRoutes.routePolicyKey(p);
+  assert.equal(key(`api/v1/experiments/${run}`), 'api/v1/experiments/{id}');
+  assert.equal(key('api/v1/experiments/exp-0123456789abcdef/lineage'), 'api/v1/experiments/{id}/lineage', 'file-registry ids');
+  assert.equal(key(`api/v1/experiments/${run}/runs`), 'api/v1/experiments/{id}/runs');
+  assert.equal(key(`api/v1/runs/${run}`), 'api/v1/runs/{id}');
+  assert.equal(key(`api/v1/runs/${run}/notes`), 'api/v1/runs/{id}/notes');
+  assert.equal(key(`api/v1/runs/${run}/artifacts/equity_curve`), 'api/v1/runs/{id}/artifacts/{kind}');
+  assert.equal(key(`api/v1/runs/${run}/artifacts/../../jobs`), `api/v1/runs/${run}/artifacts/../../jobs`, 'no traversal');
+  assert.equal(key('api/v1/runs/not an id'), 'api/v1/runs/not an id');
+  for (const p of ['api/v1/experiments', 'api/v1/runs']) {
+    assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
+    assert.equal(engineRoutes.minimumRole(routes[p], 'POST'), 'editor', p);
+  }
+  for (const p of ['api/v1/experiments/{id}', 'api/v1/runs/{id}', 'api/v1/runs/{id}/artifacts/{kind}', 'api/v1/registry/export']) {
+    assert.equal(routes[p].minRole, 'viewer', p);
+  }
+  for (const p of ['api/v1/experiments/{id}/runs', 'api/v1/runs/{id}/notes']) assert.equal(routes[p].minRole, 'editor', p);
+  for (const p of ['api/v1/registry/verify', 'api/v1/registry/import']) assert.equal(routes[p].minRole, 'owner', p);
+  assert.equal(engineRoutes.maxBodyBytes(routes['api/risk']), 2 * 1024 * 1024, 'default body limit');
+  assert.ok(engineRoutes.maxBodyBytes(routes['api/v1/runs']) > 10 * 1024 * 1024, 'a 10 MB dataset fits');
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {

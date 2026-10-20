@@ -16,6 +16,7 @@
 //! | `GET /api/v1/telemetry/{cpu,workers,gpu}` | signed | host readings |
 //! | `/api/v1/alpaca/*` | signed | 501: not ported yet |
 //! | `POST /api/v1/jobs`, `GET /api/v1/jobs[/{id}]`, `POST /api/v1/jobs/{id}/cancel` | signed | queued work; see [`jobs_api`] |
+//! | `/api/v1/experiments`, `/api/v1/runs`, `/api/v1/registry/*` | signed | workspace-scoped research registry |
 //!
 //! Every engine route is also served at its old `/api/...` path (the jobs
 //! routes are `/api/v1` only). Those
@@ -40,6 +41,7 @@ pub mod identity;
 pub mod jobs_api;
 pub mod observability;
 pub mod openapi;
+pub mod registry_api;
 pub mod telemetry;
 
 use std::future::Future;
@@ -89,12 +91,14 @@ pub struct ApiConfig {
     pub cors_origins: Vec<String>,
     /// Verifies the proxy's request signatures.
     pub engine_secret: Secret,
+    /// Where run artifacts are read from; `None` makes artifact downloads 503.
+    pub artifacts: Option<spectra_db::artifacts::ArtifactBackend>,
 }
 
 impl ApiConfig {
     /// Default CORS origins (`http://localhost:3000`) and the given secret.
     pub fn new(engine_secret: Secret) -> Self {
-        Self { cors_origins: vec!["http://localhost:3000".into()], engine_secret }
+        Self { cors_origins: vec!["http://localhost:3000".into()], engine_secret, artifacts: None }
     }
 
     fn allows(&self, origin: &str) -> bool {
@@ -104,7 +108,8 @@ impl ApiConfig {
 
 impl From<&Config> for ApiConfig {
     fn from(c: &Config) -> Self {
-        Self { cors_origins: c.cors_origins.clone(), engine_secret: c.engine_secret.clone() }
+        // The artifact backend is opened by the binary (it can fail); see `config::artifact_backend`.
+        Self { cors_origins: c.cors_origins.clone(), engine_secret: c.engine_secret.clone(), artifacts: None }
     }
 }
 
@@ -539,6 +544,24 @@ fn job_routes() -> Router<AppState> {
         .route("/api/v1/jobs/{id}/cancel", only(post(jobs_api::cancel_job)))
 }
 
+fn registry_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/v1/experiments",
+            only(get(registry_api::list_experiments).post(registry_api::create_experiment)),
+        )
+        .route("/api/v1/experiments/{id}", only(get(registry_api::get_experiment)))
+        .route("/api/v1/experiments/{id}/lineage", only(get(registry_api::get_lineage)))
+        .route("/api/v1/experiments/{id}/runs", only(post(registry_api::create_backtest)))
+        .route("/api/v1/runs", only(get(registry_api::list_runs).post(registry_api::create_run)))
+        .route("/api/v1/runs/{id}", only(get(registry_api::get_run)))
+        .route("/api/v1/runs/{id}/notes", only(post(registry_api::add_run_note)))
+        .route("/api/v1/runs/{id}/artifacts/{kind}", only(get(registry_api::get_run_artifact)))
+        .route("/api/v1/registry/verify", only(get(registry_api::verify)))
+        .route("/api/v1/registry/export", only(get(registry_api::export_jsonl)))
+        .route("/api/v1/registry/import", only(post(registry_api::import_jsonl)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -546,6 +569,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
     let signed = engine_routes("/api/v1")
         .merge(engine_routes("/api"))
         .merge(job_routes())
+        .merge(registry_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .route("/", only(get(root)))

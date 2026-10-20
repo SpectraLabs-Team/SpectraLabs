@@ -353,8 +353,12 @@ export interface components {
              * @description -10..10; higher runs first. Default 0.
              */
             priority?: number;
-            /** @description A built-in strategy name (see `GET /api/v1/strategies/builtin`). */
-            strategy: string;
+            /** @description Several strategies on one account: `[{"strategy", "params", "weight"}]`,
+             *     each `weight` a share of the starting cash (adding up to at most 1). */
+            strategies?: Record<string, never>[] | null;
+            /** @description A built-in strategy name (see `GET /api/v1/strategies/builtin`).
+             *     Give either `strategy` (with `params`) or `strategies`. */
+            strategy?: string | null;
         };
         /** @description `POST /api/v1/jobs` body. */
         CreateJob: {

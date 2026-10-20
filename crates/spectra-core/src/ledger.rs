@@ -191,6 +191,15 @@ impl LedgerConfig {
     }
 }
 
+/// A fill that passed every check, ready to commit.
+struct PreparedFill {
+    position: Position,
+    cash: Money,
+    realized: Money,
+    realized_total: Money,
+    fees_total: Money,
+}
+
 /// The accounting ledger. See the module documentation.
 #[derive(Debug, Clone, Default)]
 pub struct Ledger {
@@ -311,6 +320,33 @@ impl Ledger {
     /// `InvalidFill`, `InsufficientCash`, `ShortNotAllowed`,
     /// `LeverageExceeded`, or overflow.
     pub fn apply_fill(&mut self, f: &Fill) -> Result<()> {
+        let p = self.prepare_fill(f)?;
+        self.journal.push(JournalEntry {
+            seq: self.journal.len() as u64,
+            kind: EntryType::Fill,
+            ts_ns: f.ts_ns,
+            amount: Money::ZERO,
+            fill: *f,
+            realized: p.realized,
+            cash_after: p.cash,
+        });
+        self.positions.insert(f.instrument, p.position);
+        self.cash = p.cash;
+        self.realized = p.realized_total;
+        self.fees = p.fees_total;
+        Ok(())
+    }
+
+    /// Whether [`Self::apply_fill`] would accept `f`, without changing anything.
+    ///
+    /// # Errors
+    /// The error `apply_fill` would return.
+    pub fn check_fill(&self, f: &Fill) -> Result<()> {
+        self.prepare_fill(f).map(|_| ())
+    }
+
+    /// Every check and computation of a fill; the caller commits the result.
+    fn prepare_fill(&self, f: &Fill) -> Result<PreparedFill> {
         if f.qty.raw() <= 0 || f.price.raw() <= 0 || f.fee.raw() < 0 {
             return Err(Reject::InvalidFill.into());
         }
@@ -376,21 +412,13 @@ impl Ledger {
         let new_realized_total = self.realized.checked_add(realized)?;
         let new_fees_total = self.fees.checked_add(f.fee)?;
 
-        // Everything fallible has run; commit.
-        self.journal.push(JournalEntry {
-            seq: self.journal.len() as u64,
-            kind: EntryType::Fill,
-            ts_ns: f.ts_ns,
-            amount: Money::ZERO,
-            fill: *f,
+        Ok(PreparedFill {
+            position: next,
+            cash: new_cash,
             realized,
-            cash_after: new_cash,
-        });
-        self.positions.insert(f.instrument, next);
-        self.cash = new_cash;
-        self.realized = new_realized_total;
-        self.fees = new_fees_total;
-        Ok(())
+            realized_total: new_realized_total,
+            fees_total: new_fees_total,
+        })
     }
 
     /// Post-trade gross exposure must not exceed `limit` times post-trade

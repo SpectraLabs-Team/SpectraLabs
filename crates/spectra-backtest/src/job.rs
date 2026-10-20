@@ -174,6 +174,7 @@ pub fn run_job(
             "equity.csv" => "equity_csv",
             "orders.csv" => "orders_csv",
             "fills.csv" => "fills_csv",
+            "strategies.csv" => "strategies_csv",
             _ => "returns_csv",
         };
         files.push(JobFile { kind, file_name: a.name, media_type: a.media_type, bytes: a.bytes });

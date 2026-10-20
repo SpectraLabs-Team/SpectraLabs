@@ -715,8 +715,7 @@
         "type": "object",
         "description": "`POST /api/v1/backtests` body: the `backtest` job payload, plus a priority.",
         "required": [
-          "dataset_version_id",
-          "strategy"
+          "dataset_version_id"
         ],
         "properties": {
           "config": {
@@ -743,9 +742,22 @@
             "format": "int32",
             "description": "-10..10; higher runs first. Default 0."
           },
+          "strategies": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "Several strategies on one account: `[{\"strategy\", \"params\", \"weight\"}]`,\neach `weight` a share of the starting cash (adding up to at most 1)."
+          },
           "strategy": {
-            "type": "string",
-            "description": "A built-in strategy name (see `GET /api/v1/strategies/builtin`)."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A built-in strategy name (see `GET /api/v1/strategies/builtin`).\nGive either `strategy` (with `params`) or `strategies`."
           }
         },
         "additionalProperties": false

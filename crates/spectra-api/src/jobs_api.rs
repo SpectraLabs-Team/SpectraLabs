@@ -118,7 +118,7 @@ fn to_json<T: Serialize>(status: u16, value: &T) -> Response {
 
 fn db_error(e: &spectra_db::Error) -> Response {
     // 23503: foreign key violation, i.e. the signed workspace or user id does not exist.
-    if e.as_database_error().and_then(|d| d.code()).as_deref() == Some("23503") {
+    if e.as_database_error().is_some_and(|d| d.code().as_deref() == Some("23503")) {
         return error_response(422, "The workspace or user for this job does not exist.");
     }
     eprintln!("spectra-api: database error: {e}");

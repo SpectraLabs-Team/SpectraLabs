@@ -196,7 +196,20 @@ jobs:
           done
           curl -fsS http://127.0.0.1:3001/api/health >/dev/null
           curl -fsS http://127.0.0.1:9090/api/v1/targets | grep -q 'spectra-api'
-          test "$(curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1/)" = 200
+          proxy_ready=false
+          for attempt in $(seq 1 30); do
+            status=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1/ || true)
+            if [ "$status" = 200 ]; then
+              proxy_ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$proxy_ready" != true ]; then
+            docker compose logs --tail 100 caddy frontend
+            echo "Caddy did not return HTTP 200 from the frontend (last status: ${status:-none})"
+            exit 1
+          fi
           docker compose -f docker-compose.yml -f deploy/compose.s3.yml --profile s3 up -d --build rustfs rustfs-init worker
           for attempt in $(seq 1 90); do
             if docker compose -f docker-compose.yml -f deploy/compose.s3.yml exec -T worker curl -fsS http://127.0.0.1:9100/health >/dev/null; then

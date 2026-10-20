@@ -682,6 +682,15 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
     assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
   }
   assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests/{id}/cancel'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests'], 'GET'), 'viewer', 'listing backtests is a read');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/orders_csv`), 'api/v1/backtests/{id}/artifacts/{kind}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/strategies_csv`), 'api/v1/backtests/{id}/artifacts/{kind}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/secrets`), `api/v1/backtests/${bt}/artifacts/secrets`, 'unknown file kinds stay unlisted');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/orders_csv/x`), `api/v1/backtests/${bt}/artifacts/orders_csv/x`);
+  for (const p of ['api/v1/backtests/{id}/artifacts/{kind}', 'api/v1/datasets']) {
+    assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
+    assert.ok(!engineRoutes.allowsMethod(routes[p], 'POST'), `${p} is read-only`);
+  }
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {

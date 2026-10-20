@@ -29,10 +29,12 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/jobs': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/jobs/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/jobs/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
-  'api/v1/backtests': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/backtests': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/backtests/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/backtests/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
   'api/v1/backtests/{id}/series': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/backtests/{id}/artifacts/{kind}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
+  'api/v1/datasets': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
 };
 
@@ -40,6 +42,10 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
 export function routePolicyKey(path: string): string {
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}\/cancel$/i.test(path)) return 'api/v1/jobs/{id}/cancel';
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/jobs/{id}';
+  // Only the stored files the API serves; any other name stays unlisted (a 404 here).
+  if (/^api\/v1\/backtests\/[0-9a-f-]{36}\/artifacts\/(summary|request|equity_csv|orders_csv|fills_csv|returns_csv|strategies_csv)$/i.test(path)) {
+    return 'api/v1/backtests/{id}/artifacts/{kind}';
+  }
   const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series)?$/i.exec(path);
   if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
   return path;

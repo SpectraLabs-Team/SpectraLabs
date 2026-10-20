@@ -89,9 +89,12 @@ pub struct StressRequest {
         crate::jobs_api::get_job,
         crate::jobs_api::cancel_job,
         crate::backtests_api::create_backtest,
+        crate::backtests_api::list_backtests,
         crate::backtests_api::get_backtest,
         crate::backtests_api::cancel_backtest,
         crate::backtests_api::backtest_series,
+        crate::backtests_api::backtest_artifact,
+        crate::backtests_api::list_datasets,
         crate::backtests_api::builtin_strategies,
     ),
     components(schemas(
@@ -104,6 +107,10 @@ pub struct StressRequest {
         crate::jobs_api::JobPage,
         crate::backtests_api::CreateBacktest,
         crate::backtests_api::BacktestView,
+        crate::backtests_api::BacktestListItem,
+        crate::backtests_api::BacktestPage,
+        crate::backtests_api::DatasetVersionView,
+        crate::backtests_api::DatasetList,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
@@ -140,6 +147,8 @@ mod tests {
             "/api/v1/backtests/{id}",
             "/api/v1/backtests/{id}/cancel",
             "/api/v1/backtests/{id}/series",
+            "/api/v1/backtests/{id}/artifacts/{kind}",
+            "/api/v1/datasets",
             "/api/v1/strategies/builtin",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");

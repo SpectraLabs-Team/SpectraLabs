@@ -52,10 +52,22 @@ POST /api/v1/backtests
 | `GET /api/v1/backtests/{id}` | viewer | `status`, `progress` (0 to 1, every heartbeat), then `run_id`, `fingerprints`, `summary`, `artifacts` |
 | `POST /api/v1/backtests/{id}/cancel` | editor | stops it at the next bar group |
 | `GET /api/v1/backtests/{id}/series?kind=equity\|drawdown` | viewer | the chart series (at most 1,000 points; the maximum drawdown is always kept). 409 until it has succeeded |
+| `GET /api/v1/backtests/{id}/artifacts/{kind}` | viewer | a stored file to download: `summary`, `request`, `equity_csv`, `orders_csv`, `fills_csv`, `returns_csv` or `strategies_csv`. 409 until it has succeeded |
+| `GET /api/v1/backtests?status=&cursor=&limit=` | viewer | the workspace's backtests, newest first, with `headline` numbers (total return, Sharpe, max drawdown, final equity, fills) once finished |
+| `GET /api/v1/datasets` | viewer | the workspace's dataset versions, newest first (for the dataset picker) |
 
 A finished backtest stores `summary`, `equity_series`, `drawdown_series`, `request`, and the CSVs
 `equity_csv`, `orders_csv`, `fills_csv`, `returns_csv`, each with its SHA-256. The API reads the
 series from `ARTIFACT_DIR` (mounted read-only under docker compose).
+
+## In the Studio
+
+The Studio's **Backtests** tab (`/studio?tab=backtests`) is the same flow without writing JSON:
+pick a dataset version and a strategy (or several, with weights), adjust the parameters and the
+configuration, and run. It shows the job's progress with a cancel button, then the equity and
+drawdown charts, the summary's metrics, exposure, trades, per-instrument and per-strategy tables,
+the fingerprints, and the CSVs to download. Past runs are listed beside it. Viewers can look at
+runs; starting or cancelling one needs the editor role.
 
 ## Checking a job against the CLI
 

@@ -45,8 +45,9 @@ pub mod observability;
 pub mod openapi;
 pub mod telemetry;
 
+use std::collections::HashSet;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::{Body, Bytes};
@@ -128,7 +129,16 @@ struct AppState {
     cfg: Arc<ApiConfig>,
     compute: Arc<Semaphore>,
     db: Option<PgPool>,
+    /// (user, workspace) pairs this process has already mirrored; see [`mirror_identity`].
+    mirrored: Arc<Mutex<HashSet<MirrorKey>>>,
 }
+
+/// A signed caller as mirrored: (user id if it is a UUID, workspace id).
+type MirrorKey = (Option<Uuid>, Uuid);
+
+/// Largest number of mirrored (user, workspace) pairs remembered before the
+/// cache is cleared (a cleared pair costs one more idempotent insert).
+const MIRROR_CACHE_MAX: usize = 100_000;
 
 // ---------------------------------------------------------------------------
 // Responses and the error format
@@ -355,11 +365,40 @@ async fn require_signature(State(st): State<AppState>, req: Request, next: Next)
     };
     match auth::verify(st.cfg.engine_secret.expose(), &signed, now_secs()) {
         Ok(identity) => {
+            mirror_identity(&st, &identity).await;
             let mut req = Request::from_parts(parts, Body::from(bytes));
             req.extensions_mut().insert(identity);
             next.run(req).await
         }
         Err(reason) => error_response(401, reason),
+    }
+}
+
+/// Makes sure the engine's `users` and `workspaces` tables hold the signed
+/// caller (M1 task 1): the frontend owns accounts and workspaces in its own
+/// database, and every engine table references the engine's copies. Runs once
+/// per (user, workspace) pair per process. A user header that is not a UUID
+/// (an API token with no user) mirrors only the workspace, matching the
+/// `created_by: None` such callers get.
+///
+/// A database error is logged and the request goes on: routes that need the
+/// database report their own error, and the others don't need the rows.
+async fn mirror_identity(st: &AppState, identity: &Identity) {
+    let (Some(pool), Some(workspace)) = (&st.db, identity.workspace) else { return };
+    let key = (Uuid::parse_str(&identity.user).ok(), workspace);
+    if st.mirrored.lock().is_ok_and(|seen| seen.contains(&key)) {
+        return;
+    }
+    match spectra_db::identity::ensure_identity(pool, key.0, key.1).await {
+        Ok(()) => {
+            if let Ok(mut seen) = st.mirrored.lock() {
+                if seen.len() >= MIRROR_CACHE_MAX {
+                    seen.clear();
+                }
+                seen.insert(key);
+            }
+        }
+        Err(error) => tracing::warn!(%error, %workspace, "could not mirror the signed identity"),
     }
 }
 
@@ -614,7 +653,12 @@ fn backtest_routes() -> Router<AppState> {
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
-    let st = AppState { cfg: Arc::new(cfg), compute: Arc::new(Semaphore::new(MAX_CONCURRENT_COMPUTE)), db };
+    let st = AppState {
+        cfg: Arc::new(cfg),
+        compute: Arc::new(Semaphore::new(MAX_CONCURRENT_COMPUTE)),
+        db,
+        mirrored: Arc::new(Mutex::new(HashSet::new())),
+    };
     let signed = engine_routes("/api/v1")
         .merge(engine_routes("/api"))
         .merge(job_routes())

@@ -37,6 +37,30 @@ and monitoring. `just --list` shows the shortcuts used below.
    `checks.worker` is `none_alive` when no worker has sent a heartbeat in 30 seconds. That does not
    make the API unready (synchronous routes work without workers), so alert on it separately.
 
+## Accounts and workspaces in the engine database
+
+The dashboard (Next.js) and the engine use separate databases, each with its own `users` and
+`workspaces` tables. The dashboard's tables are the source of truth: sign-up, names, members and
+roles live there, and roles are enforced by the `/api/engine` proxy (`lib/server/engineRoutes.ts`).
+
+Every engine table points at the engine's own copies (`workspace_id`, `created_by`). So the API
+mirrors the caller on every signed request before anything else runs
+(`crates/spectra-db/queries/identity_mirror.sql`): if the signed user id or workspace id has no row
+yet, one is created **with the same id**. Existing rows are never changed. This also backfills
+accounts created before the mirror existed, the first time they call the engine.
+
+- The engine is never sent the user's email or the workspace's name, so mirrored rows carry
+  placeholders: user email `u-<id hex>@mirror.invalid` with no usable password (`'!'`), workspace
+  slug `ws-<id hex>` and name `Workspace <first 8 hex>`. Don't use them for display; ask the
+  dashboard's database.
+- Membership is not mirrored (`workspace_members` stays empty for mirrored workspaces): the engine
+  scopes data by the signed workspace and never reads it.
+- An API token with no user mirrors only the workspace; its jobs have no `created_by`.
+- Each API process remembers which pairs it has mirrored, so this costs one idempotent insert per
+  new (user, workspace) pair per process.
+- The `dev` workspace from `spectra-db seed` is unaffected and is still what the command-line tools
+  use.
+
 ## Backups
 
 Nightly, from cron on the host (or any machine that reaches the database):

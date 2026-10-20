@@ -12,7 +12,7 @@ just check-web      # npm run typecheck && npm test (in web/frontend)
 cargo test -p spectra-db --features s3 --lib     # S3 artifact store against an in-memory bucket
 ```
 
-CI runs all of that plus, against a real Postgres: the queue and schema SQL checks, a backup,
+CI runs all of that plus, against a real Postgres: the queue, backtest, identity and schema SQL checks, a backup,
 a restore into a second database with integrity checks, a registry anchor, and a check that the
 generated TypeScript API types are current. A green CI run on the branch is the main signal.
 

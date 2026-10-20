@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 pub mod artifacts;
 pub mod datasets;
+pub mod identity;
 pub mod jobs;
 
 /// The migrations in `crates/spectra-db/migrations`, embedded at build time.

@@ -2734,11 +2734,8 @@ dependencies = [
  "spectra-data",
  "spectra-db",
  "spectra-engine",
-<<<<<<< HEAD
  "spectra-registry",
  "spectra-research",
-=======
->>>>>>> origin/main
  "spectra-risk",
  "sqlx",
  "tokio",

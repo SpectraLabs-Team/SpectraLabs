@@ -53,6 +53,7 @@ pub mod openapi;
 pub mod registry_api;
 pub mod sessions_api;
 pub mod strategies_api;
+pub mod survival_api;
 pub mod telemetry;
 pub mod uploads_api;
 
@@ -67,7 +68,7 @@ use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, post, put, MethodRouter};
+use axum::routing::{any, get, patch, post, put, MethodRouter};
 use axum::Router;
 use spectra_core::{Json, ENGINE_VERSION};
 use spectra_db::PgPool;
@@ -707,6 +708,19 @@ fn registry_routes() -> Router<AppState> {
         .route("/api/v1/registry/import", only(post(registry_api::import_jsonl)))
 }
 
+/// Strategy Survival Lab reports and saved workspace presets.
+fn survival_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/runs/{id}/survival", only(get(survival_api::list_for_run).post(survival_api::start)))
+        .route("/api/v1/survival/{id}", only(get(survival_api::get)))
+        .route("/api/v1/survival/{id}/text", only(get(survival_api::text)))
+        .route(
+            "/api/v1/survival/presets",
+            only(get(survival_api::list_presets).post(survival_api::create_preset)),
+        )
+        .route("/api/v1/survival/presets/{id}", only(patch(survival_api::update_preset)))
+}
+
 /// Backtests, datasets, and built-in strategies (`/api/v1` only).
 fn backtest_routes() -> Router<AppState> {
     Router::new()
@@ -721,11 +735,6 @@ fn backtest_routes() -> Router<AppState> {
         .route("/api/v1/datasets", only(get(backtests_api::list_datasets)))
         .route("/api/v1/datasets/preview", only(post(datasets_api::preview)))
         .route("/api/v1/datasets/ingest", only(post(datasets_api::ingest)))
-        .route("/api/v1/uploads/limits", only(get(sessions_api::limits)))
-        .route("/api/v1/uploads/sessions", only(post(sessions_api::create)))
-        .route("/api/v1/uploads/sessions/{id}", only(get(sessions_api::get).delete(sessions_api::abort)))
-        .route("/api/v1/uploads/sessions/{id}/chunk", only(put(sessions_api::chunk)))
-        .route("/api/v1/uploads/sessions/{id}/complete", only(post(sessions_api::complete)))
         .route(
             "/api/v1/datasets/{id}",
             only(get(datasets_api::get_dataset).patch(datasets_api::update_dataset)),
@@ -767,6 +776,16 @@ fn upload_routes() -> Router<AppState> {
     Router::new().route("/api/v1/uploads", only(post(uploads_api::upload)))
 }
 
+/// Resumable upload sessions, including binary chunk writes.
+fn session_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/uploads/limits", only(get(sessions_api::limits)))
+        .route("/api/v1/uploads/sessions", only(post(sessions_api::create)))
+        .route("/api/v1/uploads/sessions/{id}", only(get(sessions_api::get).delete(sessions_api::abort)))
+        .route("/api/v1/uploads/sessions/{id}/chunk", only(put(sessions_api::chunk)))
+        .route("/api/v1/uploads/sessions/{id}/complete", only(post(sessions_api::complete)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -781,7 +800,9 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(engine_routes("/api"))
         .merge(job_routes())
         .merge(registry_routes())
+        .merge(survival_routes())
         .merge(backtest_routes())
+        .merge(session_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .merge(upload_routes())

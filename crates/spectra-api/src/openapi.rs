@@ -135,6 +135,13 @@ pub struct StressRequest {
         crate::sessions_api::chunk,
         crate::sessions_api::complete,
         crate::sessions_api::abort,
+        crate::survival_api::start,
+        crate::survival_api::list_for_run,
+        crate::survival_api::get,
+        crate::survival_api::text,
+        crate::survival_api::list_presets,
+        crate::survival_api::create_preset,
+        crate::survival_api::update_preset,
     ),
     components(schemas(
         ErrorDoc,
@@ -197,6 +204,8 @@ pub struct StressRequest {
         crate::sessions_api::CreateSession,
         crate::sessions_api::SessionView,
         crate::sessions_api::ChunkView,
+        crate::survival_api::StartSurvival,
+        crate::survival_api::SavePreset,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
@@ -205,6 +214,7 @@ pub struct StressRequest {
         (name = "registry", description = "Workspace-scoped experiment and run registry"),
         (name = "backtests", description = "Backtests: jobs of kind backtest, and the built-in strategies"),
         (name = "datasets", description = "Data Studio: ingest settings, previews and datasets"),
+        (name = "survival", description = "Strategy Survival Lab reports and presets"),
         (name = "corporate-actions", description = "Corporate action sets and price adjustments"),
         (name = "strategies", description = "Saved strategies and their immutable versions"),
     )

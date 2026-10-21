@@ -215,7 +215,7 @@ pub(crate) async fn create(
 }
 
 /// How far a resumable upload has got.
-#[utoipa::path(get, path = "/api/v1/uploads/sessions/{id}", tag = "datasets",
+#[utoipa::path(get, path = "/api/v1/uploads/sessions/{id}", operation_id = "get_upload_session", tag = "datasets",
     params(("id" = Uuid, Path, description = "Session id")),
     responses((status = 200, body = SessionView), (status = 404, body = crate::openapi::ErrorDoc)))]
 pub(crate) async fn get(

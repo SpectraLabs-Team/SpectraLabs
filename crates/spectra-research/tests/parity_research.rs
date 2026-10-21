@@ -17,6 +17,10 @@ use spectra_core::*;
 use spectra_engine::*;
 use spectra_research::*;
 
+const RETURN_CI_ASSUMPTION: &str = "Return confidence intervals use a circular moving-block bootstrap; their coverage depends on the selected block length and is not a formal guarantee.";
+const M6_REGIME_ASSUMPTION: &str = "Volatility regimes use full-sample terciles and are descriptive, not predictive. Trend/range uses rolling directional efficiency; crisis uses a rolling cumulative benchmark return threshold. These are not HMM states.";
+const CPP_REGIME_ASSUMPTION: &str = "Regimes are terciles of trailing realized volatility of the equal-weight benchmark, labelled with full-sample thresholds (descriptive, not predictive). HMM regimes belong to the risk engine.";
+
 fn random_walk(n: usize, seed: u64, drift: f64, instruments: usize) -> Vec<Bar> {
     let mut rng = Rng::new(seed);
     let mut px = vec![100.0f64; instruments];
@@ -74,6 +78,19 @@ impl Strategy for SmaCross {
 
 fn g(out: &mut String, label: &str, v: f64) {
     writeln!(out, "{label} {}", fmt_g17(v)).unwrap();
+}
+
+fn normalize_m6_assumptions(output: &str) -> String {
+    output
+        .lines()
+        .filter_map(|line| match line.strip_prefix("  - ") {
+            Some(RETURN_CI_ASSUMPTION) => None,
+            Some(M6_REGIME_ASSUMPTION) => Some(format!("  - {CPP_REGIME_ASSUMPTION}")),
+            _ => Some(line.to_string()),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }
 
 #[allow(clippy::too_many_lines)]
@@ -341,6 +358,8 @@ fn research_layer_matches_cpp_reference() {
 
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../parity/golden/research.golden");
     let golden = std::fs::read_to_string(path).unwrap();
+    let out = normalize_m6_assumptions(&out);
+    let golden = normalize_m6_assumptions(&golden);
     if out != golden {
         let (n, (a, g)) = out
             .lines()

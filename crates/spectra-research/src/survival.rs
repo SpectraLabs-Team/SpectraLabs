@@ -21,9 +21,10 @@
 //! tests. Output text is identical to the C++ reference.
 
 use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use spectra_core::cfmt::{fmt_f, pad_left, pad_right};
-use spectra_core::{timestamp_offsets, Bar, Bps, EntryType, Ledger, Result};
+use spectra_core::{timestamp_offsets, Bar, Bps, EntryType, Error, Json, Ledger, Qty, Result};
 use spectra_engine::{
     compute_drawdown_stats, compute_tail_stats, BacktestConfig, BacktestResult, DrawdownStats, Metrics,
     RunRecord, TailStats,
@@ -32,7 +33,10 @@ use spectra_engine::{
 use crate::benchmark::{aligned_returns, benchmark_returns, compute_benchmark_metrics, BenchmarkMetrics};
 use crate::stats::{moments, nearest_rank_index};
 use crate::sweep::{run_one, ParamSet, StrategyFactory};
-use crate::trades::{compute_trade_stats, extract_trades, resample_trades, TradeResampling, TradeStats};
+use crate::trades::{
+    block_bootstrap_returns, compute_trade_stats, extract_trades, resample_trades, ReturnBlockBootstrap,
+    TradeResampling, TradeStats,
+};
 
 /// Component verdict, in increasing severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -46,6 +50,70 @@ pub enum Verdict {
     Insufficient,
     /// Demonstrated fragility.
     Fail,
+}
+
+/// Progress through a survival test's backtest re-runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SurvivalProgress {
+    /// Test number, from 1 (cost sensitivity) to 9 (drawdown and tail risk).
+    pub test_number: u8,
+    /// One-based completed step within this test.
+    pub step: usize,
+    /// Planned number of steps in this test.
+    pub total_steps: usize,
+}
+
+struct SurvivalExecution<'a> {
+    cancel: Option<&'a AtomicBool>,
+    progress: Option<&'a mut dyn FnMut(SurvivalProgress)>,
+    test_number: u8,
+    step: usize,
+    total_steps: usize,
+}
+
+impl SurvivalExecution<'_> {
+    fn begin_test(&mut self, test_number: u8, total_steps: usize) {
+        self.test_number = test_number;
+        self.step = 0;
+        self.total_steps = total_steps;
+    }
+
+    fn check_cancelled(&self) -> Result<()> {
+        if self.cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
+            Err(Error::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn complete_test(&mut self, test_number: u8) {
+        self.begin_test(test_number, 1);
+        self.step = 1;
+        if let Some(callback) = &mut self.progress {
+            callback(SurvivalProgress { test_number, step: 1, total_steps: 1 });
+        }
+    }
+
+    fn run_one(
+        &mut self,
+        bars: &[Bar],
+        factory: &StrategyFactory<'_>,
+        config: &BacktestConfig,
+        params: &ParamSet,
+    ) -> Result<BacktestResult> {
+        self.check_cancelled()?;
+        self.step += 1;
+        if let Some(callback) = &mut self.progress {
+            callback(SurvivalProgress {
+                test_number: self.test_number,
+                step: self.step,
+                total_steps: self.total_steps,
+            });
+        }
+        // A callback can set the cancel flag; honor it before starting work.
+        self.check_cancelled()?;
+        run_one(bars, factory, config, params)
+    }
 }
 
 impl Verdict {
@@ -71,6 +139,12 @@ pub struct SurvivalConfig {
     pub extra_slippage_bps: Vec<f64>,
     /// The level the cost verdict is judged at.
     pub cost_stress_bps: f64,
+    /// 12. Annual borrow rates used for short-cost stress scenarios.
+    pub borrow_stress_rates: Vec<f64>,
+    /// 12. Volume-impact coefficients used for execution-cost stress.
+    pub impact_stress_coefficients: Vec<f64>,
+    /// 12. Maximum bar-volume participation fractions for partial-fill stress.
+    pub participation_stress_fractions: Vec<f64>,
     /// 2. Delays (bars beyond the baseline). Judged at 1 bar.
     pub delay_bars: Vec<usize>,
     /// 3. Relative changes applied to one parameter at a time.
@@ -91,6 +165,10 @@ pub struct SurvivalConfig {
     pub subperiod_positive_fail: f64,
     /// 5-6. Bootstrap resamples.
     pub bootstrap_resamples: usize,
+    /// 13. Return block-bootstrap resamples.
+    pub return_bootstrap_resamples: usize,
+    /// 13. Contiguous return periods per block.
+    pub return_bootstrap_block_length: usize,
     /// Resampling seed.
     pub seed: u64,
     /// Minimum trades to resample.
@@ -117,6 +195,12 @@ pub struct SurvivalConfig {
     pub regime_min_periods: usize,
     /// Minimum periods per regime bucket.
     pub regime_min_per_bucket: usize,
+    /// 11. Look-back used to classify trend/range market states.
+    pub regime_trend_window: usize,
+    /// 11. Directional efficiency above which a window is a trend.
+    pub regime_trend_efficiency: f64,
+    /// 11. Rolling benchmark return at or below which a period is a crisis.
+    pub regime_crisis_return: f64,
     /// 9. Warn at this max drawdown.
     pub max_drawdown_warn: f64,
     /// Fail at this max drawdown.
@@ -130,6 +214,9 @@ impl Default for SurvivalConfig {
         Self {
             extra_slippage_bps: vec![0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0],
             cost_stress_bps: 5.0,
+            borrow_stress_rates: vec![0.03, 0.10],
+            impact_stress_coefficients: vec![0.5, 1.0, 2.0],
+            participation_stress_fractions: vec![0.10, 0.05],
             delay_bars: vec![0, 1, 2, 5],
             perturbation_fractions: vec![-0.25, -0.10, 0.10, 0.25],
             integer_params: BTreeSet::new(),
@@ -140,6 +227,8 @@ impl Default for SurvivalConfig {
             subperiod_positive_warn: 0.75,
             subperiod_positive_fail: 0.50,
             bootstrap_resamples: 2000,
+            return_bootstrap_resamples: 2000,
+            return_bootstrap_block_length: 5,
             seed: 1,
             min_trades_for_resampling: 10,
             trades_insufficient_below: 10,
@@ -153,10 +242,300 @@ impl Default for SurvivalConfig {
             regime_vol_window: 20,
             regime_min_periods: 60,
             regime_min_per_bucket: 10,
+            regime_trend_window: 20,
+            regime_trend_efficiency: 0.35,
+            regime_crisis_return: -0.10,
             max_drawdown_warn: 0.20,
             max_drawdown_fail: 0.40,
             tail_level: 0.95,
         }
+    }
+}
+
+impl SurvivalConfig {
+    /// Default thresholds, named for workspace preset storage.
+    pub fn default_preset() -> Self {
+        Self::default()
+    }
+
+    /// A stricter preset: more cost/delay stress and tighter risk limits.
+    pub fn strict_preset() -> Self {
+        Self {
+            extra_slippage_bps: vec![0.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0],
+            cost_stress_bps: 10.0,
+            delay_bars: vec![0, 1, 2, 5, 10],
+            perturbation_positive_warn: 0.90,
+            perturbation_positive_fail: 0.70,
+            subperiod_positive_warn: 1.0,
+            subperiod_positive_fail: 0.75,
+            bootstrap_resamples: 5000,
+            bootstrap_loss_warn: 0.05,
+            bootstrap_loss_fail: 0.15,
+            max_drawdown_warn: 0.15,
+            max_drawdown_fail: 0.30,
+            ..Self::default()
+        }
+    }
+
+    /// A more permissive preset for exploratory research.
+    pub fn lenient_preset() -> Self {
+        Self {
+            extra_slippage_bps: vec![0.0, 1.0, 2.0, 5.0, 10.0],
+            cost_stress_bps: 2.0,
+            delay_bars: vec![0, 1, 2],
+            perturbation_positive_warn: 0.60,
+            perturbation_positive_fail: 0.30,
+            subperiod_positive_warn: 0.50,
+            subperiod_positive_fail: 0.25,
+            bootstrap_resamples: 1000,
+            bootstrap_loss_warn: 0.20,
+            bootstrap_loss_fail: 0.40,
+            max_drawdown_warn: 0.30,
+            max_drawdown_fail: 0.60,
+            ..Self::default()
+        }
+    }
+
+    /// Validates threshold ordering, probability ranges, and non-empty grids.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidArgument`] when a threshold is out of range or
+    /// a required grid/count is empty or inconsistent.
+    pub fn validate(&self) -> Result<()> {
+        let invalid = |message: &str| Error::InvalidArgument(format!("invalid survival config: {message}"));
+        let ordered = |warn: f64, fail: f64| {
+            warn.is_finite()
+                && fail.is_finite()
+                && (0.0..=1.0).contains(&fail)
+                && (0.0..=1.0).contains(&warn)
+                && fail <= warn
+        };
+        if self.extra_slippage_bps.is_empty()
+            || self.extra_slippage_bps.iter().any(|v| !v.is_finite() || *v < 0.0)
+        {
+            return Err(invalid("slippage grid must be non-empty, finite, and non-negative"));
+        }
+        if !self.cost_stress_bps.is_finite() || self.cost_stress_bps < 0.0 {
+            return Err(invalid("cost stress must be finite and non-negative"));
+        }
+        if self.borrow_stress_rates.iter().any(|v| !v.is_finite() || *v < 0.0)
+            || self.impact_stress_coefficients.iter().any(|v| !v.is_finite() || *v < 0.0)
+            || self
+                .participation_stress_fractions
+                .iter()
+                .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v) || *v == 0.0)
+        {
+            return Err(invalid(
+                "execution stress rates and impact must be non-negative; participation must be in (0, 1]",
+            ));
+        }
+        if self.delay_bars.is_empty() {
+            return Err(invalid("delay grid must be non-empty"));
+        }
+        if self.perturbation_fractions.is_empty()
+            || self.perturbation_fractions.iter().any(|v| !v.is_finite() || *v <= -1.0)
+        {
+            return Err(invalid("perturbation grid must be non-empty, finite, and greater than -1"));
+        }
+        if !ordered(self.perturbation_positive_warn, self.perturbation_positive_fail)
+            || !ordered(self.subperiod_positive_warn, self.subperiod_positive_fail)
+            || !ordered(self.bootstrap_loss_fail, self.bootstrap_loss_warn)
+            || !ordered(self.top_trade_fail, self.top_trade_warn)
+        {
+            return Err(invalid("warn/fail thresholds must be in [0, 1] with fail no greater than warn"));
+        }
+        if !self.degradation_warn_ratio.is_finite() || !(0.0..=1.0).contains(&self.degradation_warn_ratio) {
+            return Err(invalid("degradation ratio must be in [0, 1]"));
+        }
+        if !self.lucky_ordering_warn.is_finite() || !(0.0..=1.0).contains(&self.lucky_ordering_warn) {
+            return Err(invalid("lucky-ordering threshold must be in [0, 1]"));
+        }
+        if !self.max_drawdown_warn.is_finite()
+            || !self.max_drawdown_fail.is_finite()
+            || self.max_drawdown_warn < 0.0
+            || self.max_drawdown_fail < self.max_drawdown_warn
+        {
+            return Err(invalid("drawdown fail threshold must be at least the non-negative warn threshold"));
+        }
+        if !self.tail_level.is_finite() || !(0.0..1.0).contains(&self.tail_level) {
+            return Err(invalid("tail level must be in (0, 1)"));
+        }
+        if !self.regime_trend_efficiency.is_finite() || !(0.0..=1.0).contains(&self.regime_trend_efficiency) {
+            return Err(invalid("trend efficiency must be in [0, 1]"));
+        }
+        if !self.regime_crisis_return.is_finite() || !(-1.0..0.0).contains(&self.regime_crisis_return) {
+            return Err(invalid("crisis return must be in (-1, 0)"));
+        }
+        if self.n_subperiods < 2
+            || self.min_timestamps_per_subperiod == 0
+            || self.bootstrap_resamples == 0
+            || self.return_bootstrap_resamples == 0
+            || self.return_bootstrap_block_length == 0
+            || self.min_trades_for_resampling == 0
+            || self.trades_insufficient_below == 0
+            || self.trades_warn_below < self.trades_insufficient_below
+            || self.regime_vol_window == 0
+            || self.regime_min_periods == 0
+            || self.regime_min_per_bucket == 0
+            || self.regime_trend_window == 0
+        {
+            return Err(invalid(
+                "counts must be positive and trade warning count must be at least the insufficient count",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Serializes thresholds in a stable object shape.
+    ///
+    /// # Errors
+    /// Returns an error if the configuration is invalid or contains a value
+    /// that cannot be represented by the JSON format.
+    pub fn to_json(&self) -> Result<Json> {
+        self.validate()?;
+        let nums = |values: &[f64]| -> Result<Json> {
+            Ok(Json::Array(values.iter().map(|v| Json::number(*v)).collect::<Result<Vec<_>>>()?))
+        };
+        let ints = |values: &[usize]| -> Result<Json> {
+            Ok(Json::Array(values.iter().map(|v| Json::integer(*v as i64)).collect()))
+        };
+        let mut integer_params = Json::array();
+        for name in &self.integer_params {
+            integer_params.push(Json::string(name))?;
+        }
+        Ok(Json::object()
+            .with("extra_slippage_bps", nums(&self.extra_slippage_bps)?)
+            .with("cost_stress_bps", Json::number(self.cost_stress_bps)?)
+            .with("borrow_stress_rates", nums(&self.borrow_stress_rates)?)
+            .with("impact_stress_coefficients", nums(&self.impact_stress_coefficients)?)
+            .with("participation_stress_fractions", nums(&self.participation_stress_fractions)?)
+            .with("delay_bars", ints(&self.delay_bars)?)
+            .with("perturbation_fractions", nums(&self.perturbation_fractions)?)
+            .with("integer_params", integer_params)
+            .with("perturbation_positive_warn", Json::number(self.perturbation_positive_warn)?)
+            .with("perturbation_positive_fail", Json::number(self.perturbation_positive_fail)?)
+            .with("n_subperiods", Json::integer(self.n_subperiods as i64))
+            .with("min_timestamps_per_subperiod", Json::integer(self.min_timestamps_per_subperiod as i64))
+            .with("subperiod_positive_warn", Json::number(self.subperiod_positive_warn)?)
+            .with("subperiod_positive_fail", Json::number(self.subperiod_positive_fail)?)
+            .with("bootstrap_resamples", Json::integer(self.bootstrap_resamples as i64))
+            .with("return_bootstrap_resamples", Json::integer(self.return_bootstrap_resamples as i64))
+            .with("return_bootstrap_block_length", Json::integer(self.return_bootstrap_block_length as i64))
+            .with("seed", Json::integer(self.seed as i64))
+            .with("min_trades_for_resampling", Json::integer(self.min_trades_for_resampling as i64))
+            .with("trades_insufficient_below", Json::integer(self.trades_insufficient_below as i64))
+            .with("trades_warn_below", Json::integer(self.trades_warn_below as i64))
+            .with("bootstrap_loss_warn", Json::number(self.bootstrap_loss_warn)?)
+            .with("bootstrap_loss_fail", Json::number(self.bootstrap_loss_fail)?)
+            .with("lucky_ordering_warn", Json::number(self.lucky_ordering_warn)?)
+            .with("top_trade_warn", Json::number(self.top_trade_warn)?)
+            .with("top_trade_fail", Json::number(self.top_trade_fail)?)
+            .with("degradation_warn_ratio", Json::number(self.degradation_warn_ratio)?)
+            .with("regime_vol_window", Json::integer(self.regime_vol_window as i64))
+            .with("regime_min_periods", Json::integer(self.regime_min_periods as i64))
+            .with("regime_min_per_bucket", Json::integer(self.regime_min_per_bucket as i64))
+            .with("regime_trend_window", Json::integer(self.regime_trend_window as i64))
+            .with("regime_trend_efficiency", Json::number(self.regime_trend_efficiency)?)
+            .with("regime_crisis_return", Json::number(self.regime_crisis_return)?)
+            .with("max_drawdown_warn", Json::number(self.max_drawdown_warn)?)
+            .with("max_drawdown_fail", Json::number(self.max_drawdown_fail)?)
+            .with("tail_level", Json::number(self.tail_level)?))
+    }
+
+    /// Parses a complete config object and rejects invalid thresholds.
+    ///
+    /// # Errors
+    /// Returns [`Error::Json`] if a required field is absent, has the wrong
+    /// type, or fails configuration validation.
+    pub fn from_json(value: &Json) -> Result<Self> {
+        let int = |key: &str| -> Result<usize> {
+            usize::try_from(value.at(key)?.as_int()?)
+                .map_err(|_| Error::Json(format!("{key} must be non-negative")))
+        };
+        let num = |key: &str| -> Result<f64> { value.at(key)?.as_double() };
+        let int_or = |key: &str, default: usize| -> Result<usize> {
+            value.find(key).map_or(Ok(default), |v| {
+                usize::try_from(v.as_int()?).map_err(|_| Error::Json(format!("{key} must be non-negative")))
+            })
+        };
+        let num_or =
+            |key: &str, default: f64| -> Result<f64> { value.find(key).map_or(Ok(default), Json::as_double) };
+        let nums =
+            |key: &str| -> Result<Vec<f64>> { value.at(key)?.items()?.iter().map(Json::as_double).collect() };
+        let delays = value
+            .at("delay_bars")?
+            .items()?
+            .iter()
+            .map(|v| {
+                usize::try_from(v.as_int()?)
+                    .map_err(|_| Error::Json("delay_bars must be non-negative".into()))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let integer_params = value
+            .at("integer_params")?
+            .items()?
+            .iter()
+            .map(|v| Ok(v.as_str()?.to_owned()))
+            .collect::<Result<BTreeSet<_>>>()?;
+        let config = Self {
+            extra_slippage_bps: nums("extra_slippage_bps")?,
+            cost_stress_bps: num("cost_stress_bps")?,
+            borrow_stress_rates: value.find("borrow_stress_rates").map_or_else(
+                || Ok(Self::default().borrow_stress_rates),
+                |v| v.items()?.iter().map(Json::as_double).collect(),
+            )?,
+            impact_stress_coefficients: value.find("impact_stress_coefficients").map_or_else(
+                || Ok(Self::default().impact_stress_coefficients),
+                |v| v.items()?.iter().map(Json::as_double).collect(),
+            )?,
+            participation_stress_fractions: value.find("participation_stress_fractions").map_or_else(
+                || Ok(Self::default().participation_stress_fractions),
+                |v| v.items()?.iter().map(Json::as_double).collect(),
+            )?,
+            delay_bars: delays,
+            perturbation_fractions: nums("perturbation_fractions")?,
+            integer_params,
+            perturbation_positive_warn: num("perturbation_positive_warn")?,
+            perturbation_positive_fail: num("perturbation_positive_fail")?,
+            n_subperiods: int("n_subperiods")?,
+            min_timestamps_per_subperiod: int("min_timestamps_per_subperiod")?,
+            subperiod_positive_warn: num("subperiod_positive_warn")?,
+            subperiod_positive_fail: num("subperiod_positive_fail")?,
+            bootstrap_resamples: int("bootstrap_resamples")?,
+            return_bootstrap_resamples: int_or(
+                "return_bootstrap_resamples",
+                Self::default().return_bootstrap_resamples,
+            )?,
+            return_bootstrap_block_length: int_or(
+                "return_bootstrap_block_length",
+                Self::default().return_bootstrap_block_length,
+            )?,
+            seed: u64::try_from(value.at("seed")?.as_int()?)
+                .map_err(|_| Error::Json("seed must be non-negative".into()))?,
+            min_trades_for_resampling: int("min_trades_for_resampling")?,
+            trades_insufficient_below: int("trades_insufficient_below")?,
+            trades_warn_below: int("trades_warn_below")?,
+            bootstrap_loss_warn: num("bootstrap_loss_warn")?,
+            bootstrap_loss_fail: num("bootstrap_loss_fail")?,
+            lucky_ordering_warn: num("lucky_ordering_warn")?,
+            top_trade_warn: num("top_trade_warn")?,
+            top_trade_fail: num("top_trade_fail")?,
+            degradation_warn_ratio: num("degradation_warn_ratio")?,
+            regime_vol_window: int("regime_vol_window")?,
+            regime_min_periods: int("regime_min_periods")?,
+            regime_min_per_bucket: int("regime_min_per_bucket")?,
+            regime_trend_window: int_or("regime_trend_window", Self::default().regime_trend_window)?,
+            regime_trend_efficiency: num_or(
+                "regime_trend_efficiency",
+                Self::default().regime_trend_efficiency,
+            )?,
+            regime_crisis_return: num_or("regime_crisis_return", Self::default().regime_crisis_return)?,
+            max_drawdown_warn: num("max_drawdown_warn")?,
+            max_drawdown_fail: num("max_drawdown_fail")?,
+            tail_level: num("tail_level")?,
+        };
+        config.validate().map_err(|e| Error::Json(e.to_string()))?;
+        Ok(config)
     }
 }
 
@@ -171,11 +550,30 @@ pub struct CostLevel {
     pub total_return: f64,
 }
 
+/// One combined borrow, market-impact and participation stress scenario.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ExecutionCostLevel {
+    /// Annual borrow fee assumed for short exposure.
+    pub borrow_rate: f64,
+    /// Square-root market impact coefficient.
+    pub impact_coefficient: f64,
+    /// Maximum share of bar volume available to one order.
+    pub max_participation: f64,
+    /// Annualized Sharpe under this scenario.
+    pub sharpe: f64,
+    /// Total return under this scenario.
+    pub total_return: f64,
+    /// Degradation verdict relative to baseline.
+    pub verdict: Verdict,
+}
+
 /// Component 1.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CostSensitivity {
     /// Tested levels.
     pub levels: Vec<CostLevel>,
+    /// M3-backed borrow fee, impact and partial-fill stresses.
+    pub execution_levels: Vec<ExecutionCostLevel>,
     /// Sharpe at `cost_stress_bps`.
     pub stressed_sharpe: f64,
     /// Sharpe falls to <= 0 within the tested range.
@@ -324,6 +722,8 @@ pub struct RegimeBucket {
 pub struct RegimeSensitivity {
     /// Low, mid, high trailing volatility.
     pub buckets: Vec<RegimeBucket>,
+    /// Trend, range and drawdown-defined crisis states.
+    pub market_states: Vec<RegimeBucket>,
     /// Verdict.
     pub verdict: Verdict,
     /// Finding.
@@ -356,9 +756,20 @@ pub struct RiskProfile {
     pub finding: String,
 }
 
+/// Confidence intervals for return-series statistics using contiguous blocks.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StatisticalStrength {
+    /// Moving-block bootstrap distribution and empirical intervals.
+    pub return_bootstrap: ReturnBlockBootstrap,
+}
+
 /// The full battery.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SurvivalReport {
+    /// Schema version for consumers that persist report JSON.
+    pub schema_version: u32,
+    /// Exact thresholds used for this report.
+    pub config: SurvivalConfig,
     /// Parameters tested.
     pub params: ParamSet,
     /// Baseline metrics.
@@ -367,6 +778,14 @@ pub struct SurvivalReport {
     pub baseline_run: RunRecord,
     /// Baseline fill count.
     pub baseline_fills: usize,
+    /// Rebased baseline equity path for the benchmark comparison chart.
+    pub baseline_equity: Vec<f64>,
+    /// Rebased equal-weight buy-and-hold benchmark path.
+    pub benchmark_equity: Vec<f64>,
+    /// Baseline drawdown at each point in `baseline_equity`.
+    pub drawdown_curve: Vec<f64>,
+    /// Closed trade net P&L, ascending, for the concentration chart.
+    pub trade_pnl_sorted: Vec<f64>,
     /// 1.
     pub costs: CostSensitivity,
     /// 2.
@@ -385,10 +804,351 @@ pub struct SurvivalReport {
     pub benchmark: BenchmarkRelative,
     /// 9.
     pub risk: RiskProfile,
+    /// 13. Autocorrelation-aware return confidence intervals.
+    pub statistical_strength: StatisticalStrength,
     /// Most severe component verdict (NOT a score).
     pub worst: Verdict,
     /// What the tests do and ignore.
     pub assumptions: Vec<String>,
+}
+
+fn json_f(v: f64) -> Json {
+    if v.is_finite() {
+        Json::number(v).unwrap_or(Json::Null)
+    } else {
+        Json::Null
+    }
+}
+
+fn json_usize(v: usize) -> Json {
+    i64::try_from(v).map_or(Json::Null, Json::integer)
+}
+
+fn json_strings(values: &[String]) -> Json {
+    Json::Array(values.iter().map(Json::string).collect())
+}
+
+fn json_metrics(m: &Metrics) -> Json {
+    Json::object()
+        .with("valid", Json::boolean(m.valid))
+        .with("periods", Json::integer(i64::from(m.periods)))
+        .with("total_return", json_f(m.total_return))
+        .with("annualized_return", json_f(m.annualized_return))
+        .with("annualized_volatility", json_f(m.annualized_volatility))
+        .with("sharpe", json_f(m.sharpe))
+        .with("max_drawdown", json_f(m.max_drawdown))
+}
+
+fn json_verdict(v: Verdict) -> Json {
+    Json::string(v.as_str())
+}
+
+impl SurvivalReport {
+    /// Whether the optional M8 fail-only paper-trading gate should allow this
+    /// strategy. `Warn` and `Insufficient` remain a human decision.
+    pub const fn paper_trading_allowed(&self) -> bool {
+        !matches!(self.worst, Verdict::Fail)
+    }
+
+    /// Converts every report component to deterministic JSON. Non-finite
+    /// analytics are represented as null because RFC 8259 has no infinities.
+    ///
+    /// # Errors
+    /// Returns an error if the captured configuration is invalid or a
+    /// parameter name cannot be inserted into the JSON object.
+    pub fn to_json(&self) -> Result<Json> {
+        let levels = |values: Vec<Json>| Json::Array(values);
+        let costs = Json::object()
+            .with(
+                "levels",
+                levels(
+                    self.costs
+                        .levels
+                        .iter()
+                        .map(|v| {
+                            Json::object()
+                                .with("extra_bps", json_f(v.extra_bps))
+                                .with("sharpe", json_f(v.sharpe))
+                                .with("total_return", json_f(v.total_return))
+                        })
+                        .collect(),
+                ),
+            )
+            .with(
+                "execution_levels",
+                levels(
+                    self.costs
+                        .execution_levels
+                        .iter()
+                        .map(|v| {
+                            Json::object()
+                                .with("borrow_rate", json_f(v.borrow_rate))
+                                .with("impact_coefficient", json_f(v.impact_coefficient))
+                                .with("max_participation", json_f(v.max_participation))
+                                .with("sharpe", json_f(v.sharpe))
+                                .with("total_return", json_f(v.total_return))
+                                .with("verdict", json_verdict(v.verdict))
+                        })
+                        .collect(),
+                ),
+            )
+            .with("stressed_sharpe", json_f(self.costs.stressed_sharpe))
+            .with("breakeven_found", Json::boolean(self.costs.breakeven_found))
+            .with("breakeven_extra_bps", json_f(self.costs.breakeven_extra_bps))
+            .with("verdict", json_verdict(self.costs.verdict))
+            .with("finding", Json::string(&self.costs.finding));
+        let delay = Json::object()
+            .with(
+                "levels",
+                levels(
+                    self.delay
+                        .levels
+                        .iter()
+                        .map(|v| {
+                            Json::object()
+                                .with("delay_bars", json_usize(v.delay_bars))
+                                .with("sharpe", json_f(v.sharpe))
+                                .with("total_return", json_f(v.total_return))
+                        })
+                        .collect(),
+                ),
+            )
+            .with("one_bar_sharpe", json_f(self.delay.one_bar_sharpe))
+            .with("verdict", json_verdict(self.delay.verdict))
+            .with("finding", Json::string(&self.delay.finding));
+        let stability = Json::object()
+            .with("baseline_sharpe", json_f(self.stability.baseline_sharpe))
+            .with(
+                "neighbours",
+                levels(
+                    self.stability
+                        .neighbours
+                        .iter()
+                        .map(|v| {
+                            Json::object()
+                                .with("params", Json::string(v.params.canonical()))
+                                .with("sharpe", json_f(v.sharpe))
+                                .with("total_return", json_f(v.total_return))
+                        })
+                        .collect(),
+                ),
+            )
+            .with("skipped", json_usize(self.stability.skipped))
+            .with("share_positive", json_f(self.stability.share_positive))
+            .with("median_sharpe", json_f(self.stability.median_sharpe))
+            .with("min_sharpe", json_f(self.stability.min_sharpe))
+            .with("verdict", json_verdict(self.stability.verdict))
+            .with("finding", Json::string(&self.stability.finding));
+        let time = Json::object()
+            .with(
+                "subperiods",
+                levels(
+                    self.time
+                        .subperiods
+                        .iter()
+                        .map(|v| {
+                            Json::object()
+                                .with("first_ts", Json::integer(v.first_ts))
+                                .with("last_ts", Json::integer(v.last_ts))
+                                .with("sharpe", json_f(v.sharpe))
+                                .with("total_return", json_f(v.total_return))
+                                .with("max_drawdown", json_f(v.max_drawdown))
+                        })
+                        .collect(),
+                ),
+            )
+            .with("share_positive", json_f(self.time.share_positive))
+            .with("first_half_sharpe", json_f(self.time.first_half_sharpe))
+            .with("second_half_sharpe", json_f(self.time.second_half_sharpe))
+            .with("verdict", json_verdict(self.time.verdict))
+            .with("finding", Json::string(&self.time.finding));
+        let band = |b: &crate::trades::PercentileBand| {
+            Json::object().with("p05", json_f(b.p05)).with("p50", json_f(b.p50)).with("p95", json_f(b.p95))
+        };
+        let st = &self.trades.stats;
+        let res = &self.trades.resampling;
+        let trades = Json::object()
+            .with(
+                "stats",
+                Json::object()
+                    .with("n", json_usize(st.n))
+                    .with("wins", json_usize(st.wins))
+                    .with("losses", json_usize(st.losses))
+                    .with("win_rate", json_f(st.win_rate))
+                    .with("avg_win", json_f(st.avg_win))
+                    .with("avg_loss", json_f(st.avg_loss))
+                    .with("payoff_ratio", json_f(st.payoff_ratio))
+                    .with("expectancy", json_f(st.expectancy))
+                    .with("profit_factor", json_f(st.profit_factor))
+                    .with("total_net", json_f(st.total_net))
+                    .with("best", json_f(st.best))
+                    .with("worst", json_f(st.worst))
+                    .with("top_trade_share", json_f(st.top_trade_share))
+                    .with("avg_holding_ns", json_f(st.avg_holding_ns)),
+            )
+            .with(
+                "resampling",
+                Json::object()
+                    .with("valid", Json::boolean(res.valid))
+                    .with("resamples", json_usize(res.resamples))
+                    .with("observed_max_drawdown", json_f(res.observed_max_drawdown))
+                    .with("bootstrap_terminal_pnl", band(&res.bootstrap_terminal_pnl))
+                    .with(
+                        "bootstrap_terminal_histogram",
+                        levels(
+                            res.bootstrap_terminal_histogram
+                                .iter()
+                                .map(|bin| {
+                                    Json::object()
+                                        .with("lower", json_f(bin.lower))
+                                        .with("upper", json_f(bin.upper))
+                                        .with("count", json_usize(bin.count))
+                                })
+                                .collect(),
+                        ),
+                    )
+                    .with("bootstrap_max_drawdown", band(&res.bootstrap_max_drawdown))
+                    .with("bootstrap_prob_loss", json_f(res.bootstrap_prob_loss))
+                    .with("reshuffle_max_drawdown", band(&res.reshuffle_max_drawdown))
+                    .with("reshuffle_prob_worse_drawdown", json_f(res.reshuffle_prob_worse_drawdown)),
+            )
+            .with("open_positions_at_end", json_usize(self.trades.open_positions_at_end))
+            .with("verdict", json_verdict(self.trades.verdict))
+            .with("finding", Json::string(&self.trades.finding));
+        let sample = Json::object()
+            .with("trades", json_usize(self.sample.trades))
+            .with("top_trade_share", json_f(self.sample.top_trade_share))
+            .with("verdict", json_verdict(self.sample.verdict))
+            .with("finding", Json::string(&self.sample.finding));
+        let json_series = |values: &[f64]| Json::Array(values.iter().map(|value| json_f(*value)).collect());
+        let regimes = Json::object()
+            .with(
+                "buckets",
+                levels(
+                    self.regimes
+                        .buckets
+                        .iter()
+                        .map(|v| {
+                            Json::object()
+                                .with("name", Json::string(&v.name))
+                                .with("periods", json_usize(v.periods))
+                                .with("share", json_f(v.share))
+                                .with("mean_return", json_f(v.mean_return))
+                                .with("sharpe", json_f(v.sharpe))
+                        })
+                        .collect(),
+                ),
+            )
+            .with(
+                "market_states",
+                levels(
+                    self.regimes
+                        .market_states
+                        .iter()
+                        .map(|v| {
+                            Json::object()
+                                .with("name", Json::string(&v.name))
+                                .with("periods", json_usize(v.periods))
+                                .with("share", json_f(v.share))
+                                .with("mean_return", json_f(v.mean_return))
+                                .with("sharpe", json_f(v.sharpe))
+                        })
+                        .collect(),
+                ),
+            )
+            .with("verdict", json_verdict(self.regimes.verdict))
+            .with("finding", Json::string(&self.regimes.finding));
+        let bm = &self.benchmark.metrics;
+        let benchmark = Json::object()
+            .with(
+                "metrics",
+                Json::object()
+                    .with("valid", Json::boolean(bm.valid))
+                    .with("beta", json_f(bm.beta))
+                    .with("alpha_annualized", json_f(bm.alpha_annualized))
+                    .with("correlation", json_f(bm.correlation))
+                    .with("tracking_error", json_f(bm.tracking_error))
+                    .with("information_ratio", json_f(bm.information_ratio))
+                    .with("up_capture", json_f(bm.up_capture))
+                    .with("down_capture", json_f(bm.down_capture)),
+            )
+            .with("average_net_exposure", json_f(self.benchmark.average_net_exposure))
+            .with("verdict", json_verdict(self.benchmark.verdict))
+            .with("finding", Json::string(&self.benchmark.finding));
+        let d = &self.risk.drawdown;
+        let t = &self.risk.tail;
+        let risk = Json::object()
+            .with(
+                "drawdown",
+                Json::object()
+                    .with("valid", Json::boolean(d.valid))
+                    .with("max_drawdown", json_f(d.max_drawdown))
+                    .with("current_drawdown", json_f(d.current_drawdown))
+                    .with("longest_underwater", json_usize(d.longest_underwater))
+                    .with("ulcer_index", json_f(d.ulcer_index)),
+            )
+            .with(
+                "tail",
+                Json::object()
+                    .with("valid", Json::boolean(t.valid))
+                    .with("level", json_f(t.level))
+                    .with("var", json_f(t.var))
+                    .with("es", json_f(t.es))
+                    .with("worst", json_f(t.worst)),
+            )
+            .with("verdict", json_verdict(self.risk.verdict))
+            .with("finding", Json::string(&self.risk.finding));
+        let rb = &self.statistical_strength.return_bootstrap;
+        let statistical_strength = Json::object().with(
+            "return_block_bootstrap",
+            Json::object()
+                .with("valid", Json::boolean(rb.valid))
+                .with("periods", json_usize(rb.periods))
+                .with("block_length", json_usize(rb.block_length))
+                .with("resamples", json_usize(rb.resamples))
+                .with("terminal_return", band(&rb.terminal_return))
+                .with("annualized_sharpe", band(&rb.annualized_sharpe))
+                .with("max_drawdown", band(&rb.max_drawdown))
+                .with("probability_of_loss", json_f(rb.probability_of_loss)),
+        );
+        let mut params = Json::object();
+        for (name, value) in &self.params.values {
+            params.set(name, json_f(*value))?;
+        }
+        Ok(Json::object()
+            .with("schema_version", Json::integer(i64::from(self.schema_version)))
+            .with("config", self.config.to_json()?)
+            .with("params", params)
+            .with("baseline", json_metrics(&self.baseline))
+            .with(
+                "baseline_run",
+                Json::object()
+                    .with("engine_version", Json::string(&self.baseline_run.engine_version))
+                    .with("dataset_sha256", Json::string(&self.baseline_run.dataset_sha256))
+                    .with("config_sha256", Json::string(&self.baseline_run.config_sha256))
+                    .with("result_sha256", Json::string(&self.baseline_run.result_sha256))
+                    .with("seed", Json::integer(self.baseline_run.seed as i64))
+                    .with("bar_count", json_usize(self.baseline_run.bar_count)),
+            )
+            .with("baseline_fills", json_usize(self.baseline_fills))
+            .with("costs", costs)
+            .with("delay", delay)
+            .with("stability", stability)
+            .with("time", time)
+            .with("trades", trades)
+            .with("sample", sample)
+            .with("baseline_equity", json_series(&self.baseline_equity))
+            .with("benchmark_equity", json_series(&self.benchmark_equity))
+            .with("drawdown_curve", json_series(&self.drawdown_curve))
+            .with("trade_pnl_sorted", json_series(&self.trade_pnl_sorted))
+            .with("regimes", regimes)
+            .with("benchmark", benchmark)
+            .with("risk", risk)
+            .with("statistical_strength", statistical_strength)
+            .with("worst", json_verdict(self.worst))
+            .with("paper_trading_allowed", Json::boolean(self.paper_trading_allowed()))
+            .with("assumptions", json_strings(&self.assumptions)))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -440,6 +1200,32 @@ const NO_TRADES: &str =
     "The baseline run closed no trades, so there is nothing to stress; a strategy that never \
                          trades cannot be validated.";
 
+fn equity_index(returns: &[f64]) -> Vec<f64> {
+    let mut equity = Vec::with_capacity(returns.len() + 1);
+    let mut value = 1.0;
+    equity.push(value);
+    for &r in returns {
+        value *= 1.0 + r;
+        equity.push(value);
+    }
+    equity
+}
+
+fn drawdowns(equity: &[f64]) -> Vec<f64> {
+    let mut peak = f64::NEG_INFINITY;
+    equity
+        .iter()
+        .map(|value| {
+            peak = peak.max(*value);
+            if peak > 0.0 {
+                (peak - value) / peak
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
 fn f2(v: f64) -> String {
     fmt_f(v, 2)
 }
@@ -457,13 +1243,54 @@ pub fn run_survival_lab(
     params: &ParamSet,
     sc: &SurvivalConfig,
 ) -> Result<SurvivalReport> {
-    let mut rep = SurvivalReport { params: params.clone(), ..SurvivalReport::default() };
+    run_survival_lab_controlled(bars, factory, config, params, sc, None, None)
+}
+
+/// Runs the battery with between-run cancellation and per-test progress.
+/// Cancellation returns [`Error::Cancelled`].
+///
+/// # Errors
+/// Returns an error for invalid input, rejected strategy parameters, failed
+/// backtests, or a requested cancellation.
+#[allow(clippy::too_many_lines, clippy::cast_precision_loss)]
+pub fn run_survival_lab_controlled<'a>(
+    bars: &[Bar],
+    factory: &StrategyFactory<'_>,
+    config: &BacktestConfig,
+    params: &ParamSet,
+    sc: &SurvivalConfig,
+    cancel: Option<&'a AtomicBool>,
+    progress: Option<&'a mut dyn FnMut(SurvivalProgress)>,
+) -> Result<SurvivalReport> {
+    sc.validate()?;
+    let mut execution = SurvivalExecution { cancel, progress, test_number: 1, step: 0, total_steps: 1 };
+    execution.check_cancelled()?;
+    let mut rep = SurvivalReport {
+        schema_version: 2,
+        config: sc.clone(),
+        params: params.clone(),
+        ..SurvivalReport::default()
+    };
     let base = run_one(bars, factory, config, params)?;
     let base_sum = summarize(&base);
+    let base_returns = spectra_engine::returns_from_curve(&base.equity_curve);
+    rep.statistical_strength.return_bootstrap = block_bootstrap_returns(
+        &base_returns,
+        config.initial_cash.to_f64(),
+        config.periods_per_year,
+        sc.return_bootstrap_block_length.min(base_returns.len()),
+        sc.return_bootstrap_resamples,
+        sc.seed,
+    );
+    rep.baseline_equity = equity_index(&base_returns);
+    rep.drawdown_curve = drawdowns(&rep.baseline_equity);
+    rep.benchmark_equity = equity_index(&benchmark_returns(bars));
     rep.baseline = base.metrics;
     rep.baseline_run = base.run.clone();
     rep.baseline_fills = count_fills(&base.ledger);
     let extraction = extract_trades(&base.ledger)?;
+    rep.trade_pnl_sorted = extraction.trades.iter().map(|trade| trade.net.to_f64()).collect();
+    rep.trade_pnl_sorted.sort_by(f64::total_cmp);
     let traded = rep.baseline_fills > 0 && base_sum.valid;
 
     rep.assumptions = [
@@ -473,7 +1300,8 @@ pub fn run_survival_lab(
         "Parameter test perturbs one parameter at a time, never several together, so interactions are not explored.",
         "Sub-periods and halves are run from a cold start with fresh capital; long look-backs lose their warm-up.",
         "Trade resampling treats trades as exchangeable fixed dollar amounts and measures drawdown on closed trades only.",
-        "Regimes are terciles of trailing realized volatility of the equal-weight benchmark, labelled with full-sample thresholds (descriptive, not predictive). HMM regimes belong to the risk engine.",
+        "Return confidence intervals use a circular moving-block bootstrap; their coverage depends on the selected block length and is not a formal guarantee.",
+        "Volatility regimes use full-sample terciles and are descriptive, not predictive. Trend/range uses rolling directional efficiency; crisis uses a rolling cumulative benchmark return threshold. These are not HMM states.",
         "The benchmark is an equal-weight buy-and-hold of the dataset's instruments, ignoring costs. A strategy that deploys only a small share of capital will look weak against a fully invested benchmark; weigh alpha and information ratio against the reported exposure.",
         "These tests stress ONE chosen configuration for fragility. They cannot detect that it was the luckiest of many tried; use the Deflated Sharpe Ratio, PBO and walk-forward validation for that.",
         "Verdict thresholds are conservative rules of thumb, not statistical tests, and no aggregate score is produced.",
@@ -491,7 +1319,14 @@ pub fn run_survival_lab(
                 grid.push(0.0);
             }
             grid.sort_by(f64::total_cmp);
-            let level_at = |extra: f64| -> Result<CostLevel> {
+            let execution_scenarios = sc.borrow_stress_rates.len()
+                * sc.impact_stress_coefficients.len()
+                * sc.participation_stress_fractions.len();
+            let total_steps = grid.iter().filter(|&&v| v != 0.0).count()
+                + usize::from(sc.cost_stress_bps != 0.0)
+                + execution_scenarios;
+            execution.begin_test(1, total_steps);
+            let mut level_at = |extra: f64| -> Result<CostLevel> {
                 if extra == 0.0 {
                     return Ok(CostLevel {
                         extra_bps: 0.0,
@@ -501,13 +1336,39 @@ pub fn run_survival_lab(
                 }
                 let mut cfg = *config;
                 cfg.costs.slippage = config.costs.slippage.checked_add(Bps::from_f64(extra)?)?;
-                let s = summarize(&run_one(bars, factory, &cfg, params)?);
+                let s = summarize(&execution.run_one(bars, factory, &cfg, params)?);
                 Ok(CostLevel { extra_bps: extra, sharpe: s.sharpe, total_return: s.total_return })
             };
             for &extra in &grid {
                 c.levels.push(level_at(extra)?);
             }
             c.stressed_sharpe = level_at(sc.cost_stress_bps)?.sharpe;
+            for &borrow_rate in &sc.borrow_stress_rates {
+                for &impact_coefficient in &sc.impact_stress_coefficients {
+                    for &participation in &sc.participation_stress_fractions {
+                        let mut cfg = *config;
+                        cfg.financing.borrow_rate = cfg.financing.borrow_rate.max(borrow_rate);
+                        cfg.impact.coefficient = cfg.impact.coefficient.max(impact_coefficient);
+                        cfg.exec.max_participation = if config.exec.max_participation.raw() > 0 {
+                            Qty::from_f64(config.exec.max_participation.to_f64().min(participation))?
+                        } else {
+                            Qty::from_f64(participation)?
+                        };
+                        let result = summarize(&execution.run_one(bars, factory, &cfg, params)?);
+                        let verdict =
+                            degradation_verdict(base_sum.sharpe, result.sharpe, sc.degradation_warn_ratio);
+                        c.verdict = worse(c.verdict, verdict);
+                        c.execution_levels.push(ExecutionCostLevel {
+                            borrow_rate,
+                            impact_coefficient,
+                            max_participation: cfg.exec.max_participation.to_f64(),
+                            sharpe: result.sharpe,
+                            total_return: result.total_return,
+                            verdict,
+                        });
+                    }
+                }
+            }
             if base_sum.sharpe <= 0.0 {
                 c.breakeven_found = true;
                 c.breakeven_extra_bps = 0.0;
@@ -523,6 +1384,9 @@ pub fn run_survival_lab(
                 }
             }
             c.verdict = degradation_verdict(base_sum.sharpe, c.stressed_sharpe, sc.degradation_warn_ratio);
+            for scenario in &c.execution_levels {
+                c.verdict = worse(c.verdict, scenario.verdict);
+            }
             c.finding = format!(
                 "Sharpe {} at baseline costs, {} with +{} bps extra slippage; ",
                 f2(base_sum.sharpe),
@@ -540,6 +1404,9 @@ pub fn run_survival_lab(
         } else {
             c.finding = NO_TRADES.into();
         }
+        if execution.test_number == 1 && execution.step == 0 {
+            execution.complete_test(1);
+        }
     }
 
     // ---- 2. Execution delay --------------------------------------------------
@@ -551,7 +1418,9 @@ pub fn run_survival_lab(
                 grid.push(0);
             }
             grid.sort_unstable();
-            let level_at = |extra: usize| -> Result<DelayLevel> {
+            let total_steps = grid.iter().filter(|&&v| v != 0).count() + 1;
+            execution.begin_test(2, total_steps);
+            let mut level_at = |extra: usize| -> Result<DelayLevel> {
                 if extra == 0 {
                     return Ok(DelayLevel {
                         delay_bars: 0,
@@ -561,7 +1430,7 @@ pub fn run_survival_lab(
                 }
                 let mut cfg = *config;
                 cfg.exec.delay_bars = config.exec.delay_bars + extra;
-                let s = summarize(&run_one(bars, factory, &cfg, params)?);
+                let s = summarize(&execution.run_one(bars, factory, &cfg, params)?);
                 Ok(DelayLevel { delay_bars: extra, sharpe: s.sharpe, total_return: s.total_return })
             };
             for &extra in &grid {
@@ -576,6 +1445,9 @@ pub fn run_survival_lab(
             );
         } else {
             d.finding = NO_TRADES.into();
+        }
+        if execution.test_number < 2 || execution.step == 0 {
+            execution.complete_test(2);
         }
     }
 
@@ -600,8 +1472,9 @@ pub fn run_survival_lab(
                 }
             }
             let mut sharpes = Vec::new();
+            execution.begin_test(3, candidates.len());
             for n in candidates {
-                match run_one(bars, factory, config, &n) {
+                match execution.run_one(bars, factory, config, &n) {
                     Ok(r) => {
                         let s = summarize(&r);
                         sharpes.push(s.sharpe);
@@ -611,6 +1484,7 @@ pub fn run_survival_lab(
                             total_return: s.total_return,
                         });
                     }
+                    Err(e) if cancel.is_some_and(|flag| flag.load(Ordering::Relaxed)) => return Err(e),
                     Err(_) => p.skipped += 1, // the strategy rejected these parameters (e.g. fast >= slow)
                 }
             }
@@ -647,6 +1521,9 @@ pub fn run_survival_lab(
         } else {
             p.finding = NO_TRADES.into();
         }
+        if execution.test_number < 3 || execution.step == 0 {
+            execution.complete_test(3);
+        }
     }
 
     // ---- 4. Time-period robustness -------------------------------------------
@@ -663,9 +1540,10 @@ pub fn run_survival_lab(
                 sc.min_timestamps_per_subperiod
             );
         } else {
-            let run_range = |from: usize, to: usize| -> Result<(Summary, i64, i64)> {
+            execution.begin_test(4, k + 2);
+            let mut run_range = |from: usize, to: usize| -> Result<(Summary, i64, i64)> {
                 let slice = &bars[offsets[from]..offsets[to]];
-                let r = run_one(slice, factory, config, params)?;
+                let r = execution.run_one(slice, factory, config, params)?;
                 Ok((summarize(&r), slice[0].ts_ns, slice[slice.len() - 1].ts_ns))
             };
             let seg = n_ts / k;
@@ -707,6 +1585,9 @@ pub fn run_survival_lab(
                 f2(t.first_half_sharpe),
                 f2(t.second_half_sharpe)
             );
+        }
+        if execution.test_number < 4 || execution.step == 0 {
+            execution.complete_test(4);
         }
     }
 
@@ -779,6 +1660,8 @@ pub fn run_survival_lab(
             }
         }
     }
+    execution.complete_test(5);
+    execution.complete_test(6);
 
     // ---- 7. Regime sensitivity & 8. Benchmark-relative -----------------------
     {
@@ -916,8 +1799,51 @@ pub fn run_survival_lab(
                     );
                 }
             }
+
+            // M6c: causal trend/range and rolling-crisis labels. Each label
+            // only uses benchmark returns up through the current period.
+            let trend_window = sc.regime_trend_window;
+            if trend_window <= rb.len() {
+                let names = ["trend", "range", "crisis"];
+                let mut by: [Vec<f64>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+                for end in trend_window..=rb.len() {
+                    let window = &rb[end - trend_window..end];
+                    let direction: f64 = window.iter().sum();
+                    let travel: f64 = window.iter().map(|value| value.abs()).sum();
+                    let cumulative = window.iter().fold(1.0, |equity, value| equity * (1.0 + value)) - 1.0;
+                    let state_index = if cumulative <= sc.regime_crisis_return {
+                        2
+                    } else {
+                        usize::from(!(travel > 0.0 && direction.abs() / travel >= sc.regime_trend_efficiency))
+                    };
+                    by[state_index].push(rs[end - 1]);
+                }
+                let labelled = by.iter().map(Vec::len).sum::<usize>();
+                for (index, values) in by.into_iter().enumerate() {
+                    let mut bucket = RegimeBucket {
+                        name: names[index].into(),
+                        periods: values.len(),
+                        share: if labelled > 0 { values.len() as f64 / labelled as f64 } else { 0.0 },
+                        ..RegimeBucket::default()
+                    };
+                    if !values.is_empty() {
+                        bucket.mean_return = values.iter().sum::<f64>() / values.len() as f64;
+                        if values.len() >= sc.regime_min_per_bucket {
+                            let distribution = moments(&values);
+                            bucket.sharpe = if distribution.stdev > 0.0 {
+                                distribution.mean / distribution.stdev * config.periods_per_year.sqrt()
+                            } else {
+                                0.0
+                            };
+                        }
+                    }
+                    rg.market_states.push(bucket);
+                }
+            }
         }
     }
+    execution.complete_test(7);
+    execution.complete_test(8);
 
     // ---- 9. Drawdown & tail risk -----------------------------------------------
     {
@@ -952,6 +1878,7 @@ pub fn run_survival_lab(
             rk.finding = "Too few equity points to measure drawdown.".into();
         }
     }
+    execution.complete_test(9);
 
     rep.worst = [
         rep.costs.verdict,
@@ -1039,4 +1966,66 @@ pub fn format_survival_report(r: &SurvivalReport) -> String {
         out += &format!("  - {a}\n");
     }
     out
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn config_json_round_trips_and_presets_validate() {
+        for config in [
+            SurvivalConfig::default_preset(),
+            SurvivalConfig::strict_preset(),
+            SurvivalConfig::lenient_preset(),
+        ] {
+            config.validate().unwrap();
+            let encoded = config.to_json().unwrap();
+            assert_eq!(SurvivalConfig::from_json(&encoded).unwrap(), config);
+        }
+    }
+
+    #[test]
+    fn config_rejects_bad_threshold_order_and_empty_grid() {
+        let config = SurvivalConfig { perturbation_positive_fail: 0.9, ..SurvivalConfig::default() };
+        assert!(config.validate().is_err());
+        let config = SurvivalConfig { delay_bars: Vec::new(), ..SurvivalConfig::default() };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn config_loads_pre_m6c_presets_with_new_fields_defaulted() {
+        let encoded = SurvivalConfig::default().to_json().unwrap();
+        let Json::Object(fields) = encoded else { panic!("config must serialize as an object") };
+        let previous = Json::Object(
+            fields
+                .into_iter()
+                .filter(|(key, _)| {
+                    !matches!(
+                        key.as_str(),
+                        "borrow_stress_rates"
+                            | "impact_stress_coefficients"
+                            | "participation_stress_fractions"
+                            | "return_bootstrap_resamples"
+                            | "return_bootstrap_block_length"
+                            | "regime_trend_window"
+                            | "regime_trend_efficiency"
+                            | "regime_crisis_return"
+                    )
+                })
+                .collect(),
+        );
+        let parsed = SurvivalConfig::from_json(&previous).unwrap();
+        assert_eq!(parsed, SurvivalConfig::default());
+    }
+
+    #[test]
+    fn paper_trading_gate_blocks_only_a_fail_verdict() {
+        let mut report = SurvivalReport { worst: Verdict::Insufficient, ..SurvivalReport::default() };
+        assert!(report.paper_trading_allowed());
+        report.worst = Verdict::Warn;
+        assert!(report.paper_trading_allowed());
+        report.worst = Verdict::Fail;
+        assert!(!report.paper_trading_allowed());
+    }
 }

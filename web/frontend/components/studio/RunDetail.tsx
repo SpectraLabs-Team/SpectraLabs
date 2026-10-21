@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CircleAlert, Download, Fingerprint, LoaderCircle, MessageSquarePlus, X } from 'lucide-react';
 import { API_BASE, ApiError, request } from '@/lib/api';
 import type { Run } from './ExperimentRegistry';
+import { SurvivalLabPanel } from './SurvivalLabPanel';
 
 type Artifact = {
   id: string;
@@ -131,6 +132,8 @@ export function RunDetail({ runId, experimentName, onClose, onChanged }: {
             <Hash label="Configuration" value={run.config_sha256} />
             <Hash label="Result" value={run.result_sha256} />
           </dl>
+
+          <SurvivalLabPanel runId={run.id} enabled={run.status === 'succeeded'} strategy={run.strategy} params={run.params} datasetId={run.dataset_id} />
 
           {run.artifacts.length > 0 && (
             <>

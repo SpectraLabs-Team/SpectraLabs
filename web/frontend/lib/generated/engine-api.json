@@ -1823,6 +1823,107 @@
         }
       }
     },
+    "/api/v1/runs/{id}/survival": {
+      "get": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "List reports attached to one run.",
+        "operationId": "list_for_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Queue an M6 survival report for a successful run.",
+        "operationId": "start",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartSurvival"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sample-portfolio": {
       "get": {
         "tags": [
@@ -2114,6 +2215,190 @@
         }
       }
     },
+    "/api/v1/survival/presets": {
+      "get": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "List built-in and workspace survival presets.",
+        "operationId": "list_presets",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Save a workspace preset.",
+        "operationId": "create_preset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePreset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/survival/presets/{id}": {
+      "patch": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Update a saved workspace preset.",
+        "operationId": "update_preset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePreset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/survival/{id}": {
+      "get": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Read a saved report.",
+        "operationId": "get_survival_report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/survival/{id}/text": {
+      "get": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Return the saved text report.",
+        "operationId": "text",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Text report"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/uploads": {
       "post": {
         "tags": [
@@ -2293,7 +2578,7 @@
           "datasets"
         ],
         "summary": "How far a resumable upload has got.",
-        "operationId": "get",
+        "operationId": "get_upload_session",
         "parameters": [
           {
             "name": "id",
@@ -4358,6 +4643,19 @@
         },
         "additionalProperties": false
       },
+      "SavePreset": {
+        "type": "object",
+        "required": [
+          "name",
+          "config"
+        ],
+        "properties": {
+          "config": {},
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "SaveVersion": {
         "type": "object",
         "description": "`POST /api/v1/strategies/{id}/versions` body.",
@@ -4448,6 +4746,19 @@
             ],
             "format": "uuid",
             "description": "The upload it became, once completed."
+          }
+        }
+      },
+      "StartSurvival": {
+        "type": "object",
+        "properties": {
+          "config": {},
+          "preset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -5267,6 +5578,10 @@
     {
       "name": "datasets",
       "description": "Data Studio: ingest settings, previews and datasets"
+    },
+    {
+      "name": "survival",
+      "description": "Strategy Survival Lab reports and presets"
     },
     {
       "name": "corporate-actions",

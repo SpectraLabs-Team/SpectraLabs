@@ -18,12 +18,18 @@ pub use stats::{
     deflated_sharpe, expected_max_sharpe, min_track_record_length, moments, normal_cdf, normal_inv_cdf,
     probabilistic_sharpe, sharpe_per_period, Moments,
 };
-pub use survival::{format_survival_report, run_survival_lab, SurvivalConfig, SurvivalReport, Verdict};
+pub use survival::{
+    format_survival_report, run_survival_lab, run_survival_lab_controlled, StatisticalStrength,
+    SurvivalConfig, SurvivalProgress, SurvivalReport, Verdict,
+};
 pub use sweep::{
     objective_sharpe, objective_total_return, run_one, run_sweep, Objective, ParamGrid, ParamSet,
     StrategyFactory, SweepOptions, SweepResult, Trial, TrialLedger, TrialSummary,
 };
-pub use trades::{compute_trade_stats, extract_trades, resample_trades, Trade, TradeResampling, TradeStats};
+pub use trades::{
+    block_bootstrap_returns, compute_trade_stats, extract_trades, resample_trades, DistributionBin,
+    ReturnBlockBootstrap, Trade, TradeResampling, TradeStats,
+};
 pub use validation::{format_report, validate_selection, ValidationReport};
 pub use walkforward::{
     make_folds, run_walk_forward, Fold, FoldResult, WalkForwardConfig, WalkForwardMode, WalkForwardResult,

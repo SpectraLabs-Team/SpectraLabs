@@ -969,6 +969,64 @@ impl PgRegistry {
         Ok(())
     }
 
+    /// Append tamper-evident evidence that a survival report was saved.
+    pub async fn record_survival_report_started(
+        &self,
+        report_id: Uuid,
+        run_id: Uuid,
+        actor_id: Option<Uuid>,
+    ) -> Result<(), PgRegistryError> {
+        let mut tx = self.pool.begin().await?;
+        lock_workspace(&mut tx, self.workspace_id).await?;
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM survival_reports WHERE workspace_id=$1 AND id=$2 AND run_id=$3)",
+        )
+        .bind(self.workspace_id)
+        .bind(report_id)
+        .bind(run_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !exists {
+            return Err(PgRegistryError::Invalid("survival report is not present".into()));
+        }
+        let payload = Json::object()
+            .with("report_id", Json::string(report_id.to_string()))
+            .with("run_id", Json::string(run_id.to_string()))
+            .with("actor_id", actor_id.map_or(Json::Null, |id| Json::string(id.to_string())));
+        append_event(&mut tx, self.workspace_id, "survival.started", (system_clock_ns())(), payload).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Append tamper-evident evidence that a survival report was saved.
+    pub async fn record_survival_report_saved(
+        &self,
+        report_id: Uuid,
+        run_id: Uuid,
+        verdict: &str,
+    ) -> Result<(), PgRegistryError> {
+        let mut tx = self.pool.begin().await?;
+        lock_workspace(&mut tx, self.workspace_id).await?;
+        let exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM survival_reports WHERE workspace_id=$1 AND id=$2 AND run_id=$3 AND status='succeeded')",
+        )
+        .bind(self.workspace_id)
+        .bind(report_id)
+        .bind(run_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !exists {
+            return Err(PgRegistryError::Invalid("survival report is not saved".into()));
+        }
+        let payload = Json::object()
+            .with("report_id", Json::string(report_id.to_string()))
+            .with("run_id", Json::string(run_id.to_string()))
+            .with("worst_verdict", Json::string(verdict));
+        append_event(&mut tx, self.workspace_id, "survival.saved", (system_clock_ns())(), payload).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Read and verify the workspace event chain.
     pub async fn verify(&self) -> Result<VerifyReport, PgRegistryError> {
         let events = self.events().await?;

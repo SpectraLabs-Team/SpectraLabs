@@ -17,7 +17,6 @@ export type EngineRoute = {
   methodRoles?: Partial<Record<EngineMethod, WorkspaceRole>>;
   timeoutMs: number;
   heavy?: boolean;
-  /** Largest request body the proxy forwards (default 2 MB). */
   maxBodyBytes?: number;
 };
 
@@ -43,6 +42,11 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/runs/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/runs/{id}/notes': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
   'api/v1/runs/{id}/artifacts/{kind}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
+  'api/v1/runs/{id}/survival': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/survival/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  'api/v1/survival/{id}/text': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/survival/presets': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 15_000 },
+  'api/v1/survival/presets/{id}': { method: 'PATCH', minRole: 'editor', timeoutMs: 15_000 },
   'api/v1/registry/verify': { method: 'GET', minRole: 'owner', timeoutMs: 60_000 },
   'api/v1/registry/export': { method: 'GET', minRole: 'viewer', timeoutMs: 60_000 },
   'api/v1/registry/import': { method: 'POST', minRole: 'owner', timeoutMs: 120_000, maxBodyBytes: 51 * MB },
@@ -52,14 +56,11 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/backtests/{id}/series': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/backtests/{id}/artifacts/{kind}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   'api/v1/datasets': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
-  // Data Studio (M1). A preview stores nothing, but it is the first step of an upload: editors only.
   'api/v1/datasets/preview': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/datasets/ingest': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
-  // Resumable uploads (M1b): start, check, complete or abandon; chunks go through app/api/engine-upload/sessions.
   'api/v1/uploads/limits': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/uploads/sessions': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/uploads/sessions/{id}': { method: ['GET', 'DELETE'], minRole: 'editor', timeoutMs: 20_000 },
-  // Hashes and stores the whole file (up to SPECTRA_MAX_UPLOAD_BYTES).
   'api/v1/uploads/sessions/{id}/complete': { method: 'POST', minRole: 'editor', timeoutMs: 300_000 },
   'api/v1/datasets/{id}': { method: ['GET', 'PATCH'], minRole: 'viewer', methodRoles: { PATCH: 'editor' }, timeoutMs: 10_000 },
   'api/v1/datasets/versions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
@@ -73,8 +74,9 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
 };
 
-// Registry ids: UUIDs for records made here, exp-/run-/art-<16 hex> for ones imported from a
-// file registry. Artifact kinds are short snake_case words.
+export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };
+export const ENGINE_CHUNK_ROUTE = { minRole: 'editor' as WorkspaceRole, timeoutMs: 120_000, maxBytes: 8 * MB };
+
 const ID = '(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z]{2,8}-[0-9a-f]{16})';
 const REGISTRY_PATTERNS: [RegExp, string][] = [
   [new RegExp(`^api/v1/experiments/${ID}$`, 'i'), 'api/v1/experiments/{id}'],
@@ -83,18 +85,12 @@ const REGISTRY_PATTERNS: [RegExp, string][] = [
   [new RegExp(`^api/v1/runs/${ID}$`, 'i'), 'api/v1/runs/{id}'],
   [new RegExp(`^api/v1/runs/${ID}/notes$`, 'i'), 'api/v1/runs/{id}/notes'],
   [new RegExp(`^api/v1/runs/${ID}/artifacts/[a-z][a-z0-9_]{0,63}$`, 'i'), 'api/v1/runs/{id}/artifacts/{kind}'],
+  [new RegExp(`^api/v1/runs/${ID}/survival$`, 'i'), 'api/v1/runs/{id}/survival'],
+  [new RegExp(`^api/v1/survival/${ID}$`, 'i'), 'api/v1/survival/{id}'],
+  [new RegExp(`^api/v1/survival/${ID}/text$`, 'i'), 'api/v1/survival/{id}/text'],
+  [new RegExp(`^api/v1/survival/presets/${ID}$`, 'i'), 'api/v1/survival/presets/{id}'],
 ];
 
-/**
- * File uploads don't go through the JSON proxy (2 MB bodies): app/api/engine-upload streams the file
- * (up to 100 MiB) to POST /api/v1/uploads. Editors only, signed-in sessions only.
- */
-export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };
-
-/** Chunks of a resumable upload (app/api/engine-upload/sessions/[id]): at most 8 MiB each. Editors only. */
-export const ENGINE_CHUNK_ROUTE = { minRole: 'editor' as WorkspaceRole, timeoutMs: 120_000, maxBytes: 8 * 1024 * 1024 };
-
-/** Map UUID job URLs to their allowlist policy while preserving the real path for signing. */
 export function routePolicyKey(path: string): string {
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}\/cancel$/i.test(path)) return 'api/v1/jobs/{id}/cancel';
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/jobs/{id}';
@@ -117,11 +113,5 @@ export function routePolicyKey(path: string): string {
 export function allowsMethod(route: EngineRoute, method: EngineMethod): boolean {
   return Array.isArray(route.method) ? route.method.includes(method) : route.method === method;
 }
-
-export function maxBodyBytes(route: EngineRoute): number {
-  return route.maxBodyBytes ?? 2 * MB;
-}
-
-export function minimumRole(route: EngineRoute, method: EngineMethod): WorkspaceRole {
-  return route.methodRoles?.[method] ?? route.minRole;
-}
+export function maxBodyBytes(route: EngineRoute): number { return route.maxBodyBytes ?? 2 * MB; }
+export function minimumRole(route: EngineRoute, method: EngineMethod): WorkspaceRole { return route.methodRoles?.[method] ?? route.minRole; }

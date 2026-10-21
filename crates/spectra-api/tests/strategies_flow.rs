@@ -93,6 +93,9 @@ impl Fixture {
 
     /// A dataset version in the fixture's workspace (rows only; nothing is run here).
     async fn dataset_version(&self) -> Uuid {
+        spectra_db::identity::ensure_identity(&self.pool, Some(self.user), self.ws)
+            .await
+            .expect("ensure identity for workspace");
         let dataset: Uuid = sqlx::query_scalar(
             "INSERT INTO datasets (workspace_id, name) VALUES ($1, 'spy daily') RETURNING id",
         )

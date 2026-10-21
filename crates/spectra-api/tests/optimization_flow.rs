@@ -45,7 +45,9 @@ impl Fixture {
         Self { app, pool, dir, user: spectra_db::new_id(), ws: spectra_db::new_id() }
     }
 
-    fn clean_up(&self) {
+    async fn clean_up(&self) {
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(self.ws).execute(&self.pool).await;
+        let _ = sqlx::query("DELETE FROM users WHERE id = $1").bind(self.user).execute(&self.pool).await;
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 
@@ -78,6 +80,9 @@ impl Fixture {
     }
 
     async fn dataset_version(&self) -> Uuid {
+        spectra_db::identity::ensure_identity(&self.pool, Some(self.user), self.ws)
+            .await
+            .expect("ensure identity for workspace");
         let dataset: Uuid = sqlx::query_scalar(
             "INSERT INTO datasets (workspace_id, name) VALUES ($1, 'spy daily') RETURNING id",
         )
@@ -130,7 +135,7 @@ async fn overfitting_calculation_endpoint() {
     assert!(body["pbo"].as_f64().is_some());
     assert_eq!(body["num_trials"], 5);
     assert_eq!(body["num_observations"], 10);
-    f.clean_up();
+    f.clean_up().await;
 }
 
 #[tokio::test]
@@ -171,7 +176,7 @@ async fn parameter_sweep_flow() {
     assert_eq!(status, 200);
     assert_eq!(detail["sweep"]["id"], sweep_id);
     assert!(detail["trials"].is_array());
-    f.clean_up();
+    f.clean_up().await;
 }
 
 #[tokio::test]
@@ -214,7 +219,7 @@ async fn walk_forward_flow() {
     assert_eq!(status, 200);
     assert_eq!(detail["id"], report_id);
     assert_eq!(detail["mode"], "rolling");
-    f.clean_up();
+    f.clean_up().await;
 }
 
 #[tokio::test]
@@ -290,5 +295,5 @@ async fn holdout_vault_budget_lockout_flow() {
         .await;
     assert_eq!(status, 403, "status: {status}, body: {refused}");
     assert_eq!(refused["code"], "holdout_budget_exhausted");
-    f.clean_up();
+    f.clean_up().await;
 }

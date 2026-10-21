@@ -689,7 +689,10 @@ fn job_routes() -> Router<AppState> {
 
 fn registry_routes() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/experiments", only(get(registry_api::list_experiments).post(registry_api::create_experiment)))
+        .route(
+            "/api/v1/experiments",
+            only(get(registry_api::list_experiments).post(registry_api::create_experiment)),
+        )
         .route("/api/v1/experiments/{id}", only(get(registry_api::get_experiment)))
         .route("/api/v1/experiments/{id}/lineage", only(get(registry_api::get_lineage)))
         .route("/api/v1/experiments/{id}/runs", only(post(registry_api::create_backtest)))
@@ -705,7 +708,10 @@ fn registry_routes() -> Router<AppState> {
 /// Backtests, datasets, and built-in strategies (`/api/v1` only).
 fn backtest_routes() -> Router<AppState> {
     Router::new()
-        .route("/api/v1/backtests", only(get(backtests_api::list_backtests).post(backtests_api::create_backtest)))
+        .route(
+            "/api/v1/backtests",
+            only(get(backtests_api::list_backtests).post(backtests_api::create_backtest)),
+        )
         .route("/api/v1/backtests/{id}", only(get(backtests_api::get_backtest)))
         .route("/api/v1/backtests/{id}/cancel", only(post(backtests_api::cancel_backtest)))
         .route("/api/v1/backtests/{id}/series", only(get(backtests_api::backtest_series)))
@@ -718,8 +724,14 @@ fn backtest_routes() -> Router<AppState> {
         .route("/api/v1/uploads/sessions/{id}", only(get(sessions_api::get).delete(sessions_api::abort)))
         .route("/api/v1/uploads/sessions/{id}/chunk", only(put(sessions_api::chunk)))
         .route("/api/v1/uploads/sessions/{id}/complete", only(post(sessions_api::complete)))
-        .route("/api/v1/datasets/{id}", only(get(datasets_api::get_dataset).patch(datasets_api::update_dataset)))
-        .route("/api/v1/datasets/versions/{id}", only(get(datasets_api::get_version).delete(datasets_api::delete_version)))
+        .route(
+            "/api/v1/datasets/{id}",
+            only(get(datasets_api::get_dataset).patch(datasets_api::update_dataset)),
+        )
+        .route(
+            "/api/v1/datasets/versions/{id}",
+            only(get(datasets_api::get_version).delete(datasets_api::delete_version)),
+        )
         .route("/api/v1/datasets/versions/{id}/runs", only(get(datasets_api::version_runs)))
         .route("/api/v1/datasets/versions/{id}/bars", only(get(datasets_api::bars)))
         .route("/api/v1/calendars", only(get(datasets_api::list_calendars)))

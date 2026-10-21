@@ -29,8 +29,15 @@ export function QualityReport({ report, compact }: { report: Partial<Report>; co
   const issues = report.sample_issues ?? [];
   const stats = report.symbol_stats ?? [];
   const symbols = report.symbols ?? [];
+  const hasCalendar = Boolean(report.exchange) || stats.some((s) => (s.out_of_session_bars ?? 0) > 0 || (s.non_trading_day_bars ?? 0) > 0);
   return (
     <div className="space-y-4">
+      {(report.exchange || report.timezone) && (
+        <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-ink/70">
+          {report.exchange && <Badge tone="accent">Exchange: {report.exchange}</Badge>}
+          {report.timezone && <Badge tone="accent">Timezone: {report.timezone}</Badge>}
+        </div>
+      )}
       <div className={cn('grid gap-2', compact ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6')}>
         <Tile label="Rows read" value={int(report.rows_total)} />
         <Tile label="Bars" value={int(report.rows_accepted)} tone="profit" />
@@ -105,7 +112,18 @@ export function QualityReport({ report, compact }: { report: Partial<Report>; co
             <table className="w-full min-w-[640px] text-left text-[11.5px]">
               <thead className="bg-canvas/60 text-ink/50">
                 <tr>
-                  {['Symbol', 'Bars', 'Range', 'Median interval', 'Gaps', 'Largest gap', 'Outlier returns', 'Stale runs', 'Zero volume'].map((h) => (
+                  {[
+                    'Symbol',
+                    'Bars',
+                    'Range',
+                    'Median interval',
+                    'Gaps',
+                    'Largest gap',
+                    'Outlier returns',
+                    'Stale runs',
+                    'Zero volume',
+                    ...(hasCalendar ? ['Out of session', 'Non-trading day'] : []),
+                  ].map((h) => (
                     <th key={h} className="whitespace-nowrap px-2.5 py-1.5 font-medium">
                       {h}
                     </th>
@@ -124,6 +142,12 @@ export function QualityReport({ report, compact }: { report: Partial<Report>; co
                     <td className={cn('px-2.5 py-1.5', hot(s.outlier_returns))}>{int(s.outlier_returns)}</td>
                     <td className={cn('px-2.5 py-1.5', hot(s.stale_runs))}>{int(s.stale_runs)}</td>
                     <td className={cn('px-2.5 py-1.5', hot(s.zero_volume_bars))}>{int(s.zero_volume_bars)}</td>
+                    {hasCalendar && (
+                      <>
+                        <td className={cn('px-2.5 py-1.5', hot(s.out_of_session_bars ?? 0))}>{int(s.out_of_session_bars ?? 0)}</td>
+                        <td className={cn('px-2.5 py-1.5', hot(s.non_trading_day_bars ?? 0))}>{int(s.non_trading_day_bars ?? 0)}</td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>

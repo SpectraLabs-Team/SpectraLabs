@@ -7,6 +7,7 @@ import {
   applySuggestions,
   DELIMITERS,
   emptyDraft,
+  EXCHANGE_CALENDARS,
   followIngest,
   formatOffset,
   ingest,
@@ -14,6 +15,7 @@ import {
   preview as previewSample,
   readSample,
   settingsFromDraft,
+  SUPPORTED_TIMEZONES,
   TIME_FORMATS,
   uploadFile,
   UTC_OFFSETS,
@@ -248,7 +250,7 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
             </div>
           )}
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="delimiter" error={err('delimiter')}>
               <div className="flex items-center gap-2">
                 <select className="input py-1.5 text-[13px]" value={draft.delimiter} onChange={(e) => set({ delimiter: e.target.value })} aria-label="Delimiter">
@@ -278,12 +280,41 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
               </div>
             </Field>
             <Field
-              label="UTC offset"
-              error={err('utc_offset_minutes')}
-              hint={s?.timestamps_have_zone ? 'Your timestamps carry a zone, so this only applies to any that don’t.' : 'For timestamps written without a zone. A fixed offset: daylight saving is not modelled.'}
+              label="timezone (DST-aware)"
+              error={err('timezone')}
+              hint={draft.timezone ? `Converts local market time to UTC adjusting for daylight saving.` : 'Choose a DST-aware zone, or set a fixed offset below.'}
             >
               <select
                 className="input py-1.5 text-[13px]"
+                value={draft.timezone}
+                onChange={(e) => {
+                  const tz = e.target.value;
+                  set({ timezone: tz, ...(tz ? { utc_offset_minutes: null } : {}) });
+                }}
+                aria-label="Timezone"
+              >
+                <option value="">None (use fixed UTC offset)</option>
+                {SUPPORTED_TIMEZONES.map((tz) => (
+                  <option key={tz.value} value={tz.value}>
+                    {tz.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field
+              label="UTC offset"
+              error={err('utc_offset_minutes')}
+              hint={
+                draft.timezone
+                  ? `Overridden by DST-aware timezone ${draft.timezone}.`
+                  : s?.timestamps_have_zone
+                    ? 'Your timestamps carry a zone, so this only applies to any that don’t.'
+                    : 'Fixed offset if timezone is not selected.'
+              }
+            >
+              <select
+                className="input py-1.5 text-[13px]"
+                disabled={Boolean(draft.timezone)}
                 value={draft.utc_offset_minutes === null ? '' : String(draft.utc_offset_minutes)}
                 onChange={(e) => set({ utc_offset_minutes: e.target.value === '' ? null : Number(e.target.value) })}
                 aria-label="UTC offset"
@@ -297,6 +328,25 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
                 {draft.utc_offset_minutes !== null && !UTC_OFFSETS.some((o) => o.value === draft.utc_offset_minutes) && (
                   <option value={draft.utc_offset_minutes}>{formatOffset(draft.utc_offset_minutes)}</option>
                 )}
+              </select>
+            </Field>
+            <Field
+              label="exchange calendar"
+              error={err('exchange')}
+              hint="Enforces trading sessions, flags out-of-session bars, and skips holidays during gap detection."
+            >
+              <select
+                className="input py-1.5 text-[13px]"
+                value={draft.exchange}
+                onChange={(e) => set({ exchange: e.target.value })}
+                aria-label="Exchange calendar"
+              >
+                <option value="">None (all timestamps accepted)</option>
+                {EXCHANGE_CALENDARS.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
               </select>
             </Field>
           </div>

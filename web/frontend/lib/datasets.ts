@@ -30,6 +30,8 @@ export type VersionEntry = S['VersionEntryView'];
 export type VersionRun = S['VersionRunView'];
 export type Bars = S['BarsView'];
 export type BarPoint = S['BarPoint'];
+export type CalendarView = S['CalendarView'];
+export type CalendarsResponse = S['CalendarsResponse'];
 
 /** A version in full. Its quality report has every field for Studio uploads, only some for command-line ones. */
 export type VersionDetail = Omit<S['VersionDetailView'], 'quality_report' | 'source'> & {
@@ -61,6 +63,26 @@ export const UTC_OFFSETS = [
   { value: -240, label: 'UTC−04:00 (New York summer)' },
   { value: -300, label: 'UTC−05:00 (New York winter)' },
   { value: -360, label: 'UTC−06:00 (Chicago winter)' },
+] as const;
+
+export const SUPPORTED_TIMEZONES = [
+  { value: 'America/New_York', label: 'America/New_York (US Eastern, DST)' },
+  { value: 'America/Chicago', label: 'America/Chicago (US Central, DST)' },
+  { value: 'Europe/London', label: 'Europe/London (UK GMT/BST, DST)' },
+  { value: 'Europe/Berlin', label: 'Europe/Berlin (Central Europe, DST)' },
+  { value: 'Asia/Tokyo', label: 'Asia/Tokyo (JST, UTC+09:00)' },
+  { value: 'Asia/Hong_Kong', label: 'Asia/Hong_Kong (HKT, UTC+08:00)' },
+  { value: 'Asia/Kolkata', label: 'Asia/Kolkata (IST, UTC+05:30)' },
+  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
+] as const;
+
+export const EXCHANGE_CALENDARS = [
+  { value: 'XNYS', label: 'XNYS — New York Stock Exchange (09:30–16:00 ET)' },
+  { value: 'XCME', label: 'XCME — Chicago Mercantile Exchange (Globex)' },
+  { value: 'XLON', label: 'XLON — London Stock Exchange (08:00–16:30 GMT/BST)' },
+  { value: 'XTKS', label: 'XTKS — Tokyo Stock Exchange (09:00–11:30, 12:30–15:30 JST)' },
+  { value: 'XNSE', label: 'XNSE — National Stock Exchange of India (09:15–15:30 IST)' },
+  { value: '24/7', label: '24/7 — Continuous (Crypto / FX)' },
 ] as const;
 
 export const DELIMITERS = [
@@ -159,11 +181,16 @@ export const getBars = (id: string, q: { symbol?: string; from?: string; to?: st
   return request<Bars>(`/api/v1/datasets/versions/${id}/bars${qs ? `?${qs}` : ''}`, { timeoutMs: 30_000 });
 };
 
+export const listCalendars = () =>
+  request<CalendarsResponse>('/api/v1/calendars', { timeoutMs: 10_000 });
+
 /** Settings the person has filled in so far: every required field may still be missing. */
 export type DraftSettings = {
   delimiter: string;
   time_format: string;
   utc_offset_minutes: number | null;
+  timezone: string;
+  exchange: string;
   columns: { timestamp: string; open: string; high: string; low: string; close: string; volume: string; symbol: string };
   default_symbol: string;
   skip_bad_rows: boolean;
@@ -174,6 +201,8 @@ export const emptyDraft = (): DraftSettings => ({
   delimiter: '',
   time_format: '',
   utc_offset_minutes: null,
+  timezone: '',
+  exchange: '',
   columns: { timestamp: '', open: '', high: '', low: '', close: '', volume: '', symbol: '' },
   default_symbol: '',
   skip_bad_rows: false,
@@ -189,7 +218,9 @@ export function settingsFromDraft(d: DraftSettings): IngestSettings {
   return {
     delimiter: d.delimiter,
     time_format: d.time_format,
-    utc_offset_minutes: d.utc_offset_minutes as number,
+    utc_offset_minutes: d.utc_offset_minutes,
+    timezone: d.timezone || null,
+    exchange: d.exchange || null,
     columns: {
       timestamp: d.columns.timestamp,
       open: d.columns.open,

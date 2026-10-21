@@ -123,6 +123,9 @@ pub fn config_to_json(c: &BacktestConfig) -> Result<Json> {
             .with("impact_coefficient", Json::number(c.impact.coefficient)?)
             .with("impact_window", Json::integer(c.impact.window as i64));
     }
+    if let Some(ex) = c.exchange {
+        j = j.with("exchange", Json::string(ex.code()));
+    }
     Ok(j)
 }
 
@@ -181,6 +184,10 @@ pub fn config_from_json(j: &Json) -> Result<BacktestConfig> {
                     .map_err(|_| reg_err("negative impact_window"))?,
                 None => ImpactConfig::default().window,
             },
+        },
+        exchange: match j.find("exchange") {
+            Some(v) => spectra_data::calendar::Exchange::parse(v.as_str().map_err(wrap)?),
+            None => None,
         },
     })
 }

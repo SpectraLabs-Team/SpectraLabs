@@ -105,6 +105,7 @@ pub struct StressRequest {
         crate::datasets_api::delete_version,
         crate::datasets_api::version_runs,
         crate::datasets_api::bars,
+        crate::datasets_api::list_calendars,
     ),
     components(schemas(
         ErrorDoc,
@@ -144,6 +145,8 @@ pub struct StressRequest {
         crate::datasets_api::DeletedVersionView,
         crate::datasets_api::BarsView,
         crate::datasets_api::BarPoint,
+        crate::datasets_api::CalendarView,
+        crate::datasets_api::CalendarsResponse,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),

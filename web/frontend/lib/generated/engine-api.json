@@ -352,6 +352,37 @@
         }
       }
     },
+    "/api/v1/calendars": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "`GET /api/v1/calendars` (M1 task 10): lists supported exchange calendars and timezones.",
+        "operationId": "list_calendars",
+        "responses": {
+          "200": {
+            "description": "Supported exchange calendars and timezones.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid signature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/datasets": {
       "get": {
         "tags": [
@@ -1598,6 +1629,60 @@
           }
         }
       },
+      "CalendarView": {
+        "type": "object",
+        "description": "An exchange calendar supported by the platform.",
+        "required": [
+          "code",
+          "name",
+          "timezone",
+          "sessions"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "MIC or short code (e.g. `XNYS`)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Exchange name."
+          },
+          "sessions": {
+            "type": "string",
+            "description": "Regular session hours."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "Primary operating timezone."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CalendarsResponse": {
+        "type": "object",
+        "description": "Supported calendars and timezones.",
+        "required": [
+          "calendars",
+          "timezones"
+        ],
+        "properties": {
+          "calendars": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarView"
+            },
+            "description": "Supported exchanges."
+          },
+          "timezones": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Common IANA timezones."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateBacktest": {
         "type": "object",
         "description": "`POST /api/v1/backtests` body: the `backtest` job payload, plus a priority.",
@@ -2023,7 +2108,6 @@
         "required": [
           "delimiter",
           "time_format",
-          "utc_offset_minutes",
           "columns"
         ],
         "properties": {
@@ -2041,6 +2125,13 @@
           "delimiter": {
             "type": "string",
             "description": "One punctuation character (not `\"`) or a tab."
+          },
+          "exchange": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional exchange calendar for session enforcement and calendar-aware checks (e.g. `XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`)."
           },
           "quality": {
             "oneOf": [
@@ -2064,10 +2155,20 @@
             "type": "string",
             "description": "`iso8601`, `epoch_s`, `epoch_ms`, `epoch_us` or `epoch_ns`."
           },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional DST-aware timezone name (e.g. `America/New_York`, `Europe/London`, `UTC`, `Asia/Tokyo`)."
+          },
           "utc_offset_minutes": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
-            "description": "Minutes east of UTC for ISO timestamps written without a zone\n(-720 to 840). A fixed offset: daylight saving is not modelled."
+            "description": "Minutes east of UTC for ISO timestamps written without a zone\n(-720 to 840). Optional if `timezone` is provided."
           }
         },
         "additionalProperties": false
@@ -2353,6 +2454,13 @@
             "type": "string",
             "description": "Fingerprint of the bars (recorded in backtest results)."
           },
+          "exchange": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exchange calendar used, if any."
+          },
           "first_ts": {
             "type": "string",
             "description": "First bar, RFC 3339."
@@ -2436,6 +2544,13 @@
           "thresholds": {
             "$ref": "#/components/schemas/QualityThresholds",
             "description": "Thresholds the checks used."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Timezone used, if any."
           },
           "warnings": {
             "type": "array",
@@ -2672,6 +2787,13 @@
             ],
             "description": "Delimiter that splits every sampled row into the same number of fields."
           },
+          "exchange": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Suggested exchange calendar (e.g. `XNYS`)."
+          },
           "header": {
             "type": "array",
             "items": {
@@ -2692,6 +2814,13 @@
               "null"
             ],
             "description": "For ISO timestamps: whether they carry a zone (then the UTC offset does not apply to them)."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Suggested timezone identifier (e.g. `America/New_York`)."
           }
         },
         "additionalProperties": false
@@ -2741,6 +2870,24 @@
             "type": "integer",
             "format": "int64",
             "description": "Median interval between bars, nanoseconds."
+          },
+          "non_trading_day_bars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bars recorded on non-trading days/holidays.",
+            "minimum": 0
+          },
+          "out_of_session_bars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bars recorded outside regular exchange sessions.",
+            "minimum": 0
           },
           "outlier_returns": {
             "type": "integer",

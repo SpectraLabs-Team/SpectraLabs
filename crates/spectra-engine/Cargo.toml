@@ -9,6 +9,7 @@ rust-version.workspace = true
 
 [dependencies]
 spectra-core = { path = "../spectra-core" }
+spectra-data = { path = "../spectra-data" }
 
 [lints]
 workspace = true

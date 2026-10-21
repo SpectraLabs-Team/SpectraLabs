@@ -151,6 +151,7 @@ enum Kind {
     Seed,
     Leverage,
     Preset,
+    Exchange,
 }
 
 /// A field of the user form.
@@ -172,7 +173,7 @@ const fn num_positive(max: f64) -> Kind {
 /// strategy can grow it a hundredfold without overflow.
 const MAX_CASH: f64 = 1e9;
 
-const FIELDS: [Field; 19] = [
+const FIELDS: [Field; 20] = [
     Field { name: "preset", kind: Kind::Preset, description: "Starting point for every field not given" },
     Field { name: "initial_cash", kind: num_positive(MAX_CASH), description: "Starting cash" },
     Field { name: "allow_short", kind: Kind::Bool, description: "Allow negative positions" },
@@ -240,6 +241,11 @@ const FIELDS: [Field; 19] = [
         name: "impact_window",
         kind: Kind::Integer { min: 2, max: 1000 },
         description: "Bars of history for the impact model's volatility estimate",
+    },
+    Field {
+        name: "exchange",
+        kind: Kind::Exchange,
+        description: "Exchange calendar for market session enforcement (XNYS, XCME, XLON, XTKS, XNSE, 24/7)",
     },
 ];
 
@@ -356,6 +362,22 @@ pub fn parse_config(doc: &Json) -> std::result::Result<BacktestConfig, ConfigErr
                     c.seed = s;
                 }
             }
+            (name, Kind::Exchange) => {
+                if v.is_null() {
+                    c.exchange = None;
+                } else {
+                    match v.as_str() {
+                        Ok(s) => match spectra_data::calendar::Exchange::parse(s) {
+                            Some(ex) => c.exchange = Some(ex),
+                            None => errs.add(
+                                name,
+                                "unknown exchange; supported: XNYS (NYSE/NASDAQ), XCME (CME), XLON (LSE), XTKS (TSE), XNSE (NSE), 24/7 (Crypto)",
+                            ),
+                        },
+                        Err(_) => errs.add(name, "must be a string or null"),
+                    }
+                }
+            }
             (name, Kind::Integer { min, max }) => match v.as_int() {
                 Ok(n) if (min..=max).contains(&n) && name == "impact_window" => c.impact.window = n as usize,
                 Ok(n) if (min..=max).contains(&n) => c.exec.delay_bars = n as usize,
@@ -444,7 +466,8 @@ pub fn config_to_user_json(c: &BacktestConfig) -> Result<Json> {
         .with("cash_interest_rate", Json::number(c.financing.cash_rate)?)
         .with("margin_interest_rate", Json::number(c.financing.margin_rate)?)
         .with("impact_coefficient", Json::number(c.impact.coefficient)?)
-        .with("impact_window", Json::integer(c.impact.window as i64)))
+        .with("impact_window", Json::integer(c.impact.window as i64))
+        .with("exchange", c.exchange.map_or(Json::Null, |e| Json::string(e.code()))))
 }
 
 /// The exact stored form recorded with a run (raw fixed-point integers);
@@ -508,6 +531,12 @@ pub fn config_schema() -> Result<Json> {
                     names.push(Json::string(preset.name()))?;
                 }
                 p.with("type", Json::string("string")).with("enum", names)
+            }
+            Kind::Exchange => {
+                let mut types = Json::array();
+                types.push(Json::string("string"))?;
+                types.push(Json::string("null"))?;
+                p.with("type", types)
             }
         };
         let default = if f.name == "preset" {

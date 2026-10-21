@@ -5,8 +5,9 @@ How market data gets into Spectra and how a backtest finds it. The command-line 
 gives the same dataset ids; this page covers the API the Studio uses.
 
 Status: M1 Phase M1a is complete: ingest settings, preview, uploads, the ingest job, the dataset
-API and the Studio's **Data** tab (tasks 1–8). Research-grade data (Parquet, calendars, corporate
-actions, point-in-time) is M1b.
+API and the Studio's **Data** tab (tasks 1–8). Phase M1b task 10 (exchange calendars, DST-aware
+timezones, session checks) is in place. Research-grade data (Parquet, corporate actions, point-in-time)
+is continuing in M1b.
 
 ## The flow
 
@@ -30,19 +31,19 @@ actions, point-in-time) is M1b.
 `/studio?tab=data` (the open dataset is in the URL: `&dataset=<id>`).
 
 - **Upload CSV** opens the wizard: pick a file (up to 100 MiB) → choose the delimiter, timestamp
-  format, UTC offset and columns. Suggestions from the first rows sit next to each setting and are
-  applied only when you click them (or "Use all suggestions"). Then **Preview**: the parsed rows,
-  whether the ingest would stop and why, and the sample's quality report. Changing a setting
-  after a preview asks for a new preview. Name the dataset (an existing name adds a version),
-  then **Upload and ingest**: upload progress, then the job's progress (rows read), with Cancel.
-  A refused file shows every problem; go back, change the settings (for example, skip bad rows)
-  and ingest again without re-uploading.
+  format, DST-aware timezone or UTC offset, exchange calendar, and columns. Suggestions from the first
+  rows sit next to each setting and are applied only when you click them (or "Use all suggestions").
+  Then **Preview**: the parsed rows, whether the ingest would stop and why, and the sample's quality
+  report. Changing a setting after a preview asks for a new preview. Name the dataset (an existing name
+  adds a version), then **Upload and ingest**: upload progress, then the job's progress (rows read),
+  with Cancel. A refused file shows every problem; go back, change the settings (for example, skip bad
+  rows) and ingest again without re-uploading.
 - **The list**: name, latest version (and how many), symbols, date range, rows, size, last updated.
 - **A dataset**: rename it and describe it (editors), its version history (rows, range, source
   file, rejected rows, warnings, runs), and for the chosen version its quality report (warnings
-  highlighted; rejected rows by category; per-symbol gaps, outlier returns, stale runs, zero
-  volume), a price chart per symbol, where it came from (file, settings, dataset id), and the
-  runs that used it.
+  highlighted; rejected rows by category; calendar badges; per-symbol gaps, outlier returns, stale
+  runs, zero volume, out-of-session and non-trading day bars), a price chart per symbol, where it came
+  from (file, settings, dataset id), and the runs that used it.
 - **Backtest this dataset** opens the Backtests tab with that version picked in the form
   (`/studio?tab=backtests&dataset=<version id>`).
 - A version used by a run can't be deleted (runs must stay reproducible). Deleting a dataset's
@@ -52,6 +53,7 @@ actions, point-in-time) is M1b.
 
 | Route | Role | |
 |---|---|---|
+| `GET /api/v1/calendars` | viewer | supported exchange calendars (`XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`) with regular hours, operating timezone and name, plus supported IANA timezones |
 | `GET /api/v1/datasets` | viewer | every version, newest first (the backtest form). With `?view=grouped`, also `datasets`: one entry per dataset with its latest version, symbols, date range, rows and last update. Without it the response is unchanged. |
 | `GET /api/v1/datasets/{id}` | viewer | the dataset and its versions (newest first), with each version's run count |
 | `PATCH /api/v1/datasets/{id}` | editor | `{name?, description?}`; 409 if another dataset has the name |
@@ -85,12 +87,14 @@ The JSON form of the engine's CSV options (`crates/spectra-data/src/settings.rs`
 {
   "delimiter": ",",
   "time_format": "iso8601",
-  "utc_offset_minutes": 330,
+  "utc_offset_minutes": null,
+  "timezone": "America/New_York",
+  "exchange": "XNYS",
   "columns": {
     "timestamp": "Date", "open": "Open", "high": "High", "low": "Low", "close": "Close",
     "volume": "Volume", "symbol": null
   },
-  "default_symbol": "NIFTY",
+  "default_symbol": "SPY",
   "skip_bad_rows": false,
   "quality": { "gap_factor": 5, "outlier_z": 10, "stale_run": 5 }
 }
@@ -100,7 +104,9 @@ The JSON form of the engine's CSV options (`crates/spectra-data/src/settings.rs`
 |---|---|---|
 | `delimiter` | yes | One punctuation character (not `"`) or a tab. |
 | `time_format` | yes | `iso8601`, `epoch_s`, `epoch_ms`, `epoch_us` or `epoch_ns`. Bare numbers are never guessed. |
-| `utc_offset_minutes` | yes | Minutes east of UTC for ISO timestamps written without a zone, -720 to 840 (330 is IST, -300 is EST). Timestamps with a zone (`Z`, `+05:30`) ignore it. A fixed offset: daylight saving is not modelled yet (M1b). |
+| `timezone` | no | DST-aware timezone name (e.g. `America/New_York`, `America/Chicago`, `Europe/London`, `Europe/Berlin`, `Asia/Tokyo`, `Asia/Hong_Kong`, `Asia/Kolkata`, `UTC`). When specified, naive ISO timestamps without zone offsets are converted using local daylight saving rules. Takes precedence over `utc_offset_minutes`. |
+| `utc_offset_minutes` | if no `timezone` | Minutes east of UTC for ISO timestamps written without a zone (-720 to 840; 330 is IST, -300 is EST). Timestamps with a zone (`Z`, `+05:30`) ignore it. |
+| `exchange` | no | Exchange calendar code (`XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`). When set, bars falling outside session hours or on market holidays are flagged, and gap detection skips weekends/holidays and overnight closures. |
 | `columns.timestamp` … `columns.close` | yes | Header names, matched without regard to case. Two fields can't use the same column. |
 | `columns.volume` | no | `null` or absent: the file has no volume (volume is zero, and the report warns). |
 | `columns.symbol` | no | `null` or absent: a single-symbol file, named by `default_symbol`. |

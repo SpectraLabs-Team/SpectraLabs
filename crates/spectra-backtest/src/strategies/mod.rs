@@ -60,8 +60,8 @@ pub struct ParamSpec {
     pub description: &'static str,
 }
 
-type BuildFn = fn(&ParamSet) -> Result<Box<dyn Strategy>>;
-type CheckFn = fn(&ParamSet) -> Option<FieldError>;
+pub type BuildFn = fn(&ParamSet) -> Result<Box<dyn Strategy>>;
+pub type CheckFn = fn(&ParamSet) -> Option<FieldError>;
 
 /// A strategy shipped with the engine.
 #[derive(Debug, Clone, Copy)]
@@ -80,6 +80,20 @@ pub struct BuiltinStrategy {
 }
 
 impl BuiltinStrategy {
+    /// Creates a custom or test builtin strategy definition.
+    #[doc(hidden)]
+    pub const fn custom(
+        name: &'static str,
+        label: &'static str,
+        description: &'static str,
+        params: &'static [ParamSpec],
+        source: &'static str,
+        build: BuildFn,
+        check: CheckFn,
+    ) -> Self {
+        Self { name, label, description, params, source, build, check }
+    }
+
     /// SHA-256 of the strategy's source file, recorded as `strategy_sha256`.
     pub fn source_sha256(&self) -> String {
         sha256_hex(self.source.as_bytes())

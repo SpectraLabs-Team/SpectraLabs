@@ -404,20 +404,39 @@ pub fn run_request_on(
 ) -> std::result::Result<BacktestOutput, RunError> {
     let actions = resolve(&request.corporate_actions, symbols)
         .map_err(|m| RunError::Engine(spectra_core::Error::InvalidArgument(m)))?;
-    let result = if request.is_multi() {
-        let mut built = Vec::with_capacity(request.strategies.len());
-        for a in &request.strategies {
-            built.push(a.strategy.build(&a.params)?);
+    let mut ctl = std::panic::AssertUnwindSafe(ctl);
+    let run_res = std::panic::catch_unwind(move || {
+        if request.is_multi() {
+            let mut built = Vec::with_capacity(request.strategies.len());
+            for a in &request.strategies {
+                built.push(a.strategy.build(&a.params)?);
+            }
+            let mut allocations: Vec<Allocation<'_>> = built
+                .iter_mut()
+                .zip(&request.strategies)
+                .map(|(s, a)| Allocation { strategy: s.as_mut(), weight: a.weight })
+                .collect();
+            run_multi_backtest_with_actions(bars, &actions, &mut allocations, &request.config, *ctl)
+        } else {
+            let mut strategy = request.strategy.build(&request.params)?;
+            run_backtest_with_actions(bars, &actions, strategy.as_mut(), &request.config, *ctl)
         }
-        let mut allocations: Vec<Allocation<'_>> = built
-            .iter_mut()
-            .zip(&request.strategies)
-            .map(|(s, a)| Allocation { strategy: s.as_mut(), weight: a.weight })
-            .collect();
-        run_multi_backtest_with_actions(bars, &actions, &mut allocations, &request.config, ctl)?
-    } else {
-        let mut strategy = request.strategy.build(&request.params)?;
-        run_backtest_with_actions(bars, &actions, strategy.as_mut(), &request.config, ctl)?
+    });
+
+    let result = match run_res {
+        Ok(res) => res?,
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "an unexpected panic occurred during execution".to_string()
+            };
+            return Err(RunError::Engine(spectra_core::Error::Strategy(format!(
+                "The strategy panicked: {msg}"
+            ))));
+        }
     };
     let benchmark = spectra_research::benchmark_returns(bars);
     Ok(BacktestOutput { request: request.clone(), result, benchmark, symbols: symbols.to_vec() })

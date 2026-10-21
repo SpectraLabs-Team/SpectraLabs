@@ -256,6 +256,8 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("turnover_annualized", num(r.turnover(req.config.periods_per_year)))
         .with("total_fees", money(r.ledger.total_fees()))
         .with("financing", money(r.ledger.financing()))
+        .with("dividends", money(r.ledger.dividends()))
+        .with("corporate_actions_applied", Json::integer(applied_actions(r) as i64))
         .with("realized_pnl", money(r.ledger.realized_pnl()))
         .with("final_cash", money(r.ledger.cash()))
         .with("final_equity", money(r.ledger.equity()?))
@@ -278,6 +280,11 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("avg_holding_ns", num(t.avg_holding_ns))
         .with("avg_holding_days", num(t.avg_holding_ns / 86_400e9));
 
+    let run = if req.corporate_actions.is_empty() {
+        run
+    } else {
+        run.with("corporate_actions", crate::corporate::actions_to_json(&req.corporate_actions)?)
+    };
     let summary = Json::object()
         .with("schema", Json::string(SUMMARY_SCHEMA))
         .with("run", run)
@@ -345,6 +352,7 @@ fn strategies_json(out: &BacktestOutput) -> Result<Json> {
                 .with("fill_count", Json::integer(fills as i64))
                 .with("total_fees", money(s.ledger.total_fees()))
                 .with("financing", money(s.ledger.financing()))
+                .with("dividends", money(s.ledger.dividends()))
                 .with("realized_pnl", money(s.ledger.realized_pnl())),
         )?;
     }
@@ -414,19 +422,25 @@ fn exposure_json(r: &BacktestResult) -> Json {
         .with("time_in_market", num(invested as f64 / nf))
 }
 
+/// Splits and dividends applied to the account's books.
+fn applied_actions(r: &BacktestResult) -> usize {
+    r.ledger.journal().iter().filter(|e| matches!(e.kind, EntryType::Split | EntryType::Dividend)).count()
+}
+
 /// P&L and costs per instrument, from the ledger.
 fn instruments_json(out: &BacktestOutput) -> Result<Json> {
     let l = &out.result.ledger;
-    let mut fills: std::collections::BTreeMap<spectra_core::InstrumentId, (i64, f64, Money)> =
+    let mut fills: std::collections::BTreeMap<spectra_core::InstrumentId, (i64, f64, Money, Money)> =
         std::collections::BTreeMap::new();
     for e in l.journal() {
-        let slot = fills.entry(e.fill.instrument).or_insert((0, 0.0, Money::ZERO));
+        let slot = fills.entry(e.fill.instrument).or_insert((0, 0.0, Money::ZERO, Money::ZERO));
         match e.kind {
             EntryType::Fill => {
                 slot.0 += 1;
                 slot.1 += spectra_core::notional(e.fill.price, e.fill.qty)?.to_f64();
             }
             EntryType::BorrowFee => slot.2 = slot.2.checked_add(e.amount)?,
+            EntryType::Dividend => slot.3 = slot.3.checked_add(e.amount)?,
             _ => {}
         }
     }
@@ -434,8 +448,14 @@ fn instruments_json(out: &BacktestOutput) -> Result<Json> {
     for (&id, p) in l.positions() {
         let value = l.position_value(id)?;
         let unrealized = value.checked_sub(p.cost)?;
-        let (count, traded, borrow) = fills.get(&id).copied().unwrap_or((0, 0.0, Money::ZERO));
-        let net = p.realized.checked_add(unrealized)?.checked_sub(p.fees)?.checked_sub(borrow)?;
+        let (count, traded, borrow, dividends) =
+            fills.get(&id).copied().unwrap_or((0, 0.0, Money::ZERO, Money::ZERO));
+        let net = p
+            .realized
+            .checked_add(unrealized)?
+            .checked_sub(p.fees)?
+            .checked_sub(borrow)?
+            .checked_add(dividends)?;
         let symbol = out.symbols.get(id as usize).map_or(Json::Null, |s| Json::string(s.clone()));
         arr.push(
             Json::object()
@@ -449,6 +469,7 @@ fn instruments_json(out: &BacktestOutput) -> Result<Json> {
                 .with("unrealized_pnl", money(unrealized))
                 .with("fees", money(p.fees))
                 .with("borrow_fees", money(borrow))
+                .with("dividends", money(dividends))
                 .with("net_pnl", money(net)),
         )?;
     }

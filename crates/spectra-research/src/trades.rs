@@ -66,8 +66,27 @@ pub fn extract_trades(ledger: &Ledger) -> Result<TradeExtraction> {
     let mut out = TradeExtraction::default();
     let mut state: BTreeMap<InstrumentId, Open> = BTreeMap::new();
     for e in ledger.journal() {
-        if e.kind != EntryType::Fill {
-            continue;
+        match e.kind {
+            EntryType::Fill => {}
+            // A split changes the open quantity, not the trade.
+            EntryType::Split => {
+                if let Some(s) = state.get_mut(&e.fill.instrument) {
+                    if !s.qty.is_zero() {
+                        s.qty = e.fill.qty;
+                    }
+                }
+                continue;
+            }
+            // A dividend is part of the open trade's P&L.
+            EntryType::Dividend => {
+                if let Some(s) = state.get_mut(&e.fill.instrument) {
+                    if !s.qty.is_zero() {
+                        s.gross = s.gross.checked_add(e.amount)?;
+                    }
+                }
+                continue;
+            }
+            _ => continue,
         }
         let f = &e.fill;
         let fq = if f.side == Side::Buy { f.qty } else { f.qty.checked_neg()? };

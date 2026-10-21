@@ -23,7 +23,7 @@ use spectra_engine::{RunControl, RunError, RunRecord};
 
 use crate::config::{ConfigError, FieldError};
 use crate::output::{artifacts, series_json, summary_json, SeriesKind, DEFAULT_SERIES_POINTS};
-use crate::run::{run_request, BacktestRequest};
+use crate::run::{run_request_on, BacktestRequest};
 
 /// The job kind name.
 pub const JOB_KIND: &str = "backtest";
@@ -132,7 +132,7 @@ pub struct JobProducts {
 /// Runs a job on bars already loaded.
 ///
 /// # Errors
-/// [`RunError`] as from [`run_request`].
+/// [`RunError`] as from [`run_request_on`].
 pub fn run_job(
     bars: &[Bar],
     symbols: &[String],
@@ -140,8 +140,7 @@ pub fn run_job(
     dataset_checksum: &str,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<JobProducts, RunError> {
-    let mut out = run_request(bars, &job.request, ctl)?;
-    out.symbols = symbols.to_vec();
+    let out = run_request_on(bars, symbols, &job.request, ctl)?;
     let summary = summary_json(&out)?;
     let params = job
         .request

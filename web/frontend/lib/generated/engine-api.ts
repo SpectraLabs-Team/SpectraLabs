@@ -128,6 +128,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/corporate-actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List corporate action sets for the active workspace. */
+        get: operations["list_corporate_action_sets"];
+        put?: never;
+        /** Create a corporate action set and its actions. */
+        post: operations["create_corporate_action_set"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/corporate-actions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch a corporate action set and all its events. */
+        get: operations["get_corporate_action_set"];
+        put?: never;
+        post?: never;
+        /** Delete a corporate action set. */
+        delete: operations["delete_corporate_action_set"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets": {
         parameters: {
             query?: never;
@@ -209,6 +245,23 @@ export interface paths {
         get: operations["bars"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/versions/{id}/derive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Derive an adjusted dataset version from an existing version using a corporate action set. */
+        post: operations["derive_version"];
         delete?: never;
         options?: never;
         head?: never;
@@ -706,6 +759,107 @@ export interface components {
              */
             received: number;
         };
+        /** @description A corporate action item in an upload or creation request. */
+        CorporateActionItem: {
+            /** @description "split" or "dividend". */
+            action_kind: string;
+            /** @description For cash dividends: dividend amount per share (e.g. "0.205"). */
+            dividend_amount?: string | null;
+            /** @description Ex-action timestamp (RFC 3339 or YYYY-MM-DD). */
+            ex_date: string;
+            /**
+             * Format: int32
+             * @description For splits: original ratio (e.g. 1 in 2:1). Default: 1.
+             */
+            split_from?: number;
+            /**
+             * Format: int32
+             * @description For splits: new ratio (e.g. 2 in 2:1). Default: 1.
+             */
+            split_to?: number;
+            /** @description Instrument ticker symbol. */
+            symbol: string;
+        };
+        /** @description Detail view of a corporate action set. */
+        CorporateActionSetDetailView: {
+            /** @description Actions in the set. */
+            actions: components["schemas"]["CorporateActionView"][];
+            /**
+             * Format: date-time
+             * @description Created at.
+             */
+            created_at: string;
+            /** @description Description. */
+            description: string;
+            /**
+             * Format: uuid
+             * @description Set id.
+             */
+            id: string;
+            /** @description Name. */
+            name: string;
+        };
+        /** @description List of corporate action sets. */
+        CorporateActionSetListView: {
+            /** @description Items. */
+            items: components["schemas"]["CorporateActionSetSummaryView"][];
+        };
+        /** @description Summary of a corporate action set. */
+        CorporateActionSetSummaryView: {
+            /**
+             * Format: int64
+             * @description Action count.
+             */
+            action_count: number;
+            /**
+             * Format: date-time
+             * @description Created at.
+             */
+            created_at: string;
+            /** @description Description. */
+            description: string;
+            /**
+             * Format: uuid
+             * @description Set id.
+             */
+            id: string;
+            /** @description Name. */
+            name: string;
+        };
+        /** @description A corporate action view. */
+        CorporateActionView: {
+            /** @description "split" or "dividend". */
+            action_kind: string;
+            /**
+             * Format: date-time
+             * @description Recorded at.
+             */
+            created_at: string;
+            /** @description Cash dividend amount per share. */
+            dividend_amount: string;
+            /**
+             * Format: date-time
+             * @description Ex-action date.
+             */
+            ex_date: string;
+            /**
+             * Format: uuid
+             * @description Action id.
+             */
+            id: string;
+            /**
+             * Format: int32
+             * @description Split from.
+             */
+            split_from: number;
+            /**
+             * Format: int32
+             * @description Split to.
+             */
+            split_to: number;
+            /** @description Instrument symbol. */
+            symbol: string;
+        };
         /** @description `POST /api/v1/backtests` body: the `backtest` job payload, plus a priority. */
         CreateBacktest: {
             /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
@@ -728,6 +882,18 @@ export interface components {
             /** @description A built-in strategy name (see `GET /api/v1/strategies/builtin`).
              *     Give either `strategy` (with `params`) or `strategies`. */
             strategy?: string | null;
+        };
+        /** @description `POST /api/v1/corporate-actions` request body. */
+        CreateCorporateActionSetRequest: {
+            /** @description Corporate actions list. */
+            actions?: components["schemas"]["CorporateActionItem"][];
+            /** @description Optional CSV text containing actions with headers:
+             *     `symbol,ex_date,action_kind,split_from,split_to,dividend_amount`. */
+            csv?: string | null;
+            /** @description Description. */
+            description?: string | null;
+            /** @description Action set name. */
+            name: string;
         };
         /** @description `POST /api/v1/jobs` body. */
         CreateJob: {
@@ -868,12 +1034,31 @@ export interface components {
              */
             version: number;
         };
+        /** @description Result of deleting a corporate action set. */
+        DeletedActionSetView: {
+            /** @description True when deleted. */
+            deleted: boolean;
+        };
         /** @description What deleting a version did. */
         DeletedVersionView: {
             /** @description It was the dataset's last version, so the dataset was deleted too. */
             dataset_deleted: boolean;
             /** @description The version was deleted. */
             deleted: boolean;
+        };
+        /** @description `POST /api/v1/datasets/versions/{id}/derive` body: corporate actions derivation options. */
+        DeriveDatasetRequest: {
+            /** @description Whether to adjust dividends (default: true). */
+            adjust_dividends?: boolean | null;
+            /** @description Whether to adjust splits (default: true). */
+            adjust_splits?: boolean | null;
+            /**
+             * Format: uuid
+             * @description Corporate action set id to apply.
+             */
+            corporate_action_set_id: string;
+            /** @description Target dataset name (defaults to source dataset name if omitted or null). */
+            target_dataset_name?: string | null;
         };
         /** @description Every error response. */
         ErrorDoc: {
@@ -1379,6 +1564,15 @@ export interface components {
             dataset_id: string;
             /** @description The dataset's name. */
             dataset_name: string;
+            /** @description Derivation kind (e.g. "adjusted") if derived. */
+            derivation_kind?: string | null;
+            /** @description Derivation parameters. */
+            derivation_params?: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description Base version id if derived.
+             */
+            derived_from_id?: string | null;
             /**
              * Format: uuid
              * @description Version id.
@@ -1426,6 +1620,13 @@ export interface components {
              * @description Who registered it.
              */
             created_by?: string | null;
+            /** @description Derivation kind (e.g. "adjusted") if derived. */
+            derivation_kind?: string | null;
+            /**
+             * Format: uuid
+             * @description Base version id if derived.
+             */
+            derived_from_id?: string | null;
             /** @description Uploaded file name; null when registered from the command line. */
             filename?: string | null;
             /** @description First bar (RFC 3339). */
@@ -1791,6 +1992,126 @@ export interface operations {
             };
         };
     };
+    list_corporate_action_sets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorporateActionSetListView"];
+                };
+            };
+        };
+    };
+    create_corporate_action_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateCorporateActionSetRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorporateActionSetDetailView"];
+                };
+            };
+            /** @description Name already in use */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Validation errors */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_corporate_action_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Set id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorporateActionSetDetailView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_corporate_action_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Set id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedActionSetView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     list_datasets: {
         parameters: {
             query?: never;
@@ -2021,6 +2342,50 @@ export interface operations {
                 };
             };
             /** @description Every invalid parameter (`details.errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    derive_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Source dataset version id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeriveDatasetRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionDetailView"];
+                };
+            };
+            /** @description Source dataset version or action set not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Derivation or adjustment math error */
             422: {
                 headers: {
                     [name: string]: unknown;

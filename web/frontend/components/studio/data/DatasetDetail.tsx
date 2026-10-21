@@ -1,9 +1,22 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Check, FileText, History, LineChart, Pencil, Trash2, X } from 'lucide-react';
+import { Check, FileText, GitFork, History, LineChart, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { ApiError, detailErrors } from '@/lib/api';
-import { deleteVersion, getDataset, getVersion, getVersionRuns, updateDataset, type DatasetDetail as Detail, type VersionDetail, type VersionRun } from '@/lib/datasets';
+import {
+  createCorporateActionSet,
+  deleteVersion,
+  deriveDatasetVersion,
+  getDataset,
+  getVersion,
+  getVersionRuns,
+  listCorporateActionSets,
+  updateDataset,
+  type CorporateActionSetSummary,
+  type DatasetDetail as Detail,
+  type VersionDetail,
+  type VersionRun,
+} from '@/lib/datasets';
 import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
 import { signedPct, tone } from '../backtests/format';
@@ -42,6 +55,27 @@ export function DatasetDetail({ datasetId, canEdit, onBacktest, onChanged, onDel
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+
+  // Corporate action derivation
+  const [deriving, setDeriving] = useState(false);
+  const [actionSets, setActionSets] = useState<CorporateActionSetSummary[]>([]);
+  const [selectedSetId, setSelectedSetId] = useState<string>('');
+  const [adjustSplits, setAdjustSplits] = useState(true);
+  const [adjustDividends, setAdjustDividends] = useState(true);
+  const [targetDatasetName, setTargetDatasetName] = useState('');
+  const [derivingBusy, setDerivingBusy] = useState(false);
+  const [deriveError, setDeriveError] = useState('');
+
+  // Quick-create action set in modal
+  const [creatingSet, setCreatingSet] = useState(false);
+  const [newSetName, setNewSetName] = useState('');
+  const [newSetDesc, setNewSetDesc] = useState('');
+  const [newActionSymbol, setNewActionSymbol] = useState('');
+  const [newActionKind, setNewActionKind] = useState<'split' | 'dividend'>('split');
+  const [newActionExDate, setNewActionExDate] = useState('');
+  const [newActionSplitFrom, setNewActionSplitFrom] = useState(1);
+  const [newActionSplitTo, setNewActionSplitTo] = useState(2);
+  const [newActionDividend, setNewActionDividend] = useState('');
 
   const load = useCallback(async () => {
     try {
@@ -115,6 +149,76 @@ export function DatasetDetail({ datasetId, canEdit, onBacktest, onChanged, onDel
     }
   };
 
+  const openDeriveModal = async () => {
+    setDeriveError('');
+    setDeriving(true);
+    setCreatingSet(false);
+    if (version?.quality_report?.symbols?.[0]) {
+      setNewActionSymbol(version.quality_report.symbols[0]);
+    }
+    try {
+      const sets = await listCorporateActionSets();
+      setActionSets(sets);
+      if (sets.length > 0) {
+        setSelectedSetId(sets[0].id);
+      } else {
+        setCreatingSet(true);
+      }
+    } catch (e) {
+      setDeriveError(e instanceof Error ? e.message : 'Could not list corporate action sets.');
+    }
+  };
+
+  const handleDerive = async () => {
+    if (!versionId) return;
+    setDerivingBusy(true);
+    setDeriveError('');
+    try {
+      let setId = selectedSetId;
+      if (creatingSet) {
+        if (!newSetName.trim()) throw new Error('Please enter a name for the corporate action set.');
+        if (!newActionSymbol.trim()) throw new Error('Please enter a symbol.');
+        if (!newActionExDate.trim()) throw new Error('Please enter an ex-date.');
+        const created = await createCorporateActionSet({
+          name: newSetName.trim(),
+          description: newSetDesc.trim(),
+          actions: [
+            {
+              symbol: newActionSymbol.trim().toUpperCase(),
+              action_kind: newActionKind,
+              ex_date: newActionExDate.includes('T') ? newActionExDate : `${newActionExDate}T00:00:00Z`,
+              split_from: newActionKind === 'split' ? Number(newActionSplitFrom) : undefined,
+              split_to: newActionKind === 'split' ? Number(newActionSplitTo) : undefined,
+              dividend_amount: newActionKind === 'dividend' ? newActionDividend.trim() : undefined,
+            },
+          ],
+        });
+        setId = created.id;
+      }
+      if (!setId) throw new Error('Please select or create a corporate action set.');
+
+      const derived = await deriveDatasetVersion(versionId, {
+        corporate_action_set_id: setId,
+        adjust_splits: adjustSplits,
+        adjust_dividends: adjustDividends,
+        target_dataset_name: targetDatasetName.trim() || undefined,
+      });
+
+      setDeriving(false);
+      onChanged();
+      if (derived.dataset_id === datasetId) {
+        setVersionId(derived.id);
+        await load();
+      } else {
+        await load();
+      }
+    } catch (e) {
+      setDeriveError(e instanceof Error ? e.message : 'Derivation failed.');
+    } finally {
+      setDerivingBusy(false);
+    }
+  };
+
   if (error && !detail) return <ErrorNote>{error}</ErrorNote>;
   if (!detail) {
     return (
@@ -166,11 +270,18 @@ export function DatasetDetail({ datasetId, canEdit, onBacktest, onChanged, onDel
               </h2>
               <p className="mt-0.5 text-[12px] text-ink/55">{detail.description || <span className="italic text-ink/35">No description.</span>}</p>
             </div>
-            {versionId && (
-              <button type="button" className="btn-primary" onClick={() => onBacktest(versionId)}>
-                <LineChart className="h-3.5 w-3.5" /> Backtest this dataset
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {versionId && canEdit && (
+                <button type="button" className="btn-secondary" onClick={openDeriveModal}>
+                  <GitFork className="h-3.5 w-3.5" /> Derive adjusted
+                </button>
+              )}
+              {versionId && (
+                <button type="button" className="btn-primary" onClick={() => onBacktest(versionId)}>
+                  <LineChart className="h-3.5 w-3.5" /> Backtest this dataset
+                </button>
+              )}
+            </div>
           </div>
         )}
         {error && (
@@ -193,6 +304,7 @@ export function DatasetDetail({ datasetId, canEdit, onBacktest, onChanged, onDel
                   <span className="truncate text-ink/50" title={v.filename ?? 'command line'}>
                     {v.filename ?? 'command line'}
                   </span>
+                  {v.derivation_kind && <Badge tone="neutral">derived ({v.derivation_kind})</Badge>}
                   {v.rows_rejected > 0 && <Badge tone="loss">{int(v.rows_rejected)} rejected</Badge>}
                   {v.warning_count > 0 && <Badge tone="caution">{int(v.warning_count)} warnings</Badge>}
                   {v.run_count > 0 && <Badge tone="accent">{int(v.run_count)} runs</Badge>}
@@ -242,7 +354,29 @@ export function DatasetDetail({ datasetId, canEdit, onBacktest, onChanged, onDel
                 <dt className="text-ink/45">Added</dt>
                 <dd className="text-ink/70">{new Date(version.created_at).toLocaleString()}</dd>
                 <dt className="text-ink/45">Source</dt>
-                <dd className="text-ink/70">{version.source?.filename ?? 'Registered from the command line'}</dd>
+                <dd className="text-ink/70">
+                  {version.source?.filename ?? (version.derivation_kind ? `Derived (${version.derivation_kind})` : 'Registered from the command line')}
+                </dd>
+                {version.derived_from_id && (
+                  <>
+                    <dt className="text-ink/45">Derived from</dt>
+                    <dd className="break-all font-mono text-[11px] text-ink/70">
+                      {version.derived_from_id}
+                    </dd>
+                  </>
+                )}
+                {version.derivation_params && (
+                  <>
+                    <dt className="text-ink/45">Lineage</dt>
+                    <dd className="text-ink/70 text-[11px]">
+                      {typeof version.derivation_params === 'object'
+                        ? Object.entries(version.derivation_params)
+                            .map(([k, val]) => `${k}: ${val}`)
+                            .join(' · ')
+                        : String(version.derivation_params)}
+                    </dd>
+                  </>
+                )}
                 {settings && (
                   <>
                     <dt className="text-ink/45">Read as</dt>
@@ -286,6 +420,209 @@ export function DatasetDetail({ datasetId, canEdit, onBacktest, onChanged, onDel
             </Section>
           </div>
         </>
+      )}
+
+      {deriving && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <GlassCard className="w-full max-w-lg space-y-4 p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-base font-semibold text-ink">
+                <GitFork className="h-4 w-4 text-accent" /> Derive Adjusted Dataset
+              </h3>
+              <button
+                type="button"
+                className="btn-ghost p-1"
+                onClick={() => setDeriving(false)}
+                aria-label="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="text-[12px] text-ink/65">
+              Apply splits and dividend backward adjustments to <strong className="text-ink">{detail.name}</strong> (v{version?.version}) to create a continuous, unadjusted-gap-free price series.
+            </p>
+
+            {deriveError && <ErrorNote>{deriveError}</ErrorNote>}
+
+            <div className="space-y-3 text-[12px]">
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="font-semibold text-ink">Corporate Action Set</label>
+                  <button
+                    type="button"
+                    className="text-[11px] text-accent hover:underline"
+                    onClick={() => setCreatingSet(!creatingSet)}
+                  >
+                    {creatingSet ? 'Select existing set' : '+ Create new set'}
+                  </button>
+                </div>
+
+                {!creatingSet ? (
+                  actionSets.length > 0 ? (
+                    <select
+                      className="input py-1.5 text-xs"
+                      value={selectedSetId}
+                      onChange={(e) => setSelectedSetId(e.target.value)}
+                    >
+                      {actionSets.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.action_count} actions)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <p className="text-ink/50 text-[11.5px]">No action sets found. Create one below.</p>
+                  )
+                ) : (
+                  <div className="space-y-2 rounded-lg border border-ink/10 bg-canvas/40 p-3">
+                    <div>
+                      <label className="block text-[11px] text-ink/60">Set Name</label>
+                      <input
+                        className="input py-1 text-xs"
+                        placeholder="e.g. US Equities 2020 Splits & Dividends"
+                        value={newSetName}
+                        onChange={(e) => setNewSetName(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-ink/60">Description (optional)</label>
+                      <input
+                        className="input py-1 text-xs"
+                        placeholder="e.g. Backward adjustments for tech stocks"
+                        value={newSetDesc}
+                        onChange={(e) => setNewSetDesc(e.target.value)}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-ink/60">Symbol</label>
+                        <input
+                          className="input py-1 text-xs"
+                          placeholder="AAPL"
+                          value={newActionSymbol}
+                          onChange={(e) => setNewActionSymbol(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-ink/60">Action Kind</label>
+                        <select
+                          className="input py-1 text-xs"
+                          value={newActionKind}
+                          onChange={(e) => setNewActionKind(e.target.value as 'split' | 'dividend')}
+                        >
+                          <option value="split">Split</option>
+                          <option value="dividend">Cash Dividend</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-ink/60">Ex-Date (YYYY-MM-DD)</label>
+                        <input
+                          className="input py-1 text-xs"
+                          type="date"
+                          value={newActionExDate}
+                          onChange={(e) => setNewActionExDate(e.target.value)}
+                        />
+                      </div>
+                      {newActionKind === 'split' ? (
+                        <div className="flex gap-2 items-center">
+                          <div className="flex-1">
+                            <label className="block text-[11px] text-ink/60">From</label>
+                            <input
+                              className="input py-1 text-xs"
+                              type="number"
+                              min={1}
+                              value={newActionSplitFrom}
+                              onChange={(e) => setNewActionSplitFrom(Number(e.target.value))}
+                            />
+                          </div>
+                          <span className="mt-3 text-ink/40">:</span>
+                          <div className="flex-1">
+                            <label className="block text-[11px] text-ink/60">To</label>
+                            <input
+                              className="input py-1 text-xs"
+                              type="number"
+                              min={1}
+                              value={newActionSplitTo}
+                              onChange={(e) => setNewActionSplitTo(Number(e.target.value))}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-[11px] text-ink/60">Dividend per Share</label>
+                          <input
+                            className="input py-1 text-xs"
+                            placeholder="0.205"
+                            value={newActionDividend}
+                            onChange={(e) => setNewActionDividend(e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1.5 pt-1">
+                <label className="font-semibold text-ink">Adjustment Options</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 text-ink/80 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={adjustSplits}
+                      onChange={(e) => setAdjustSplits(e.target.checked)}
+                    />
+                    Adjust Splits
+                  </label>
+                  <label className="flex items-center gap-1.5 text-ink/80 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={adjustDividends}
+                      onChange={(e) => setAdjustDividends(e.target.checked)}
+                    />
+                    Adjust Dividends
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-ink">Target Dataset Name</label>
+                <input
+                  className="input py-1 text-xs mt-1"
+                  placeholder={`Leave empty to add new version to "${detail.name}"`}
+                  value={targetDatasetName}
+                  onChange={(e) => setTargetDatasetName(e.target.value)}
+                />
+                <span className="text-[11px] text-ink/40">
+                  Optional. If omitted, the new adjusted version is appended to the current dataset.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                className="btn-ghost text-xs"
+                onClick={() => setDeriving(false)}
+                disabled={derivingBusy}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary text-xs"
+                onClick={handleDerive}
+                disabled={derivingBusy}
+              >
+                {derivingBusy ? <Spinner className="h-3.5 w-3.5" /> : <GitFork className="h-3.5 w-3.5" />}
+                Derive
+              </button>
+            </div>
+          </GlassCard>
+        </div>
       )}
     </div>
   );

@@ -6,8 +6,8 @@ gives the same dataset ids; this page covers the API the Studio uses.
 
 Status: M1 Phase M1a is complete: ingest settings, preview, uploads, the ingest job, the dataset
 API and the Studio's **Data** tab (tasks 1–8). From M1b: streaming ingest, resumable chunked uploads
-(up to 1 GiB), exchange calendars, and DST-aware timezones (tasks 9–10). Research-grade data
-(Parquet, corporate actions, point-in-time) is continuing in M1b.
+(up to 1 GiB), exchange calendars, DST-aware timezones, corporate actions, backward adjustments, and
+dataset derivation lineage (tasks 9–11). Research-grade data (Parquet, point-in-time) is continuing in M1b.
 
 ## The flow
 
@@ -57,10 +57,15 @@ API and the Studio's **Data** tab (tasks 1–8). From M1b: streaming ingest, res
 | `GET /api/v1/datasets` | viewer | every version, newest first (the backtest form). With `?view=grouped`, also `datasets`: one entry per dataset with its latest version, symbols, date range, rows and last update. Without it the response is unchanged. |
 | `GET /api/v1/datasets/{id}` | viewer | the dataset and its versions (newest first), with each version's run count |
 | `PATCH /api/v1/datasets/{id}` | editor | `{name?, description?}`; 409 if another dataset has the name |
-| `GET /api/v1/datasets/versions/{id}` | viewer | metadata, the full quality report, its source, and `chartable` |
+| `GET /api/v1/datasets/versions/{id}` | viewer | metadata, the full quality report, its source, derivation lineage (`derived_from_id`, `derivation_kind`, `derivation_params`), and `chartable` |
 | `DELETE /api/v1/datasets/versions/{id}` | editor | 409 `in_use` while a run or a queued/running backtest uses it; also removes its file when nothing else uses it, and releases its upload |
+| `POST /api/v1/datasets/versions/{id}/derive` | editor | derives a new adjusted dataset version applying a corporate action set |
 | `GET /api/v1/datasets/versions/{id}/runs` | viewer | runs that used it, newest first |
 | `GET /api/v1/datasets/versions/{id}/bars?symbol=&from=&to=&points=` | viewer | one symbol's bars, reduced to at most `points` (10–5000, default 1000) for a chart: each point groups consecutive bars (first open, highest high, lowest low, last close, summed volume); `t` in ms |
+| `GET /api/v1/corporate-actions` | viewer | list corporate action sets for the active workspace |
+| `POST /api/v1/corporate-actions` | editor | create a corporate action set and its actions (`split` from:to, `dividend` amount) |
+| `GET /api/v1/corporate-actions/{id}` | viewer | get corporate action set detail and all its constituent events |
+| `DELETE /api/v1/corporate-actions/{id}` | editor | delete a corporate action set |
 
 Every route is scoped to the caller's workspace: another workspace's ids are a 404. The bars are
 read from the artifact store; versions registered from the command line are read from the API's
@@ -290,6 +295,34 @@ as a reference), and the C++ parity fixtures pass.
 Integrity: every byte read for an ingest is hashed and the whole file is read whatever the parser
 made of it, so a stored upload that no longer matches its SHA-256 fails the job as corrupt (never
 as "bad rows").
+
+## Corporate actions and backward adjustments (M1b Task 11)
+
+Raw historical market data reflects nominal trade prices. When a stock undergoes a stock split
+(e.g., a 2:1 or 4:1 split) or distributes cash dividends, unadjusted historical prices exhibit
+artificial discontinuities ("price cliffs") that corrupt moving averages, volatility estimators,
+and momentum indicators.
+
+Spectra provides research-grade **backward adjustment** for historical datasets:
+
+- **Exact rational scaling:** adjustments are computed backward in time using 128-bit exact
+  rational multipliers (`num / den`) reduced via greatest common divisor (GCD).
+  - **Stock Splits:** A split from $A$ to $B$ (e.g., 1 to 2) multiplies past prices by $A/B$ and
+    scales past trading volume inversely by $B/A$.
+  - **Cash Dividends:** A cash dividend $D$ paid with prior close $P_{\text{prior}}$ scales past
+    prices by $(P_{\text{prior}} - D) / P_{\text{prior}}$. Volumes are unchanged.
+- **Invariant preservation:** OHLC bounds are strictly maintained across integer fixed-point
+  round-off: $low \le \min(open, close)$ and $high \ge \max(open, close)$ for all adjusted bars.
+- **Derived version lineage:** Deriving an adjusted version leaves the original unadjusted dataset
+  intact and records full cryptographic and operational lineage:
+  - `derived_from_id`: the UUID of the parent dataset version.
+  - `derivation_kind`: `"adjusted"`.
+  - `derivation_params`: `{ corporate_action_set_id, adjust_splits, adjust_dividends }`.
+  - The derived version is fully queryable, chartable, backtestable, and has its own quality report.
+
+Corporate actions are grouped into reusable **corporate action sets** (`corporate_action_sets` and
+`corporate_actions`), manageable via `GET/POST/DELETE /api/v1/corporate-actions` or directly in the
+Studio Data tab.
 
 ## Limits for now
 

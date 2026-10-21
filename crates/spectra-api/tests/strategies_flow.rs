@@ -570,3 +570,200 @@ async fn parity_between_saved_version_and_direct_builtin_run() {
     sqlx::query("DELETE FROM strategies WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
     f.clean_up();
 }
+
+#[tokio::test]
+async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
+    let Some(pool) = pool().await else {
+        eprintln!("skipping: DATABASE_URL not set");
+        return;
+    };
+    let f = Fixture::new(pool);
+
+    // 1. Validation endpoint (POST /api/v1/strategies/validate)
+    // Valid code:
+    let valid_code = r"
+        param fast: int = 10, min = 2, max = 50;
+        param slow: int = 30, min = 5, max = 200;
+
+        on_bar {
+            let f = sma(fast);
+            let s = sma(slow);
+            if f > s {
+                target_shares(100);
+            } else {
+                target_shares(0);
+            }
+        }
+    ";
+    let (status, val_resp) =
+        f.call("POST", "/api/v1/strategies/validate", &json!({ "code": valid_code })).await;
+    assert_eq!(status, 200);
+    assert_eq!(val_resp["valid"], true);
+    assert_eq!(val_resp["parameters"].as_array().unwrap().len(), 2);
+    assert_eq!(val_resp["parameters"][0]["name"], "fast");
+
+    // Invalid code (loop keyword):
+    let (status, val_err) =
+        f.call("POST", "/api/v1/strategies/validate", &json!({ "code": "while true { buy(); }" })).await;
+    assert_eq!(status, 200);
+    assert_eq!(val_err["valid"], false);
+    assert!(!val_err["errors"].as_array().unwrap().is_empty());
+
+    // Invalid code (lookahead index):
+    let (status, val_lookahead) = f
+        .call("POST", "/api/v1/strategies/validate", &json!({ "code": "on_bar { let x = close[-1]; }" }))
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(val_lookahead["valid"], false);
+    assert!(val_lookahead["errors"][0]["message"].as_str().unwrap().contains("Lookahead"));
+
+    // 2. Create Strategy
+    let (status, strat_resp) = f
+        .call(
+            "POST",
+            "/api/v1/strategies",
+            &json!({
+                "name": "DSL Momentum Strategy",
+                "kind": "custom",
+                "description": "Restricted DSL strategy testing draft & version flow",
+            }),
+        )
+        .await;
+    assert_eq!(status, 201);
+    let strat_id = Uuid::parse_str(strat_resp["id"].as_str().unwrap()).unwrap();
+
+    // 3. Draft Flow (PUT / GET /api/v1/strategies/{id}/draft)
+    let (status, draft_save) = f
+        .call(
+            "PUT",
+            &format!("/api/v1/strategies/{strat_id}/draft"),
+            &json!({
+                "code": valid_code,
+                "parameters": { "fast": 12, "slow": 24 },
+            }),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(draft_save["saved"], true);
+
+    let (status, draft_get) =
+        f.call("GET", &format!("/api/v1/strategies/{strat_id}/draft"), &Value::Null).await;
+    assert_eq!(status, 200);
+    assert_eq!(draft_get["strategy_id"], strat_id.to_string());
+    assert_eq!(draft_get["code"], valid_code);
+    assert_eq!(draft_get["parameters"]["fast"], 12);
+
+    // 4. Save Version & Deduplication
+    let (status, v1_resp) = f
+        .call(
+            "POST",
+            &format!("/api/v1/strategies/{strat_id}/versions"),
+            &json!({
+                "code": valid_code,
+                "parameters": { "fast": 12, "slow": 24 },
+                "notes": "Initial v1 draft save",
+            }),
+        )
+        .await;
+    assert_eq!(status, 201);
+    let v1_id = v1_resp["id"].as_str().unwrap().to_string();
+    assert_eq!(v1_resp["version_num"], 1);
+
+    // Save exact same text & parameters again -> Dedup returns exact same version
+    let (status, v1_dup) = f
+        .call(
+            "POST",
+            &format!("/api/v1/strategies/{strat_id}/versions"),
+            &json!({
+                "code": valid_code,
+                "parameters": { "fast": 12, "slow": 24 },
+                "notes": "Redundant click",
+            }),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(v1_dup["id"], v1_id);
+    assert_eq!(v1_dup["version_num"], 1);
+
+    // Modify code and save version 2
+    let v2_code = valid_code.replace("target_shares(100)", "target_shares(200)");
+    let (status, v2_resp) = f
+        .call(
+            "POST",
+            &format!("/api/v1/strategies/{strat_id}/versions"),
+            &json!({
+                "code": v2_code,
+                "parameters": { "fast": 15, "slow": 30 },
+                "notes": "Version 2 doubled position size",
+            }),
+        )
+        .await;
+    assert_eq!(status, 201);
+    let _v2_id = v2_resp["id"].as_str().unwrap().to_string();
+    assert_eq!(v2_resp["version_num"], 2);
+
+    // 5. Version Diff API (GET /api/v1/strategies/{id}/diff)
+    let (status, diff_resp) = f
+        .call("GET", &format!("/api/v1/strategies/{strat_id}/diff?from_version=1&to_version=2"), &Value::Null)
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(diff_resp["from_version"], 1);
+    assert_eq!(diff_resp["to_version"], 2);
+    let lines = diff_resp["lines"].as_array().unwrap();
+    let has_addition = lines
+        .iter()
+        .any(|l| l["change_type"] == "added" && l["text"].as_str().unwrap().contains("target_shares(200)"));
+    let has_deletion = lines
+        .iter()
+        .any(|l| l["change_type"] == "deleted" && l["text"].as_str().unwrap().contains("target_shares(100)"));
+    assert!(has_addition && has_deletion, "diff accurately reported line changes");
+
+    let params_changed = diff_resp["parameters_changed"].as_array().unwrap();
+    assert_eq!(params_changed.len(), 2); // fast changed 12->15, slow changed 24->30
+
+    // 6. Parameter Sets API (Task 10)
+    let (status, pset_resp) = f
+        .call(
+            "POST",
+            &format!("/api/v1/strategies/{strat_id}/parameter_sets"),
+            &json!({
+                "strategy_version_id": v1_id,
+                "name": "Conservative Preset",
+                "parameters": { "fast": 20, "slow": 50 },
+            }),
+        )
+        .await;
+    assert_eq!(status, 201);
+    let pset_id = pset_resp["id"].as_str().unwrap().to_string();
+
+    let (status, pset_list) =
+        f.call("GET", &format!("/api/v1/strategies/{strat_id}/parameter_sets"), &Value::Null).await;
+    assert_eq!(status, 200);
+    let psets = pset_list.as_array().unwrap();
+    assert!(psets.iter().any(|p| p["name"] == "Conservative Preset"));
+
+    let (status, pset_single) =
+        f.call("GET", &format!("/api/v1/strategies/{strat_id}/parameter_sets/{pset_id}"), &Value::Null).await;
+    assert_eq!(status, 200);
+    assert_eq!(pset_single["name"], "Conservative Preset");
+    assert_eq!(pset_single["parameters"]["fast"], 20);
+
+    // Clean up
+    sqlx::query("DELETE FROM strategy_parameter_sets WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM strategy_drafts WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM strategy_versions WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM strategies WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    f.clean_up();
+}

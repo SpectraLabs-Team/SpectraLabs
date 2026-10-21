@@ -6,6 +6,7 @@
 pub mod backtest;
 pub mod corporate;
 pub mod costs;
+pub mod dsl;
 pub mod metrics;
 pub mod performance;
 pub mod rebalance;

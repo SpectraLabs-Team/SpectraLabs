@@ -42,7 +42,9 @@ impl BacktestWorkerEnv {
 /// strategies on one account their names joined with `+`.
 #[must_use]
 pub fn run_strategy_name(req: &spectra_backtest::BacktestRequest) -> String {
-    if req.is_multi() {
+    if req.dsl_code.is_some() {
+        "dsl".to_string()
+    } else if req.is_multi() {
         req.strategies.iter().map(|a| a.strategy.name).collect::<Vec<_>>().join("+")
     } else {
         req.strategy.name.to_string()

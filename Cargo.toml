@@ -9,9 +9,9 @@ license = "UNLICENSED"
 repository = "https://github.com/SpectraLabs-Team/spectralabs"
 rust-version = "1.89"
 
-# Third-party crates are allowed only in the service crates (spectra-api, and later the worker and
-# storage crates). spectra-core, -engine, -risk, -research and the other library crates stay
-# standard-library only, so parity results cannot drift with a dependency upgrade.
+# Third-party crates are kept out of the default engine and parity builds. Service/storage
+# integrations may be exposed behind opt-in features (such as spectra-registry/postgres), keeping
+# the default spectra-core, -engine, -risk and -research builds standard-library only.
 [workspace.dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "query", "matched-path"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time", "fs", "io-util"] }

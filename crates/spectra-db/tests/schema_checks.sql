@@ -22,8 +22,8 @@ BEGIN
     END IF;
 END $$;
 
--- Fixtures: two users, two workspaces.
-INSERT INTO users (id, email, password_hash, role) VALUES
+-- Fixtures: two users, two workspaces (the dashboard's tables: web/frontend/db/migrations).
+INSERT INTO users (id, email, password_hash, platform_role) VALUES
     ('00000000-0000-7000-8000-000000000001', 'alice@example.com', '!', 'admin'),
     ('00000000-0000-7000-8000-000000000002', 'bob@example.com', '!', 'user');
 INSERT INTO workspaces (id, slug, name) VALUES
@@ -58,6 +58,72 @@ EXCEPTION WHEN foreign_key_violation THEN NULL; END $$;
 INSERT INTO dataset_versions (workspace_id, dataset_id, version, checksum, row_count, byte_size)
     VALUES ('00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-0000000000d1', 1,
             repeat('a', 64), 10, 100);
+
+-- M5: experiments carry tags and same-workspace lineage; runs freeze their results at completion.
+INSERT INTO experiments (id, workspace_id, name, tags, registry_id)
+    VALUES ('00000000-0000-7000-8000-00000000e001', '00000000-0000-7000-8000-0000000000a1',
+            'M5 parent', ARRAY['baseline', 'daily'], 'import-exp-1');
+INSERT INTO experiments (id, workspace_id, name, parent_id, registry_id)
+    VALUES ('00000000-0000-7000-8000-00000000e002', '00000000-0000-7000-8000-0000000000a1',
+            'M5 child', '00000000-0000-7000-8000-00000000e001', 'import-exp-2');
+INSERT INTO experiment_notes (workspace_id, experiment_id, body)
+    VALUES ('00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-00000000e001', 'Initial note');
+DO $$ BEGIN
+    INSERT INTO experiments (workspace_id, name, parent_id)
+        VALUES ('00000000-0000-7000-8000-0000000000b1', 'cross-workspace child',
+                '00000000-0000-7000-8000-00000000e001');
+    RAISE EXCEPTION 'cross-workspace experiment parent accepted';
+EXCEPTION WHEN foreign_key_violation THEN NULL; END $$;
+
+INSERT INTO runs (id, workspace_id, experiment_id, kind, status)
+    VALUES ('00000000-0000-7000-8000-00000000e101', '00000000-0000-7000-8000-0000000000a1',
+            '00000000-0000-7000-8000-00000000e002', 'backtest', 'queued');
+UPDATE runs SET status = 'running', started_at = now()
+ WHERE id = '00000000-0000-7000-8000-00000000e101';
+DO $$ BEGIN
+    UPDATE runs SET metrics = '{"sharpe":1.0}'::jsonb WHERE id = '00000000-0000-7000-8000-00000000e101';
+    RAISE EXCEPTION 'running run results changed before completion';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'run results may only be written when the run succeeds' THEN RAISE; END IF;
+END $$;
+UPDATE runs SET status = 'succeeded', finished_at = now(),
+    dataset_bars_sha256 = repeat('a', 64), strategy_sha256 = repeat('b', 64),
+    config = '{"seed":1}'::jsonb, config_sha256 = repeat('c', 64), result_sha256 = repeat('d', 64),
+    sharpe_per_period = 0.5, n_obs = 10, bar_count = 11, metrics = '{"sharpe":1.0}'::jsonb,
+    registry_id = 'import-run-1'
+ WHERE id = '00000000-0000-7000-8000-00000000e101';
+DO $$ BEGIN
+    UPDATE runs SET metrics = '{"sharpe":2.0}'::jsonb WHERE id = '00000000-0000-7000-8000-00000000e101';
+    RAISE EXCEPTION 'finished run was mutable';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'finished runs are immutable' THEN RAISE; END IF;
+END $$;
+INSERT INTO run_notes (workspace_id, run_id, body)
+    VALUES ('00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-00000000e101', 'Reviewed');
+DO $$ BEGIN
+    INSERT INTO runs (workspace_id, experiment_id, kind, status, finished_at)
+        VALUES ('00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-00000000e002',
+                'backtest', 'succeeded', now());
+    RAISE EXCEPTION 'registry run created already finished';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'registry runs must be created in queued status' THEN RAISE; END IF;
+END $$;
+-- A plain job result (no experiment) is recorded once, already finished, and then frozen.
+INSERT INTO runs (id, workspace_id, kind, status, finished_at)
+    VALUES ('00000000-0000-7000-8000-00000000e102', '00000000-0000-7000-8000-0000000000a1',
+            'benchmark', 'succeeded', now());
+DO $$ BEGIN
+    UPDATE runs SET metrics = '{"x":1}'::jsonb WHERE id = '00000000-0000-7000-8000-00000000e102';
+    RAISE EXCEPTION 'finished job run was mutable';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'finished runs are immutable' THEN RAISE; END IF;
+END $$;
+DO $$ BEGIN
+    UPDATE run_notes SET body = 'edited' WHERE run_id = '00000000-0000-7000-8000-00000000e101';
+    RAISE EXCEPTION 'run note was mutable';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'run notes are append-only' THEN RAISE; END IF;
+END $$;
 
 -- Jobs: finished_at is set exactly when the job is in a terminal state.
 DO $$ BEGIN
@@ -121,6 +187,82 @@ DO $$ BEGIN
     IF (SELECT payload::text FROM registry_events
          WHERE workspace_id = '00000000-0000-7000-8000-0000000000a1' AND seq = 0) <> '{"b":1,"a":2}' THEN
         RAISE EXCEPTION 'payload text was rewritten';
+    END IF;
+END $$;
+
+-- Shared database: deleting a user or a workspace in the dashboard must work even when the
+-- engine holds frozen rows for them, and must never remove part of a chain.
+INSERT INTO users (id, email, password_hash) VALUES
+    ('00000000-0000-7000-8000-000000000003', 'dave@example.com', '!');
+INSERT INTO workspaces (id, slug, name) VALUES
+    ('00000000-0000-7000-8000-0000000000c1', 'gamma', 'Gamma');
+INSERT INTO experiments (id, workspace_id, name, created_by) VALUES
+    ('00000000-0000-7000-8000-00000000c001', '00000000-0000-7000-8000-0000000000c1', 'doomed', '00000000-0000-7000-8000-000000000003');
+INSERT INTO runs (id, workspace_id, experiment_id, kind, status, created_by) VALUES
+    ('00000000-0000-7000-8000-00000000c101', '00000000-0000-7000-8000-0000000000c1',
+     '00000000-0000-7000-8000-00000000c001', 'backtest', 'queued', '00000000-0000-7000-8000-000000000003');
+UPDATE runs SET status = 'running', started_at = now() WHERE id = '00000000-0000-7000-8000-00000000c101';
+UPDATE runs SET status = 'succeeded', finished_at = now(), dataset_bars_sha256 = repeat('a', 64),
+    config_sha256 = repeat('c', 64), result_sha256 = repeat('d', 64)
+ WHERE id = '00000000-0000-7000-8000-00000000c101';
+INSERT INTO run_notes (workspace_id, run_id, author_id, body) VALUES
+    ('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-00000000c101',
+     '00000000-0000-7000-8000-000000000003', 'by dave');
+INSERT INTO experiment_notes (workspace_id, experiment_id, author_id, body) VALUES
+    ('00000000-0000-7000-8000-0000000000c1', '00000000-0000-7000-8000-00000000c001',
+     '00000000-0000-7000-8000-000000000003', 'also by dave');
+INSERT INTO registry_events (workspace_id, seq, type, ts_ns, payload, prev_hash, hash) VALUES
+    ('00000000-0000-7000-8000-0000000000c1', 0, 'experiment.created', 1, '{}', repeat('0', 64), repeat('5', 64)),
+    ('00000000-0000-7000-8000-0000000000c1', 1, 'run.recorded', 2, '{}', repeat('5', 64), repeat('6', 64));
+INSERT INTO workspace_quotas (workspace_id, artifact_quota_bytes) VALUES ('00000000-0000-7000-8000-0000000000c1', 10);
+
+-- Piecemeal removal is still refused while the workspace exists.
+DO $$ BEGIN
+    DELETE FROM registry_events WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1' AND seq = 1;
+    RAISE EXCEPTION 'single registry event deleted';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'registry_events is append-only' THEN RAISE; END IF;
+END $$;
+DO $$ BEGIN
+    DELETE FROM run_notes WHERE body = 'by dave';
+    RAISE EXCEPTION 'single note deleted';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'run notes are append-only' THEN RAISE; END IF;
+END $$;
+DO $$ BEGIN
+    UPDATE runs SET created_by = NULL, metrics = '{"x":1}'::jsonb WHERE id = '00000000-0000-7000-8000-00000000c101';
+    RAISE EXCEPTION 'finished run changed alongside created_by';
+EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'finished runs are immutable' THEN RAISE; END IF;
+END $$;
+
+-- Deleting the author's account clears authorship on frozen rows and keeps the rows.
+DELETE FROM users WHERE id = '00000000-0000-7000-8000-000000000003';
+DO $$ BEGIN
+    IF (SELECT created_by FROM runs WHERE id = '00000000-0000-7000-8000-00000000c101') IS NOT NULL
+       OR (SELECT author_id FROM run_notes WHERE body = 'by dave') IS NOT NULL
+       OR (SELECT author_id FROM experiment_notes WHERE body = 'also by dave') IS NOT NULL THEN
+        RAISE EXCEPTION 'authorship survived the account deletion';
+    END IF;
+    IF (SELECT status FROM runs WHERE id = '00000000-0000-7000-8000-00000000c101') <> 'succeeded' THEN
+        RAISE EXCEPTION 'run changed when its creator was deleted';
+    END IF;
+END $$;
+
+-- Deleting the workspace removes everything it owned, the whole chain included.
+DELETE FROM workspaces WHERE id = '00000000-0000-7000-8000-0000000000c1';
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM registry_events WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM runs WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM run_notes WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM experiment_notes WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM experiments WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM workspace_quotas WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1') THEN
+        RAISE EXCEPTION 'workspace deletion left engine rows behind';
+    END IF;
+    -- Other workspaces' chains are untouched.
+    IF (SELECT count(*) FROM registry_events WHERE workspace_id = '00000000-0000-7000-8000-0000000000a1') <> 2 THEN
+        RAISE EXCEPTION 'another workspace lost registry events';
     END IF;
 END $$;
 

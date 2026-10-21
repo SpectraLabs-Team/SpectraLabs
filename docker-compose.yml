@@ -58,9 +58,10 @@ services:
       SPECTRA_API_ADDR: 0.0.0.0:8000
       SPECTRA_CORS_ORIGINS: http://localhost:3000
       SPECTRA_MIGRATE_ON_START: "false"
-      ARTIFACT_STORAGE: local # uploads and backtest chart series; s3: see deploy/compose.s3.yml
+      ARTIFACT_STORAGE: local # registry artifacts, uploads, and backtest chart series
       ARTIFACT_DIR: /var/lib/spectra/artifacts
       SPECTRA_DATA_DIR: /var/lib/spectra/datasets # read only, to chart command-line datasets
+      SPECTRA_MAX_UPLOAD_BYTES: ${SPECTRA_MAX_UPLOAD_BYTES:-1073741824} # largest resumable upload (1 GiB)
     volumes:
       - artifacts:/var/lib/spectra/artifacts # written by uploads (M1), read for backtest series
       - datasets:/var/lib/spectra/datasets:ro
@@ -121,6 +122,9 @@ services:
       - path: web/frontend/.env.local
         required: false
     environment:
+      # One database for the whole platform: the dashboard owns users, workspaces and sessions,
+      # the engine owns research data (spectra-db migrate applies both, dashboard first).
+      DATABASE_URL: postgres://${POSTGRES_USER:-spectra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-spectra}
       ENGINE_URL: http://api:8000
       ENGINE_SECRET: ${ENGINE_SECRET}
     volumes:

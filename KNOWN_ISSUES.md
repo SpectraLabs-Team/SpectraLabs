@@ -23,13 +23,24 @@
 - **Not tested on macOS.** The full Rust test suite and frontend checks passed locally on Windows;
   no macOS run has been reported.
 
+## Platform follow-ups
+
+- **One database role for every service.** The dashboard, API, worker and migrations connect as the
+  same Postgres user. Separate roles (migrations own the schema; the API and worker get only the
+  grants they need on engine tables and read access to `workspaces`) are a hardening step before
+  production.
+- **Artifact bytes of deleted workspaces stay in the store.** Their rows go with the workspace and no
+  longer count against a quota, but the content-addressed files are not garbage-collected yet (another
+  workspace may hold the same bytes). A sweep that removes files no `run_artifacts` row references is
+  still to be written.
+
 ## Model limits (inherited)
 
 - The risk model treats the portfolio as one aggregate position: zero drift, and volatility equal to
   the simple average of the assets' volatilities. There are no correlations and no per-asset paths, so
   it cannot attribute risk to positions, and it treats the assets as perfectly correlated.
 - Data: CSV only. There is no Parquet, no provider connectors, no corporate actions and no exchange
-  calendars, and datasets are held fully in memory.
+  calendars, and datasets are held fully in memory during a backtest (ingest streams since M1b task 9; streaming backtests are M3 task 14).
 - Backtester: market and limit orders only, bar data only, flat-bps slippage, a single currency and
   average-cost accounting.
 - PSR and DSR assume serially independent returns and independent trials.

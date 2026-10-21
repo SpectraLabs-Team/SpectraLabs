@@ -16,6 +16,35 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # Formatting and lints run on their own, so a formatting slip never hides test results.
+  # The toolchain is pinned in rust-toolchain.toml (the same one `scripts/ci-local.sh` and the
+  # git hooks use); keep the version below in step with it.
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.99.0
+        with:
+          components: clippy, rustfmt
+      - name: Toolchain matches rust-toolchain.toml
+        run: |
+          pinned=$(sed -n 's/^channel = "\(.*\)"/\1/p' rust-toolchain.toml)
+          actual=$(rustc --version | cut -d' ' -f2)
+          echo "::notice title=Rust toolchain::rustc $actual (pinned $pinned)"
+          test "$pinned" = "$actual" || { echo "::error::rust-toolchain.toml pins $pinned but CI installed $actual"; exit 1; }
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy (default features)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Clippy (Postgres registry, CLI and S3 features)
+        run: |
+          cargo clippy -p spectra-registry --features postgres --all-targets -- -D warnings
+          cargo clippy -p spectra-cli --features postgres --all-targets -- -D warnings
+          cargo clippy -p spectra-db -p spectra-api --features spectra-api/s3 --all-targets -- -D warnings
+      - name: Standard-library-only engine crates
+        run: cargo metadata --format-version 1 --no-deps | python3 scripts/check_std_only.py
+
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -34,31 +63,33 @@ jobs:
       DATABASE_URL: postgresql://spectra:spectra@localhost:5432/spectra
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Standard-library-only engine crates
-        run: cargo metadata --format-version 1 --no-deps | python3 scripts/check_std_only.py
+      - uses: dtolnay/rust-toolchain@1.99.0
       - name: Test (debug, overflow checks on)
         run: cargo test --workspace
       - name: Test (release)
         run: cargo test --workspace --release
+<<<<<<< HEAD
+      - name: Postgres experiment registry
+<<<<<<< HEAD
+        run: |
+          cargo clippy -p spectra-registry --features postgres --all-targets -- -D warnings
+          cargo test -p spectra-registry --features postgres --test pg_registry
+          cargo clippy -p spectra-cli --features postgres --all-targets -- -D warnings
+=======
+        run: cargo test -p spectra-registry --features postgres --test pg_registry
+>>>>>>> origin/codex/m5-experiment-registry
+=======
       - name: Backtest throughput floor
         # A normal run is ~1.8M bars/s; the floor only catches order-of-magnitude regressions.
         run: cargo run --release -p spectra-cli --example backtest_throughput -- --min-bars-per-sec 150000
+>>>>>>> origin/main
       - name: Parity scripts are reproducible
         run: |
           python3 parity/gen_ops.py parity/ops
           python3 parity/gen_data.py parity/data
           git diff --exit-code parity/ops parity/data
-      - name: S3 artifact storage (feature build and tests)
-        run: |
-          cargo clippy -p spectra-db -p spectra-api --features spectra-api/s3 --all-targets -- -D warnings
-          cargo test -p spectra-db --features s3 --lib
+      - name: S3 artifact storage (feature tests)
+        run: cargo test -p spectra-db --features s3 --lib
       - name: Database SQL checks, backup, restore and registry anchor
         run: |
           cargo run --quiet -p spectra-db -- migrate
@@ -73,6 +104,8 @@ jobs:
           { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/upload_checks.sql; } \
             | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
           { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/dataset_checks.sql; } \
+            | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
+          { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/session_checks.sql; } \
             | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
           scripts/backup-postgres.sh "$RUNNER_TEMP/backups"
           psql "$DATABASE_URL" -c 'CREATE DATABASE spectra_restore'
@@ -102,7 +135,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.99.0
       - name: Test (release)
         run: cargo test --workspace --release
 

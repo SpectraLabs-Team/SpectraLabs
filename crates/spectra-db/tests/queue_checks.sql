@@ -8,9 +8,12 @@ SET LOCAL client_min_messages = warning;
 
 CREATE TEMP TABLE t_ids (name text PRIMARY KEY, id uuid);
 INSERT INTO users (id, email, password_hash) VALUES ('00000000-0000-7000-8000-000000000001', 'q@example.com', '!');
-INSERT INTO workspaces (id, slug, name, artifact_quota_bytes) VALUES
-    ('00000000-0000-7000-8000-0000000000a1', 'qa', 'A', 100),
-    ('00000000-0000-7000-8000-0000000000b1', 'qb', 'B', NULL);
+INSERT INTO workspaces (id, slug, name) VALUES
+    ('00000000-0000-7000-8000-0000000000a1', 'qa', 'A'),
+    ('00000000-0000-7000-8000-0000000000b1', 'qb', 'B');
+-- A has its own artifact quota; B uses the deployment default.
+INSERT INTO workspace_quotas (workspace_id, artifact_quota_bytes) VALUES
+    ('00000000-0000-7000-8000-0000000000a1', 100);
 
 CREATE FUNCTION pg_temp.check(ok boolean, what text) RETURNS void LANGUAGE plpgsql AS $$
 BEGIN IF ok IS NOT TRUE THEN RAISE EXCEPTION 'queue check failed: %', what; END IF; END $$;

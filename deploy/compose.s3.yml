@@ -44,6 +44,21 @@ services:
       AWS_ENDPOINT: ${AWS_ENDPOINT:-http://rustfs:9000}
       AWS_ALLOW_HTTP: ${AWS_ALLOW_HTTP:-true}
 
+  api:
+    build:
+      args:
+        CARGO_FEATURES: spectra-api/s3
+    image: spectralabs/engine:dev-s3
+    environment:
+      ARTIFACT_STORAGE: s3
+      ARTIFACT_S3_BUCKET: ${ARTIFACT_S3_BUCKET:-spectra-artifacts}
+      ARTIFACT_S3_PREFIX: ${ARTIFACT_S3_PREFIX:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-spectra-local}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-change-me-local-s3-secret}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT: ${AWS_ENDPOINT:-http://rustfs:9000}
+      AWS_ALLOW_HTTP: ${AWS_ALLOW_HTTP:-true}
+
   rustfs:
     image: rustfs/rustfs:1.0.3
     profiles: ["s3"]

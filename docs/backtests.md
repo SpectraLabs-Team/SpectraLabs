@@ -102,6 +102,14 @@ drawdown charts, the summary's metrics, exposure, trades, per-instrument and per
 the fingerprints, and the CSVs to download. Past runs are listed beside it. Viewers can look at
 runs; starting or cancelling one needs the editor role.
 
+Saved strategies appear under **Saved strategies** in the strategy picker: choose one, then a
+version (newest first), and run it; its parameters are shown read-only because a version never
+changes. **Save as version** under a built-in's parameters stores them in a new or existing saved
+strategy (editors only; saving the same parameters again reports the version already saved), and
+**Edit as new** loads a version's parameters back into the built-in form to change them. A version
+saved with older built-in code is marked "(older code)" and cannot run. **Edit and run again** on a
+run started from a version picks that version again.
+
 ## Checking a job against the CLI
 
 The same request run directly gives the same fingerprints:

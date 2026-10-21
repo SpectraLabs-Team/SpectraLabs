@@ -98,7 +98,12 @@ export type CreateBacktest = {
   dataset_version_id: string;
   config?: UserConfig;
   priority?: number;
-} & ({ strategy: string; params?: ParamValues; strategies?: never } | { strategies: StrategyAllocation[]; strategy?: never; params?: never });
+} & (
+  | { strategy: string; params?: ParamValues; strategies?: never; strategy_version_id?: never }
+  | { strategies: StrategyAllocation[]; strategy?: never; params?: never; strategy_version_id?: never }
+  /** A saved strategy version (M2a): the engine fills in its built-in and parameters. */
+  | { strategy_version_id: string; strategy?: never; params?: never; strategies?: never }
+);
 
 /** Most strategies in one request (`MAX_REQUEST_STRATEGIES`). */
 export const MAX_STRATEGIES = 10;
@@ -231,6 +236,8 @@ export interface Summary {
 /** The job payload as stored: the request plus the dataset version. */
 export interface StoredRequest {
   dataset_version_id?: string;
+  /** Set when the run was started from a saved strategy version (with `strategy` and `params` filled in). */
+  strategy_version_id?: string;
   strategy?: string;
   params?: ParamValues;
   strategies?: StrategyAllocation[];
@@ -297,6 +304,64 @@ export type DownloadKind = (typeof DOWNLOADS)[number]['kind'];
 // ---------------------------------------------------------------- calls
 
 const id = (s: string) => encodeURIComponent(s);
+
+// ---------------------------------------------------------------- saved strategies (M2a)
+
+/** One immutable version of a saved strategy (`StrategyVersionView`). */
+export interface StrategyVersion {
+  id: string;
+  strategy_id: string;
+  strategy_name: string;
+  version: number;
+  builtin: string;
+  /** Every parameter, defaults filled in. */
+  params: ParamValues;
+  strategy_sha256: string;
+  config_hash: string;
+  /** False once the built-in's code has changed since saving: the version can no longer run. */
+  current: boolean;
+  created_by: string | null;
+  created_at: string;
+}
+
+/** A saved strategy (`StrategyView`). */
+export interface SavedStrategy {
+  id: string;
+  name: string;
+  description: string;
+  created_by: string | null;
+  created_at: string;
+  version_count: number;
+  latest_version_id: string | null;
+  latest_version: number | null;
+  latest_builtin: string | null;
+}
+
+export interface StrategyDetail {
+  strategy: SavedStrategy;
+  /** Newest first. */
+  versions: StrategyVersion[];
+}
+
+export const listStrategies = () =>
+  request<{ items: SavedStrategy[] }>('/api/v1/strategies', { timeoutMs: 15_000 }).then((r) => r.items);
+
+export const getStrategy = (strategyId: string) => request<StrategyDetail>(`/api/v1/strategies/${id(strategyId)}`, { timeoutMs: 10_000 });
+
+export const getStrategyVersion = (versionId: string) =>
+  request<StrategyVersion>(`/api/v1/strategies/versions/${id(versionId)}`, { timeoutMs: 10_000 });
+
+/** Creates a saved strategy and, with `builtin`, its version 1. 409 (`strategy_exists`) for a taken name. */
+export const createStrategy = (body: { name: string; description?: string; builtin?: string; params?: ParamValues }) =>
+  request<StrategyDetail>('/api/v1/strategies', { method: 'POST', body: JSON.stringify(body), timeoutMs: 15_000 });
+
+/** Saves a version; the same built-in and parameters again return the existing one (`created: false`). */
+export const saveStrategyVersion = (strategyId: string, body: { builtin: string; params?: ParamValues }) =>
+  request<{ created: boolean; version: StrategyVersion }>(`/api/v1/strategies/${id(strategyId)}/versions`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    timeoutMs: 15_000,
+  });
 
 export const createBacktest = (body: CreateBacktest) =>
   request<Backtest>('/api/v1/backtests', { method: 'POST', body: JSON.stringify(body), timeoutMs: 20_000 });
@@ -420,7 +485,8 @@ export function defaultParams(s: BuiltinStrategy): ParamValues {
 export function describeRequest(r: StoredRequest, catalog?: Catalog | null): string {
   const label = (name: string) => catalog?.strategies.find((s) => s.name === name)?.label ?? name;
   if (r.strategies?.length) return r.strategies.map((s) => label(s.strategy)).join(' + ');
-  return r.strategy ? label(r.strategy) : 'backtest';
+  if (!r.strategy) return 'backtest';
+  return r.strategy_version_id ? `${label(r.strategy)} · saved version` : label(r.strategy);
 }
 
 /** One strategy's equity over time, from strategies.csv (`ts_ns,strategy,equity,cash,gross_exposure`). */

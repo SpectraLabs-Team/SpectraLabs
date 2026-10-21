@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use spectra_db::datasets;
 use spectra_db::jobs::{self, NewJob};
-use spectra_db::optimization::{self, HoldoutEvaluation, HoldoutVault, OptimizationSweep, OptimizationTrial, WalkForwardReport};
+use spectra_db::optimization::{
+    self, HoldoutEvaluation, HoldoutVault, OptimizationSweep, OptimizationTrial, WalkForwardReport,
+};
 use spectra_research::pbo::cscv_pbo;
 use spectra_research::stats::{
     deflated_sharpe, expected_max_sharpe, min_track_record_length, moments, probabilistic_sharpe,
@@ -450,17 +452,15 @@ pub(crate) async fn queue_sweep(
 /// List parameter sweeps in workspace.
 #[utoipa::path(get, path = "/api/v1/optimization/sweeps", tag = "optimization",
     responses((status = 200, body = Vec<OptimizationSweepView>)))]
-pub(crate) async fn list_sweeps(
-    State(st): State<AppState>,
-    Extension(id): Extension<Identity>,
-) -> Response {
+pub(crate) async fn list_sweeps(State(st): State<AppState>, Extension(id): Extension<Identity>) -> Response {
     let (pool, ws) = match context(&st, &id) {
         Ok(c) => c,
         Err(r) => return r,
     };
     match optimization::list_sweeps(&pool, ws, 100).await {
         Ok(items) => {
-            let views: Vec<OptimizationSweepView> = items.into_iter().map(OptimizationSweepView::from).collect();
+            let views: Vec<OptimizationSweepView> =
+                items.into_iter().map(OptimizationSweepView::from).collect();
             to_json(200, &json!({ "items": views }))
         }
         Err(e) => db_error(&e),
@@ -494,11 +494,14 @@ pub(crate) async fn get_sweep(
     let sensitivity = compute_sensitivity_matrix(&trials);
     let trial_views: Vec<SweepTrialView> = trials.into_iter().map(SweepTrialView::from).collect();
 
-    to_json(200, &json!({
-        "sweep": sweep,
-        "trials": trial_views,
-        "sensitivity": sensitivity,
-    }))
+    to_json(
+        200,
+        &json!({
+            "sweep": sweep,
+            "trials": trial_views,
+            "sensitivity": sensitivity,
+        }),
+    )
 }
 
 /// Computes 2D heatmap matrix if two distinct parameters vary across trials.
@@ -528,17 +531,11 @@ fn compute_sensitivity_matrix(trials: &[OptimizationTrial]) -> Option<serde_json
     let axis_x = &param_names[0];
     let axis_y = &param_names[1];
 
-    let mut vals_x: Vec<f64> = trials
-        .iter()
-        .filter_map(|t| t.params.get(axis_x)?.as_f64())
-        .collect();
+    let mut vals_x: Vec<f64> = trials.iter().filter_map(|t| t.params.get(axis_x)?.as_f64()).collect();
     vals_x.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     vals_x.dedup();
 
-    let mut vals_y: Vec<f64> = trials
-        .iter()
-        .filter_map(|t| t.params.get(axis_y)?.as_f64())
-        .collect();
+    let mut vals_y: Vec<f64> = trials.iter().filter_map(|t| t.params.get(axis_y)?.as_f64()).collect();
     vals_y.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     vals_y.dedup();
 
@@ -666,7 +663,8 @@ pub(crate) async fn list_walk_forwards(
     };
     match optimization::list_walk_forwards(&pool, ws, 100).await {
         Ok(items) => {
-            let views: Vec<WalkForwardReportView> = items.into_iter().map(WalkForwardReportView::from).collect();
+            let views: Vec<WalkForwardReportView> =
+                items.into_iter().map(WalkForwardReportView::from).collect();
             to_json(200, &json!({ "items": views }))
         }
         Err(e) => db_error(&e),
@@ -859,10 +857,13 @@ pub(crate) async fn get_holdout(
         Err(e) => return db_error(&e),
     };
     let eval_views: Vec<HoldoutEvaluationView> = evals.into_iter().map(HoldoutEvaluationView::from).collect();
-    to_json(200, &json!({
-        "holdout": holdout,
-        "evaluations": eval_views,
-    }))
+    to_json(
+        200,
+        &json!({
+            "holdout": holdout,
+            "evaluations": eval_views,
+        }),
+    )
 }
 
 /// Evaluate a strategy against a sealed holdout (metered access, permanently consumes budget).
@@ -900,7 +901,10 @@ pub(crate) async fn evaluate_holdout(
         return error_with_code(
             403,
             "holdout_budget_exhausted",
-            format!("Holdout '{}' budget is exhausted ({} of {} evaluations used).", holdout.name, holdout.evaluations_used, holdout.budget),
+            format!(
+                "Holdout '{}' budget is exhausted ({} of {} evaluations used).",
+                holdout.name, holdout.evaluations_used, holdout.budget
+            ),
         );
     }
 
@@ -944,7 +948,10 @@ pub(crate) async fn evaluate_holdout(
 
     let cfg = spectra_engine::BacktestConfig::default();
     let (metrics_json, dsr_val) = {
-        let mut strat = spectra_backtest::builtin("buy_and_hold").unwrap().build(&spectra_research::ParamSet::default()).unwrap();
+        let mut strat = spectra_backtest::builtin("buy_and_hold")
+            .unwrap()
+            .build(&spectra_research::ParamSet::default())
+            .unwrap();
         let res = spectra_engine::run_backtest(&bars, strat.as_mut(), &cfg);
         match res {
             Ok(r) => {

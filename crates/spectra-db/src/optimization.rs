@@ -222,10 +222,7 @@ pub async fn insert_trial(
 
 /// List all trials belonging to a sweep.
 pub async fn trials_of_sweep(pool: &PgPool, sweep_id: Uuid) -> Result<Vec<OptimizationTrial>, Error> {
-    sqlx::query_as(include_str!("../queries/sweep_trials_of.sql"))
-        .bind(sweep_id)
-        .fetch_all(pool)
-        .await
+    sqlx::query_as(include_str!("../queries/sweep_trials_of.sql")).bind(sweep_id).fetch_all(pool).await
 }
 
 // ---------------------------------------------------------------- Walk-Forward
@@ -341,11 +338,7 @@ pub async fn insert_holdout(
 }
 
 /// Get a holdout vault entry by ID.
-pub async fn get_holdout(
-    pool: &PgPool,
-    workspace_id: Uuid,
-    id: Uuid,
-) -> Result<Option<HoldoutVault>, Error> {
+pub async fn get_holdout(pool: &PgPool, workspace_id: Uuid, id: Uuid) -> Result<Option<HoldoutVault>, Error> {
     sqlx::query_as(include_str!("../queries/holdout_get.sql"))
         .bind(workspace_id)
         .bind(id)
@@ -368,10 +361,7 @@ pub async fn get_holdout_by_name(
 
 /// List all sealed holdouts in a workspace.
 pub async fn list_holdouts(pool: &PgPool, workspace_id: Uuid) -> Result<Vec<HoldoutVault>, Error> {
-    sqlx::query_as(include_str!("../queries/holdout_list.sql"))
-        .bind(workspace_id)
-        .fetch_all(pool)
-        .await
+    sqlx::query_as(include_str!("../queries/holdout_list.sql")).bind(workspace_id).fetch_all(pool).await
 }
 
 /// Record an evaluation against a sealed holdout and increment its evaluation count.
@@ -419,8 +409,5 @@ pub async fn evaluations_of_holdout(
     pool: &PgPool,
     holdout_id: Uuid,
 ) -> Result<Vec<HoldoutEvaluation>, Error> {
-    sqlx::query_as(include_str!("../queries/holdout_evals_of.sql"))
-        .bind(holdout_id)
-        .fetch_all(pool)
-        .await
+    sqlx::query_as(include_str!("../queries/holdout_evals_of.sql")).bind(holdout_id).fetch_all(pool).await
 }

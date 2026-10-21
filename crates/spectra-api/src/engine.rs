@@ -250,7 +250,8 @@ pub const JOB_KINDS: [&str; 6] = ["backtest", "benchmark", "risk", "stress", "sw
 pub const INGEST_JOB_KIND: &str = "ingest";
 
 /// Job kinds the background worker runs.
-pub const WORKER_KINDS: [&str; 8] = ["backtest", "benchmark", "risk", "stress", INGEST_JOB_KIND, "survival", "sweep", "walk_forward"];
+pub const WORKER_KINDS: [&str; 8] =
+    ["backtest", "benchmark", "risk", "stress", INGEST_JOB_KIND, "survival", "sweep", "walk_forward"];
 
 /// A validated `backtest` payload, or a 422 listing every problem.
 ///

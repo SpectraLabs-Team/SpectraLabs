@@ -1094,12 +1094,22 @@ fn parse_grid_from_json(val: &serde_json::Value) -> Result<spectra_research::Par
 #[allow(clippy::needless_pass_by_value)]
 async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
     let started = Instant::now();
-    let Some(sweep_id) = job.payload.get("sweep_id").and_then(serde_json::Value::as_str).and_then(|id| Uuid::parse_str(id).ok()) else {
+    let Some(sweep_id) = job
+        .payload
+        .get("sweep_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+    else {
         fail_job(&ctx, &job, started, "Sweep job missing sweep_id.", false).await;
         drop(permit);
         return;
     };
-    let Some(version_id) = job.payload.get("dataset_version_id").and_then(serde_json::Value::as_str).and_then(|id| Uuid::parse_str(id).ok()) else {
+    let Some(version_id) = job
+        .payload
+        .get("dataset_version_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+    else {
         fail_job(&ctx, &job, started, "Sweep job missing dataset_version_id.", false).await;
         drop(permit);
         return;
@@ -1119,7 +1129,10 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
         }
     };
 
-    if let Err((msg, retryable)) = ingest::ensure_local(&ctx.store, &ctx.data_dir, &version.checksum, version.blob_sha256.as_deref()).await {
+    if let Err((msg, retryable)) =
+        ingest::ensure_local(&ctx.store, &ctx.data_dir, &version.checksum, version.blob_sha256.as_deref())
+            .await
+    {
         fail_job(&ctx, &job, started, &msg, retryable).await;
         drop(permit);
         return;
@@ -1134,19 +1147,23 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
         }
     };
 
-    let _ = sqlx::query("UPDATE optimization_sweeps SET status='running' WHERE workspace_id=$1 AND id=$2 AND status='queued'")
-        .bind(job.workspace_id)
-        .bind(sweep_id)
-        .execute(&ctx.pool)
-        .await;
+    let _ = sqlx::query(
+        "UPDATE optimization_sweeps SET status='running' WHERE workspace_id=$1 AND id=$2 AND status='queued'",
+    )
+    .bind(job.workspace_id)
+    .bind(sweep_id)
+    .execute(&ctx.pool)
+    .await;
 
     let param_grid_val = job.payload.get("param_grid").cloned().unwrap_or_else(|| serde_json::json!({}));
     let method = job.payload.get("method").and_then(serde_json::Value::as_str).unwrap_or("grid");
     let max_trials = job.payload.get("max_trials").and_then(serde_json::Value::as_u64).map(|n| n as usize);
     let seed = job.payload.get("seed").and_then(serde_json::Value::as_u64).unwrap_or(42);
-    let objective = job.payload.get("objective").and_then(serde_json::Value::as_str).unwrap_or("sharpe").to_string();
+    let objective =
+        job.payload.get("objective").and_then(serde_json::Value::as_str).unwrap_or("sharpe").to_string();
     let dsl_code = job.payload.get("dsl_code").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
-    let strategy = job.payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("sma_cross").to_string();
+    let strategy =
+        job.payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("sma_cross").to_string();
 
     let grid = match parse_grid_from_json(&param_grid_val) {
         Ok(g) => g,
@@ -1169,7 +1186,8 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
     let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
 
     let mut work = {
-        let (bars, objective, dsl_code, strategy, param_sets) = (bars.clone(), objective.clone(), dsl_code.clone(), strategy.clone(), param_sets.clone());
+        let (bars, objective, dsl_code, strategy, param_sets) =
+            (bars.clone(), objective.clone(), dsl_code.clone(), strategy.clone(), param_sets.clone());
         tokio::task::spawn_blocking(move || {
             let backtest_config = spectra_engine::BacktestConfig::default();
             let sweep_res = if let Some(code) = dsl_code {
@@ -1194,7 +1212,8 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     &*obj_fn,
                     spectra_research::SweepOptions { threads: 1 },
                     1,
-                ).map_err(|e| e.to_string())?
+                )
+                .map_err(|e| e.to_string())?
             } else {
                 let factory = spectra_backtest::builtin_factory(&strategy).map_err(|e| e.to_string())?;
                 let obj_fn: Box<spectra_research::Objective<'_>> = if objective == "total_return" {
@@ -1210,7 +1229,8 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     &*obj_fn,
                     spectra_research::SweepOptions { threads: 1 },
                     1,
-                ).map_err(|e| e.to_string())?
+                )
+                .map_err(|e| e.to_string())?
             };
             Ok::<_, String>(sweep_res)
         })
@@ -1286,14 +1306,18 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
             let sharpes: Vec<f64> = sweep_res.trials.iter().map(|t| t.metrics.sharpe).collect();
             let best_trial = sweep_res.best_trial();
 
-            let (dsr, psr, min_trl, pbo, best_params_json, best_metrics_json) = if let Some(best) = best_trial {
+            let (dsr, psr, min_trl, pbo, best_params_json, best_metrics_json) = if let Some(best) = best_trial
+            {
                 let m = spectra_research::moments(&best.returns);
                 let sr_mom = spectra_research::moments(&sharpes);
                 let sr_var = sr_mom.stdev * sr_mom.stdev;
-                let psr = spectra_research::probabilistic_sharpe(best.metrics.sharpe, 0.0, m.n, m.skew, m.kurt);
+                let psr =
+                    spectra_research::probabilistic_sharpe(best.metrics.sharpe, 0.0, m.n, m.skew, m.kurt);
                 let dsr = spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var);
-                let min_trl = spectra_research::min_track_record_length(best.metrics.sharpe, 0.0, m.skew, m.kurt, 0.95);
-                let pbo = if returns_matrix.len() >= 2 && returns_matrix.first().is_some_and(|r| r.len() >= 8) {
+                let min_trl =
+                    spectra_research::min_track_record_length(best.metrics.sharpe, 0.0, m.skew, m.kurt, 0.95);
+                let pbo = if returns_matrix.len() >= 2 && returns_matrix.first().is_some_and(|r| r.len() >= 8)
+                {
                     spectra_research::cscv_pbo(&returns_matrix, 16).map_or(0.0, |p| p.pbo)
                 } else {
                     0.0
@@ -1374,12 +1398,22 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
 #[allow(clippy::needless_pass_by_value)]
 async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
     let started = Instant::now();
-    let Some(report_id) = job.payload.get("report_id").and_then(serde_json::Value::as_str).and_then(|id| Uuid::parse_str(id).ok()) else {
+    let Some(report_id) = job
+        .payload
+        .get("report_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+    else {
         fail_job(&ctx, &job, started, "Walk-forward job missing report_id.", false).await;
         drop(permit);
         return;
     };
-    let Some(version_id) = job.payload.get("dataset_version_id").and_then(serde_json::Value::as_str).and_then(|id| Uuid::parse_str(id).ok()) else {
+    let Some(version_id) = job
+        .payload
+        .get("dataset_version_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+    else {
         fail_job(&ctx, &job, started, "Walk-forward job missing dataset_version_id.", false).await;
         drop(permit);
         return;
@@ -1399,7 +1433,10 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
         }
     };
 
-    if let Err((msg, retryable)) = ingest::ensure_local(&ctx.store, &ctx.data_dir, &version.checksum, version.blob_sha256.as_deref()).await {
+    if let Err((msg, retryable)) =
+        ingest::ensure_local(&ctx.store, &ctx.data_dir, &version.checksum, version.blob_sha256.as_deref())
+            .await
+    {
         fail_job(&ctx, &job, started, &msg, retryable).await;
         drop(permit);
         return;
@@ -1422,13 +1459,17 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
 
     let param_grid_val = job.payload.get("param_grid").cloned().unwrap_or_else(|| serde_json::json!({}));
     let mode_str = job.payload.get("mode").and_then(serde_json::Value::as_str).unwrap_or("rolling");
-    let train_size = job.payload.get("train_size").and_then(serde_json::Value::as_u64).unwrap_or(200) as usize;
+    let train_size =
+        job.payload.get("train_size").and_then(serde_json::Value::as_u64).unwrap_or(200) as usize;
     let test_size = job.payload.get("test_size").and_then(serde_json::Value::as_u64).unwrap_or(50) as usize;
-    let step_size = job.payload.get("step_size").and_then(serde_json::Value::as_u64).unwrap_or(test_size as u64) as usize;
+    let step_size =
+        job.payload.get("step_size").and_then(serde_json::Value::as_u64).unwrap_or(test_size as u64) as usize;
     let embargo = job.payload.get("embargo").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
-    let objective = job.payload.get("objective").and_then(serde_json::Value::as_str).unwrap_or("sharpe").to_string();
+    let objective =
+        job.payload.get("objective").and_then(serde_json::Value::as_str).unwrap_or("sharpe").to_string();
     let dsl_code = job.payload.get("dsl_code").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
-    let strategy = job.payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("sma_cross").to_string();
+    let strategy =
+        job.payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("sma_cross").to_string();
 
     let grid = match parse_grid_from_json(&param_grid_val) {
         Ok(g) => g,
@@ -1457,7 +1498,14 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
     let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
 
     let mut work = {
-        let (bars, objective, dsl_code, strategy, param_sets, wf_config) = (bars.clone(), objective.clone(), dsl_code.clone(), strategy.clone(), param_sets.clone(), wf_config);
+        let (bars, objective, dsl_code, strategy, param_sets, wf_config) = (
+            bars.clone(),
+            objective.clone(),
+            dsl_code.clone(),
+            strategy.clone(),
+            param_sets.clone(),
+            wf_config,
+        );
         tokio::task::spawn_blocking(move || {
             let backtest_config = spectra_engine::BacktestConfig::default();
             let wf_res = if let Some(code) = dsl_code {
@@ -1483,7 +1531,8 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
                     &*obj_fn,
                     spectra_research::SweepOptions { threads: 1 },
                     None,
-                ).map_err(|e| e.to_string())?
+                )
+                .map_err(|e| e.to_string())?
             } else {
                 let factory = spectra_backtest::builtin_factory(&strategy).map_err(|e| e.to_string())?;
                 let obj_fn: Box<spectra_research::Objective<'_>> = if objective == "total_return" {
@@ -1500,7 +1549,8 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
                     &*obj_fn,
                     spectra_research::SweepOptions { threads: 1 },
                     None,
-                ).map_err(|e| e.to_string())?
+                )
+                .map_err(|e| e.to_string())?
             };
             Ok::<_, String>(wf_res)
         })
@@ -1544,25 +1594,30 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
                 0.0
             };
 
-            let folds_vec: Vec<serde_json::Value> = wf_res.folds.iter().enumerate().map(|(idx, f)| {
-                let mut param_map = serde_json::Map::new();
-                for (k, v) in &f.best_params.values {
-                    param_map.insert(k.clone(), serde_json::json!(v));
-                }
-                serde_json::json!({
-                    "fold": idx + 1,
-                    "train_begin": f.fold.train_begin,
-                    "train_end": f.fold.train_end,
-                    "test_begin": f.fold.test_begin,
-                    "test_end": f.fold.test_end,
-                    "in_sample_objective": f.in_sample_objective,
-                    "out_of_sample_objective": f.out_of_sample_objective,
-                    "best_params": serde_json::Value::Object(param_map),
-                    "oos_sharpe": f.oos_metrics.sharpe,
-                    "oos_return": f.oos_metrics.total_return,
-                    "oos_drawdown": f.oos_metrics.max_drawdown,
+            let folds_vec: Vec<serde_json::Value> = wf_res
+                .folds
+                .iter()
+                .enumerate()
+                .map(|(idx, f)| {
+                    let mut param_map = serde_json::Map::new();
+                    for (k, v) in &f.best_params.values {
+                        param_map.insert(k.clone(), serde_json::json!(v));
+                    }
+                    serde_json::json!({
+                        "fold": idx + 1,
+                        "train_begin": f.fold.train_begin,
+                        "train_end": f.fold.train_end,
+                        "test_begin": f.fold.test_begin,
+                        "test_end": f.fold.test_end,
+                        "in_sample_objective": f.in_sample_objective,
+                        "out_of_sample_objective": f.out_of_sample_objective,
+                        "best_params": serde_json::Value::Object(param_map),
+                        "oos_sharpe": f.oos_metrics.sharpe,
+                        "oos_return": f.oos_metrics.total_return,
+                        "oos_drawdown": f.oos_metrics.max_drawdown,
+                    })
                 })
-            }).collect();
+                .collect();
             let folds_json = serde_json::Value::Array(folds_vec);
 
             let _ = optimization::update_walk_forward(

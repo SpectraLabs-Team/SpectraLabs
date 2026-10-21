@@ -166,9 +166,8 @@ async fn parameter_sweep_flow() {
     assert!(list["items"].as_array().unwrap().iter().any(|s| s["id"] == sweep_id));
 
     // 3. Get sweep detail
-    let (status, detail) = f
-        .call("GET", &format!("/api/v1/optimization/sweep/{sweep_id}"), &Value::Null)
-        .await;
+    let (status, detail) =
+        f.call("GET", &format!("/api/v1/optimization/sweep/{sweep_id}"), &Value::Null).await;
     assert_eq!(status, 200);
     assert_eq!(detail["sweep"]["id"], sweep_id);
     assert!(detail["trials"].is_array());
@@ -210,9 +209,8 @@ async fn walk_forward_flow() {
     assert!(list["items"].as_array().unwrap().iter().any(|r| r["id"] == report_id));
 
     // 3. Get walk-forward detail
-    let (status, detail) = f
-        .call("GET", &format!("/api/v1/optimization/walkforward/{report_id}"), &Value::Null)
-        .await;
+    let (status, detail) =
+        f.call("GET", &format!("/api/v1/optimization/walkforward/{report_id}"), &Value::Null).await;
     assert_eq!(status, 200);
     assert_eq!(detail["id"], report_id);
     assert_eq!(detail["mode"], "rolling");
@@ -261,9 +259,8 @@ async fn holdout_vault_budget_lockout_flow() {
     assert_eq!(eval1["evaluation_num"], 1);
 
     // Check status
-    let (status, detail) = f
-        .call("GET", &format!("/api/v1/optimization/holdout/{holdout_id}"), &Value::Null)
-        .await;
+    let (status, detail) =
+        f.call("GET", &format!("/api/v1/optimization/holdout/{holdout_id}"), &Value::Null).await;
     assert_eq!(status, 200);
     assert_eq!(detail["holdout"]["evaluations_used"], 1);
 
@@ -279,9 +276,8 @@ async fn holdout_vault_budget_lockout_flow() {
     assert_eq!(eval2["evaluation_num"], 2);
 
     // Check status
-    let (_, detail) = f
-        .call("GET", &format!("/api/v1/optimization/holdout/{holdout_id}"), &Value::Null)
-        .await;
+    let (_, detail) =
+        f.call("GET", &format!("/api/v1/optimization/holdout/{holdout_id}"), &Value::Null).await;
     assert_eq!(detail["holdout"]["evaluations_used"], 2);
 
     // 5. Third evaluation MUST be refused (403 holdout_budget_exhausted)

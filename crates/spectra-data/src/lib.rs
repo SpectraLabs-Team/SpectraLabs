@@ -7,6 +7,7 @@ pub mod calendar;
 pub mod chart;
 pub mod dataset;
 pub mod datastore;
+mod records;
 pub mod report;
 pub mod settings;
 pub mod time;
@@ -16,8 +17,8 @@ pub use calendar::Exchange;
 pub use chart::{chart_points, ChartPoint};
 pub use dataset::{
     assess_quality, compute_dataset_id, derive_dataset, format_quality_report, load_csv, load_csv_file,
-    load_csv_with_progress, preview_csv, CsvOptions, CsvPreview, DataQualityReport, Dataset, DatasetInfo,
-    InvalidRowPolicy, RowIssue, SymbolStats, SymbolTable,
+    load_csv_reader, preview_csv, report_csv_reader, CsvOptions, CsvPreview, DataQualityReport, Dataset,
+    DatasetInfo, InvalidRowPolicy, RowIssue, SymbolStats, SymbolTable,
 };
 pub use datastore::DataStore;
 pub use report::{preview_json, quality_report_json};

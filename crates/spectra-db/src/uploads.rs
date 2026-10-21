@@ -147,3 +147,156 @@ pub async fn audit(pool: &PgPool, e: &AuditEvent<'_>) -> Result<i64, Error> {
         .fetch_one(pool)
         .await
 }
+
+// ---------------------------------------------------------------------------
+// Resumable uploads (M1b task 9)
+// ---------------------------------------------------------------------------
+
+/// How long a resumable upload may sit idle before it is removed.
+pub const SESSION_TTL_SECS: i32 = 24 * 60 * 60;
+
+/// A resumable upload in progress (or finished: `upload_id` set).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UploadSession {
+    /// Session id (also names its staging file).
+    pub id: Uuid,
+    /// File name as given.
+    pub filename: String,
+    /// Bytes the file will have.
+    pub size_bytes: i64,
+    /// Bytes received so far: where the next chunk starts.
+    pub received_bytes: i64,
+    /// The upload it became, once completed.
+    pub upload_id: Option<Uuid>,
+    /// Removed after this unless more arrives.
+    pub expires_at: DateTime<Utc>,
+}
+
+type SessionRow = (Uuid, String, i64, i64, Option<Uuid>, DateTime<Utc>);
+
+fn session((id, filename, size_bytes, received_bytes, upload_id, expires_at): SessionRow) -> UploadSession {
+    UploadSession { id, filename, size_bytes, received_bytes, upload_id, expires_at }
+}
+
+/// Opens a session. `Ok(None)` when the workspace already has `max_open`
+/// unfinished sessions.
+///
+/// # Errors
+/// Any database error.
+pub async fn create_session(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    created_by: Option<Uuid>,
+    filename: &str,
+    size_bytes: i64,
+    max_open: i32,
+) -> Result<Option<UploadSession>, Error> {
+    let row: Option<SessionRow> = sqlx::query_as(include_str!("../queries/upload_session_create.sql"))
+        .bind(workspace_id)
+        .bind(created_by)
+        .bind(filename)
+        .bind(size_bytes)
+        .bind(SESSION_TTL_SECS)
+        .bind(max_open)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(session))
+}
+
+/// The session `id` of `workspace_id`, unless it has expired.
+///
+/// # Errors
+/// Any database error.
+pub async fn get_session(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<Option<UploadSession>, Error> {
+    let row: Option<SessionRow> = sqlx::query_as(include_str!("../queries/upload_session_get.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(session))
+}
+
+/// Locks the session row for the rest of the transaction (chunks of one
+/// session are written one at a time).
+///
+/// # Errors
+/// Any database error.
+pub async fn lock_session(
+    conn: &mut sqlx::PgConnection,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<Option<UploadSession>, Error> {
+    let row: Option<SessionRow> = sqlx::query_as(include_str!("../queries/upload_session_lock.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(conn)
+        .await?;
+    Ok(row.map(session))
+}
+
+/// Records `len` bytes written at `offset`; the new received total, or
+/// `None` if the session is not at `offset` or the chunk would not fit.
+///
+/// # Errors
+/// Any database error.
+pub async fn advance_session(
+    conn: &mut sqlx::PgConnection,
+    workspace_id: Uuid,
+    id: Uuid,
+    offset: i64,
+    len: i64,
+) -> Result<Option<i64>, Error> {
+    sqlx::query_scalar(include_str!("../queries/upload_session_advance.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .bind(offset)
+        .bind(len)
+        .bind(SESSION_TTL_SECS)
+        .fetch_optional(conn)
+        .await
+}
+
+/// Points a fully received session at its upload.
+///
+/// # Errors
+/// Any database error.
+pub async fn finish_session(
+    conn: &mut sqlx::PgConnection,
+    workspace_id: Uuid,
+    id: Uuid,
+    upload_id: Uuid,
+) -> Result<(), Error> {
+    sqlx::query(include_str!("../queries/upload_session_finish.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .bind(upload_id)
+        .execute(conn)
+        .await
+        .map(|_| ())
+}
+
+/// Abandons a session; `true` if it existed.
+///
+/// # Errors
+/// Any database error.
+pub async fn delete_session(pool: &PgPool, workspace_id: Uuid, id: Uuid) -> Result<bool, Error> {
+    let gone: Option<Uuid> = sqlx::query_scalar(include_str!("../queries/upload_session_delete.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(gone.is_some())
+}
+
+/// Removes up to `limit` expired sessions; their ids, so the caller can
+/// remove their staging files.
+///
+/// # Errors
+/// Any database error.
+pub async fn expire_sessions(pool: &PgPool, limit: i32) -> Result<Vec<Uuid>, Error> {
+    sqlx::query_scalar(include_str!("../queries/upload_session_expire.sql")).bind(limit).fetch_all(pool).await
+}

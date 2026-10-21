@@ -5,15 +5,15 @@ How market data gets into Spectra and how a backtest finds it. The command-line 
 gives the same dataset ids; this page covers the API the Studio uses.
 
 Status: M1 Phase M1a is complete: ingest settings, preview, uploads, the ingest job, the dataset
-API and the Studio's **Data** tab (tasks 1–8). Phase M1b task 10 (exchange calendars, DST-aware
-timezones, session checks) is in place. Research-grade data (Parquet, corporate actions, point-in-time)
-is continuing in M1b.
+API and the Studio's **Data** tab (tasks 1–8). From M1b: streaming ingest, resumable chunked uploads
+(up to 1 GiB), exchange calendars, and DST-aware timezones (tasks 9–10). Research-grade data
+(Parquet, corporate actions, point-in-time) is continuing in M1b.
 
 ## The flow
 
 1. **Preview** the first rows with the chosen settings (`POST /api/v1/datasets/preview`).
-2. **Upload** the whole file (`POST /api/engine-upload` in the dashboard → the engine's
-   `POST /api/v1/uploads`). It is stored in the artifact store and counts against the workspace's
+2. **Upload** the whole file, in resumable chunks (see below; `POST /api/engine-upload` takes a
+   whole file in one request too). It is stored in the artifact store and counts against the workspace's
    storage quota.
 3. **Ingest** it (`POST /api/v1/datasets/ingest`): a queued `ingest` job parses the file on a
    worker, stores the dataset and registers it as the next version of the named dataset.
@@ -169,10 +169,41 @@ It keeps the keys `spectra-db dataset-add` has always written (`rows_total`, `ro
 zero-volume bars, outlier returns, stale runs) and the `thresholds` used. The OpenAPI schema is
 `QualityReport`.
 
-## Upload: `POST /api/engine-upload?filename=prices.csv`
+## Resumable upload (what the Studio uses)
 
-The browser sends the raw file as the body (not a form), at most **100 MiB**. Editors only, from a
-signed-in session; API tokens can't upload yet.
+Files up to `SPECTRA_MAX_UPLOAD_BYTES` (default **1 GiB**; `GET /api/v1/uploads/limits` reports
+it) go up in chunks, so an interrupted upload continues where it stopped. Editors only, from a
+signed-in session.
+
+1. `POST /api/v1/uploads/sessions` `{filename, size}` opens a session: `{id, received: 0,
+   chunk_bytes, expires_at}`. The size counts against the storage quota from the start (413
+   `quota_exceeded`); a workspace may have 5 unfinished sessions (409 `too_many_uploads`).
+2. Each chunk (at most 8 MiB) goes to the dashboard's `PUT /api/engine-upload/sessions/{id}?offset=N`,
+   which signs it and forwards it to the engine's `PUT /api/v1/uploads/sessions/{id}/chunk`. `N`
+   must be exactly the bytes received so far; otherwise the answer is 409 `offset_mismatch` with
+   `details.received`, which is where to continue. So a chunk whose answer was lost can simply be
+   sent again. Chunks of one session are written one at a time (the session row is locked).
+3. `GET /api/v1/uploads/sessions/{id}` says how far it got. The Studio remembers the session per
+   file (name, size, modification time) in the browser, so choosing the same file again after a
+   reload or a dropped connection resumes it.
+4. `POST /api/v1/uploads/sessions/{id}/complete` hashes the received file, moves it into the
+   artifact store and records the upload, exactly as the single upload below; 409 `incomplete`
+   if bytes are missing. Completing again returns the same upload (200), so a lost answer is safe
+   to retry.
+5. `DELETE /api/v1/uploads/sessions/{id}` abandons it. Sessions idle for 24 hours are removed by the
+   API, with their staging files.
+
+The Studio's client retries a failed chunk up to 6 times with backoff (network errors, 429 and
+5xx) and stops at once on anything else (quota, size, a missing session).
+
+The staging files live in the artifact store's `staging/` directory (local backend) or the system
+temporary directory (S3). With more than one API instance, that directory has to be shared, or a
+session's chunks routed to one instance.
+
+## Single upload: `POST /api/engine-upload?filename=prices.csv`
+
+Still served, for scripts and smaller files. The browser sends the raw file as the body (not a
+form), at most **100 MiB**. Editors only, from a signed-in session; API tokens can't upload yet.
 
 The dashboard route writes the file to a private temporary file while hashing it (it is never held
 in memory), then streams it to the engine's `POST /api/v1/uploads` with the usual signed headers
@@ -241,8 +272,27 @@ way (tested in `crates/spectra-api/tests/ingest_flow.rs`). The id doesn't depend
 name, row order, formatting or the upload. Settings that read it differently (another offset, no
 volume column) give a different id.
 
+## Memory
+
+Ingest reads the file as a stream: one CSV record is held at a time, rows are kept as compact
+numbers (each symbol name is stored once), and the file is never loaded whole, from either the
+local volume or S3 (downloaded to a staging file in 8 MiB ranges first). Measured on a 100 MB
+CSV of 2.19 M bars and 200 symbols: **269 MB** peak on the worker, against 1.48 GB before
+(the same dataset id, slightly faster). As a rule of thumb, ingest needs about 1.3× the CSV's
+size, roughly 120 bytes per bar, so a 1 GiB file needs about 1.4 GB on the worker.
+
+The streaming parser gives byte-for-byte the same result as the old one, including which error a
+refused file gets: on an error it reads on to the end, because an unterminated quote anywhere in
+the file still takes precedence, as before. This was checked against the previous implementation
+on 80,000 generated files (`tests` in `crates/spectra-data/src/records.rs` keep the old tokenizer
+as a reference), and the C++ parity fixtures pass.
+
+Integrity: every byte read for an ingest is hashed and the whole file is read whatever the parser
+made of it, so a stored upload that no longer matches its SHA-256 fails the job as corrupt (never
+as "bad rows").
+
 ## Limits for now
 
-- 100 MiB per file. The whole file is parsed in memory, so ingesting a 100 MiB CSV can briefly
-  use a few times that on the worker. Streaming ingest and resumable uploads are M1b (task 9).
+- Backtests still load the whole dataset into memory: the engine takes every bar as one list.
+  Streaming bars through a backtest is M3 task 14.
 - Fixed UTC offsets only (no daylight saving); exchange calendars are M1b (task 10).

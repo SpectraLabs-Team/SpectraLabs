@@ -99,6 +99,10 @@ accounts created before the mirror existed, the first time they call the engine.
   the API and the workers; default 1 GiB).
 - Uploads not ingested within 24 hours are removed by the workers, with their files unless
   something else uses the same bytes.
+- Resumable uploads: `SPECTRA_MAX_UPLOAD_BYTES` on the API sets the largest file (default 1 GiB).
+  Chunks are staged in `<ARTIFACT_DIR>/staging` (local) or the system temporary directory (S3) and
+  the API removes sessions idle for 24 hours. With several API instances, share that directory.
+  Ingest needs roughly 1.3× the file's size in memory on the worker (about 1.4 GB for 1 GiB).
 - Volumes created by an image older than M1 may have a root-owned `datasets` directory. If a
   worker logs a permission error there, run
   `docker compose run --rm -u root worker chown -R 10001 /var/lib/spectra/datasets`.

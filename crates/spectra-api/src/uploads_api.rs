@@ -55,7 +55,7 @@ fn is_sha256_hex(s: &str) -> bool {
 }
 
 /// Keeps a file name for display: no path, no control characters.
-fn clean_filename(name: &str) -> String {
+pub(crate) fn clean_filename(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or("");
     base.chars().filter(|c| !c.is_control()).take(255).collect::<String>().trim().to_string()
 }
@@ -170,18 +170,46 @@ pub(crate) async fn upload(State(st): State<AppState>, req: Request) -> Response
     }
 
     // 4. Into the store (a rename for the local store), then the row.
-    if let Err(e) = store.put_file(path.clone(), &sha256).await {
-        let _ = tokio::fs::remove_file(&path).await;
-        tracing::error!(error = %e, "upload not stored");
-        return error_response(503, "Could not store the file; try again.");
+    match store_and_record(&st, &pool, ws, user, &request_id, &path, &sha256, length, &filename).await {
+        Ok(view) => crate::jobs_api::to_json(201, &view),
+        Err(r) => r,
     }
+}
+
+/// Moves a staged file whose SHA-256 is known into the artifact store,
+/// records the upload (re-checking the quota under a lock) and audits it.
+/// Shared by single uploads and completed resumable ones.
+#[allow(clippy::too_many_arguments, clippy::result_large_err)] // the error is the finished response
+pub(crate) async fn store_and_record(
+    st: &AppState,
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    user: Option<Uuid>,
+    request_id: &str,
+    path: &std::path::Path,
+    sha256: &str,
+    length: u64,
+    filename: &str,
+) -> Result<UploadView, Response> {
+    let Some(store) = st.cfg.artifacts.clone() else {
+        return Err(error_response(
+            503,
+            "Uploads need the artifact store, which this server was started without.",
+        ));
+    };
+    if let Err(e) = store.put_file(path.to_path_buf(), sha256).await {
+        let _ = tokio::fs::remove_file(path).await;
+        tracing::error!(error = %e, "upload not stored");
+        return Err(error_response(503, "Could not store the file; try again."));
+    }
+    let size = i64::try_from(length).unwrap_or(i64::MAX);
     let recorded = spectra_db::uploads::record(
-        &pool,
+        pool,
         &spectra_db::uploads::NewUpload {
             workspace_id: ws,
-            sha256: &sha256,
+            sha256,
             size_bytes: size,
-            filename: &filename,
+            filename,
             created_by: user,
             default_quota: st.cfg.artifact_quota_bytes,
         },
@@ -190,19 +218,19 @@ pub(crate) async fn upload(State(st): State<AppState>, req: Request) -> Response
     let (upload_id, expires_at) = match recorded {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return error_with_code(413, "quota_exceeded", "This workspace's storage quota is full.");
+            return Err(error_with_code(413, "quota_exceeded", "This workspace's storage quota is full."))
         }
-        Err(e) => return crate::jobs_api::db_error(&e),
+        Err(e) => return Err(crate::jobs_api::db_error(&e)),
     };
     let audit = spectra_db::uploads::audit(
-        &pool,
+        pool,
         &spectra_db::uploads::AuditEvent {
             workspace_id: ws,
             actor_id: user,
             action: "upload.created",
             target_type: "upload",
             target_id: upload_id.to_string(),
-            request_id: &request_id,
+            request_id,
             details: serde_json::json!({ "filename": filename, "size": length, "sha256": sha256 }),
         },
     )
@@ -210,8 +238,13 @@ pub(crate) async fn upload(State(st): State<AppState>, req: Request) -> Response
     if let Err(e) = audit {
         tracing::error!(error = %e, %upload_id, "upload not written to the audit log");
     }
-    let view = UploadView { id: upload_id, sha256, size: length, filename, expires_at };
-    crate::jobs_api::to_json(201, &view)
+    Ok(UploadView {
+        id: upload_id,
+        sha256: sha256.to_string(),
+        size: length,
+        filename: filename.to_string(),
+        expires_at,
+    })
 }
 
 /// Writes the body to `path`, hashing it, refusing more than `limit` bytes.

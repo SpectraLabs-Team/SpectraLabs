@@ -76,6 +76,12 @@ const REGISTRY_PATTERNS: [RegExp, string][] = [
   // Data Studio (M1). A preview stores nothing, but it is the first step of an upload: editors only.
   'api/v1/datasets/preview': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/datasets/ingest': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  // Resumable uploads (M1b): start, check, complete or abandon; chunks go through app/api/engine-upload/sessions.
+  'api/v1/uploads/limits': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  'api/v1/uploads/sessions': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/uploads/sessions/{id}': { method: ['GET', 'DELETE'], minRole: 'editor', timeoutMs: 20_000 },
+  // Hashes and stores the whole file (up to SPECTRA_MAX_UPLOAD_BYTES).
+  'api/v1/uploads/sessions/{id}/complete': { method: 'POST', minRole: 'editor', timeoutMs: 300_000 },
   'api/v1/datasets/{id}': { method: ['GET', 'PATCH'], minRole: 'viewer', methodRoles: { PATCH: 'editor' }, timeoutMs: 10_000 },
   'api/v1/datasets/versions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
   'api/v1/datasets/versions/{id}/runs': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
@@ -91,6 +97,9 @@ const REGISTRY_PATTERNS: [RegExp, string][] = [
 export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };
 >>>>>>> origin/main
 
+/** Chunks of a resumable upload (app/api/engine-upload/sessions/[id]): at most 8 MiB each. Editors only. */
+export const ENGINE_CHUNK_ROUTE = { minRole: 'editor' as WorkspaceRole, timeoutMs: 120_000, maxBytes: 8 * 1024 * 1024 };
+
 /** Map UUID job URLs to their allowlist policy while preserving the real path for signing. */
 export function routePolicyKey(path: string): string {
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}\/cancel$/i.test(path)) return 'api/v1/jobs/{id}/cancel';
@@ -104,6 +113,8 @@ export function routePolicyKey(path: string): string {
   }
   const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series)?$/i.exec(path);
   if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
+  const session = /^api\/v1\/uploads\/sessions\/[0-9a-f-]{36}(\/complete)?$/i.exec(path);
+  if (session) return `api/v1/uploads/sessions/{id}${session[1] ?? ''}`;
   const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars)?$/i.exec(path);
   if (version) return `api/v1/datasets/versions/{id}${version[1] ?? ''}`;
   if (/^api\/v1\/datasets\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/datasets/{id}';

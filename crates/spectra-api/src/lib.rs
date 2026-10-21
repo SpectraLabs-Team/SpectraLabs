@@ -20,6 +20,7 @@
 //! | `POST /api/v1/datasets/preview` | signed | parse a file's first rows with ingest settings; see [`datasets_api`] |
 //! | `POST /api/v1/uploads` | signed (streamed) | store a data file of up to 100 MiB; see [`uploads_api`] |
 //! | `POST /api/v1/datasets/ingest` | signed | queue an `ingest` job: upload → dataset version |
+//! | `/api/v1/uploads/sessions[/{id}[/chunk\|/complete]]`, `GET /api/v1/uploads/limits` | signed | resumable uploads; see [`sessions_api`] |
 //! | `GET/PATCH /api/v1/datasets/{id}`, `GET/DELETE /api/v1/datasets/versions/{id}`, `.../runs`, `.../bars` | signed | browse, rename, delete; chart data |
 //!
 //! Every engine route is also served at its old `/api/...` path (the jobs
@@ -49,6 +50,7 @@ pub mod jobs_api;
 pub mod observability;
 pub mod openapi;
 pub mod registry_api;
+pub mod sessions_api;
 pub mod telemetry;
 pub mod uploads_api;
 
@@ -63,7 +65,7 @@ use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, post, MethodRouter};
+use axum::routing::{any, get, post, put, MethodRouter};
 use axum::Router;
 use spectra_core::{Json, ENGINE_VERSION};
 use spectra_db::PgPool;
@@ -107,6 +109,8 @@ pub struct ApiConfig {
     pub artifact_quota_bytes: i64,
     /// Local dataset store to chart command-line versions from, if mounted.
     pub data_dir: Option<std::path::PathBuf>,
+    /// Largest resumable upload (`SPECTRA_MAX_UPLOAD_BYTES`).
+    pub max_upload_bytes: u64,
 }
 
 impl ApiConfig {
@@ -118,6 +122,7 @@ impl ApiConfig {
             artifacts: None,
             artifact_quota_bytes: config::DEFAULT_ARTIFACT_QUOTA_BYTES,
             data_dir: None,
+            max_upload_bytes: sessions_api::DEFAULT_MAX_UPLOAD_BYTES,
         }
     }
 
@@ -135,6 +140,7 @@ impl From<&Config> for ApiConfig {
             artifacts: None,
             artifact_quota_bytes: c.artifact_quota_bytes,
             data_dir: c.data_dir.clone(),
+            max_upload_bytes: c.max_upload_bytes,
         }
     }
 }
@@ -219,6 +225,19 @@ fn error_response(status: u16, message: impl Into<String>) -> Response {
 fn error_with_code(status: u16, code: &'static str, message: impl Into<String>) -> Response {
     let mut resp = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR).into_response();
     resp.extensions_mut().insert(ErrorBody { code, message: message.into(), details: None });
+    resp
+}
+
+/// An error with a specific `code` and structured `details` (for example
+/// where a resumable upload stands).
+fn error_with_details(
+    status: u16,
+    code: &'static str,
+    message: impl Into<String>,
+    details: Json,
+) -> Response {
+    let mut resp = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR).into_response();
+    resp.extensions_mut().insert(ErrorBody { code, message: message.into(), details: Some(details) });
     resp
 }
 
@@ -772,9 +791,29 @@ pub async fn serve(
             }
         })
     });
+    // Resumable uploads idle for 24 hours: their rows and staging files go (this process owns the staging files).
+    let sweeper = db
+        .clone()
+        .zip(cfg.artifacts.as_ref().map(spectra_db::artifacts::ArtifactBackend::staging_dir))
+        .map(|(pool, staging)| {
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(600));
+                loop {
+                    interval.tick().await;
+                    match sessions_api::sweep_expired(&pool, &staging).await {
+                        Ok(0) => {}
+                        Ok(n) => tracing::info!("removed {n} abandoned upload(s)"),
+                        Err(error) => tracing::warn!(%error, "could not sweep abandoned uploads"),
+                    }
+                }
+            })
+        });
     let result = axum::serve(listener, router(cfg, db)).with_graceful_shutdown(shutdown).await;
     if let Some(sampler) = sampler {
         sampler.abort();
+    }
+    if let Some(sweeper) = sweeper {
+        sweeper.abort();
     }
     result
 }

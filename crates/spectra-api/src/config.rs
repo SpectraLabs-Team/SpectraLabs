@@ -73,6 +73,8 @@ pub struct Config {
     /// versions registered from the command line (the others are read from
     /// the artifact store).
     pub data_dir: Option<std::path::PathBuf>,
+    /// Largest resumable upload in bytes (`SPECTRA_MAX_UPLOAD_BYTES`, default 1 GiB).
+    pub max_upload_bytes: u64,
 }
 
 /// Everything wrong with the environment, one line per problem.
@@ -184,6 +186,15 @@ impl Config {
                 DEFAULT_ARTIFACT_QUOTA_BYTES
             }
         };
+        let max_upload_bytes = match val("SPECTRA_MAX_UPLOAD_BYTES").map(|v| v.parse::<u64>()) {
+            None => crate::sessions_api::DEFAULT_MAX_UPLOAD_BYTES,
+            Some(Ok(n)) if n >= 1024 => n,
+            Some(_) => {
+                problems
+                    .push("SPECTRA_MAX_UPLOAD_BYTES must be a whole number of bytes, at least 1024".into());
+                crate::sessions_api::DEFAULT_MAX_UPLOAD_BYTES
+            }
+        };
         if problems.is_empty() {
             Ok(Self {
                 addr,
@@ -195,6 +206,7 @@ impl Config {
                 artifact_storage,
                 artifact_quota_bytes,
                 data_dir: val("SPECTRA_DATA_DIR").map(Into::into),
+                max_upload_bytes,
             })
         } else {
             Err(ConfigError(problems))

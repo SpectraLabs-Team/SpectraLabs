@@ -289,6 +289,41 @@ impl ArtifactBackend {
         }
     }
 
+    /// The bytes for `sha256` as a file on this machine, for reading as a
+    /// stream: the stored file itself for a local backend, or a download
+    /// into `staging` for S3 (fetched in 8 MiB ranges, never held whole).
+    /// The caller verifies the content (for example, by hashing it while
+    /// reading) and removes the file when [`LocalFile::temporary`] is set.
+    ///
+    /// # Errors
+    /// `InvalidInput` for a malformed hash, `NotFound` if absent, or any
+    /// I/O or object-store error.
+    pub async fn local_file(&self, sha256: &str, staging: &Path) -> io::Result<LocalFile> {
+        if !is_sha256_hex(sha256) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a lower-case SHA-256 hex string"));
+        }
+        #[cfg(not(feature = "s3"))]
+        let _ = staging; // only S3 downloads into it
+        match self {
+            Self::Local(store) => {
+                let path = store.root().join(ArtifactStore::relative_path(sha256));
+                if tokio::fs::metadata(&path).await.is_err() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("artifact {sha256} not found"),
+                    ));
+                }
+                Ok(LocalFile { path, temporary: false })
+            }
+            #[cfg(feature = "s3")]
+            Self::S3(store) => {
+                let path = staging.join(format!("download-{sha256}-{}", std::process::id()));
+                store.download(sha256, &path).await?;
+                Ok(LocalFile { path, temporary: true })
+            }
+        }
+    }
+
     /// A local directory to write incoming files to before [`Self::put_file`]:
     /// inside the store for a local backend (so the move is a rename), the
     /// system temporary directory otherwise.
@@ -308,6 +343,15 @@ impl ArtifactBackend {
             Self::S3(store) => format!("s3://{}/{}", store.bucket(), store.prefix()),
         }
     }
+}
+
+/// An artifact's bytes as a file on this machine; see [`ArtifactBackend::local_file`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalFile {
+    /// Where to read it.
+    pub path: PathBuf,
+    /// A downloaded copy the caller should remove when done.
+    pub temporary: bool,
 }
 
 /// Why an artifact could not be recorded.
@@ -560,6 +604,39 @@ pub mod s3 {
             Ok(Stored { path: ArtifactStore::relative_path(&sha256), sha256, size })
         }
 
+        /// Writes the object for `sha256` to `dest`, in 8 MiB ranges.
+        ///
+        /// # Errors
+        /// `NotFound` if absent, or any object-store or I/O error.
+        pub async fn download(&self, sha256: &str, dest: &std::path::Path) -> io::Result<()> {
+            use tokio::io::AsyncWriteExt;
+            const PART: u64 = 8 << 20;
+            let location = self.location(sha256);
+            let size = match self.store.head(&location).await {
+                Ok(meta) => meta.size,
+                Err(e) if not_found(&e) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("artifact {sha256} not found"),
+                    ))
+                }
+                Err(e) => return Err(io::Error::other(e)),
+            };
+            if let Some(dir) = dest.parent() {
+                tokio::fs::create_dir_all(dir).await?;
+            }
+            let mut file = tokio::fs::File::create(dest).await?;
+            let mut at = 0u64;
+            while at < size {
+                let end = (at + PART).min(size);
+                let part = self.store.get_range(&location, at..end).await.map_err(io::Error::other)?;
+                file.write_all(&part).await?;
+                at = end;
+            }
+            file.sync_all().await?;
+            Ok(())
+        }
+
         /// Removes the object for `sha256`; a missing object is not an error.
         ///
         /// # Errors
@@ -633,6 +710,23 @@ pub mod s3 {
         }
 
         #[tokio::test]
+        async fn local_file_downloads_in_parts() {
+            let s = S3ArtifactStore::new(Arc::new(InMemory::new()), "bucket", "p");
+            let data: Vec<u8> = (0..(9u32 << 20)).map(|i| (i % 251) as u8).collect(); // > one 8 MiB part
+            let a = s.put(data.clone()).await.unwrap();
+            let backend = super::super::ArtifactBackend::S3(s);
+            let dir = std::env::temp_dir().join(format!("spectra-s3-dl-{}", std::process::id()));
+            let f = backend.local_file(&a.sha256, &dir).await.unwrap();
+            assert!(f.temporary);
+            assert_eq!(std::fs::read(&f.path).unwrap(), data);
+            assert_eq!(
+                backend.local_file(&"0".repeat(64), &dir).await.unwrap_err().kind(),
+                io::ErrorKind::NotFound
+            );
+            let _ = std::fs::remove_dir_all(dir);
+        }
+
+        #[tokio::test]
         async fn delete_removes_the_object_and_tolerates_absence() {
             let s = S3ArtifactStore::new(Arc::new(InMemory::new()), "bucket", "p");
             let a = s.put(b"bye".to_vec()).await.unwrap();
@@ -690,6 +784,25 @@ mod tests {
         assert_eq!(s.get(&a.sha256).unwrap_err().kind(), io::ErrorKind::InvalidData);
         assert_eq!(s.get("../../etc/passwd").unwrap_err().kind(), io::ErrorKind::InvalidInput);
         assert_eq!(s.get(&"0".repeat(64)).unwrap_err().kind(), io::ErrorKind::NotFound);
+        let _ = fs::remove_dir_all(s.root());
+    }
+
+    #[tokio::test]
+    async fn local_file_is_the_stored_file_itself() {
+        let s = temp_store("local-file");
+        let stored = s.put(b"a,b\n1,2\n").unwrap();
+        let backend = ArtifactBackend::Local(s.clone());
+        let f = backend.local_file(&stored.sha256, Path::new("/nonexistent")).await.unwrap();
+        assert!(!f.temporary);
+        assert_eq!(fs::read(&f.path).unwrap(), b"a,b\n1,2\n");
+        assert_eq!(
+            backend.local_file(&"0".repeat(64), Path::new("/x")).await.unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            backend.local_file("../x", Path::new("/x")).await.unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
         let _ = fs::remove_dir_all(s.root());
     }
 

@@ -61,6 +61,7 @@ services:
       ARTIFACT_STORAGE: local # registry artifacts, uploads, and backtest chart series
       ARTIFACT_DIR: /var/lib/spectra/artifacts
       SPECTRA_DATA_DIR: /var/lib/spectra/datasets # read only, to chart command-line datasets
+      SPECTRA_MAX_UPLOAD_BYTES: ${SPECTRA_MAX_UPLOAD_BYTES:-1073741824} # largest resumable upload (1 GiB)
     volumes:
       - artifacts:/var/lib/spectra/artifacts # written by uploads (M1), read for backtest series
       - datasets:/var/lib/spectra/datasets:ro

@@ -32,9 +32,10 @@ use spectra_core::Json;
 
 use crate::calendar::Exchange;
 use crate::dataset::{
-    find_column, normalise_header, parse_records, CsvOptions, InvalidRowPolicy, CLOSE_ALIASES, HIGH_ALIASES,
-    LOW_ALIASES, OPEN_ALIASES, SYMBOL_ALIASES, TIMESTAMP_ALIASES, VOLUME_ALIASES,
+    find_column, normalise_header, CsvOptions, InvalidRowPolicy, CLOSE_ALIASES, HIGH_ALIASES, LOW_ALIASES,
+    OPEN_ALIASES, SYMBOL_ALIASES, TIMESTAMP_ALIASES, VOLUME_ALIASES,
 };
+use crate::records::{parse_records, Record};
 use crate::time::{parse_timestamp, TimeFormat, TimeOptions};
 use crate::timezone::Timezone;
 
@@ -430,7 +431,7 @@ impl Suggestions {
 pub fn suggest(sample: &[u8]) -> Suggestions {
     let sample = sample.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(sample);
     // The delimiter that gives the header the most fields and every sampled row the same count.
-    let mut best: Option<(u8, Vec<crate::dataset::Record>)> = None;
+    let mut best: Option<(u8, Vec<Record>)> = None;
     for &d in CANDIDATE_DELIMITERS {
         let Ok(mut records) = parse_records(sample, d) else { continue };
         records.truncate(SUGGEST_ROWS + 1);

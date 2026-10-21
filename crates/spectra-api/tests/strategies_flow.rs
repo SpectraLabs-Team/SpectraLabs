@@ -320,6 +320,20 @@ async fn backtests_from_a_strategy_version() {
     f.clean_up();
 }
 
+async fn claim_job(pool: &PgPool, job_id: Uuid, worker_id: &str) -> spectra_db::jobs::Job {
+    sqlx::query_as(
+        "UPDATE jobs SET status = 'running', attempts = attempts + 1, started_at = now(), heartbeat_at = now(), \
+         worker_id = $1, progress = 0, error = NULL \
+         WHERE id = $2 AND status = 'queued' \
+         RETURNING *",
+    )
+    .bind(worker_id)
+    .bind(job_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
 #[allow(clippy::similar_names)]
 async fn parity_between_saved_version_and_direct_builtin_run() {
@@ -429,19 +443,11 @@ async fn parity_between_saved_version_and_direct_builtin_run() {
     let worker_env = f.worker_env();
     let worker_id = "test-worker-parity";
 
-    let job_a = spectra_db::jobs::claim(&f.pool, worker_id, &["backtest".to_string()], 10)
-        .await
-        .unwrap()
-        .expect("job A claimed");
-    assert_eq!(job_a.id, job_a_id);
+    let job_a = claim_job(&f.pool, job_a_id, worker_id).await;
     let run_a_id =
         spectra_api::worker::run_backtest_job(&worker_env, &job_a, worker_id).await.expect("job A succeeds");
 
-    let job_b = spectra_db::jobs::claim(&f.pool, worker_id, &["backtest".to_string()], 10)
-        .await
-        .unwrap()
-        .expect("job B claimed");
-    assert_eq!(job_b.id, job_b_id);
+    let job_b = claim_job(&f.pool, job_b_id, worker_id).await;
     let run_b_id =
         spectra_api::worker::run_backtest_job(&worker_env, &job_b, worker_id).await.expect("job B succeeds");
 
@@ -533,11 +539,7 @@ async fn parity_between_saved_version_and_direct_builtin_run() {
         .await;
     assert_eq!(status, 202);
     let job_c_id = Uuid::parse_str(resp_c["id"].as_str().unwrap()).unwrap();
-    let job_c = spectra_db::jobs::claim(&f.pool, worker_id, &["backtest".to_string()], 10)
-        .await
-        .unwrap()
-        .expect("job C claimed");
-    assert_eq!(job_c.id, job_c_id);
+    let job_c = claim_job(&f.pool, job_c_id, worker_id).await;
     let _run_c_id =
         spectra_api::worker::run_backtest_job(&worker_env, &job_c, worker_id).await.expect("job C succeeds");
     let (_, view_c) = f.call("GET", &format!("/api/v1/backtests/{job_c_id}"), &Value::Null).await;

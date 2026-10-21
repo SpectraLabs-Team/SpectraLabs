@@ -30,7 +30,7 @@ pub struct CreateExperiment {
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-pub struct CreateBacktest {
+pub struct CreateRegistryRun {
     /// OHLCV CSV with timestamp, symbol, open, high, low, close and volume columns.
     pub csv: String,
     /// Short SMA period; 1 through 999 and less than `slow`.
@@ -258,7 +258,7 @@ pub(crate) async fn get_lineage(
     }
 }
 
-#[utoipa::path(post, path = "/api/v1/experiments/{id}/runs", tag = "registry", params(("id" = String, Path)), request_body = CreateBacktest, responses((status = 202, description = "Backtest queued"), (status = 422, description = "Invalid dataset or request", body = crate::openapi::ErrorDoc)))]
+#[utoipa::path(post, operation_id = "create_registry_run", path = "/api/v1/experiments/{id}/runs", tag = "registry", params(("id" = String, Path)), request_body = CreateRegistryRun, responses((status = 202, description = "Backtest queued"), (status = 422, description = "Invalid dataset or request", body = crate::openapi::ErrorDoc)))]
 pub(crate) async fn create_backtest(
     State(st): State<AppState>,
     Extension(identity): Extension<Identity>,
@@ -279,7 +279,7 @@ pub(crate) async fn create_backtest(
     queue_backtest(&registry, &identity, experiment_id, request).await
 }
 
-#[utoipa::path(post, path = "/api/v1/runs", tag = "registry", request_body = CreateBacktest, responses((status = 202, description = "Backtest queued; without experiment_id it is recorded under \"Unsorted\""), (status = 422, description = "Invalid dataset or request", body = crate::openapi::ErrorDoc)))]
+#[utoipa::path(post, path = "/api/v1/runs", tag = "registry", request_body = CreateRegistryRun, responses((status = 202, description = "Backtest queued; without experiment_id it is recorded under \"Unsorted\""), (status = 422, description = "Invalid dataset or request", body = crate::openapi::ErrorDoc)))]
 pub(crate) async fn create_run(
     State(st): State<AppState>,
     Extension(identity): Extension<Identity>,
@@ -304,7 +304,7 @@ pub(crate) async fn create_run(
 }
 
 #[allow(clippy::result_large_err)] // route helpers return the response immediately
-fn parse_backtest(body: Result<Bytes, BytesRejection>) -> Result<CreateBacktest, Response> {
+fn parse_backtest(body: Result<Bytes, BytesRejection>) -> Result<CreateRegistryRun, Response> {
     let Ok(bytes) = body else {
         return Err(error_response(400, "Could not read the backtest request body."));
     };
@@ -316,7 +316,7 @@ async fn queue_backtest(
     registry: &PgRegistry,
     identity: &Identity,
     experiment_id: String,
-    request: CreateBacktest,
+    request: CreateRegistryRun,
 ) -> Response {
     if request.csv.trim().is_empty() || request.csv.len() > 10_000_000 {
         return error_response(422, "Dataset CSV must be non-empty and no larger than 10 MB.");

@@ -58,14 +58,9 @@ services:
       SPECTRA_API_ADDR: 0.0.0.0:8000
       SPECTRA_CORS_ORIGINS: http://localhost:3000
       SPECTRA_MIGRATE_ON_START: "false"
-<<<<<<< HEAD
-      ARTIFACT_STORAGE: local # read side of run artifacts; must match the worker
-      ARTIFACT_DIR: /var/lib/spectra/artifacts
-=======
-      ARTIFACT_STORAGE: local # uploads and backtest chart series; s3: see deploy/compose.s3.yml
+      ARTIFACT_STORAGE: local # registry artifacts, uploads, and backtest chart series
       ARTIFACT_DIR: /var/lib/spectra/artifacts
       SPECTRA_DATA_DIR: /var/lib/spectra/datasets # read only, to chart command-line datasets
->>>>>>> origin/main
     volumes:
       - artifacts:/var/lib/spectra/artifacts # written by uploads (M1), read for backtest series
       - datasets:/var/lib/spectra/datasets:ro

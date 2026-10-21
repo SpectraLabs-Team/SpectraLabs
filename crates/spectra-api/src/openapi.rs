@@ -88,7 +88,6 @@ pub struct StressRequest {
         crate::jobs_api::list_jobs,
         crate::jobs_api::get_job,
         crate::jobs_api::cancel_job,
-<<<<<<< HEAD
         crate::registry_api::list_experiments,
         crate::registry_api::create_experiment,
         crate::registry_api::get_experiment,
@@ -102,7 +101,6 @@ pub struct StressRequest {
         crate::registry_api::verify,
         crate::registry_api::export_jsonl,
         crate::registry_api::import_jsonl,
-=======
         crate::backtests_api::create_backtest,
         crate::backtests_api::list_backtests,
         crate::backtests_api::get_backtest,
@@ -121,7 +119,6 @@ pub struct StressRequest {
         crate::datasets_api::version_runs,
         crate::datasets_api::bars,
         crate::datasets_api::list_calendars,
->>>>>>> origin/main
     ),
     components(schemas(
         ErrorDoc,
@@ -131,11 +128,9 @@ pub struct StressRequest {
         crate::jobs_api::CreateJob,
         crate::jobs_api::JobView,
         crate::jobs_api::JobPage,
-<<<<<<< HEAD
         crate::registry_api::CreateExperiment,
-        crate::registry_api::CreateBacktest,
+        crate::registry_api::CreateRegistryRun,
         crate::registry_api::CreateNote,
-=======
         crate::backtests_api::CreateBacktest,
         crate::backtests_api::BacktestView,
         crate::backtests_api::BacktestListItem,
@@ -168,18 +163,14 @@ pub struct StressRequest {
         crate::datasets_api::BarPoint,
         crate::datasets_api::CalendarView,
         crate::datasets_api::CalendarsResponse,
->>>>>>> origin/main
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
         (name = "engine", description = "Synchronous engine calls"),
         (name = "jobs", description = "Queued engine work, run by spectra-worker"),
-<<<<<<< HEAD
         (name = "registry", description = "Workspace-scoped experiment and run registry"),
-=======
         (name = "backtests", description = "Backtests: jobs of kind backtest, and the built-in strategies"),
         (name = "datasets", description = "Data Studio: ingest settings, previews and datasets"),
->>>>>>> origin/main
     )
 )]
 pub struct ApiDoc;
@@ -206,7 +197,6 @@ mod tests {
             "/api/v1/jobs",
             "/api/v1/jobs/{id}",
             "/api/v1/jobs/{id}/cancel",
-<<<<<<< HEAD
             "/api/v1/experiments",
             "/api/v1/experiments/{id}",
             "/api/v1/experiments/{id}/lineage",
@@ -218,7 +208,6 @@ mod tests {
             "/api/v1/registry/verify",
             "/api/v1/registry/export",
             "/api/v1/registry/import",
-=======
             "/api/v1/backtests",
             "/api/v1/backtests/{id}",
             "/api/v1/backtests/{id}/cancel",
@@ -233,7 +222,6 @@ mod tests {
             "/api/v1/datasets/versions/{id}",
             "/api/v1/datasets/versions/{id}/runs",
             "/api/v1/datasets/versions/{id}/bars",
->>>>>>> origin/main
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

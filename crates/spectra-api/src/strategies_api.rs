@@ -117,10 +117,9 @@ pub struct ValidateCodeRequest {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ValidateCodeResponse {
     pub valid: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub errors: Vec<CodeErrorView>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub params: Vec<ParamSpecView>,
+    #[serde(alias = "params")]
+    pub parameters: Vec<ParamSpecView>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -702,7 +701,7 @@ pub(crate) async fn validate_strategy_code(body: Result<Bytes, BytesRejection>) 
 
     match spectra_engine::dsl::parse_and_validate(&req.code) {
         Ok(program) => {
-            let params = program
+            let parameters = program
                 .params
                 .into_iter()
                 .map(|p| ParamSpecView {
@@ -714,7 +713,7 @@ pub(crate) async fn validate_strategy_code(body: Result<Bytes, BytesRejection>) 
                     description: p.description,
                 })
                 .collect();
-            to_json(200, &ValidateCodeResponse { valid: true, errors: Vec::new(), params })
+            to_json(200, &ValidateCodeResponse { valid: true, errors: Vec::new(), parameters })
         }
         Err(e) => {
             let errors = vec![CodeErrorView {
@@ -723,7 +722,7 @@ pub(crate) async fn validate_strategy_code(body: Result<Bytes, BytesRejection>) 
                 message: e.message,
                 code: e.code.to_string(),
             }];
-            to_json(200, &ValidateCodeResponse { valid: false, errors, params: Vec::new() })
+            to_json(200, &ValidateCodeResponse { valid: false, errors, parameters: Vec::new() })
         }
     }
 }

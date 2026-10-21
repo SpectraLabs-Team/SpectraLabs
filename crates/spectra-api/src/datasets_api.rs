@@ -56,8 +56,12 @@ pub struct IngestSettings {
     /// `iso8601`, `epoch_s`, `epoch_ms`, `epoch_us` or `epoch_ns`.
     pub time_format: String,
     /// Minutes east of UTC for ISO timestamps written without a zone
-    /// (-720 to 840). A fixed offset: daylight saving is not modelled.
-    pub utc_offset_minutes: i32,
+    /// (-720 to 840). Optional if `timezone` is provided.
+    pub utc_offset_minutes: Option<i32>,
+    /// Optional DST-aware timezone name (e.g. `America/New_York`, `Europe/London`, `UTC`, `Asia/Tokyo`).
+    pub timezone: Option<String>,
+    /// Optional exchange calendar for session enforcement and calendar-aware checks (e.g. `XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`).
+    pub exchange: Option<String>,
     /// Which header name holds each field.
     pub columns: IngestColumns,
     /// The symbol for every row when `columns.symbol` is null; not allowed otherwise.
@@ -124,6 +128,10 @@ pub struct Suggestions {
     pub time_format: Option<String>,
     /// For ISO timestamps: whether they carry a zone (then the UTC offset does not apply to them).
     pub timestamps_have_zone: Option<bool>,
+    /// Suggested exchange calendar (e.g. `XNYS`).
+    pub exchange: Option<String>,
+    /// Suggested timezone identifier (e.g. `America/New_York`).
+    pub timezone: Option<String>,
 }
 
 /// Suggested header name per field.
@@ -210,6 +218,10 @@ pub struct QualityReport {
     pub symbol_stats: Vec<SymbolStats>,
     /// Thresholds the checks used.
     pub thresholds: QualityThresholds,
+    /// Exchange calendar used, if any.
+    pub exchange: Option<String>,
+    /// Timezone used, if any.
+    pub timezone: Option<String>,
 }
 
 /// A rejected row.
@@ -248,6 +260,10 @@ pub struct SymbolStats {
     pub outlier_returns: u64,
     /// Runs of `stale_run` or more frozen bars.
     pub stale_runs: u64,
+    /// Bars recorded outside regular exchange sessions.
+    pub out_of_session_bars: Option<u64>,
+    /// Bars recorded on non-trading days/holidays.
+    pub non_trading_day_bars: Option<u64>,
 }
 
 /// Validates a settings document, prefixing field paths with `prefix`
@@ -1130,4 +1146,90 @@ pub(crate) async fn bars(
                 .collect(),
         },
     )
+}
+
+/// An exchange calendar supported by the platform.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CalendarView {
+    /// MIC or short code (e.g. `XNYS`).
+    pub code: String,
+    /// Exchange name.
+    pub name: String,
+    /// Primary operating timezone.
+    pub timezone: String,
+    /// Regular session hours.
+    pub sessions: String,
+}
+
+/// Supported calendars and timezones.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CalendarsResponse {
+    /// Supported exchanges.
+    pub calendars: Vec<CalendarView>,
+    /// Common IANA timezones.
+    pub timezones: Vec<String>,
+}
+
+/// `GET /api/v1/calendars` (M1 task 10): lists supported exchange calendars and timezones.
+#[utoipa::path(
+    get,
+    path = "/api/v1/calendars",
+    tag = "datasets",
+    responses(
+        (status = 200, description = "Supported exchange calendars and timezones.", body = CalendarsResponse),
+        (status = 401, description = "Missing or invalid signature.", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub async fn list_calendars() -> Response {
+    let calendars = vec![
+        CalendarView {
+            code: "XNYS".into(),
+            name: "New York Stock Exchange / NASDAQ".into(),
+            timezone: "America/New_York".into(),
+            sessions: "09:30-16:00 ET (early close 13:00 ET)".into(),
+        },
+        CalendarView {
+            code: "XCME".into(),
+            name: "Chicago Mercantile Exchange (US Futures)".into(),
+            timezone: "America/Chicago".into(),
+            sessions: "Sun 17:00 - Fri 16:00 CT (daily pause 16:00-17:00 CT)".into(),
+        },
+        CalendarView {
+            code: "XLON".into(),
+            name: "London Stock Exchange".into(),
+            timezone: "Europe/London".into(),
+            sessions: "08:00-16:30 London (early close 12:30 London)".into(),
+        },
+        CalendarView {
+            code: "XTKS".into(),
+            name: "Tokyo Stock Exchange".into(),
+            timezone: "Asia/Tokyo".into(),
+            sessions: "09:00-11:30, 12:30-15:30 JST".into(),
+        },
+        CalendarView {
+            code: "XNSE".into(),
+            name: "National Stock Exchange of India".into(),
+            timezone: "Asia/Kolkata".into(),
+            sessions: "09:15-15:30 IST".into(),
+        },
+        CalendarView {
+            code: "24/7".into(),
+            name: "Continuous 24/7 (Crypto)".into(),
+            timezone: "UTC".into(),
+            sessions: "00:00-24:00 (continuous)".into(),
+        },
+    ];
+    let timezones = vec![
+        "UTC".into(),
+        "America/New_York".into(),
+        "America/Chicago".into(),
+        "Europe/London".into(),
+        "Europe/Berlin".into(),
+        "Asia/Tokyo".into(),
+        "Asia/Hong_Kong".into(),
+        "Asia/Kolkata".into(),
+    ];
+    to_json(200, &CalendarsResponse { calendars, timezones })
 }

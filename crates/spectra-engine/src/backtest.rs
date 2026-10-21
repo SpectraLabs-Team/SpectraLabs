@@ -262,6 +262,8 @@ pub struct BacktestConfig {
     pub financing: FinancingConfig,
     /// Volume-based market impact (off by default).
     pub impact: ImpactConfig,
+    /// Optional exchange calendar: when set, orders only fill during open market sessions.
+    pub exchange: Option<spectra_data::calendar::Exchange>,
 }
 
 impl Default for BacktestConfig {
@@ -276,6 +278,7 @@ impl Default for BacktestConfig {
             risk_free_rate: 0.0,
             financing: FinancingConfig::default(),
             impact: ImpactConfig::default(),
+            exchange: None,
         }
     }
 }
@@ -880,6 +883,9 @@ pub fn canonical_config(c: &BacktestConfig) -> String {
         s.push_str(&format!("impact_coefficient={};", fmt_g17(c.impact.coefficient)));
         s.push_str(&format!("impact_window={};", c.impact.window));
     }
+    if let Some(ex) = c.exchange {
+        s.push_str(&format!("exchange={};", ex.code()));
+    }
     s
 }
 
@@ -1452,55 +1458,61 @@ fn run_inner<'s>(
         expire(&mut orders, &mut open, |o| matches!(o.tif, TimeInForce::GoodTillDate(t) if ts > t));
 
         // 1. Fill orders submitted at earlier timestamps, in submission order.
+        let session_open = cfg.exchange.is_none_or(|ex| ex.is_session_open(ts));
         let mut fills: Vec<(usize, Fill)> = Vec::new();
-        for k in open.candidates(group, &orders) {
-            if !orders[k].state.is_open() || step - orders[k].submit_step < min_wait {
-                continue;
-            }
-            let Some(bar) = find_bar(group, orders[k].instrument) else { continue };
-            let past = history.get(&orders[k].instrument).map_or(&[][..], Vec::as_slice);
-            let ev = evaluate(&orders[k], bar, past, cfg)?;
-            if ev.triggered && !orders[k].triggered {
-                // The stop was reached: from now on a stop is a market order and a
-                // stop-limit a resting limit order.
-                open.remove(&orders[k], k);
-                orders[k].triggered = true;
-                open.insert(&orders[k], k);
-            }
-            let Some(a) = ev.fill else { continue };
-            let o = &mut orders[k];
-            let f = Fill {
-                instrument: o.instrument,
-                side: o.side,
-                qty: a.qty,
-                price: a.price,
-                fee: commission_fee(&cfg.costs.commission, a.qty, notional(a.price, a.qty)?)?,
-                ts_ns: ts,
-            };
-            // A strategy must afford a fill on its own books before the account takes it.
-            let accepted = match sleeves.get(o.strategy) {
-                Some(book) => book.check_fill(&f).and_then(|()| ledger.apply_fill(&f)),
-                None => ledger.apply_fill(&f),
-            };
-            match accepted {
-                Ok(()) => {
-                    if let Some(book) = sleeves.get_mut(o.strategy) {
-                        book.apply_fill(&f).map_err(ledger_err)?;
+        if session_open {
+            for k in open.candidates(group, &orders) {
+                if !orders[k].state.is_open() || step - orders[k].submit_step < min_wait {
+                    continue;
+                }
+                let Some(bar) = find_bar(group, orders[k].instrument) else { continue };
+                let past = history.get(&orders[k].instrument).map_or(&[][..], Vec::as_slice);
+                let ev = evaluate(&orders[k], bar, past, cfg)?;
+                if ev.triggered && !orders[k].triggered {
+                    // The stop was reached: from now on a stop is a market order and a
+                    // stop-limit a resting limit order.
+                    open.remove(&orders[k], k);
+                    orders[k].triggered = true;
+                    open.insert(&orders[k], k);
+                }
+                let Some(a) = ev.fill else { continue };
+                let o = &mut orders[k];
+                let f = Fill {
+                    instrument: o.instrument,
+                    side: o.side,
+                    qty: a.qty,
+                    price: a.price,
+                    fee: commission_fee(&cfg.costs.commission, a.qty, notional(a.price, a.qty)?)?,
+                    ts_ns: ts,
+                };
+                // A strategy must afford a fill on its own books before the account takes it.
+                let accepted = match sleeves.get(o.strategy) {
+                    Some(book) => book.check_fill(&f).and_then(|()| ledger.apply_fill(&f)),
+                    None => ledger.apply_fill(&f),
+                };
+                match accepted {
+                    Ok(()) => {
+                        if let Some(book) = sleeves.get_mut(o.strategy) {
+                            book.apply_fill(&f).map_err(ledger_err)?;
+                        }
+                        o.remaining = o.remaining.checked_sub(a.qty)?;
+                        o.state = if o.remaining.is_zero() {
+                            OrderState::Filled
+                        } else {
+                            OrderState::PartiallyFilled
+                        };
+                        fills.push((o.strategy, f));
+                        fill_orders.push(o.id);
                     }
-                    o.remaining = o.remaining.checked_sub(a.qty)?;
-                    o.state =
-                        if o.remaining.is_zero() { OrderState::Filled } else { OrderState::PartiallyFilled };
-                    fills.push((o.strategy, f));
-                    fill_orders.push(o.id);
+                    Err(LedgerError::Rejected(r)) => {
+                        o.state = OrderState::Rejected;
+                        o.reject_reason = Some(r);
+                    }
+                    Err(e) => return Err(ledger_err(e).into()),
                 }
-                Err(LedgerError::Rejected(r)) => {
-                    o.state = OrderState::Rejected;
-                    o.reject_reason = Some(r);
+                if !orders[k].state.is_open() {
+                    open.remove(&orders[k], k);
                 }
-                Err(e) => return Err(ledger_err(e).into()),
-            }
-            if !orders[k].state.is_open() {
-                open.remove(&orders[k], k);
             }
         }
 

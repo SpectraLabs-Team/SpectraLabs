@@ -690,6 +690,7 @@ fn backtest_routes() -> Router<AppState> {
         )
         .route("/api/v1/datasets/versions/{id}/runs", only(get(datasets_api::version_runs)))
         .route("/api/v1/datasets/versions/{id}/bars", only(get(datasets_api::bars)))
+        .route("/api/v1/calendars", only(get(datasets_api::list_calendars)))
         .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
 }
 

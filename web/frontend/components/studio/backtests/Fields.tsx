@@ -115,7 +115,7 @@ export function ParamFields({ strategy, values, onChange, errors, prefix, disabl
 export const CONFIG_GROUPS: { title: string; fields: string[] }[] = [
   { title: 'Capital and policy', fields: ['initial_cash', 'allow_short', 'allow_negative_cash', 'max_gross_leverage'] },
   { title: 'Costs', fields: ['commission_per_unit', 'commission_bps', 'commission_min', 'slippage_bps', 'impact_coefficient', 'impact_window'] },
-  { title: 'Execution', fields: ['delay_bars', 'max_participation'] },
+  { title: 'Execution', fields: ['delay_bars', 'max_participation', 'exchange'] },
   { title: 'Financing (annual rates, 0.03 = 3%)', fields: ['borrow_fee_rate', 'cash_interest_rate', 'margin_interest_rate'] },
   { title: 'Reporting and seed', fields: ['periods_per_year', 'risk_free_rate', 'seed'] },
 ];
@@ -176,6 +176,30 @@ export function ConfigFields({ schema, base, overrides, onChange, errors, disabl
                   );
                 }
                 if (t.includes('string')) {
+                  if (name === 'exchange') {
+                    return (
+                      <Field key={name} label={name} hint={f.description} error={err} changed={changed}>
+                        <select
+                          className={cn('input py-1.5 text-[13px]', err && 'border-loss/60')}
+                          aria-label={name}
+                          disabled={disabled}
+                          value={value == null ? '' : String(value)}
+                          onChange={(e) => {
+                            const s = e.target.value.trim();
+                            set(name, s === '' ? undefined : s);
+                          }}
+                        >
+                          <option value="">None (all bars)</option>
+                          <option value="XNYS">XNYS (NYSE / NASDAQ)</option>
+                          <option value="XCME">XCME (CME Globex)</option>
+                          <option value="XLON">XLON (London Stock Exchange)</option>
+                          <option value="XTKS">XTKS (Tokyo Stock Exchange)</option>
+                          <option value="XNSE">XNSE (National Stock Exchange of India)</option>
+                          <option value="24/7">24/7 (Continuous)</option>
+                        </select>
+                      </Field>
+                    );
+                  }
                   // seed: a whole number, sent as a string when it is too large for JSON numbers.
                   return (
                     <Field key={name} label={name} hint={f.description} error={err} changed={changed}>

@@ -690,7 +690,7 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/strategies_csv`), 'api/v1/backtests/{id}/artifacts/{kind}');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/secrets`), `api/v1/backtests/${bt}/artifacts/secrets`, 'unknown file kinds stay unlisted');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/orders_csv/x`), `api/v1/backtests/${bt}/artifacts/orders_csv/x`);
-  for (const p of ['api/v1/backtests/{id}/artifacts/{kind}', 'api/v1/datasets']) {
+  for (const p of ['api/v1/backtests/{id}/artifacts/{kind}', 'api/v1/datasets', 'api/v1/calendars']) {
     assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
     assert.ok(!engineRoutes.allowsMethod(routes[p], 'POST'), `${p} is read-only`);
   }

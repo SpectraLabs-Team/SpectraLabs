@@ -28,7 +28,11 @@ fn options(path: &PathBuf) -> CsvOptions {
     CsvOptions {
         on_invalid: if m["skip"] == "1" { InvalidRowPolicy::Skip } else { InvalidRowPolicy::Reject },
         delimiter: if m["delim"] == "TAB" { b'\t' } else { m["delim"].as_bytes()[0] },
-        time: TimeOptions { format: tf, naive_utc_offset_minutes: m["offset"].parse().unwrap() },
+        time: TimeOptions {
+            format: tf,
+            naive_utc_offset_minutes: m["offset"].parse().unwrap(),
+            timezone: None,
+        },
         default_symbol: m["symbol"].into(),
         timestamp_column: m["ts"].into(),
         open_column: m["open"].into(),
@@ -129,7 +133,7 @@ fn data_studio_matches_cpp_reference() {
     for line in fs::read_to_string(dir.join("parse_time.txt")).unwrap().lines() {
         for (fname, fmt) in fmts {
             for off in [0, 330, -90] {
-                let t = TimeOptions { format: fmt, naive_utc_offset_minutes: off };
+                let t = TimeOptions { format: fmt, naive_utc_offset_minutes: off, timezone: None };
                 write!(out, "T {fname} {off} [{line}] ").unwrap();
                 match parse_timestamp(line, &t) {
                     Some(p) => writeln!(

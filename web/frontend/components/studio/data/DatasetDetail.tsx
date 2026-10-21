@@ -247,7 +247,8 @@ export function DatasetDetail({ datasetId, canEdit, onBacktest, onChanged, onDel
                   <>
                     <dt className="text-ink/45">Read as</dt>
                     <dd className="text-ink/70">
-                      {settings.time_format}, {formatOffset(settings.utc_offset_minutes)}, delimiter “{settings.delimiter === '\t' ? 'tab' : settings.delimiter}”
+                      {settings.time_format}, {settings.timezone ? settings.timezone : settings.utc_offset_minutes != null ? formatOffset(settings.utc_offset_minutes) : 'UTC'}, delimiter “{settings.delimiter === '\t' ? 'tab' : settings.delimiter}”
+                      {settings.exchange ? `, exchange ${settings.exchange}` : ''}
                       {settings.skip_bad_rows ? ', bad rows skipped' : ''}
                     </dd>
                     <dt className="text-ink/45">Columns</dt>

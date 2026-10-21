@@ -63,6 +63,9 @@ async fn ensure_can_edit(pool: &spectra_db::PgPool, ws: Uuid, user_id: Option<Uu
 pub struct CreateStrategy {
     /// Unique in the workspace; at most 200 characters.
     pub name: String,
+    /// Strategy kind (e.g. "custom", "builtin").
+    #[serde(default)]
+    pub kind: Option<String>,
     /// Free text; at most 2000 characters.
     #[serde(default)]
     pub description: Option<String>,

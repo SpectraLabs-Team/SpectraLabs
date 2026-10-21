@@ -29,7 +29,7 @@
   the simple average of the assets' volatilities. There are no correlations and no per-asset paths, so
   it cannot attribute risk to positions, and it treats the assets as perfectly correlated.
 - Data: CSV only. There is no Parquet, no provider connectors, no corporate actions and no exchange
-  calendars, and datasets are held fully in memory.
+  calendars, and datasets are held fully in memory during a backtest (ingest streams since M1b task 9; streaming backtests are M3 task 14).
 - Backtester: market and limit orders only, bar data only, flat-bps slippage, a single currency and
   average-cost accounting.
 - PSR and DSR assume serially independent returns and independent trials.

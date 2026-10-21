@@ -716,6 +716,17 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/versions/{id}'], 'DELETE'), 'editor', 'deleting needs editor');
   assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/{id}'], 'DELETE'), 'datasets are deleted version by version');
   assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/versions/{id}/bars'], 'POST'));
+  // Resumable uploads (M1b): every step needs editor except reading the limits.
+  const sid = '0192f3a4-0000-7000-8000-00000000000a';
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/uploads/sessions/${sid}`), 'api/v1/uploads/sessions/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/uploads/sessions/${sid}/complete`), 'api/v1/uploads/sessions/{id}/complete');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/uploads/sessions/${sid}/chunk`), `api/v1/uploads/sessions/${sid}/chunk`, 'chunks never go through the JSON proxy');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/uploads/sessions'], 'POST'), 'editor');
+  for (const m of ['GET', 'DELETE']) assert.equal(engineRoutes.minimumRole(routes['api/v1/uploads/sessions/{id}'], m), 'editor', m);
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/uploads/sessions/{id}/complete'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/uploads/limits'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.ENGINE_CHUNK_ROUTE.minRole, 'editor');
+  assert.equal(engineRoutes.ENGINE_CHUNK_ROUTE.maxBytes, 8 * 1024 * 1024, 'chunks stay under the 10 MB middleware body buffer');
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {
@@ -1923,6 +1934,7 @@ const ROUTE_RULES = {
   'engine/[...path] PATCH': 'engine',
   'engine/[...path] DELETE': 'engine',
   'engine-upload POST': 'editor',
+  'engine-upload/sessions/[id] PUT': 'editor',
   'invites/[token] GET': 'public',
   'invites/[token] POST': 'session',
   'secrets GET': 'viewer',
@@ -2532,6 +2544,71 @@ test('data tab: settings come only from what the person chose; suggestions apply
   assert.equal(fromResponse.code, 'in_use');
   assert.equal(fromResponse.status, 409);
   assert.equal(fromResponse.message, 'kept');
+});
+
+test('resumable uploads: retries, a lost answer, a failed completion, and resuming after a reload', async () => {
+  const content = new Uint8Array(23_000).map((_, i) => i % 251);
+  const file = new File([content], 'big.csv', { lastModified: 1 });
+  const fakeServer = (opts = {}) => {
+    const st = { received: opts.received ?? 0, data: new Uint8Array(content.length), puts: 0, creates: 0, completes: 0, faults: [...(opts.faults ?? [])], completeFailures: opts.completeFailures ?? 0 };
+    if (st.received) st.data.set(content.subarray(0, st.received));
+    const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+    const session = () => ({ id: 'sess-1', filename: 'big.csv', size: content.length, received: st.received, chunk_bytes: 5000, upload_id: null, expires_at: 'x' });
+    st.fetch = async (url, init = {}) => {
+      if (url.endsWith('/api/v1/uploads/sessions') && init.method === 'POST') { st.creates++; return reply(201, session()); }
+      if (url.includes('/api/v1/uploads/sessions/sess-1/complete')) {
+        st.completes++;
+        if (st.completeFailures-- > 0) return reply(502, { message: 'bad gateway' });
+        assert.equal(st.received, content.length);
+        return reply(201, { id: 'up-1', sha256: 'x', size: content.length, filename: 'big.csv', expires_at: 'x' });
+      }
+      if (url.endsWith('/api/v1/uploads/sessions/sess-1')) return reply(200, session());
+      if (url.startsWith('/api/engine-upload/sessions/sess-1?offset=')) {
+        st.puts++;
+        const fault = st.faults.shift();
+        if (fault === 'network') throw new TypeError('fetch failed');
+        if (fault === '503') return reply(503, { message: 'busy' });
+        const offset = Number(new URL(url, 'http://x').searchParams.get('offset'));
+        if (offset !== st.received) return reply(409, { code: 'offset_mismatch', message: 'm', details: { received: st.received } });
+        const bytes = new Uint8Array(await init.body.arrayBuffer());
+        st.data.set(bytes, offset);
+        st.received += bytes.length;
+        if (fault === 'lost') throw new TypeError('connection reset after the server stored it');
+        return reply(200, { received: st.received });
+      }
+      throw new Error(`unexpected ${init.method ?? 'GET'} ${url}`);
+    };
+    return st;
+  };
+  const memoryStorage = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: (k) => m.delete(k), m }; };
+
+  // Faults on the first chunks: a dropped connection, a 503, a stored chunk whose answer was lost; then a failed completion.
+  const st = fakeServer({ faults: [undefined, 'network', '503', 'lost'], completeFailures: 1 });
+  const storage = memoryStorage();
+  const seen = [];
+  const upload = await datasetsClient.uploadFile(file, (sent) => seen.push(sent), undefined, { fetch: st.fetch, storage, sleep: async () => {} });
+  assert.equal(upload.id, 'up-1');
+  assert.deepEqual(Array.from(st.data), Array.from(content), 'every byte arrived once, in place');
+  assert.ok(seen.every((v, i) => i === 0 || v >= seen[i - 1]), 'progress never goes back');
+  assert.equal(seen.at(-1), content.length);
+  assert.equal(st.completes, 2, 'the failed completion was retried');
+  assert.equal(storage.m.size, 0, 'a finished upload is forgotten');
+
+  // A reload half-way: the remembered session continues from what the server has.
+  const half = 11_000;
+  const resumed = fakeServer({ received: half });
+  const storage2 = memoryStorage();
+  storage2.setItem('spectra-upload:big.csv:23000:1', 'sess-1');
+  const seen2 = [];
+  await datasetsClient.uploadFile(file, (sent) => seen2.push(sent), undefined, { fetch: resumed.fetch, storage: storage2, sleep: async () => {} });
+  assert.equal(resumed.creates, 0, 'no new session');
+  assert.equal(seen2[0], half, 'starts from where it stopped');
+  assert.equal(resumed.puts, Math.ceil((content.length - half) / 5000));
+  assert.deepEqual(Array.from(resumed.data), Array.from(content));
+
+  // Errors that retrying can't fix stop at once.
+  const refusing = { fetch: async (url) => url.endsWith('/sessions') ? new Response(JSON.stringify({ code: 'quota_exceeded', message: 'full' }), { status: 413 }) : new Response('{}', { status: 500 }), storage: null, sleep: async () => {} };
+  await assert.rejects(datasetsClient.uploadFile(file, () => {}, undefined, refusing), (e) => e.status === 413 && e.code === 'quota_exceeded');
 });
 
 test('engine request signing matches the Rust verifier', () => {

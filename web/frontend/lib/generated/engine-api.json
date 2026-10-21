@@ -1292,6 +1292,335 @@
         }
       }
     },
+    "/api/v1/uploads/limits": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Upload limits.",
+        "operationId": "limits",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadLimits"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads/sessions": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Start a resumable upload.",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSession"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Too many unfinished uploads (code `too_many_uploads`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Over the size limit, or the storage quota (code `quota_exceeded`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every invalid field (`details.errors`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads/sessions/{id}": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "How far a resumable upload has got.",
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Abandon a resumable upload.",
+        "operationId": "abort",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChunkView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads/sessions/{id}/chunk": {
+      "put": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Send one chunk of a resumable upload.",
+        "operationId": "chunk",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "path",
+            "description": "Where this chunk starts: the bytes received so far.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "At most 8 MiB",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChunkView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not where the upload is (code `offset_mismatch`, `details.received`), or already completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Chunk over 8 MiB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Empty, or past the file's size",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads/sessions/{id}/complete": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Finish a resumable upload: the file becomes an upload, ready to ingest.",
+        "operationId": "complete",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Stored (a retry answers 200 with the same upload)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not every byte has arrived (code `incomplete`, `details.received`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Storage quota (code `quota_exceeded`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -1683,6 +2012,21 @@
         },
         "additionalProperties": false
       },
+      "ChunkView": {
+        "type": "object",
+        "description": "After a chunk.",
+        "required": [
+          "received"
+        ],
+        "properties": {
+          "received": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes received so far.",
+            "minimum": 0
+          }
+        }
+      },
       "CreateBacktest": {
         "type": "object",
         "description": "`POST /api/v1/backtests` body: the `backtest` job payload, plus a priority.",
@@ -1754,6 +2098,27 @@
             "type": "integer",
             "format": "int32",
             "description": "-10..10; higher runs first. Default 0."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateSession": {
+        "type": "object",
+        "description": "`POST /api/v1/uploads/sessions` body.",
+        "required": [
+          "filename",
+          "size"
+        ],
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "The file's name (display only)."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The file's size in bytes.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -2681,6 +3046,60 @@
         },
         "additionalProperties": false
       },
+      "SessionView": {
+        "type": "object",
+        "description": "A resumable upload.",
+        "required": [
+          "id",
+          "filename",
+          "size",
+          "received",
+          "chunk_bytes",
+          "expires_at"
+        ],
+        "properties": {
+          "chunk_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Largest chunk.",
+            "minimum": 0
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Removed at this time unless more arrives (UTC, RFC 3339)."
+          },
+          "filename": {
+            "type": "string",
+            "description": "File name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Session id."
+          },
+          "received": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes received: where the next chunk starts.",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The whole file, in bytes.",
+            "minimum": 0
+          },
+          "upload_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The upload it became, once completed."
+          }
+        }
+      },
       "StressRequest": {
         "type": "object",
         "description": "`POST /api/v1/stress` body (also the `stress` job payload).",
@@ -2934,6 +3353,34 @@
           }
         },
         "additionalProperties": false
+      },
+      "UploadLimits": {
+        "type": "object",
+        "description": "Upload limits, for the Studio.",
+        "required": [
+          "max_bytes",
+          "chunk_bytes",
+          "max_open_sessions"
+        ],
+        "properties": {
+          "chunk_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Largest chunk.",
+            "minimum": 0
+          },
+          "max_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Largest file a resumable upload accepts.",
+            "minimum": 0
+          },
+          "max_open_sessions": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Unfinished uploads a workspace may have at once."
+          }
+        }
       },
       "UploadView": {
         "type": "object",

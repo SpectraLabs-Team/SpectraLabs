@@ -71,6 +71,11 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/corporate-actions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
   'api/v1/calendars': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  // Saved strategies and their immutable versions (M2a): reads are viewer, saving is editor.
+  'api/v1/strategies': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 15_000 },
+  'api/v1/strategies/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  'api/v1/strategies/{id}/versions': { method: 'POST', minRole: 'editor', timeoutMs: 15_000 },
+  'api/v1/strategies/versions/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
 };
 
 // Registry ids: UUIDs for records made here, exp-/run-/art-<16 hex> for ones imported from a
@@ -108,6 +113,9 @@ export function routePolicyKey(path: string): string {
   const session = /^api\/v1\/uploads\/sessions\/[0-9a-f-]{36}(\/complete)?$/i.exec(path);
   if (session) return `api/v1/uploads/sessions/{id}${session[1] ?? ''}`;
   if (/^api\/v1\/corporate-actions\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/corporate-actions/{id}';
+  if (/^api\/v1\/strategies\/versions\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/strategies/versions/{id}';
+  const strategy = /^api\/v1\/strategies\/[0-9a-f-]{36}(\/versions)?$/i.exec(path);
+  if (strategy) return `api/v1/strategies/{id}${strategy[1] ?? ''}`;
   const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars|\/derive)?$/i.exec(path);
   if (version) return `api/v1/datasets/versions/{id}${version[1] ?? ''}`;
   if (/^api\/v1\/datasets\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/datasets/{id}';

@@ -716,6 +716,20 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
     assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
     assert.ok(!engineRoutes.allowsMethod(routes[p], 'POST'), `${p} is read-only`);
   }
+  // Saved strategies (M2a): reads are viewer, saving a strategy or a version is editor.
+  const sv = '0192f3a4-0000-7000-8000-000000000004';
+  assert.equal(key(`api/v1/strategies/${sv}`), 'api/v1/strategies/{id}');
+  assert.equal(key(`api/v1/strategies/${sv}/versions`), 'api/v1/strategies/{id}/versions');
+  assert.equal(key(`api/v1/strategies/versions/${sv}`), 'api/v1/strategies/versions/{id}');
+  assert.equal(key('api/v1/strategies/builtin'), 'api/v1/strategies/builtin', 'the catalogue keeps its own entry');
+  assert.equal(key(`api/v1/strategies/${sv}/other`), `api/v1/strategies/${sv}/other`, 'unknown sub-routes stay unlisted');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/strategies'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/strategies'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/strategies/{id}/versions'], 'POST'), 'editor');
+  for (const p of ['api/v1/strategies/{id}', 'api/v1/strategies/versions/{id}']) {
+    assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
+    assert.ok(!engineRoutes.allowsMethod(routes[p], 'POST'), `${p} is read-only`);
+  }
   // Data Studio (M1): previewing a file is part of uploading one, so viewers can't.
   assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/preview'], 'POST'), 'editor');
   assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/preview'], 'GET'), 'preview is POST only');

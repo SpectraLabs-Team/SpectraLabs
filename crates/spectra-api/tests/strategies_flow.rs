@@ -1,9 +1,10 @@
-//! M2a tasks 3 and 4 end-to-end: saved strategies, idempotent versions, and
-//! backtests queued from a version.
+//! M2a tasks 3, 4 and 6 end-to-end: saved strategies, idempotent versions,
+//! backtests queued from a version, and parity between version and direct runs.
 //!
 //! Needs `DATABASE_URL`; without it the test passes without doing anything,
 //! like the rest of the workspace's database tests.
 
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
@@ -12,7 +13,13 @@ use axum::Router;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
 use spectra_api::auth::{canonical, sign};
+use spectra_api::worker::BacktestWorkerEnv;
 use spectra_api::{router, ApiConfig, Secret};
+use spectra_core::fixed::Price;
+use spectra_core::{Bar, Qty};
+use spectra_data::dataset::{compute_dataset_id, SymbolTable};
+use spectra_data::{Dataset, DatasetInfo};
+use spectra_db::artifacts::{ArtifactBackend, ArtifactStore};
 use spectra_db::{connect, migrate, PgPool, PoolConfig};
 use tower::ServiceExt;
 use uuid::Uuid;
@@ -30,14 +37,29 @@ async fn pool() -> Option<PgPool> {
 struct Fixture {
     app: Router,
     pool: PgPool,
+    store: ArtifactBackend,
+    dir: PathBuf,
     user: Uuid,
     ws: Uuid,
 }
 
 impl Fixture {
     fn new(pool: PgPool) -> Self {
-        let app = router(ApiConfig::new(Secret::new(SECRET)), Some(pool.clone()));
-        Self { app, pool, user: spectra_db::new_id(), ws: spectra_db::new_id() }
+        let dir = std::env::temp_dir().join(format!("spectra-strat-{}", spectra_db::new_id().simple()));
+        let store = ArtifactBackend::Local(ArtifactStore::new(dir.join("artifacts")));
+        let mut cfg = ApiConfig::new(Secret::new(SECRET));
+        cfg.artifacts = Some(store.clone());
+        cfg.data_dir = Some(dir.join("data"));
+        let app = router(cfg, Some(pool.clone()));
+        Self { app, pool, store, dir, user: spectra_db::new_id(), ws: spectra_db::new_id() }
+    }
+
+    fn worker_env(&self) -> BacktestWorkerEnv {
+        BacktestWorkerEnv::new(self.pool.clone(), self.store.clone(), self.dir.join("data"), 1 << 30)
+    }
+
+    fn clean_up(&self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
     }
 
     /// Sends a signed request in `ws`; returns the status and the JSON body (Null when empty).
@@ -188,6 +210,7 @@ async fn saved_strategies_and_versions() {
     assert_eq!(status, 404);
     let (status, body) = f.call("POST", &path, &json!({"builtin": "nope"})).await;
     assert_eq!((status, fields(&body)), (422, vec!["builtin".to_string()]));
+    f.clean_up();
 }
 
 #[tokio::test]
@@ -294,4 +317,256 @@ async fn backtests_from_a_strategy_version() {
 
     // Leave no queued work behind: the SQL checks that run after the tests count every queued job.
     sqlx::query("DELETE FROM jobs WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    f.clean_up();
+}
+
+async fn claim_job(pool: &PgPool, job_id: Uuid, worker_id: &str) -> spectra_db::jobs::Job {
+    sqlx::query_as(
+        "UPDATE jobs SET status = 'running', attempts = attempts + 1, started_at = now(), heartbeat_at = now(), \
+         worker_id = $1, progress = 0, error = NULL \
+         WHERE id = $2 AND status = 'queued' \
+         RETURNING *",
+    )
+    .bind(worker_id)
+    .bind(job_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+#[allow(clippy::similar_names)]
+async fn parity_between_saved_version_and_direct_builtin_run() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    spectra_db::identity::ensure_identity(&f.pool, Some(f.user), f.ws).await.unwrap();
+
+    // 1. Ingest/register a real dataset with bars so sma_cross produces trades and equity.
+    let mut bars = Vec::with_capacity(120);
+    let mut price = 100.0f64;
+    for i in 0..120 {
+        let drift = if (i / 20) % 2 == 0 { 0.5 } else { -0.5 };
+        price += drift;
+        let p = Price::from_raw((price * spectra_core::fixed::SCALE as f64).round() as i64);
+        bars.push(Bar {
+            ts_ns: (1_700_000_000 + i * 86_400) * 1_000_000_000,
+            instrument: 0,
+            open: p,
+            high: Price::from_raw(p.raw() + 50 * spectra_core::fixed::SCALE),
+            low: Price::from_raw(p.raw() - 50 * spectra_core::fixed::SCALE),
+            close: p,
+            volume: Qty::from_raw(1000 * spectra_core::fixed::SCALE),
+        });
+    }
+    let symbols = SymbolTable { symbols: vec!["SPY".to_string()] };
+    let checksum = compute_dataset_id(&bars, &symbols);
+    let dataset = Dataset {
+        bars: bars.clone(),
+        symbols: symbols.clone(),
+        info: DatasetInfo {
+            id: checksum.clone(),
+            bars_sha256: spectra_core::bars_sha256(&bars),
+            ..DatasetInfo::default()
+        },
+        quality: spectra_data::dataset::assess_quality(&bars, &symbols, &spectra_data::CsvOptions::default()),
+    };
+    let raw = spectra_data::datastore::encode_dataset(&dataset);
+    let blob_sha = spectra_core::sha256_hex(&raw);
+    f.store.put(raw.clone()).await.unwrap();
+    spectra_data::DataStore::new(f.dir.join("data")).unwrap().put(&dataset).unwrap();
+    let reg = spectra_db::datasets::register_version(
+        &f.pool,
+        &spectra_db::datasets::NewDatasetVersion {
+            workspace_id: f.ws,
+            dataset_name: "SPY 120 bars",
+            checksum: &checksum,
+            row_count: dataset.bars.len() as i64,
+            byte_size: raw.len() as i64,
+            quality_report: serde_json::json!({ "symbols": ["SPY"], "rows": 120 }),
+            created_by: Some(f.user),
+            blob_sha256: Some(&blob_sha),
+            source: None,
+        },
+    )
+    .await
+    .unwrap();
+    let dataset_version_id = reg.id;
+
+    // 2. Save sma_cross with fast=10, slow=50 as a strategy version.
+    let (status, created) = f
+        .call(
+            "POST",
+            "/api/v1/strategies",
+            &json!({
+                "name": "SPY Trend Parity",
+                "description": "SMA cross parity test",
+                "builtin": "sma_cross",
+                "params": { "fast": 10, "slow": 50 }
+            }),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    let version_id = created["versions"][0]["id"].as_str().unwrap().to_string();
+    let builtin_sha = spectra_backtest::builtin("sma_cross").unwrap().source_sha256();
+    assert_eq!(created["versions"][0]["strategy_sha256"], builtin_sha);
+
+    // 3. Queue a run started from the saved version (Run A).
+    let (status, resp_a) = f
+        .call(
+            "POST",
+            "/api/v1/backtests",
+            &json!({
+                "dataset_version_id": dataset_version_id,
+                "strategy_version_id": version_id,
+            }),
+        )
+        .await;
+    assert_eq!(status, 202, "{resp_a}");
+    let job_a_id = Uuid::parse_str(resp_a["id"].as_str().unwrap()).unwrap();
+
+    // 4. Queue a direct built-in run on the same data with the same parameters (Run B).
+    let (status, resp_b) = f
+        .call(
+            "POST",
+            "/api/v1/backtests",
+            &json!({
+                "dataset_version_id": dataset_version_id,
+                "strategy": "sma_cross",
+                "params": { "fast": 10, "slow": 50 },
+            }),
+        )
+        .await;
+    assert_eq!(status, 202, "{resp_b}");
+    let job_b_id = Uuid::parse_str(resp_b["id"].as_str().unwrap()).unwrap();
+
+    // 5. Worker execution: claim and run both jobs to completion.
+    let worker_env = f.worker_env();
+    let worker_id = "test-worker-parity";
+
+    let job_a = claim_job(&f.pool, job_a_id, worker_id).await;
+    let run_a_id =
+        spectra_api::worker::run_backtest_job(&worker_env, &job_a, worker_id).await.expect("job A succeeds");
+
+    let job_b = claim_job(&f.pool, job_b_id, worker_id).await;
+    let run_b_id =
+        spectra_api::worker::run_backtest_job(&worker_env, &job_b, worker_id).await.expect("job B succeeds");
+
+    // 6. Verify backtests via API: both succeeded and match on all fingerprints and metrics.
+    let (status, view_a) = f.call("GET", &format!("/api/v1/backtests/{job_a_id}"), &Value::Null).await;
+    assert_eq!(status, 200, "{view_a}");
+    assert_eq!(view_a["status"], "succeeded");
+    assert_eq!(view_a["run_id"], run_a_id.to_string());
+
+    let (status, view_b) = f.call("GET", &format!("/api/v1/backtests/{job_b_id}"), &Value::Null).await;
+    assert_eq!(status, 200, "{view_b}");
+    assert_eq!(view_b["status"], "succeeded");
+    assert_eq!(view_b["run_id"], run_b_id.to_string());
+
+    // Check fingerprints parity:
+    assert_eq!(
+        view_a["fingerprints"]["result_sha256"], view_b["fingerprints"]["result_sha256"],
+        "result hashes must match exactly"
+    );
+    assert_eq!(view_a["fingerprints"]["strategy_sha256"], view_b["fingerprints"]["strategy_sha256"]);
+    assert_eq!(view_a["fingerprints"]["strategy_sha256"], builtin_sha);
+    assert_eq!(view_a["fingerprints"]["dataset_sha256"], view_b["fingerprints"]["dataset_sha256"]);
+    assert_eq!(view_a["fingerprints"]["config_sha256"], view_b["fingerprints"]["config_sha256"]);
+
+    // Check summary metrics parity:
+    assert_eq!(view_a["summary"], view_b["summary"], "metrics summary must match exactly");
+
+    // 7. Check database run records:
+    // "Done when: a user saves sma_cross with fast=10, slow=50, runs it on a dataset,
+    // and the run record shows the version ID and the code hash."
+    let row_a: (Option<Uuid>, String, String, Value, Value) = sqlx::query_as(
+        "SELECT strategy_version_id, strategy, strategy_sha256, params, metrics FROM runs WHERE id = $1",
+    )
+    .bind(run_a_id)
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+
+    let row_b: (Option<Uuid>, String, String, Value, Value) = sqlx::query_as(
+        "SELECT strategy_version_id, strategy, strategy_sha256, params, metrics FROM runs WHERE id = $1",
+    )
+    .bind(run_b_id)
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        row_a.0,
+        Some(Uuid::parse_str(&version_id).unwrap()),
+        "run record shows the strategy version ID"
+    );
+    assert_eq!(row_a.1, "sma_cross");
+    assert_eq!(row_a.2, builtin_sha, "run record shows the code hash");
+
+    assert_eq!(row_b.0, None, "direct run has no strategy_version_id");
+    assert_eq!(row_b.1, "sma_cross");
+    assert_eq!(row_b.2, builtin_sha);
+
+    assert_eq!(row_a.3, row_b.3, "recorded parameters match");
+    assert_eq!(row_a.4, row_b.4, "recorded metrics match");
+
+    // 8. Artifacts and chart series parity via API:
+    let (status, series_a) =
+        f.call("GET", &format!("/api/v1/backtests/{job_a_id}/series?kind=equity"), &Value::Null).await;
+    assert_eq!(status, 200);
+    let (status, series_b) =
+        f.call("GET", &format!("/api/v1/backtests/{job_b_id}/series?kind=equity"), &Value::Null).await;
+    assert_eq!(status, 200);
+    assert_eq!(series_a["points"], series_b["points"], "equity curves match");
+
+    let (status, art_a) =
+        f.call("GET", &format!("/api/v1/backtests/{job_a_id}/artifacts/equity_csv"), &Value::Null).await;
+    assert_eq!(status, 200);
+    let (status, art_b) =
+        f.call("GET", &format!("/api/v1/backtests/{job_b_id}/artifacts/equity_csv"), &Value::Null).await;
+    assert_eq!(status, 200);
+    assert_eq!(art_a, art_b, "equity CSV artifacts match");
+
+    // 9. Running the saved version a second time reproduces identical result_sha256:
+    let (status, resp_c) = f
+        .call(
+            "POST",
+            "/api/v1/backtests",
+            &json!({
+                "dataset_version_id": dataset_version_id,
+                "strategy_version_id": version_id,
+            }),
+        )
+        .await;
+    assert_eq!(status, 202);
+    let job_c_id = Uuid::parse_str(resp_c["id"].as_str().unwrap()).unwrap();
+    let job_c = claim_job(&f.pool, job_c_id, worker_id).await;
+    let _run_c_id =
+        spectra_api::worker::run_backtest_job(&worker_env, &job_c, worker_id).await.expect("job C succeeds");
+    let (_, view_c) = f.call("GET", &format!("/api/v1/backtests/{job_c_id}"), &Value::Null).await;
+    assert_eq!(
+        view_c["fingerprints"]["result_sha256"], view_a["fingerprints"]["result_sha256"],
+        "re-running reproduces identical result_sha256"
+    );
+
+    // Clean up
+    sqlx::query("DELETE FROM run_artifacts WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM runs WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    sqlx::query("DELETE FROM jobs WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    sqlx::query("DELETE FROM dataset_versions WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM datasets WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    sqlx::query("DELETE FROM strategy_versions WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM strategies WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    f.clean_up();
 }

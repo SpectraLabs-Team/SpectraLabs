@@ -5,7 +5,9 @@
 -- $1 workspace, $2 sha256, $3 size, $4 file name, $5 created by (nullable), $6 default quota,
 -- $7 seconds until an un-ingested upload expires.
 WITH ws AS (
-    SELECT COALESCE(artifact_quota_bytes, $6)::bigint AS quota FROM workspaces WHERE id = $1 FOR UPDATE
+    SELECT COALESCE(q.artifact_quota_bytes, $6)::bigint AS quota
+      FROM workspaces w LEFT JOIN workspace_quotas q ON q.workspace_id = w.id
+     WHERE w.id = $1 FOR NO KEY UPDATE OF w
 ), used AS (
     SELECT COALESCE(sum(size_bytes), 0)::bigint AS bytes FROM workspace_storage WHERE workspace_id = $1
 ), dup AS (

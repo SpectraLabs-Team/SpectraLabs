@@ -68,21 +68,14 @@ jobs:
         run: cargo test --workspace
       - name: Test (release)
         run: cargo test --workspace --release
-<<<<<<< HEAD
       - name: Postgres experiment registry
-<<<<<<< HEAD
         run: |
           cargo clippy -p spectra-registry --features postgres --all-targets -- -D warnings
           cargo test -p spectra-registry --features postgres --test pg_registry
           cargo clippy -p spectra-cli --features postgres --all-targets -- -D warnings
-=======
-        run: cargo test -p spectra-registry --features postgres --test pg_registry
->>>>>>> origin/codex/m5-experiment-registry
-=======
       - name: Backtest throughput floor
         # A normal run is ~1.8M bars/s; the floor only catches order-of-magnitude regressions.
         run: cargo run --release -p spectra-cli --example backtest_throughput -- --min-bars-per-sec 150000
->>>>>>> origin/main
       - name: Parity scripts are reproducible
         run: |
           python3 parity/gen_ops.py parity/ops

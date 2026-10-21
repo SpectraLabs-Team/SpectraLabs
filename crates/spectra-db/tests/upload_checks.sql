@@ -19,9 +19,11 @@ BEGIN IF ok IS NOT TRUE THEN RAISE EXCEPTION 'upload check failed: %', what; END
 \set ds1 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 
 INSERT INTO users (id, email, password_hash) VALUES (:'user', 'up@example.com', '!');
-INSERT INTO workspaces (id, slug, name, artifact_quota_bytes) VALUES
-    (:'ws', 'upl', 'Uploads', 1000),
-    (:'other', 'upl-other', 'Other', NULL);
+INSERT INTO workspaces (id, slug, name) VALUES
+    (:'ws', 'upl', 'Uploads'),
+    (:'other', 'upl-other', 'Other');
+INSERT INTO workspace_quotas (workspace_id, artifact_quota_bytes) VALUES
+    (:'ws', 1000);
 
 -- Uploads count against the quota; the same bytes again cost nothing.
 CREATE TEMP TABLE u1 AS EXECUTE upload_insert(:'ws', :'f1', 600, 'prices.csv', :'user', 5000, 86400);

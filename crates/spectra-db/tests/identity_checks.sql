@@ -30,7 +30,7 @@ EXECUTE identity_mirror(:'u1', :'w1');
 SELECT pg_temp.check((SELECT email FROM users WHERE id = :'u1') = 'u-6f1c2d3e0000400080000000000000a1@mirror.invalid',
                      'placeholder email');
 SELECT pg_temp.check((SELECT password_hash FROM users WHERE id = :'u1') = '!', 'no usable password');
-SELECT pg_temp.check((SELECT role FROM users WHERE id = :'u1') = 'user', 'never an admin');
+SELECT pg_temp.check((SELECT platform_role FROM users WHERE id = :'u1') = 'user', 'never an admin');
 SELECT pg_temp.check((SELECT slug FROM workspaces WHERE id = :'w1') = 'ws-7a2b3c4d0000400080000000000000b1', 'slug');
 SELECT pg_temp.check((SELECT created_by FROM workspaces WHERE id = :'w1') = :'u1', 'created_by is the mirrored user');
 

@@ -3,26 +3,18 @@
 //! ```text
 //! spectra-db migrate   apply pending migrations: the dashboard's, then the engine's
 //! spectra-db seed      migrate, then seed the dev workspace and admin (ADMIN_EMAIL)
-<<<<<<< HEAD
 //! spectra-db status    list pending migrations of both; exit 1 if any
-=======
-//! spectra-db status    list pending migrations; exit 1 if any
 //! spectra-db dataset-add --workspace ID|SLUG --name NAME --store DIR --id CHECKSUM
 //!                      register a dataset-store entry (from `spectra-ingest`) as the next
 //!                      version of a workspace dataset, and print the version id to run on
->>>>>>> origin/main
 //! ```
 //!
 //! Reads `DATABASE_URL`.
 
 use std::process::ExitCode;
 
-<<<<<<< HEAD
-use spectra_db::{connect, migrate, pending_migrations, seed_dev, web_migrations, PoolConfig};
-=======
 use spectra_db::datasets::{register_version, resolve_workspace, NewDatasetVersion};
-use spectra_db::{connect, migrate, pending_migrations, seed_dev, PoolConfig};
->>>>>>> origin/main
+use spectra_db::{connect, migrate, pending_migrations, seed_dev, web_migrations, PoolConfig};
 
 const USAGE: &str =
     "usage: spectra-db <migrate|seed|status>   (reads DATABASE_URL; seed also reads ADMIN_EMAIL)

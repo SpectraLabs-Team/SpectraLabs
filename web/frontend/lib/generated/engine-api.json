@@ -2909,6 +2909,16 @@
             ],
             "description": "Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...)."
           },
+          "corporate_actions": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "Splits and dividends to apply during the run, on unadjusted prices:\n`[{\"symbol\", \"ex_date\", \"type\": \"split\", \"from\", \"to\"}]` or\n`[{\"symbol\", \"ex_date\", \"type\": \"dividend\", \"amount\"}]`."
+          },
           "dataset_version_id": {
             "type": "string",
             "format": "uuid",

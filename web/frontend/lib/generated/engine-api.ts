@@ -1040,6 +1040,10 @@ export interface components {
         CreateBacktest: {
             /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
             config?: Record<string, never> | null;
+            /** @description Splits and dividends to apply during the run, on unadjusted prices:
+             *     `[{"symbol", "ex_date", "type": "split", "from", "to"}]` or
+             *     `[{"symbol", "ex_date", "type": "dividend", "amount"}]`. */
+            corporate_actions?: Record<string, never>[] | null;
             /**
              * Format: uuid
              * @description A dataset version of the caller's workspace.

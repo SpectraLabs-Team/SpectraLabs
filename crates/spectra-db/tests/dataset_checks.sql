@@ -40,8 +40,8 @@ SELECT dataset_id AS qqq FROM dataset_versions WHERE id = :'v3' \gset
 -- A finished backtest run on v1, and a queued backtest on v2.
 INSERT INTO jobs (id, workspace_id, kind, status, payload, attempts, started_at, finished_at) VALUES
     ('00000000-0000-7000-8000-00000000f0b1', :'ws', 'backtest', 'succeeded', '{}', 1, now(), now());
-INSERT INTO runs (id, workspace_id, job_id, dataset_version_id, status, metrics) VALUES
-    ('00000000-0000-7000-8000-00000000f0c1', :'ws', '00000000-0000-7000-8000-00000000f0b1', :'v1', 'succeeded',
+INSERT INTO runs (id, workspace_id, job_id, dataset_version_id, status, finished_at, metrics) VALUES
+    ('00000000-0000-7000-8000-00000000f0c1', :'ws', '00000000-0000-7000-8000-00000000f0b1', :'v1', 'succeeded', now(),
      '{"metrics":{"total_return":0.125}}');
 INSERT INTO jobs (id, workspace_id, kind, status, payload) VALUES
     ('00000000-0000-7000-8000-00000000f0b2', :'ws', 'backtest', 'queued', jsonb_build_object('dataset_version_id', :'v2'));

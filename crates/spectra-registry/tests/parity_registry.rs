@@ -1,8 +1,12 @@
 //! C++ <-> Rust parity for the registry and holdout vault. Runs the same
 //! workflow as `parity/cpp/registry_golden.cpp` with the same deterministic
 //! clock and requires:
-//! * a byte-identical `registry.jsonl` (`parity/golden/registry.jsonl`), and
-//! * an identical transcript (`parity/golden/registry.golden`).
+//! * a matching registry event stream (`parity/golden/registry.jsonl`), and
+//! * an identical stable transcript (`parity/golden/registry.golden`).
+//!
+//! The M6 Survival Lab report is newer than the frozen C++ reference. Its artifact id and content
+//! hash therefore differ, as do hash-chain values from that event onward. The test normalizes only
+//! those version-specific values; it still compares the event payloads and verifies the Rust log.
 //!
 //! Runs are recorded with `engine_version` "0.6.0" (the C++ engine's) so the
 //! log can match byte for byte; every other field is produced by the Rust
@@ -292,6 +296,7 @@ fn workflow(work: &Path) -> String {
     )
     .unwrap();
     let vr = registry.verify();
+    assert!(vr.ok, "registry integrity check failed: {}", vr.detail);
     writeln!(out, "verify {} {} {}", b(vr.ok), vr.events, vr.last_hash).unwrap();
     let best_run_id = registry
         .runs(&f)
@@ -319,14 +324,86 @@ fn first_difference(a: &str, b: &str) -> String {
     )
 }
 
+fn normalize_transcript(input: &str) -> String {
+    input
+        .lines()
+        .map(|line| {
+            if line.starts_with("artifact art-") {
+                let verdict = line.split_whitespace().last().unwrap_or_default();
+                format!("artifact <version-specific-id> {verdict}")
+            } else if line.starts_with("verify ") {
+                let mut fields: Vec<_> = line.split_whitespace().collect();
+                if let Some(last) = fields.last_mut() {
+                    *last = "<version-specific-chain-hash>";
+                }
+                fields.join(" ")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+fn replace_json_string_value(line: &str, marker: &str, replacement: &str) -> String {
+    let Some(marker_start) = line.find(marker) else { return line.to_string() };
+    let value_start = marker_start + marker.len();
+    let Some(value_end) = line[value_start..].find('"').map(|offset| value_start + offset) else {
+        return line.to_string();
+    };
+    format!("{}{replacement}{}", &line[..value_start], &line[value_end..])
+}
+
+fn event_sequence(line: &str) -> Option<u64> {
+    line.strip_prefix("{\"seq\":")
+        .and_then(|rest| rest.split_once(',').map(|(seq, _)| seq.parse().ok()))
+        .flatten()
+}
+
+fn normalize_registry_log(input: &str) -> String {
+    let survival_artifact_seq = input
+        .lines()
+        .find(|line| {
+            line.contains("\"type\":\"artifact.recorded\"") && line.contains("\"kind\":\"survival_report\"")
+        })
+        .and_then(event_sequence);
+    input
+        .lines()
+        .map(|line| {
+            let (Some(seq), Some(artifact_seq)) = (event_sequence(line), survival_artifact_seq) else {
+                return line.to_string();
+            };
+            if seq < artifact_seq {
+                return line.to_string();
+            }
+            let mut normalized = line.to_string();
+            if seq == artifact_seq {
+                normalized = replace_json_string_value(&normalized, "\"id\":\"", "<version-specific-id>");
+                normalized =
+                    replace_json_string_value(&normalized, "\"sha256\":\"", "<version-specific-report-hash>");
+            }
+            normalized =
+                replace_json_string_value(&normalized, "\"prev\":\"", "<version-specific-chain-hash>");
+            replace_json_string_value(&normalized, "\"hash\":\"", "<version-specific-chain-hash>")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
 #[test]
-fn registry_workflow_matches_cpp_reference_byte_for_byte() {
+fn registry_workflow_matches_cpp_reference_for_stable_events() {
     let work = temp_dir("parity");
     let transcript = workflow(&work);
     let expected = std::fs::read_to_string(golden("registry.golden")).unwrap();
+    let transcript = normalize_transcript(&transcript);
+    let expected = normalize_transcript(&expected);
     assert!(transcript == expected, "transcript differs at {}", first_difference(&transcript, &expected));
     let log = std::fs::read_to_string(work.join("registry/registry.jsonl")).unwrap();
     let cpp_log = std::fs::read_to_string(golden("registry.jsonl")).unwrap();
+    let log = normalize_registry_log(&log);
+    let cpp_log = normalize_registry_log(&cpp_log);
     assert!(log == cpp_log, "registry.jsonl differs at {}", first_difference(&log, &cpp_log));
     let _ = std::fs::remove_dir_all(&work);
 }

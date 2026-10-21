@@ -1,12 +1,7 @@
 -- params: uuid, uuid, text, text, text, bigint, text, bigint
 -- Record a stored artifact against a run, re-checking the quota under a lock on the workspace row
-<<<<<<< HEAD
--- so two writers cannot both squeeze under it (NO KEY UPDATE: foreign-key checks are not blocked). inserted = 0 with present = false means the quota
--- would be exceeded. $1 workspace, $2 run, $3 kind, $4 sha256, $5 path, $6 size, $7 content type,
-=======
 -- so two writers cannot both squeeze under it. inserted = 0 with present = false means the quota
 -- would be exceeded (usage counts every hash in workspace_storage once). $1 workspace, $2 run, $3 kind, $4 sha256, $5 path, $6 size, $7 content type,
->>>>>>> origin/main
 -- $8 default quota.
 WITH ws AS (
     SELECT COALESCE(q.artifact_quota_bytes, $8)::bigint AS quota

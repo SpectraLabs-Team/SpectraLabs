@@ -5,11 +5,7 @@ import { record as audit, requestMeta } from '@/lib/server/audit';
 import { hasRole } from '@/lib/server/authz';
 import { clientIp, hit, tooMany } from '@/lib/server/rateLimit';
 import { ENGINE_IDENTITY_HEADER, signEngineIdentity } from '@/lib/server/engineIdentity';
-<<<<<<< HEAD
-import { allowsMethod, ENGINE_ROUTES, maxBodyBytes, minimumRole, routePolicyKey } from '@/lib/server/engineRoutes';
-=======
-import { allowsMethod, ENGINE_ROUTES, minimumRole, routePolicyKey, type EngineMethod } from '@/lib/server/engineRoutes';
->>>>>>> origin/main
+import { allowsMethod, ENGINE_ROUTES, maxBodyBytes, minimumRole, routePolicyKey, type EngineMethod } from '@/lib/server/engineRoutes';
 import { requireWorkspace } from '@/lib/server/requireUser';
 import { engineSecret, signEngineRequest } from '@/lib/server/engineSign';
 
@@ -104,12 +100,8 @@ async function proxy(req: Request, path: string[], method: EngineMethod) {
   }
 
   let body: string | undefined;
-<<<<<<< HEAD
-  if (method === 'POST') {
-    const maxBody = maxBodyBytes(route);
-=======
   if (method === 'POST' || method === 'PATCH') {
->>>>>>> origin/main
+    const maxBody = maxBodyBytes(route);
     const len = Number(req.headers.get('content-length') || 0);
     if (len > maxBody) return NextResponse.json({ detail: 'Request too large.' }, { status: 413 });
     body = await req.text();

@@ -357,8 +357,22 @@
         "tags": [
           "backtests"
         ],
-        "summary": "The dataset versions of the caller's workspace, newest first (for the backtest form).",
+        "summary": "The dataset versions of the caller's workspace, newest first (for the\nbacktest form); with `?view=grouped`, also one entry per dataset.",
         "operationId": "list_datasets",
+        "parameters": [
+          {
+            "name": "view",
+            "in": "path",
+            "description": "`grouped` adds `datasets` (one entry per dataset). Without it the\nresponse is exactly the version list the backtest form reads.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -366,6 +380,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DatasetList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown view",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
                 }
               }
             }
@@ -464,6 +488,369 @@
           },
           "422": {
             "description": "Invalid settings (`details.errors` lists every field), or the file does not match them (a missing column)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/versions/{id}": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "One dataset version: metadata, symbols, date range and the full quality report.",
+        "operationId": "get_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Delete a dataset version that no run uses.",
+        "operationId": "delete_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedVersionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A run or a queued backtest uses it (code `in_use`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/versions/{id}/bars": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "A symbol's bars, reduced to at most `points` points, for a price chart.",
+        "operationId": "bars",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "path",
+            "description": "Symbol; default: the version's first.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "path",
+            "description": "From (inclusive), RFC 3339 or a date (`2024-01-02`).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "path",
+            "description": "To (inclusive), RFC 3339 or a date.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "points",
+            "in": "path",
+            "description": "Most points to return, 10 to 5000 (default 1000).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BarsView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bars not reachable (code `not_chartable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every invalid parameter (`details.errors`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/versions/{id}/runs": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Runs that used a dataset version, newest first.",
+        "operationId": "version_runs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionRunList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{id}": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "A dataset and its version history.",
+        "operationId": "get_dataset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Rename a dataset or change its description.",
+        "operationId": "update_dataset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDataset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another dataset has that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every invalid field (`details.errors`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1096,6 +1483,81 @@
           }
         }
       },
+      "BarPoint": {
+        "type": "object",
+        "description": "One chart point. Prices are decimal numbers (for drawing only).",
+        "required": [
+          "t",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "properties": {
+          "close": {
+            "type": "number",
+            "format": "double"
+          },
+          "high": {
+            "type": "number",
+            "format": "double"
+          },
+          "low": {
+            "type": "number",
+            "format": "double"
+          },
+          "open": {
+            "type": "number",
+            "format": "double"
+          },
+          "t": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds since the epoch, UTC."
+          },
+          "volume": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "BarsView": {
+        "type": "object",
+        "description": "A symbol's bars for a chart.",
+        "required": [
+          "symbol",
+          "symbols",
+          "total_bars",
+          "points"
+        ],
+        "properties": {
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BarPoint"
+            },
+            "description": "At most `points` points; each groups consecutive bars (first open,\nhighest high, lowest low, last close, summed volume)."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "The symbol charted."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every symbol in the version."
+          },
+          "total_bars": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars in the range, before reducing them to points.",
+            "minimum": 0
+          }
+        }
+      },
       "BenchmarkRequest": {
         "type": "object",
         "description": "`POST /api/v1/benchmark` body (also the `benchmark` job payload).",
@@ -1211,6 +1673,52 @@
         },
         "additionalProperties": false
       },
+      "DatasetDetailView": {
+        "type": "object",
+        "description": "A dataset and its versions.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "versions"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Created."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who created it."
+          },
+          "description": {
+            "type": "string",
+            "description": "Free text."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Dataset id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionEntryView"
+            },
+            "description": "Newest first."
+          }
+        }
+      },
       "DatasetList": {
         "type": "object",
         "description": "The workspace's dataset versions, newest first.",
@@ -1218,12 +1726,120 @@
           "items"
         ],
         "properties": {
+          "datasets": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/DatasetSummaryView"
+            },
+            "description": "Only with `?view=grouped`: the same versions' datasets, most recently\nupdated first, each with its latest version (the Studio's Data tab)."
+          },
           "items": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DatasetVersionView"
             },
             "description": "At most 500."
+          }
+        }
+      },
+      "DatasetSummaryView": {
+        "type": "object",
+        "description": "A dataset, with its latest version, for the dataset list.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "version_count",
+          "created_at",
+          "symbols"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes stored for the latest version."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Created."
+          },
+          "description": {
+            "type": "string",
+            "description": "Free text."
+          },
+          "first_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "First bar of the latest version (RFC 3339)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Dataset id."
+          },
+          "last_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Last bar of the latest version (RFC 3339)."
+          },
+          "latest_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The latest version's number."
+          },
+          "latest_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The latest version's id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name (unique in the workspace)."
+          },
+          "row_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bars in the latest version."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbols in the latest version."
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the latest version was added."
+          },
+          "version_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Versions."
           }
         }
       },
@@ -1272,6 +1888,24 @@
             "type": "integer",
             "format": "int32",
             "description": "Version number within the dataset."
+          }
+        }
+      },
+      "DeletedVersionView": {
+        "type": "object",
+        "description": "What deleting a version did.",
+        "required": [
+          "deleted",
+          "dataset_deleted"
+        ],
+        "properties": {
+          "dataset_deleted": {
+            "type": "boolean",
+            "description": "It was the dataset's last version, so the dataset was deleted too."
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "The version was deleted."
           }
         }
       },
@@ -1583,12 +2217,12 @@
             "items": {
               "$ref": "#/components/schemas/PreviewRow"
             },
-            "description": "Up to 200 parsed rows, sorted by timestamp then symbol. Prices are exact decimal text."
+            "description": "The first 200 parsed rows, sorted by timestamp then symbol. Prices are exact decimal text."
           },
           "rows_not_read": {
             "type": "integer",
             "format": "int64",
-            "description": "Data rows in the sample beyond the first 200, not parsed.",
+            "description": "Data rows in the sample that were not checked. Every row of the\nsample (at most 1 MB) is checked, so this is 0.",
             "minimum": 0
           },
           "would_abort": {
@@ -2133,6 +2767,27 @@
         },
         "additionalProperties": false
       },
+      "UpdateDataset": {
+        "type": "object",
+        "description": "`PATCH /api/v1/datasets/{id}` body: what to change.",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New description (at most 2000 characters; empty clears it)."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New name (unique in the workspace)."
+          }
+        },
+        "additionalProperties": false
+      },
       "UploadView": {
         "type": "object",
         "description": "A stored upload.",
@@ -2167,6 +2822,266 @@
             "format": "int64",
             "description": "Bytes.",
             "minimum": 0
+          }
+        }
+      },
+      "VersionDetailView": {
+        "type": "object",
+        "description": "A dataset version in full.",
+        "required": [
+          "id",
+          "dataset_id",
+          "dataset_name",
+          "version",
+          "checksum",
+          "row_count",
+          "byte_size",
+          "created_at",
+          "run_count",
+          "chartable",
+          "quality_report"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes stored."
+          },
+          "chartable": {
+            "type": "boolean",
+            "description": "Whether its bars can be charted here (`/bars`)."
+          },
+          "checksum": {
+            "type": "string",
+            "description": "The dataset id (content hash of bars and symbols)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Registered at."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who registered it."
+          },
+          "dataset_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Its dataset."
+          },
+          "dataset_name": {
+            "type": "string",
+            "description": "The dataset's name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Version id."
+          },
+          "quality_report": {
+            "type": "object",
+            "description": "The quality report. Versions ingested through the Studio have every\nfield of `QualityReport`; command-line versions only some\n(`rows_total`, `rows_accepted`, `rows_rejected`, `warnings`, `symbols`, ...)."
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars."
+          },
+          "run_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Runs that used it."
+          },
+          "source": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "How it was made from an upload (`upload_id`, `file_sha256`, `filename`,\n`settings`); null when registered from the command line."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Version number."
+          }
+        }
+      },
+      "VersionEntryView": {
+        "type": "object",
+        "description": "One version in a dataset's history.",
+        "required": [
+          "id",
+          "version",
+          "checksum",
+          "row_count",
+          "byte_size",
+          "created_at",
+          "symbols",
+          "rows_rejected",
+          "warning_count",
+          "run_count"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes stored."
+          },
+          "checksum": {
+            "type": "string",
+            "description": "The dataset id (content hash of bars and symbols)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Registered at."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who registered it."
+          },
+          "filename": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Uploaded file name; null when registered from the command line."
+          },
+          "first_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "First bar (RFC 3339)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Version id (a backtest's `dataset_version_id`)."
+          },
+          "last_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Last bar (RFC 3339)."
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars."
+          },
+          "rows_rejected": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows dropped at ingest."
+          },
+          "run_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Runs that used it (a version with runs can't be deleted)."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbols."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Version number."
+          },
+          "warning_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Warnings in its quality report."
+          }
+        }
+      },
+      "VersionRunList": {
+        "type": "object",
+        "description": "Runs of a version, newest first (at most 100).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionRunView"
+            },
+            "description": "The runs."
+          }
+        }
+      },
+      "VersionRunView": {
+        "type": "object",
+        "description": "A run that used a dataset version.",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Started."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Finished."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Run id."
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The job; for a backtest, its id in `/api/v1/backtests/{id}`."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`backtest`, ..."
+          },
+          "status": {
+            "type": "string",
+            "description": "Run status."
+          },
+          "strategy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The strategy, or `multi-strategy`."
+          },
+          "total_return": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Total return (a fraction) for finished backtests."
           }
         }
       }

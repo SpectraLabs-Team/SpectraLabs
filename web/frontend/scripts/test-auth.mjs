@@ -55,7 +55,7 @@ const build = path.join(root, 'node_modules', '.cache', 'spectra-auth-test');
 fs.rmSync(build, { recursive: true, force: true });
 fs.mkdirSync(build, { recursive: true });
 fs.writeFileSync(path.join(build, 'package.json'), '{"type":"commonjs"}');
-for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts', 'lib/server/engineSign.ts', 'lib/server/engineUpload.ts']) {
+for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts', 'lib/server/engineSign.ts', 'lib/server/engineUpload.ts', 'lib/api.ts', 'lib/jobs.ts', 'lib/datasets.ts']) {
   const { outputText } = ts.transpileModule(fs.readFileSync(path.join(root, rel), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
   });
@@ -75,6 +75,8 @@ let workspaces = load('lib/server/workspaces.js');
 const engineId = load('lib/server/engineIdentity.js');
 const engineSign = load('lib/server/engineSign.js');
 const engineUpload = load('lib/server/engineUpload.js');
+const apiClient = load('lib/api.js');
+const datasetsClient = load('lib/datasets.js');
 let authz = load('lib/server/authz.js');
 let lockout = load('lib/server/lockout.js');
 let vault = load('lib/server/vault.js');
@@ -661,7 +663,7 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
     const methods = Array.isArray(r.method) ? r.method : [r.method];
     for (const method of methods) {
       const role = engineRoutes.minimumRole(r, method);
-      if (method === 'POST') assert.ok(authz.hasRole(role, 'editor'), `${path}: running a computation needs editor`);
+      if (method !== 'GET') assert.ok(authz.hasRole(role, 'editor'), `${path}: ${method} changes data, so it needs editor`);
     }
   }
   for (const p of ['api/risk', 'api/stress', 'api/benchmark', 'api/alpaca/account']) assert.equal(routes[p].minRole, 'editor', p);
@@ -699,6 +701,21 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/ingest'], 'POST'), 'editor', 'ingesting needs editor');
   assert.equal(engineRoutes.ENGINE_UPLOAD_ROUTE.minRole, 'editor', 'uploading needs editor');
   assert.ok(!Object.prototype.hasOwnProperty.call(routes, 'api/v1/uploads'), 'uploads never go through the 2 MB JSON proxy');
+  // Browsing datasets is a read; renaming and deleting need editor.
+  const ds = '0192f3a4-0000-7000-8000-000000000009';
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/${ds}`), 'api/v1/datasets/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}`), 'api/v1/datasets/versions/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/bars`), 'api/v1/datasets/versions/{id}/bars');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/runs`), 'api/v1/datasets/versions/{id}/runs');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/other`), `api/v1/datasets/versions/${ds}/other`, 'unknown sub-routes stay unlisted');
+  assert.equal(engineRoutes.routePolicyKey('api/v1/datasets/not-a-uuid'), 'api/v1/datasets/not-a-uuid');
+  for (const p of ['api/v1/datasets/{id}', 'api/v1/datasets/versions/{id}', 'api/v1/datasets/versions/{id}/runs', 'api/v1/datasets/versions/{id}/bars']) {
+    assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
+  }
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/{id}'], 'PATCH'), 'editor', 'renaming needs editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/versions/{id}'], 'DELETE'), 'editor', 'deleting needs editor');
+  assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/{id}'], 'DELETE'), 'datasets are deleted version by version');
+  assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/versions/{id}/bars'], 'POST'));
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {
@@ -1903,6 +1920,8 @@ const ROUTE_RULES = {
   'csp-report POST': 'public',
   'engine/[...path] GET': 'engine',
   'engine/[...path] POST': 'engine',
+  'engine/[...path] PATCH': 'engine',
+  'engine/[...path] DELETE': 'engine',
   'engine-upload POST': 'editor',
   'invites/[token] GET': 'public',
   'invites/[token] POST': 'session',
@@ -2009,7 +2028,7 @@ test('permissions: viewer = read only, editor = create and run, owner = members,
   for (const [p, r] of Object.entries(engineRoutes.ENGINE_ROUTES)) {
     const methods = Array.isArray(r.method) ? r.method : [r.method];
     for (const method of methods) {
-      if (method === 'POST' && !r.public) assert.ok(rank[engineRoutes.minimumRole(r, method)] >= rank.editor, `engine ${p}`);
+      if (method !== 'GET' && !r.public) assert.ok(rank[engineRoutes.minimumRole(r, method)] >= rank.editor, `engine ${method} ${p}`);
     }
   }
 
@@ -2464,6 +2483,55 @@ test('uploads skip the middleware (it cuts bodies at 10 MB), and only that route
   for (const p of ['/api/engine/api/v1/datasets', '/api/engine-upload/x', '/api/engine-uploads', '/studio', '/api/auth/login']) {
     assert.ok(re.test(p), `${p} still goes through the middleware`);
   }
+});
+
+test('data tab: settings come only from what the person chose; suggestions apply on request', async () => {
+  const d = datasetsClient.emptyDraft();
+  const empty = datasetsClient.settingsFromDraft(d);
+  // Nothing is filled in: the engine reports every missing choice.
+  assert.equal(empty.delimiter, '');
+  assert.equal(empty.time_format, '');
+  assert.equal(empty.utc_offset_minutes, null);
+  assert.equal(empty.columns.close, '');
+  assert.equal(empty.columns.volume, null, 'an optional column left empty means "none"');
+  assert.equal(empty.skip_bad_rows, false, 'bad rows abort by default');
+  const suggestions = {
+    delimiter: ';',
+    header: ['Date', 'Ticker', 'Open', 'High', 'Low', 'Close'],
+    columns: { timestamp: 'Date', open: 'Open', high: 'High', low: 'Low', close: 'Close', volume: null, symbol: 'Ticker' },
+    time_format: 'iso8601',
+    timestamps_have_zone: false,
+  };
+  const applied = datasetsClient.applySuggestions(d, suggestions);
+  assert.equal(applied.utc_offset_minutes, null, 'the offset is never suggested');
+  const s = datasetsClient.settingsFromDraft({ ...applied, utc_offset_minutes: 330, default_symbol: 'IGNORED' });
+  assert.deepEqual(
+    { delimiter: s.delimiter, time_format: s.time_format, utc: s.utc_offset_minutes, symbol: s.columns.symbol, volume: s.columns.volume, default_symbol: s.default_symbol },
+    { delimiter: ';', time_format: 'iso8601', utc: 330, symbol: 'Ticker', volume: null, default_symbol: null },
+    'a symbol column means no default symbol',
+  );
+  const single = datasetsClient.settingsFromDraft({ ...applied, columns: { ...applied.columns, symbol: '' }, default_symbol: 'NIFTY' });
+  assert.equal(single.default_symbol, 'NIFTY');
+  assert.equal(datasetsClient.formatOffset(330), 'UTC+05:30');
+  assert.equal(datasetsClient.formatOffset(-300), 'UTC−05:00');
+  assert.equal(datasetsClient.formatOffset(0), 'UTC+00:00');
+
+  // The preview sample: the first 1 MB, flagged when cut.
+  const small = await datasetsClient.readSample(new Blob(['a,b\n1,2\n']));
+  assert.deepEqual(small, { text: 'a,b\n1,2\n', truncated: false });
+  const big = await datasetsClient.readSample(new Blob(['x'.repeat(datasetsClient.PREVIEW_SAMPLE_BYTES + 10)]));
+  assert.equal(big.text.length, datasetsClient.PREVIEW_SAMPLE_BYTES);
+  assert.ok(big.truncated);
+
+  // Field errors from a 422's details, joined per field.
+  const err = new apiClient.ApiError('bad', 422, { errors: [{ field: 'settings.columns.close', message: 'required' }, { field: 'dataset_name', message: 'required' }, { field: 'dataset_name', message: 'too long' }, { message: 'whole request' }] });
+  assert.deepEqual(apiClient.detailErrors(err), { 'settings.columns.close': 'required', dataset_name: 'required; too long', '': 'whole request' });
+  assert.deepEqual(apiClient.detailErrors(new Error('x')), {});
+  assert.deepEqual(apiClient.detailErrors(new apiClient.ApiError('x', 500)), {});
+  const fromResponse = await apiClient.errorFrom(new Response(JSON.stringify({ code: 'in_use', message: 'kept', details: null }), { status: 409 }));
+  assert.equal(fromResponse.code, 'in_use');
+  assert.equal(fromResponse.status, 409);
+  assert.equal(fromResponse.message, 'kept');
 });
 
 test('engine request signing matches the Rust verifier', () => {

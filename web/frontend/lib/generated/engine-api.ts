@@ -118,7 +118,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The dataset versions of the caller's workspace, newest first (for the backtest form). */
+        /** The dataset versions of the caller's workspace, newest first (for the
+         *     backtest form); with `?view=grouped`, also one entry per dataset. */
         get: operations["list_datasets"];
         put?: never;
         post?: never;
@@ -160,6 +161,76 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/versions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One dataset version: metadata, symbols, date range and the full quality report. */
+        get: operations["get_version"];
+        put?: never;
+        post?: never;
+        /** Delete a dataset version that no run uses. */
+        delete: operations["delete_version"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/versions/{id}/bars": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A symbol's bars, reduced to at most `points` points, for a price chart. */
+        get: operations["bars"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/versions/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Runs that used a dataset version, newest first. */
+        get: operations["version_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A dataset and its version history. */
+        get: operations["get_dataset"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename a dataset or change its description. */
+        patch: operations["update_dataset"];
         trace?: never;
     };
     "/api/v1/jobs": {
@@ -453,6 +524,39 @@ export interface components {
             /** @description Metrics, drawdown, tail, activity and trade statistics, once finished. */
             summary?: Record<string, never> | null;
         };
+        /** @description One chart point. Prices are decimal numbers (for drawing only). */
+        BarPoint: {
+            /** Format: double */
+            close: number;
+            /** Format: double */
+            high: number;
+            /** Format: double */
+            low: number;
+            /** Format: double */
+            open: number;
+            /**
+             * Format: int64
+             * @description Milliseconds since the epoch, UTC.
+             */
+            t: number;
+            /** Format: double */
+            volume: number;
+        };
+        /** @description A symbol's bars for a chart. */
+        BarsView: {
+            /** @description At most `points` points; each groups consecutive bars (first open,
+             *     highest high, lowest low, last close, summed volume). */
+            points: components["schemas"]["BarPoint"][];
+            /** @description The symbol charted. */
+            symbol: string;
+            /** @description Every symbol in the version. */
+            symbols: string[];
+            /**
+             * Format: int64
+             * @description Bars in the range, before reducing them to points.
+             */
+            total_bars: number;
+        };
         /** @description `POST /api/v1/benchmark` body (also the `benchmark` job payload). */
         BenchmarkRequest: {
             /** @description Portfolio CSV. */
@@ -508,10 +612,90 @@ export interface components {
              */
             priority?: number;
         };
+        /** @description A dataset and its versions. */
+        DatasetDetailView: {
+            /**
+             * Format: date-time
+             * @description Created.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who created it.
+             */
+            created_by?: string | null;
+            /** @description Free text. */
+            description: string;
+            /**
+             * Format: uuid
+             * @description Dataset id.
+             */
+            id: string;
+            /** @description Name. */
+            name: string;
+            /** @description Newest first. */
+            versions: components["schemas"]["VersionEntryView"][];
+        };
         /** @description The workspace's dataset versions, newest first. */
         DatasetList: {
+            /** @description Only with `?view=grouped`: the same versions' datasets, most recently
+             *     updated first, each with its latest version (the Studio's Data tab). */
+            datasets?: components["schemas"]["DatasetSummaryView"][] | null;
             /** @description At most 500. */
             items: components["schemas"]["DatasetVersionView"][];
+        };
+        /** @description A dataset, with its latest version, for the dataset list. */
+        DatasetSummaryView: {
+            /**
+             * Format: int64
+             * @description Bytes stored for the latest version.
+             */
+            byte_size?: number | null;
+            /**
+             * Format: date-time
+             * @description Created.
+             */
+            created_at: string;
+            /** @description Free text. */
+            description: string;
+            /** @description First bar of the latest version (RFC 3339). */
+            first_ts?: string | null;
+            /**
+             * Format: uuid
+             * @description Dataset id.
+             */
+            id: string;
+            /** @description Last bar of the latest version (RFC 3339). */
+            last_ts?: string | null;
+            /**
+             * Format: int32
+             * @description The latest version's number.
+             */
+            latest_version?: number | null;
+            /**
+             * Format: uuid
+             * @description The latest version's id.
+             */
+            latest_version_id?: string | null;
+            /** @description Name (unique in the workspace). */
+            name: string;
+            /**
+             * Format: int64
+             * @description Bars in the latest version.
+             */
+            row_count?: number | null;
+            /** @description Symbols in the latest version. */
+            symbols: string[];
+            /**
+             * Format: date-time
+             * @description When the latest version was added.
+             */
+            updated_at?: string | null;
+            /**
+             * Format: int64
+             * @description Versions.
+             */
+            version_count: number;
         };
         /** @description A dataset version a backtest can run on. */
         DatasetVersionView: {
@@ -544,6 +728,13 @@ export interface components {
              * @description Version number within the dataset.
              */
             version: number;
+        };
+        /** @description What deleting a version did. */
+        DeletedVersionView: {
+            /** @description It was the dataset's last version, so the dataset was deleted too. */
+            dataset_deleted: boolean;
+            /** @description The version was deleted. */
+            deleted: boolean;
         };
         /** @description Every error response. */
         ErrorDoc: {
@@ -684,11 +875,12 @@ export interface components {
             /** @description The quality report of the parsed rows. Every bad row in the sample is
              *     counted here, whatever `skip_bad_rows` says. */
             quality: components["schemas"]["QualityReport"];
-            /** @description Up to 200 parsed rows, sorted by timestamp then symbol. Prices are exact decimal text. */
+            /** @description The first 200 parsed rows, sorted by timestamp then symbol. Prices are exact decimal text. */
             rows: components["schemas"]["PreviewRow"][];
             /**
              * Format: int64
-             * @description Data rows in the sample beyond the first 200, not parsed.
+             * @description Data rows in the sample that were not checked. Every row of the
+             *     sample (at most 1 MB) is checked, so this is 0.
              */
             rows_not_read: number;
             /** @description Why ingesting would stop with these settings (the first bad row when
@@ -916,6 +1108,13 @@ export interface components {
              */
             zero_volume_bars: number;
         };
+        /** @description `PATCH /api/v1/datasets/{id}` body: what to change. */
+        UpdateDataset: {
+            /** @description New description (at most 2000 characters; empty clears it). */
+            description?: string | null;
+            /** @description New name (unique in the workspace). */
+            name?: string | null;
+        };
         /** @description A stored upload. */
         UploadView: {
             /**
@@ -937,6 +1136,159 @@ export interface components {
              * @description Bytes.
              */
             size: number;
+        };
+        /** @description A dataset version in full. */
+        VersionDetailView: {
+            /**
+             * Format: int64
+             * @description Bytes stored.
+             */
+            byte_size: number;
+            /** @description Whether its bars can be charted here (`/bars`). */
+            chartable: boolean;
+            /** @description The dataset id (content hash of bars and symbols). */
+            checksum: string;
+            /**
+             * Format: date-time
+             * @description Registered at.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who registered it.
+             */
+            created_by?: string | null;
+            /**
+             * Format: uuid
+             * @description Its dataset.
+             */
+            dataset_id: string;
+            /** @description The dataset's name. */
+            dataset_name: string;
+            /**
+             * Format: uuid
+             * @description Version id.
+             */
+            id: string;
+            /** @description The quality report. Versions ingested through the Studio have every
+             *     field of `QualityReport`; command-line versions only some
+             *     (`rows_total`, `rows_accepted`, `rows_rejected`, `warnings`, `symbols`, ...). */
+            quality_report: Record<string, never>;
+            /**
+             * Format: int64
+             * @description Bars.
+             */
+            row_count: number;
+            /**
+             * Format: int64
+             * @description Runs that used it.
+             */
+            run_count: number;
+            /** @description How it was made from an upload (`upload_id`, `file_sha256`, `filename`,
+             *     `settings`); null when registered from the command line. */
+            source?: Record<string, never> | null;
+            /**
+             * Format: int32
+             * @description Version number.
+             */
+            version: number;
+        };
+        /** @description One version in a dataset's history. */
+        VersionEntryView: {
+            /**
+             * Format: int64
+             * @description Bytes stored.
+             */
+            byte_size: number;
+            /** @description The dataset id (content hash of bars and symbols). */
+            checksum: string;
+            /**
+             * Format: date-time
+             * @description Registered at.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who registered it.
+             */
+            created_by?: string | null;
+            /** @description Uploaded file name; null when registered from the command line. */
+            filename?: string | null;
+            /** @description First bar (RFC 3339). */
+            first_ts?: string | null;
+            /**
+             * Format: uuid
+             * @description Version id (a backtest's `dataset_version_id`).
+             */
+            id: string;
+            /** @description Last bar (RFC 3339). */
+            last_ts?: string | null;
+            /**
+             * Format: int64
+             * @description Bars.
+             */
+            row_count: number;
+            /**
+             * Format: int64
+             * @description Rows dropped at ingest.
+             */
+            rows_rejected: number;
+            /**
+             * Format: int64
+             * @description Runs that used it (a version with runs can't be deleted).
+             */
+            run_count: number;
+            /** @description Symbols. */
+            symbols: string[];
+            /**
+             * Format: int32
+             * @description Version number.
+             */
+            version: number;
+            /**
+             * Format: int64
+             * @description Warnings in its quality report.
+             */
+            warning_count: number;
+        };
+        /** @description Runs of a version, newest first (at most 100). */
+        VersionRunList: {
+            /** @description The runs. */
+            items: components["schemas"]["VersionRunView"][];
+        };
+        /** @description A run that used a dataset version. */
+        VersionRunView: {
+            /**
+             * Format: date-time
+             * @description Started.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Finished.
+             */
+            finished_at?: string | null;
+            /**
+             * Format: uuid
+             * @description Run id.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The job; for a backtest, its id in `/api/v1/backtests/{id}`.
+             */
+            job_id?: string | null;
+            /** @description `backtest`, ... */
+            kind: string;
+            /** @description Run status. */
+            status: string;
+            /** @description The strategy, or `multi-strategy`. */
+            strategy?: string | null;
+            /**
+             * Format: double
+             * @description Total return (a fraction) for finished backtests.
+             */
+            total_return?: number | null;
         };
     };
     responses: never;
@@ -1200,7 +1552,11 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                /** @description `grouped` adds `datasets` (one entry per dataset). Without it the
+                 *     response is exactly the version list the backtest form reads. */
+                view: string | null;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -1211,6 +1567,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DatasetList"];
+                };
+            };
+            /** @description Unknown view */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
             503: {
@@ -1288,6 +1653,243 @@ export interface operations {
                 };
             };
             /** @description Invalid settings (`details.errors` lists every field), or the file does not match them (a missing column) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset version id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionDetailView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset version id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedVersionView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description A run or a queued backtest uses it (code `in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    bars: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset version id */
+                id: string;
+                /** @description Symbol; default: the version's first. */
+                symbol: string | null;
+                /** @description From (inclusive), RFC 3339 or a date (`2024-01-02`). */
+                from: string | null;
+                /** @description To (inclusive), RFC 3339 or a date. */
+                to: string | null;
+                /** @description Most points to return, 10 to 5000 (default 1000). */
+                points: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BarsView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Bars not reachable (code `not_chartable`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every invalid parameter (`details.errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    version_runs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset version id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionRunList"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_dataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetDetailView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    update_dataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDataset"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetDetailView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Another dataset has that name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every invalid field (`details.errors`) */
             422: {
                 headers: {
                     [name: string]: unknown;

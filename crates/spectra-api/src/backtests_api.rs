@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use spectra_db::artifacts::find_for_run;
 use spectra_db::jobs::{self, Job, JobStatus};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::jobs_api::{context, db_error, submit, to_json, ListJobs};
@@ -196,6 +196,18 @@ pub struct DatasetVersionView {
 pub struct DatasetList {
     /// At most 500.
     pub items: Vec<DatasetVersionView>,
+    /// Only with `?view=grouped`: the same versions' datasets, most recently
+    /// updated first, each with its latest version (the Studio's Data tab).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub datasets: Option<Vec<crate::datasets_api::DatasetSummaryView>>,
+}
+
+/// `GET /api/v1/datasets` query.
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct DatasetListQuery {
+    /// `grouped` adds `datasets` (one entry per dataset). Without it the
+    /// response is exactly the version list the backtest form reads.
+    pub view: Option<String>,
 }
 
 /// Stored files of a finished backtest that `/artifacts/{kind}` serves.
@@ -404,16 +416,35 @@ pub(crate) async fn list_backtests(
     }
 }
 
-/// The dataset versions of the caller's workspace, newest first (for the backtest form).
-#[utoipa::path(get, path = "/api/v1/datasets", tag = "backtests",
-    responses((status = 200, body = DatasetList), (status = 503, body = crate::openapi::ErrorDoc)))]
+/// The dataset versions of the caller's workspace, newest first (for the
+/// backtest form); with `?view=grouped`, also one entry per dataset.
+#[utoipa::path(get, path = "/api/v1/datasets", tag = "backtests", params(DatasetListQuery),
+    responses(
+        (status = 200, body = DatasetList),
+        (status = 422, description = "Unknown view", body = crate::openapi::ErrorDoc),
+        (status = 503, body = crate::openapi::ErrorDoc),
+    ))]
 pub(crate) async fn list_datasets(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
+    query: Result<Query<DatasetListQuery>, QueryRejection>,
 ) -> Response {
     let (pool, ws) = match context(&st, &id) {
         Ok(c) => c,
         Err(r) => return r,
+    };
+    let grouped = match query.ok().and_then(|q| q.0.view) {
+        None => false,
+        Some(v) if v == "grouped" => true,
+        Some(_) => return error_response(422, "view: use grouped, or leave it out."),
+    };
+    let datasets = if grouped {
+        match spectra_db::datasets::list_datasets(&pool, ws, 500).await {
+            Ok(rows) => Some(rows.into_iter().map(crate::datasets_api::DatasetSummaryView::from).collect()),
+            Err(e) => return db_error(&e),
+        }
+    } else {
+        None
     };
     match spectra_db::datasets::list_versions(&pool, ws, 500).await {
         Ok(rows) => to_json(
@@ -431,6 +462,7 @@ pub(crate) async fn list_datasets(
                         created_at: v.created_at,
                     })
                     .collect(),
+                datasets,
             },
         ),
         Err(e) => db_error(&e),

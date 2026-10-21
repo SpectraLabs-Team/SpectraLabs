@@ -39,11 +39,18 @@ export function BacktestLab() {
       const [c, d] = await Promise.all([getCatalog(), listDatasets()]);
       setCatalog(c);
       setDatasets(d);
+      // "Backtest this dataset" from the Data tab: ?tab=backtests&dataset=<version id>.
+      const wanted = params.get('dataset');
+      if (wanted && UUID.test(wanted) && d.some((x) => x.id === wanted)) {
+        setPrefill({ request: { dataset_version_id: wanted }, nonce: Date.now() });
+      }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Could not reach the engine.');
     } finally {
       setLoading(false);
     }
+    // Read the URL once, on load; later changes come from the form itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

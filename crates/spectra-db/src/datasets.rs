@@ -219,3 +219,453 @@ pub async fn insert_backtest_run(pool: &PgPool, r: &NewBacktestRun) -> Result<Uu
         .fetch_one(pool)
         .await
 }
+
+// ---------------------------------------------------------------------------
+// The Studio's dataset browser (M1 task 6)
+// ---------------------------------------------------------------------------
+
+/// A dataset with its latest version, as the dataset list shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DatasetSummary {
+    /// Dataset id.
+    pub id: Uuid,
+    /// Name (unique in the workspace).
+    pub name: String,
+    /// Free text.
+    pub description: String,
+    /// When the dataset was created.
+    pub created_at: DateTime<Utc>,
+    /// Number of versions.
+    pub version_count: i64,
+    /// The latest version, if any.
+    pub latest: Option<LatestVersion>,
+}
+
+/// The newest version of a dataset, in a [`DatasetSummary`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct LatestVersion {
+    /// Version id.
+    pub id: Uuid,
+    /// Version number.
+    pub version: i32,
+    /// Bars.
+    pub row_count: i64,
+    /// Bytes stored.
+    pub byte_size: i64,
+    /// When it was registered (the dataset's "last updated").
+    pub created_at: DateTime<Utc>,
+    /// Symbol names, from its quality report.
+    pub symbols: Vec<String>,
+    /// First and last bar, nanoseconds since the epoch (from its quality report).
+    pub first_ts_ns: Option<i64>,
+    /// See `first_ts_ns`.
+    pub last_ts_ns: Option<i64>,
+}
+
+fn strings(v: &JsonValue) -> Vec<String> {
+    v.as_array()
+        .map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
+}
+
+/// The workspace's datasets, most recently updated first.
+///
+/// # Errors
+/// Any database error.
+pub async fn list_datasets(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    limit: i32,
+) -> Result<Vec<DatasetSummary>, Error> {
+    type Row = (
+        Uuid,
+        String,
+        String,
+        DateTime<Utc>,
+        i64,
+        Option<Uuid>,
+        Option<i32>,
+        Option<i64>,
+        Option<i64>,
+        Option<DateTime<Utc>>,
+        JsonValue,
+        Option<i64>,
+        Option<i64>,
+    );
+    let rows: Vec<Row> = sqlx::query_as(include_str!("../queries/dataset_list_grouped.sql"))
+        .bind(workspace_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                name,
+                description,
+                created_at,
+                version_count,
+                lid,
+                lver,
+                rows,
+                size,
+                updated,
+                symbols,
+                first,
+                last,
+            )| {
+                let latest = match (lid, lver, rows, size, updated) {
+                    (Some(id), Some(version), Some(row_count), Some(byte_size), Some(created_at)) => {
+                        Some(LatestVersion {
+                            id,
+                            version,
+                            row_count,
+                            byte_size,
+                            created_at,
+                            symbols: strings(&symbols),
+                            first_ts_ns: first,
+                            last_ts_ns: last,
+                        })
+                    }
+                    _ => None,
+                };
+                DatasetSummary { id, name, description, created_at, version_count, latest }
+            },
+        )
+        .collect())
+}
+
+/// A dataset's own fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DatasetRow {
+    /// Dataset id.
+    pub id: Uuid,
+    /// Name.
+    pub name: String,
+    /// Free text.
+    pub description: String,
+    /// Who created it.
+    pub created_by: Option<Uuid>,
+    /// When.
+    pub created_at: DateTime<Utc>,
+}
+
+type DatasetTuple = (Uuid, String, String, Option<Uuid>, DateTime<Utc>);
+
+fn dataset_row((id, name, description, created_by, created_at): DatasetTuple) -> DatasetRow {
+    DatasetRow { id, name, description, created_by, created_at }
+}
+
+/// The dataset `id` of `workspace_id`.
+///
+/// # Errors
+/// Any database error.
+pub async fn get_dataset(pool: &PgPool, workspace_id: Uuid, id: Uuid) -> Result<Option<DatasetRow>, Error> {
+    let row: Option<DatasetTuple> = sqlx::query_as(include_str!("../queries/dataset_get.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(dataset_row))
+}
+
+/// Renames a dataset and/or sets its description (`None` keeps a field).
+/// `Ok(None)` if it is not in the workspace.
+///
+/// # Errors
+/// Any database error; a name already used in the workspace is a unique
+/// violation (code 23505).
+pub async fn update_dataset(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    id: Uuid,
+    name: Option<&str>,
+    description: Option<&str>,
+) -> Result<Option<DatasetRow>, Error> {
+    let row: Option<DatasetTuple> = sqlx::query_as(include_str!("../queries/dataset_update.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .bind(name)
+        .bind(description)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(dataset_row))
+}
+
+/// One version in a dataset's history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionEntry {
+    /// Version id.
+    pub id: Uuid,
+    /// Version number.
+    pub version: i32,
+    /// Dataset-store checksum (the dataset id).
+    pub checksum: String,
+    /// Bars.
+    pub row_count: i64,
+    /// Bytes stored.
+    pub byte_size: i64,
+    /// Who registered it.
+    pub created_by: Option<Uuid>,
+    /// When.
+    pub created_at: DateTime<Utc>,
+    /// Symbol names.
+    pub symbols: Vec<String>,
+    /// First bar, ns since the epoch.
+    pub first_ts_ns: Option<i64>,
+    /// Last bar, ns since the epoch.
+    pub last_ts_ns: Option<i64>,
+    /// Rows dropped at ingest.
+    pub rows_rejected: i64,
+    /// Warnings in its quality report.
+    pub warning_count: i64,
+    /// Uploaded file name (`None` from the command line).
+    pub filename: Option<String>,
+    /// Runs that used it.
+    pub run_count: i64,
+}
+
+/// Every version of a dataset, newest first.
+///
+/// # Errors
+/// Any database error.
+pub async fn dataset_versions(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    dataset_id: Uuid,
+) -> Result<Vec<VersionEntry>, Error> {
+    type Row = (
+        Uuid,
+        i32,
+        String,
+        i64,
+        i64,
+        Option<Uuid>,
+        DateTime<Utc>,
+        JsonValue,
+        Option<i64>,
+        Option<i64>,
+        i64,
+        i64,
+        Option<String>,
+        i64,
+    );
+    let rows: Vec<Row> = sqlx::query_as(include_str!("../queries/dataset_versions_of.sql"))
+        .bind(workspace_id)
+        .bind(dataset_id)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(
+                id,
+                version,
+                checksum,
+                row_count,
+                byte_size,
+                created_by,
+                created_at,
+                symbols,
+                first_ts_ns,
+                last_ts_ns,
+                rows_rejected,
+                warning_count,
+                filename,
+                run_count,
+            )| VersionEntry {
+                id,
+                version,
+                checksum,
+                row_count,
+                byte_size,
+                created_by,
+                created_at,
+                symbols: strings(&symbols),
+                first_ts_ns,
+                last_ts_ns,
+                rows_rejected,
+                warning_count,
+                filename,
+                run_count,
+            },
+        )
+        .collect())
+}
+
+/// A dataset version in full.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VersionDetail {
+    /// Version id.
+    pub id: Uuid,
+    /// Its dataset.
+    pub dataset_id: Uuid,
+    /// The dataset's name.
+    pub dataset_name: String,
+    /// Version number.
+    pub version: i32,
+    /// Dataset-store checksum (the dataset id).
+    pub checksum: String,
+    /// Bars.
+    pub row_count: i64,
+    /// Bytes stored.
+    pub byte_size: i64,
+    /// The full quality report.
+    pub quality_report: JsonValue,
+    /// How it was made from an upload, if it was.
+    pub source: Option<JsonValue>,
+    /// Its file in the artifact store, if there.
+    pub blob_sha256: Option<String>,
+    /// Who registered it.
+    pub created_by: Option<Uuid>,
+    /// When.
+    pub created_at: DateTime<Utc>,
+    /// Runs that used it.
+    pub run_count: i64,
+}
+
+/// The dataset version `id` of `workspace_id`, in full.
+///
+/// # Errors
+/// Any database error.
+pub async fn get_version(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<Option<VersionDetail>, Error> {
+    type Row = (
+        Uuid,
+        Uuid,
+        String,
+        i32,
+        String,
+        i64,
+        i64,
+        JsonValue,
+        Option<JsonValue>,
+        Option<String>,
+        Option<Uuid>,
+        DateTime<Utc>,
+        i64,
+    );
+    let row: Option<Row> = sqlx::query_as(include_str!("../queries/dataset_version_get.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(
+        |(
+            id,
+            dataset_id,
+            dataset_name,
+            version,
+            checksum,
+            row_count,
+            byte_size,
+            quality_report,
+            source,
+            blob_sha256,
+            created_by,
+            created_at,
+            run_count,
+        )| VersionDetail {
+            id,
+            dataset_id,
+            dataset_name,
+            version,
+            checksum,
+            row_count,
+            byte_size,
+            quality_report,
+            source,
+            blob_sha256,
+            created_by,
+            created_at,
+            run_count,
+        },
+    ))
+}
+
+/// A run that used a dataset version.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VersionRun {
+    /// Run id.
+    pub id: Uuid,
+    /// Its job (a backtest's id in the API).
+    pub job_id: Option<Uuid>,
+    /// `backtest`, ...
+    pub kind: String,
+    /// Run status.
+    pub status: String,
+    /// What ran (strategy, parameters, configuration).
+    pub params: JsonValue,
+    /// When.
+    pub created_at: DateTime<Utc>,
+    /// When it finished.
+    pub finished_at: Option<DateTime<Utc>>,
+    /// Total return, for finished backtests.
+    pub total_return: Option<f64>,
+}
+
+/// Runs that used the dataset version `id`, newest first.
+///
+/// # Errors
+/// Any database error.
+pub async fn version_runs(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    id: Uuid,
+    limit: i32,
+) -> Result<Vec<VersionRun>, Error> {
+    type Row =
+        (Uuid, Option<Uuid>, String, String, JsonValue, DateTime<Utc>, Option<DateTime<Utc>>, Option<f64>);
+    let rows: Vec<Row> = sqlx::query_as(include_str!("../queries/dataset_version_runs.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, job_id, kind, status, params, created_at, finished_at, total_return)| VersionRun {
+            id,
+            job_id,
+            kind,
+            status,
+            params,
+            created_at,
+            finished_at,
+            total_return,
+        })
+        .collect())
+}
+
+/// What [`delete_version`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeletedVersion {
+    /// The version exists in the workspace.
+    pub found: bool,
+    /// A run or a queued or running backtest uses it, so it was kept.
+    pub in_use: bool,
+    /// It was deleted.
+    pub deleted: bool,
+    /// Its dataset had no other version and was deleted too.
+    pub dataset_deleted: bool,
+    /// Its file in the artifact store, now referenced by nothing: delete it.
+    pub orphaned_blob: Option<String>,
+}
+
+/// Deletes a dataset version unless something uses it (see the query).
+///
+/// # Errors
+/// Any database error.
+pub async fn delete_version(pool: &PgPool, workspace_id: Uuid, id: Uuid) -> Result<DeletedVersion, Error> {
+    let (found, in_use, deleted, dataset_deleted, orphaned_blob): (bool, bool, bool, bool, Option<String>) =
+        sqlx::query_as(include_str!("../queries/dataset_version_delete.sql"))
+            .bind(workspace_id)
+            .bind(id)
+            .fetch_one(pool)
+            .await?;
+    Ok(DeletedVersion { found, in_use, deleted, dataset_deleted, orphaned_blob })
+}

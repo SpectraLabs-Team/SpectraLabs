@@ -341,3 +341,197 @@ async fn uploads_count_against_the_storage_quota() {
     assert_eq!(j.at("code").unwrap().as_str().unwrap(), "quota_exceeded");
     f.clean_up().await;
 }
+
+// ---------------------------------------------------------------------------
+// M1 task 6: browsing, charting, renaming and deleting datasets
+// ---------------------------------------------------------------------------
+
+fn field_names(j: &Json) -> Vec<String> {
+    j.at("details")
+        .and_then(|d| d.at("errors"))
+        .and_then(Json::items)
+        .map(|e| e.iter().map(|x| x.at("field").unwrap().as_str().unwrap().to_string()).collect())
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn datasets_can_be_browsed_charted_renamed_and_deleted() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool.clone(), 1 << 30);
+    let v1 = registered(f.ingest(&f.upload(CSV).await, "spy-qqq daily", SETTINGS, false).await);
+    let more = format!("{CSV}2024-01-08,SPY,474.5,476,474,475,1000\n2024-01-08,QQQ,403,405,402,404,520\n");
+    let v2 = registered(f.ingest(&f.upload(&more).await, "spy-qqq daily", SETTINGS, false).await);
+    let (v1_id, v2_id) =
+        (v1["dataset_version_id"].as_str().unwrap(), v2["dataset_version_id"].as_str().unwrap());
+
+    // The plain list is unchanged; ?view=grouped adds one entry per dataset.
+    let (status, j) = f.call(f.json("GET", "/api/v1/datasets", "")).await;
+    assert_eq!(status, 200);
+    assert!(j.find("datasets").is_none(), "opt-in only");
+    assert_eq!(j.at("items").unwrap().items().unwrap().len(), 2);
+    let (status, j) = f.call(f.json("GET", "/api/v1/datasets?view=grouped", "")).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let d = &j.at("datasets").unwrap().items().unwrap()[0];
+    assert_eq!(d.at("name").unwrap().as_str().unwrap(), "spy-qqq daily");
+    assert_eq!(d.at("version_count").unwrap().as_int().unwrap(), 2);
+    assert_eq!(d.at("latest_version").unwrap().as_int().unwrap(), 2);
+    assert_eq!(d.at("row_count").unwrap().as_int().unwrap(), 10);
+    assert_eq!(d.at("first_ts").unwrap().as_str().unwrap(), "2024-01-02T00:00:00Z");
+    assert_eq!(d.at("last_ts").unwrap().as_str().unwrap(), "2024-01-08T00:00:00Z");
+    let dataset_id = d.at("id").unwrap().as_str().unwrap().to_string();
+    assert_eq!(f.call(f.json("GET", "/api/v1/datasets?view=flat", "")).await.0, 422);
+
+    // The dataset with its history, and one version in full.
+    let (status, j) = f.call(f.json("GET", &format!("/api/v1/datasets/{dataset_id}"), "")).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let versions = j.at("versions").unwrap().items().unwrap();
+    assert_eq!(versions.len(), 2);
+    assert_eq!(versions[0].at("version").unwrap().as_int().unwrap(), 2);
+    assert_eq!(versions[0].at("filename").unwrap().as_str().unwrap(), "prices.csv");
+    let (status, j) = f.call(f.json("GET", &format!("/api/v1/datasets/versions/{v1_id}"), "")).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let typed: spectra_api::datasets_api::VersionDetailView = serde_json::from_str(&j.dump()).unwrap();
+    assert!(typed.chartable);
+    assert_eq!(typed.quality_report["symbol_stats"][0]["bars"], 4);
+    assert_eq!(typed.source.unwrap()["settings"]["time_format"], "iso8601");
+
+    // Chart data: per symbol, reduced, within a range; every bad parameter at once.
+    let (status, j) = f
+        .call(f.json("GET", &format!("/api/v1/datasets/versions/{v2_id}/bars?symbol=SPY&points=10"), ""))
+        .await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let typed: spectra_api::datasets_api::BarsView = serde_json::from_str(&j.dump()).unwrap();
+    assert_eq!((typed.symbol.as_str(), typed.total_bars, typed.points.len()), ("SPY", 5, 5));
+    assert_eq!(typed.symbols, ["QQQ", "SPY"]);
+    assert!((typed.points[0].open - 470.1).abs() < 1e-9);
+    assert_eq!(typed.points[0].t, 1_704_153_600_000);
+    let (_, j) = f
+        .call(f.json(
+            "GET",
+            &format!("/api/v1/datasets/versions/{v2_id}/bars?from=2024-01-03&to=2024-01-04"),
+            "",
+        ))
+        .await;
+    assert_eq!(j.at("symbol").unwrap().as_str().unwrap(), "QQQ", "default: the first symbol");
+    assert_eq!(j.at("total_bars").unwrap().as_int().unwrap(), 2, "dates are inclusive");
+    let (status, j) = f
+        .call(f.json(
+            "GET",
+            &format!("/api/v1/datasets/versions/{v2_id}/bars?from=yesterday&to=x&points=1"),
+            "",
+        ))
+        .await;
+    assert_eq!(status, 422);
+    assert_eq!(field_names(&j), ["from", "to", "points"]);
+    let (status, j) =
+        f.call(f.json("GET", &format!("/api/v1/datasets/versions/{v2_id}/bars?symbol=AAPL"), "")).await;
+    assert_eq!(status, 422);
+    assert!(j.dump().contains("QQQ, SPY"));
+
+    // Rename: every problem at once, then a taken name, then a real change.
+    let (status, j) = f
+        .call(f.json(
+            "PATCH",
+            &format!("/api/v1/datasets/{dataset_id}"),
+            &format!(r#"{{"name":" ","description":"{}"}}"#, "x".repeat(2001)),
+        ))
+        .await;
+    assert_eq!(status, 422);
+    assert_eq!(field_names(&j), ["name", "description"]);
+    registered(
+        f.ingest(&f.upload(&format!("{CSV}2024-01-09,SPY,1,2,0.5,1.5,1\n")).await, "other", SETTINGS, false)
+            .await,
+    );
+    let (status, j) =
+        f.call(f.json("PATCH", &format!("/api/v1/datasets/{dataset_id}"), r#"{"name":"other"}"#)).await;
+    assert_eq!(status, 409, "{}", j.dump());
+    let (status, j) = f
+        .call(f.json(
+            "PATCH",
+            &format!("/api/v1/datasets/{dataset_id}"),
+            r#"{"name":"SPY + QQQ","description":"Daily bars"}"#,
+        ))
+        .await;
+    assert_eq!(status, 200, "{}", j.dump());
+    assert_eq!(
+        (j.at("name").unwrap().as_str().unwrap(), j.at("description").unwrap().as_str().unwrap()),
+        ("SPY + QQQ", "Daily bars")
+    );
+
+    // Runs that used a version; such a version can't be deleted.
+    let job: Uuid = sqlx::query_scalar(
+        "INSERT INTO jobs (workspace_id, kind, status, attempts, started_at, finished_at) \
+         VALUES ($1, 'backtest', 'succeeded', 1, now(), now()) RETURNING id",
+    )
+    .bind(f.ws)
+    .fetch_one(&f.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO runs (workspace_id, job_id, dataset_version_id, status, params, metrics) \
+         VALUES ($1, $2, $3, 'succeeded', '{\"strategy\":\"sma_cross\"}', '{\"metrics\":{\"total_return\":0.05}}')",
+    )
+    .bind(f.ws)
+    .bind(job)
+    .bind(Uuid::parse_str(v1_id).unwrap())
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let (status, j) = f.call(f.json("GET", &format!("/api/v1/datasets/versions/{v1_id}/runs"), "")).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let run = &j.at("items").unwrap().items().unwrap()[0];
+    assert_eq!(run.at("job_id").unwrap().as_str().unwrap(), job.to_string());
+    assert_eq!(run.at("strategy").unwrap().as_str().unwrap(), "sma_cross");
+    let (status, j) = f.call(f.json("DELETE", &format!("/api/v1/datasets/versions/{v1_id}"), "")).await;
+    assert_eq!((status, j.at("code").unwrap().as_str().unwrap()), (409, "in_use"));
+
+    // An unused version goes, with its file (nothing else uses it); the dataset stays.
+    let v2_blob = spectra_db::datasets::get_version(&f.pool, f.ws, Uuid::parse_str(v2_id).unwrap())
+        .await
+        .unwrap()
+        .unwrap()
+        .blob_sha256
+        .unwrap();
+    let (status, j) = f.call(f.json("DELETE", &format!("/api/v1/datasets/versions/{v2_id}"), "")).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    assert!(!j.at("dataset_deleted").unwrap().as_bool().unwrap());
+    assert_eq!(f.store.get(&v2_blob).await.unwrap_err().kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(f.call(f.json("GET", &format!("/api/v1/datasets/versions/{v2_id}"), "")).await.0, 404);
+
+    // Another workspace sees none of it.
+    let other = Fixture::new(pool, 1 << 30);
+    for path in [
+        format!("/api/v1/datasets/{dataset_id}"),
+        format!("/api/v1/datasets/versions/{v1_id}"),
+        format!("/api/v1/datasets/versions/{v1_id}/runs"),
+        format!("/api/v1/datasets/versions/{v1_id}/bars"),
+    ] {
+        assert_eq!(other.call(other.json("GET", &path, "")).await.0, 404, "{path}");
+    }
+    assert_eq!(
+        other.call(other.json("DELETE", &format!("/api/v1/datasets/versions/{v1_id}"), "")).await.0,
+        404
+    );
+    assert_eq!(
+        other
+            .call(other.json("PATCH", &format!("/api/v1/datasets/{dataset_id}"), r#"{"name":"mine"}"#))
+            .await
+            .0,
+        404
+    );
+    let (_, j) = other.call(other.json("GET", "/api/v1/datasets?view=grouped", "")).await;
+    assert!(j.at("datasets").unwrap().items().unwrap().is_empty());
+    other.clean_up().await;
+
+    let actions: Vec<String> = sqlx::query_scalar("SELECT action FROM audit_events WHERE workspace_id = $1")
+        .bind(f.ws)
+        .fetch_all(&f.pool)
+        .await
+        .unwrap();
+    assert!(
+        actions.contains(&"dataset.updated".to_string())
+            && actions.contains(&"dataset.version_deleted".to_string())
+    );
+    sqlx::query("DELETE FROM runs WHERE job_id = $1").bind(job).execute(&f.pool).await.unwrap();
+    f.clean_up().await;
+}

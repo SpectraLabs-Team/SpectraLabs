@@ -60,8 +60,10 @@ services:
       SPECTRA_MIGRATE_ON_START: "false"
       ARTIFACT_STORAGE: local # uploads and backtest chart series; s3: see deploy/compose.s3.yml
       ARTIFACT_DIR: /var/lib/spectra/artifacts
+      SPECTRA_DATA_DIR: /var/lib/spectra/datasets # read only, to chart command-line datasets
     volumes:
       - artifacts:/var/lib/spectra/artifacts # written by uploads (M1), read for backtest series
+      - datasets:/var/lib/spectra/datasets:ro
     expose:
       - "8000"
     healthcheck:

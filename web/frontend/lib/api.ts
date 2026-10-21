@@ -15,10 +15,41 @@ import type {
 export const API_BASE = '/api/engine';
 
 export class ApiError extends Error {
-  constructor(message: string, public status: number) {
+  /** `details` is the API's structured detail, when it sends one (e.g. `{errors: [{field, message}]}`). */
+  constructor(message: string, public status: number, public details?: unknown, public code?: string) {
     super(message);
     this.name = 'ApiError';
   }
+}
+
+/** The per-field errors of a 422 (`details.errors`), keyed by field path; '' for the request as a whole. */
+export function detailErrors(e: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const list = e instanceof ApiError ? (e.details as { errors?: { field?: unknown; message?: unknown }[] } | undefined)?.errors : undefined;
+  if (!Array.isArray(list)) return out;
+  for (const item of list) {
+    const field = typeof item?.field === 'string' ? item.field : '';
+    const message = typeof item?.message === 'string' ? item.message : '';
+    if (message) out[field] = out[field] ? `${out[field]}; ${message}` : message;
+  }
+  return out;
+}
+
+/** The {@link ApiError} for a failed response: the API's message, code and details when it sent JSON. */
+export async function errorFrom(response: Response): Promise<ApiError> {
+  let detail = `${response.status} ${response.statusText}`;
+  let details: unknown;
+  let code: string | undefined;
+  try {
+    const body = await response.json();
+    if (typeof body?.message === 'string') detail = body.message;
+    else if (typeof body?.detail === 'string') detail = body.detail;
+    if (body?.details) details = body.details;
+    if (typeof body?.code === 'string') code = body.code;
+  } catch {
+    /* non-JSON error body */
+  }
+  return new ApiError(detail, response.status, details, code);
 }
 
 /** One engine call through the proxy; throws {@link ApiError} with the API's message on failure. */
@@ -39,17 +70,7 @@ export async function request<T>(path: string, init?: RequestInit & { timeoutMs?
   } finally {
     clearTimeout(timer);
   }
-  if (!response.ok) {
-    let detail = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      if (typeof body?.message === 'string') detail = body.message;
-      else if (typeof body?.detail === 'string') detail = body.detail;
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new ApiError(detail, response.status);
-  }
+  if (!response.ok) throw await errorFrom(response);
   return response.json() as Promise<T>;
 }
 

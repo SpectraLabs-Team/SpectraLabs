@@ -19,6 +19,7 @@
 //! | `POST /api/v1/datasets/preview` | signed | parse a file's first rows with ingest settings; see [`datasets_api`] |
 //! | `POST /api/v1/uploads` | signed (streamed) | store a data file of up to 100 MiB; see [`uploads_api`] |
 //! | `POST /api/v1/datasets/ingest` | signed | queue an `ingest` job: upload → dataset version |
+//! | `GET/PATCH /api/v1/datasets/{id}`, `GET/DELETE /api/v1/datasets/versions/{id}`, `.../runs`, `.../bars` | signed | browse, rename, delete; chart data |
 //!
 //! Every engine route is also served at its old `/api/...` path (the jobs
 //! routes are `/api/v1` only). Those
@@ -102,6 +103,8 @@ pub struct ApiConfig {
     pub artifacts: Option<spectra_db::artifacts::ArtifactBackend>,
     /// Default storage quota per workspace, for uploads.
     pub artifact_quota_bytes: i64,
+    /// Local dataset store to chart command-line versions from, if mounted.
+    pub data_dir: Option<std::path::PathBuf>,
 }
 
 impl ApiConfig {
@@ -112,6 +115,7 @@ impl ApiConfig {
             engine_secret,
             artifacts: None,
             artifact_quota_bytes: config::DEFAULT_ARTIFACT_QUOTA_BYTES,
+            data_dir: None,
         }
     }
 
@@ -128,6 +132,7 @@ impl From<&Config> for ApiConfig {
             // Set by the caller once the backend is built (S3 setup can fail).
             artifacts: None,
             artifact_quota_bytes: c.artifact_quota_bytes,
+            data_dir: c.data_dir.clone(),
         }
     }
 }
@@ -143,7 +148,12 @@ struct AppState {
     db: Option<PgPool>,
     /// (user, workspace) pairs this process has already mirrored; see [`mirror_identity`].
     mirrored: Arc<Mutex<HashSet<MirrorKey>>>,
+    /// The last few datasets charted, decoded; see [`datasets_api::bars`].
+    charted: Arc<Mutex<Vec<ChartedDataset>>>,
 }
+
+/// A decoded dataset kept for charts, by its checksum.
+type ChartedDataset = (String, Arc<spectra_data::Dataset>);
 
 /// A signed caller as mirrored: (user id if it is a UUID, workspace id).
 type MirrorKey = (Option<Uuid>, Uuid);
@@ -670,6 +680,16 @@ fn backtest_routes() -> Router<AppState> {
         .route("/api/v1/datasets", only(get(backtests_api::list_datasets)))
         .route("/api/v1/datasets/preview", only(post(datasets_api::preview)))
         .route("/api/v1/datasets/ingest", only(post(datasets_api::ingest)))
+        .route(
+            "/api/v1/datasets/{id}",
+            only(get(datasets_api::get_dataset).patch(datasets_api::update_dataset)),
+        )
+        .route(
+            "/api/v1/datasets/versions/{id}",
+            only(get(datasets_api::get_version).delete(datasets_api::delete_version)),
+        )
+        .route("/api/v1/datasets/versions/{id}/runs", only(get(datasets_api::version_runs)))
+        .route("/api/v1/datasets/versions/{id}/bars", only(get(datasets_api::bars)))
         .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
 }
 
@@ -687,6 +707,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         compute: Arc::new(Semaphore::new(MAX_CONCURRENT_COMPUTE)),
         db,
         mirrored: Arc::new(Mutex::new(HashSet::new())),
+        charted: Arc::new(Mutex::new(Vec::new())),
     };
     let signed = engine_routes("/api/v1")
         .merge(engine_routes("/api"))

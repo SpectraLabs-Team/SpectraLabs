@@ -174,10 +174,11 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
             </div>
           ) : (
             <div className="rounded-lg border border-dashed border-ink/15 p-3 text-[11.5px] leading-5 text-ink/55">
-              No datasets in this workspace yet. Add one from the command line:
-              <pre className="mt-2 overflow-x-auto rounded bg-canvas/70 p-2 font-mono text-[10.5px] text-ink/70">{`spectra-ingest prices.csv --store "$SPECTRA_DATA_DIR"
-spectra-db dataset-add --workspace <slug> --name "my data" \\
-    --store "$SPECTRA_DATA_DIR" --id <checksum>`}</pre>
+              No datasets in this workspace yet.{' '}
+              <a className="text-accent hover:underline" href="/studio?tab=data">
+                Upload a CSV in the Data tab
+              </a>
+              , then come back to run a backtest on it.
             </div>
           )}
         </Field>

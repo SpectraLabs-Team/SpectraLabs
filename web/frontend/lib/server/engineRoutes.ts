@@ -6,9 +6,10 @@ import type { WorkspaceRole } from './workspaces';
  * 404, so new engine routes stay private until added here.
  *
  *   viewer → reads (sample data, telemetry, datasets and backtests)
- *   editor → computations ("create and run"), data uploads, and broker account data
+ *   editor → computations ("create and run"), data uploads, renaming and deleting datasets, and
+ *            broker account data
  */
-export type EngineMethod = 'GET' | 'POST';
+export type EngineMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 export type EngineRoute = {
   method: EngineMethod | EngineMethod[];
   public?: boolean;
@@ -38,6 +39,10 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   // Data Studio (M1). A preview stores nothing, but it is the first step of an upload: editors only.
   'api/v1/datasets/preview': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/datasets/ingest': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/datasets/{id}': { method: ['GET', 'PATCH'], minRole: 'viewer', methodRoles: { PATCH: 'editor' }, timeoutMs: 10_000 },
+  'api/v1/datasets/versions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/datasets/versions/{id}/runs': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  'api/v1/datasets/versions/{id}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
 };
 
@@ -57,6 +62,9 @@ export function routePolicyKey(path: string): string {
   }
   const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series)?$/i.exec(path);
   if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
+  const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars)?$/i.exec(path);
+  if (version) return `api/v1/datasets/versions/{id}${version[1] ?? ''}`;
+  if (/^api\/v1\/datasets\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/datasets/{id}';
   return path;
 }
 

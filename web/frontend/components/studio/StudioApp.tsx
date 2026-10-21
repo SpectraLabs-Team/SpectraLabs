@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BacktestLab } from './BacktestLab';
 import { BenchmarkLab } from './BenchmarkLab';
+import { DataLab } from './DataLab';
 import { MarketSettings } from './MarketSettings';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';
@@ -27,6 +28,7 @@ export function StudioApp() {
           <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.18 }}>
             {tab === 'risk' && <RiskLab />}
             {tab === 'portfolio' && <PortfolioStudio />}
+            {tab === 'data' && <DataLab />}
             {tab === 'backtests' && <BacktestLab />}
             {tab === 'benchmark' && <BenchmarkLab />}
             {tab === 'settings' && <MarketSettings />}

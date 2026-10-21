@@ -4,8 +4,9 @@ How market data gets into Spectra and how a backtest finds it. The command-line 
 [backtests.md](backtests.md) (`spectra-ingest`, then `spectra-db dataset-add`) still works and
 gives the same dataset ids; this page covers the API the Studio uses.
 
-Status: ingest settings, preview, uploads and the ingest job are in place (M1 tasks 2–5). The
-dataset browser and the Studio's Data tab follow in tasks 6–8.
+Status: M1 Phase M1a is complete: ingest settings, preview, uploads, the ingest job, the dataset
+API and the Studio's **Data** tab (tasks 1–8). Research-grade data (Parquet, calendars, corporate
+actions, point-in-time) is M1b.
 
 ## The flow
 
@@ -21,8 +22,49 @@ dataset browser and the Studio's Data tab follow in tasks 6–8.
 
 | Step | Who |
 |---|---|
-| Preview, upload, ingest | editors and owners of the workspace |
-| List datasets, follow jobs | viewers too |
+| Preview, upload, ingest, rename, delete a version | editors and owners of the workspace |
+| List and open datasets, charts, quality reports, follow jobs | viewers too |
+
+## In the Studio: the Data tab
+
+`/studio?tab=data` (the open dataset is in the URL: `&dataset=<id>`).
+
+- **Upload CSV** opens the wizard: pick a file (up to 100 MiB) → choose the delimiter, timestamp
+  format, UTC offset and columns. Suggestions from the first rows sit next to each setting and are
+  applied only when you click them (or "Use all suggestions"). Then **Preview**: the parsed rows,
+  whether the ingest would stop and why, and the sample's quality report. Changing a setting
+  after a preview asks for a new preview. Name the dataset (an existing name adds a version),
+  then **Upload and ingest**: upload progress, then the job's progress (rows read), with Cancel.
+  A refused file shows every problem; go back, change the settings (for example, skip bad rows)
+  and ingest again without re-uploading.
+- **The list**: name, latest version (and how many), symbols, date range, rows, size, last updated.
+- **A dataset**: rename it and describe it (editors), its version history (rows, range, source
+  file, rejected rows, warnings, runs), and for the chosen version its quality report (warnings
+  highlighted; rejected rows by category; per-symbol gaps, outlier returns, stale runs, zero
+  volume), a price chart per symbol, where it came from (file, settings, dataset id), and the
+  runs that used it.
+- **Backtest this dataset** opens the Backtests tab with that version picked in the form
+  (`/studio?tab=backtests&dataset=<version id>`).
+- A version used by a run can't be deleted (runs must stay reproducible). Deleting a dataset's
+  last version deletes the dataset.
+
+## Dataset API
+
+| Route | Role | |
+|---|---|---|
+| `GET /api/v1/datasets` | viewer | every version, newest first (the backtest form). With `?view=grouped`, also `datasets`: one entry per dataset with its latest version, symbols, date range, rows and last update. Without it the response is unchanged. |
+| `GET /api/v1/datasets/{id}` | viewer | the dataset and its versions (newest first), with each version's run count |
+| `PATCH /api/v1/datasets/{id}` | editor | `{name?, description?}`; 409 if another dataset has the name |
+| `GET /api/v1/datasets/versions/{id}` | viewer | metadata, the full quality report, its source, and `chartable` |
+| `DELETE /api/v1/datasets/versions/{id}` | editor | 409 `in_use` while a run or a queued/running backtest uses it; also removes its file when nothing else uses it, and releases its upload |
+| `GET /api/v1/datasets/versions/{id}/runs` | viewer | runs that used it, newest first |
+| `GET /api/v1/datasets/versions/{id}/bars?symbol=&from=&to=&points=` | viewer | one symbol's bars, reduced to at most `points` (10–5000, default 1000) for a chart: each point groups consecutive bars (first open, highest high, lowest low, last close, summed volume); `t` in ms |
+
+Every route is scoped to the caller's workspace: another workspace's ids are a 404. The bars are
+read from the artifact store; versions registered from the command line are read from the API's
+`SPECTRA_DATA_DIR` when it is mounted (compose mounts the `datasets` volume read-only), and
+otherwise answer 409 `not_chartable`. The API keeps the last three charted datasets decoded in
+memory.
 
 ## Rules
 
@@ -93,7 +135,7 @@ stores nothing.
 ```
 
 - `sample`: the file's first lines as text, at most 1 MB (the dashboard proxy's body limit is
-  2 MB). Only the first 200 data rows are parsed.
+  2 MB). Every row of the sample is checked; the first 200 parsed rows are sent back for display.
 - `truncated`: `true` when the sample was cut from a longer file; its last, possibly partial,
   line is ignored.
 - `settings`: omit them to get only suggestions.

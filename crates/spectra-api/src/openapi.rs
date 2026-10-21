@@ -99,6 +99,12 @@ pub struct StressRequest {
         crate::datasets_api::preview,
         crate::uploads_api::upload,
         crate::datasets_api::ingest,
+        crate::datasets_api::get_dataset,
+        crate::datasets_api::update_dataset,
+        crate::datasets_api::get_version,
+        crate::datasets_api::delete_version,
+        crate::datasets_api::version_runs,
+        crate::datasets_api::bars,
     ),
     components(schemas(
         ErrorDoc,
@@ -128,6 +134,16 @@ pub struct StressRequest {
         crate::datasets_api::SymbolStats,
         crate::uploads_api::UploadView,
         crate::datasets_api::IngestRequest,
+        crate::datasets_api::DatasetSummaryView,
+        crate::datasets_api::DatasetDetailView,
+        crate::datasets_api::VersionEntryView,
+        crate::datasets_api::VersionDetailView,
+        crate::datasets_api::VersionRunView,
+        crate::datasets_api::VersionRunList,
+        crate::datasets_api::UpdateDataset,
+        crate::datasets_api::DeletedVersionView,
+        crate::datasets_api::BarsView,
+        crate::datasets_api::BarPoint,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
@@ -171,6 +187,10 @@ mod tests {
             "/api/v1/datasets/preview",
             "/api/v1/uploads",
             "/api/v1/datasets/ingest",
+            "/api/v1/datasets/{id}",
+            "/api/v1/datasets/versions/{id}",
+            "/api/v1/datasets/versions/{id}/runs",
+            "/api/v1/datasets/versions/{id}/bars",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

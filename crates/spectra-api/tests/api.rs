@@ -644,3 +644,24 @@ async fn preview_limits_the_sample_and_drops_a_cut_last_line() {
     assert_eq!(call(post("/api/v1/datasets/preview", &extra)).await.0, 422, "unknown fields are refused");
     assert_eq!(call(unsigned("POST", "/api/v1/datasets/preview")).await.0, 401);
 }
+
+#[tokio::test]
+async fn preview_checks_every_row_of_the_sample_not_just_the_rows_it_returns() {
+    let mut csv = String::from("Date,Open,High,Low,Close,Volume\n");
+    for i in 0..300 {
+        csv += &format!("{},1,2,0.5,1.5,10\n", 1_704_153_600 + i * 86_400);
+    }
+    csv += "1800000000,1,2,0.5,oops,10\n";
+    let settings = Json::parse(
+        r#"{"delimiter":",","time_format":"epoch_s","utc_offset_minutes":0,"default_symbol":"X",
+            "columns":{"timestamp":"Date","open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"}}"#,
+    )
+    .unwrap();
+    let (status, j) = call(post("/api/v1/datasets/preview", &preview_body(&csv, Some(settings)))).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let p = j.at("preview").unwrap();
+    assert_eq!(p.at("rows").unwrap().items().unwrap().len(), 200, "the first 200 are returned");
+    assert_eq!(p.at("rows_not_read").unwrap().as_int().unwrap(), 0);
+    assert_eq!(p.at("quality").unwrap().at("rows_total").unwrap().as_int().unwrap(), 301, "all checked");
+    assert!(p.at("would_abort").unwrap().as_str().unwrap().starts_with("line 302 [bad_number]"));
+}

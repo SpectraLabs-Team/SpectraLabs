@@ -5,7 +5,7 @@ import { record as audit, requestMeta } from '@/lib/server/audit';
 import { hasRole } from '@/lib/server/authz';
 import { clientIp, hit, tooMany } from '@/lib/server/rateLimit';
 import { ENGINE_IDENTITY_HEADER, signEngineIdentity } from '@/lib/server/engineIdentity';
-import { allowsMethod, ENGINE_ROUTES, minimumRole, routePolicyKey } from '@/lib/server/engineRoutes';
+import { allowsMethod, ENGINE_ROUTES, minimumRole, routePolicyKey, type EngineMethod } from '@/lib/server/engineRoutes';
 import { requireWorkspace } from '@/lib/server/requireUser';
 import { engineSecret, signEngineRequest } from '@/lib/server/engineSign';
 
@@ -19,7 +19,7 @@ export const runtime = 'nodejs';
 const ENGINE_URL = (process.env.ENGINE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
 const MAX_BODY = 2 * 1024 * 1024;
 
-async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
+async function proxy(req: Request, path: string[], method: EngineMethod) {
   const key = path.join('/');
   const pathAndQuery = `/${key}${new URL(req.url).search}`;
   const policyKey = routePolicyKey(key);
@@ -101,7 +101,7 @@ async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
   }
 
   let body: string | undefined;
-  if (method === 'POST') {
+  if (method === 'POST' || method === 'PATCH') {
     const len = Number(req.headers.get('content-length') || 0);
     if (len > MAX_BODY) return NextResponse.json({ detail: 'Request too large.' }, { status: 413 });
     body = await req.text();
@@ -165,4 +165,14 @@ export async function GET(req: Request, props: { params: Promise<{ path: string[
 export async function POST(req: Request, props: { params: Promise<{ path: string[] }> }) {
   const params = await props.params;
   return proxy(req, params.path, 'POST');
+}
+
+export async function PATCH(req: Request, props: { params: Promise<{ path: string[] }> }) {
+  const params = await props.params;
+  return proxy(req, params.path, 'PATCH');
+}
+
+export async function DELETE(req: Request, props: { params: Promise<{ path: string[] }> }) {
+  const params = await props.params;
+  return proxy(req, params.path, 'DELETE');
 }

@@ -69,6 +69,10 @@ pub struct Config {
     /// Default storage quota per workspace (`SPECTRA_ARTIFACT_QUOTA_BYTES`,
     /// the worker's setting), applied to uploads.
     pub artifact_quota_bytes: i64,
+    /// Optional local dataset store (`SPECTRA_DATA_DIR`), read to chart
+    /// versions registered from the command line (the others are read from
+    /// the artifact store).
+    pub data_dir: Option<std::path::PathBuf>,
 }
 
 /// Everything wrong with the environment, one line per problem.
@@ -190,6 +194,7 @@ impl Config {
                 engine_secret,
                 artifact_storage,
                 artifact_quota_bytes,
+                data_dir: val("SPECTRA_DATA_DIR").map(Into::into),
             })
         } else {
             Err(ConfigError(problems))

@@ -82,6 +82,17 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/strategies/versions/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/strategies/{id}/versions/{versionId}/parameter_sets': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 15_000 },
   'api/v1/strategies/parameter_sets/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  // Module 4: Parameter Sweeps, Walk-Forward Validation, Overfitting, Holdout Vault
+  'api/v1/optimization/sweep': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  'api/v1/optimization/sweeps': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/optimization/sweep/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/optimization/walkforward': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 30_000 },
+  'api/v1/optimization/walkforward/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/optimization/overfitting': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/optimization/holdout': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/optimization/holdout/seal': { method: 'POST', minRole: 'editor', timeoutMs: 15_000 },
+  'api/v1/optimization/holdout/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/optimization/holdout/{id}/evaluate': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
 };
 
 export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };
@@ -121,6 +132,10 @@ export function routePolicyKey(path: string): string {
   if (paramSets) return 'api/v1/strategies/{id}/versions/{versionId}/parameter_sets';
   const strategy = /^api\/v1\/strategies\/[0-9a-f-]{36}(\/versions|\/draft|\/diff)?$/i.exec(path);
   if (strategy) return `api/v1/strategies/{id}${strategy[1] ?? ''}`;
+  if (/^api\/v1\/optimization\/sweep\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/optimization/sweep/{id}';
+  if (/^api\/v1\/optimization\/walkforward\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/optimization/walkforward/{id}';
+  const holdout = /^api\/v1\/optimization\/holdout\/[0-9a-f-]{36}(\/evaluate)?$/i.exec(path);
+  if (holdout) return `api/v1/optimization/holdout/{id}${holdout[1] ?? ''}`;
   const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars|\/derive)?$/i.exec(path);
   if (version) return `api/v1/datasets/versions/{id}${version[1] ?? ''}`;
   if (/^api\/v1\/datasets\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/datasets/{id}';

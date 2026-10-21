@@ -13,7 +13,7 @@ import { cn, formatCompactCurrency, formatCurrency } from '@/lib/utils';
 import { usePortfolio } from './PortfolioContext';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
-export type StudioTab = 'risk' | 'portfolio' | 'data' | 'strategies' | 'backtests' | 'benchmark' | 'registry' | 'settings';
+export type StudioTab = 'risk' | 'portfolio' | 'data' | 'strategies' | 'backtests' | 'optimization' | 'benchmark' | 'registry' | 'settings';
 
 export const TABS: { id: StudioTab; label: string; short: string; icon: typeof Cpu }[] = [
   { id: 'risk', label: 'Risk & Stress Lab', short: 'Risk', icon: ShieldAlert },
@@ -21,6 +21,7 @@ export const TABS: { id: StudioTab; label: string; short: string; icon: typeof C
   { id: 'data', label: 'Data', short: 'Data', icon: Database },
   { id: 'strategies', label: 'Strategy Studio', short: 'Strategies', icon: FileCode2 },
   { id: 'backtests', label: 'Backtests', short: 'Backtests', icon: LineChart },
+  { id: 'optimization', label: 'Optimization Lab', short: 'Optimization', icon: LayoutDashboard },
   { id: 'benchmark', label: 'Hardware Benchmarks', short: 'Benchmarks', icon: Cpu },
   { id: 'registry', label: 'Experiment Registry', short: 'Experiments', icon: Database },
   { id: 'settings', label: 'Market Data & Alpaca Settings', short: 'Settings', icon: PlugZap },

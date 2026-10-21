@@ -50,6 +50,7 @@ pub mod ingest;
 pub mod jobs_api;
 pub mod observability;
 pub mod openapi;
+pub mod optimization_api;
 pub mod registry_api;
 pub mod sessions_api;
 pub mod strategies_api;
@@ -798,6 +799,24 @@ fn session_routes() -> Router<AppState> {
         .route("/api/v1/uploads/sessions/{id}/complete", only(post(sessions_api::complete)))
 }
 
+/// Module 4: Parameter Sweeps, Walk-Forward Validation, Overfitting Diagnostics, Holdout Vault.
+fn optimization_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/optimization/sweep", only(post(optimization_api::queue_sweep)))
+        .route("/api/v1/optimization/sweeps", only(get(optimization_api::list_sweeps)))
+        .route("/api/v1/optimization/sweep/{id}", only(get(optimization_api::get_sweep)))
+        .route(
+            "/api/v1/optimization/walkforward",
+            only(get(optimization_api::list_walk_forwards).post(optimization_api::queue_walk_forward)),
+        )
+        .route("/api/v1/optimization/walkforward/{id}", only(get(optimization_api::get_walk_forward)))
+        .route("/api/v1/optimization/overfitting", only(post(optimization_api::compute_overfitting)))
+        .route("/api/v1/optimization/holdout", only(get(optimization_api::list_holdouts)))
+        .route("/api/v1/optimization/holdout/seal", only(post(optimization_api::seal_holdout)))
+        .route("/api/v1/optimization/holdout/{id}", only(get(optimization_api::get_holdout)))
+        .route("/api/v1/optimization/holdout/{id}/evaluate", only(post(optimization_api::evaluate_holdout)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -815,6 +834,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(survival_routes())
         .merge(backtest_routes())
         .merge(session_routes())
+        .merge(optimization_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .merge(upload_routes())

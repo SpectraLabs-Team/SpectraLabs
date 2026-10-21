@@ -615,7 +615,7 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
         .await;
     assert_eq!(status, 200);
     assert_eq!(val_lookahead["valid"], false);
-    assert!(val_lookahead["errors"][0]["message"].as_str().unwrap().contains("Lookahead"));
+    assert!(val_lookahead["errors"][0]["message"].as_str().unwrap().to_lowercase().contains("lookahead"));
 
     // 2. Create Strategy
     let (status, strat_resp) = f

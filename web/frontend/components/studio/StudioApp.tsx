@@ -8,6 +8,7 @@ import { BenchmarkLab } from './BenchmarkLab';
 import { ExperimentRegistry } from './ExperimentRegistry';
 import { DataLab } from './DataLab';
 import { MarketSettings } from './MarketSettings';
+import { OptimizationLab } from './OptimizationLab';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';
 import { RiskLab } from './RiskLab';
@@ -33,6 +34,7 @@ export function StudioApp() {
             {tab === 'data' && <DataLab />}
             {tab === 'strategies' && <StrategyStudio />}
             {tab === 'backtests' && <BacktestLab />}
+            {tab === 'optimization' && <OptimizationLab />}
             {tab === 'benchmark' && <BenchmarkLab />}
             {tab === 'registry' && <ExperimentRegistry />}
             {tab === 'settings' && <MarketSettings />}

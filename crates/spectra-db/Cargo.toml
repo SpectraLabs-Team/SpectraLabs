@@ -14,6 +14,7 @@ uuid.workspace = true
 chrono.workspace = true
 spectra-core = { path = "../spectra-core" }
 spectra-data = { path = "../spectra-data" }
+serde.workspace = true
 serde_json.workspace = true
 # S3-compatible artifact storage, only with `--features s3`.
 object_store = { version = "0.14", default-features = false, features = ["aws"], optional = true }

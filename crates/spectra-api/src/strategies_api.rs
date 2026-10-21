@@ -797,6 +797,7 @@ pub(crate) async fn save_strategy_draft(
         Ok(d) => to_json(
             200,
             &serde_json::json!({
+                "saved": true,
                 "strategy_id": d.strategy_id,
                 "workspace_id": d.workspace_id,
                 "code": d.code,

@@ -56,6 +56,7 @@ pub mod strategies_api;
 pub mod survival_api;
 pub mod telemetry;
 pub mod uploads_api;
+pub mod worker;
 
 use std::collections::HashSet;
 use std::future::Future;

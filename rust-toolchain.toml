@@ -1,0 +1,8 @@
+# One Rust toolchain for every machine, CI and the Docker build, so rustfmt and clippy give the
+# same answer everywhere (a newer local clippy or rustfmt is how formatting and lint failures slip
+# into pull requests). rustup installs it automatically on first use. Bump deliberately, in its
+# own pull request, together with ci.yml and docker/engine.Dockerfile.
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

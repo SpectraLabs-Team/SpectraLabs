@@ -2,7 +2,8 @@
 # Rust services: spectra-api, spectra-worker and spectra-db.
 # Build from the repository root:  docker build -f docker/engine.Dockerfile .
 
-FROM rust:1-bookworm AS build
+# Same toolchain as rust-toolchain.toml (bump both together).
+FROM rust:1.99.0-bookworm AS build
 WORKDIR /src
 # Manifests and sources. examples/ is read at compile time (include_str! of the sample portfolio),
 # and so are the dashboard's migrations, which spectra-db applies before the engine's.

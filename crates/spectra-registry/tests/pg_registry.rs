@@ -173,7 +173,10 @@ async fn completing_a_run_links_stored_artifacts_in_the_same_transaction() {
     let other = registry.create_queued_run(&sample_input(&experiment, 'd'), None, None).await.unwrap();
     registry.start_run(other).await.unwrap();
     let bad = StoredArtifact { sha256: "not-a-hash".into(), ..artifacts[1].clone() };
-    assert!(registry.complete_run_with_artifacts(other, &sample_input(&experiment, 'd'), &[bad]).await.is_err());
+    assert!(registry
+        .complete_run_with_artifacts(other, &sample_input(&experiment, 'd'), &[bad])
+        .await
+        .is_err());
     assert_eq!(registry.run(&other.to_string()).await.unwrap().unwrap().status, "running");
     assert_eq!(registry.events().await.unwrap().len(), 4);
 }
@@ -266,4 +269,49 @@ async fn finished_runs_cannot_be_changed() {
         .await;
     assert!(edit.unwrap_err().to_string().contains("finished runs are immutable"));
     assert!(registry.fail_run(run.parse().unwrap(), "late").await.is_err());
+}
+
+#[tokio::test]
+async fn deleting_a_workspace_in_the_dashboard_removes_its_research() {
+    let Some((registry, pool)) = database_registry().await else { return };
+    let experiment = registry.create_experiment("to delete", "", &["x"], "", None).await.unwrap();
+    let input = sample_input(&experiment, '7');
+    let job = spectra_db::jobs::NewJob {
+        workspace_id: registry.workspace_id(),
+        kind: "backtest".into(),
+        payload: "{}".parse::<sqlx::types::JsonValue>().unwrap(),
+        priority: 0,
+        max_attempts: 1,
+        created_by: None,
+    };
+    let (_job, run_id) = registry.enqueue_run(&input, &job).await.unwrap();
+    registry.start_run(run_id).await.unwrap();
+    let artifact = StoredArtifact {
+        kind: "report".into(),
+        sha256: "f".repeat(64),
+        uri: "sha256/ff/ff/z".into(),
+        size_bytes: 3,
+        content_type: "application/json".into(),
+        summary: Json::object(),
+    };
+    let run = registry.complete_run_with_artifacts(run_id, &input, &[artifact]).await.unwrap();
+    registry.add_note(&run, "kept until the workspace goes", None).await.unwrap();
+    registry.add_note(&experiment, "experiment note", None).await.unwrap();
+    assert!(registry.verify().await.unwrap().events >= 5);
+
+    sqlx::query("DELETE FROM workspaces WHERE id = $1")
+        .bind(registry.workspace_id())
+        .execute(&pool)
+        .await
+        .unwrap();
+    for table in
+        ["registry_events", "runs", "run_artifacts", "run_notes", "experiment_notes", "experiments", "jobs"]
+    {
+        let left: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table} WHERE workspace_id = $1"))
+            .bind(registry.workspace_id())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0, "{table} kept rows of a deleted workspace");
+    }
 }

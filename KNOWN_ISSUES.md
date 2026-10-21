@@ -23,6 +23,17 @@
 - **Not tested on macOS.** The full Rust test suite and frontend checks passed locally on Windows;
   no macOS run has been reported.
 
+## Platform follow-ups
+
+- **One database role for every service.** The dashboard, API, worker and migrations connect as the
+  same Postgres user. Separate roles (migrations own the schema; the API and worker get only the
+  grants they need on engine tables and read access to `workspaces`) are a hardening step before
+  production.
+- **Artifact bytes of deleted workspaces stay in the store.** Their rows go with the workspace and no
+  longer count against a quota, but the content-addressed files are not garbage-collected yet (another
+  workspace may hold the same bytes). A sweep that removes files no `run_artifacts` row references is
+  still to be written.
+
 ## Model limits (inherited)
 
 - The risk model treats the portfolio as one aggregate position: zero drift, and volatility equal to

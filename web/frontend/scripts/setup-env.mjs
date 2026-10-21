@@ -15,7 +15,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const examplePath = path.join(root, '.env.example');
 const envPath = path.join(root, '.env.local');
 const RETIRED = new Set(['spectralabs_jwt_default_secret_key_32bytes_required']);
-const DEFAULT_DATABASE_URL = 'postgresql://localhost:5432/spectralabs';
+const DEFAULT_DATABASE_URL = 'postgresql://localhost:5432/spectra';
 
 const created = !fs.existsSync(envPath);
 let text = created ? fs.readFileSync(examplePath, 'utf8') : fs.readFileSync(envPath, 'utf8');

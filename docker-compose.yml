@@ -117,6 +117,9 @@ services:
       - path: web/frontend/.env.local
         required: false
     environment:
+      # One database for the whole platform: the dashboard owns users, workspaces and sessions,
+      # the engine owns research data (spectra-db migrate applies both, dashboard first).
+      DATABASE_URL: postgres://${POSTGRES_USER:-spectra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-spectra}
       ENGINE_URL: http://api:8000
       ENGINE_SECRET: ${ENGINE_SECRET}
     volumes:

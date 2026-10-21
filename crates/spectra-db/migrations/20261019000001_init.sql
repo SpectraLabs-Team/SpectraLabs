@@ -30,56 +30,28 @@ END $$;
 CREATE DOMAIN sha256_hex AS text CHECK (VALUE ~ '^[0-9a-f]{64}$');
 
 -- ---------------------------------------------------------------------------
--- Identity
+-- Identity and tenancy: owned by the dashboard
 -- ---------------------------------------------------------------------------
+-- One database. `users`, `workspaces`, `workspace_members`, sessions, invites, API tokens and the
+-- audit log are created by the dashboard's migrations (web/frontend/db/migrations), which
+-- `spectra-db migrate` applies before these. Engine tables reference `users (id)` and
+-- `workspaces (id)`; the engine never alters those tables.
 
-CREATE TABLE users (
-    id                  uuid PRIMARY KEY DEFAULT spectra_uuidv7(),
-    email               text NOT NULL UNIQUE CHECK (email = lower(btrim(email)) AND email LIKE '%_@_%'),
-    name                text NOT NULL DEFAULT '',
-    -- "salt:hash" from the frontend's PBKDF2 (authStore.ts). '!' = no usable password yet.
-    password_hash       text NOT NULL,
-    role                text NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
-    two_factor          boolean NOT NULL DEFAULT false,
-    created_at          timestamptz NOT NULL DEFAULT now(),
-    -- Sessions issued before this are rejected.
-    password_changed_at timestamptz
-);
+DO $$
+BEGIN
+    IF to_regclass('users') IS NULL OR to_regclass('workspaces') IS NULL
+       OR to_regclass('workspace_members') IS NULL THEN
+        RAISE EXCEPTION 'apply the dashboard migrations first (spectra-db migrate does both, in order)';
+    END IF;
+END $$;
 
--- Pending emailed codes (sign-up, password reset, 2FA login). Only the SHA-256 of a code is kept.
-CREATE TABLE auth_codes (
-    kind          text NOT NULL CHECK (kind IN ('signup', 'reset', 'login')),
-    email         text NOT NULL CHECK (email = lower(btrim(email))),
-    code_hash     sha256_hex NOT NULL,
-    -- Sign-up only: the account details to create once the code is confirmed.
-    password_hash text NOT NULL DEFAULT '',
-    name          text NOT NULL DEFAULT '',
-    two_factor    boolean,
-    attempts      integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
-    expires_at    timestamptz NOT NULL,
-    created_at    timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (kind, email)
-);
-CREATE INDEX auth_codes_expires_at ON auth_codes (expires_at);
-
-CREATE TABLE workspaces (
-    id         uuid PRIMARY KEY DEFAULT spectra_uuidv7(),
-    slug       text NOT NULL UNIQUE CHECK (slug ~ '^[a-z0-9][a-z0-9-]{1,62}$'),
-    name       text NOT NULL,
-    -- Per-workspace artifact storage quota (step 7); NULL = no limit.
+-- Engine-side settings per workspace. A workspace without a row uses the defaults.
+CREATE TABLE workspace_quotas (
+    workspace_id         uuid PRIMARY KEY REFERENCES workspaces (id) ON DELETE CASCADE,
+    -- Artifact storage quota (step 7); NULL = the deployment default (SPECTRA_ARTIFACT_QUOTA_BYTES).
     artifact_quota_bytes bigint CHECK (artifact_quota_bytes IS NULL OR artifact_quota_bytes >= 0),
-    created_by uuid REFERENCES users (id) ON DELETE SET NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+    updated_at           timestamptz NOT NULL DEFAULT now()
 );
-
-CREATE TABLE workspace_members (
-    workspace_id uuid NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
-    user_id      uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    role         text NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member', 'viewer')),
-    created_at   timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (workspace_id, user_id)
-);
-CREATE INDEX workspace_members_user ON workspace_members (user_id);
 
 -- ---------------------------------------------------------------------------
 -- Research objects
@@ -253,15 +225,19 @@ CREATE INDEX run_artifacts_workspace_sha ON run_artifacts (workspace_id, sha256)
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE registry_events (
-    workspace_id uuid NOT NULL REFERENCES workspaces (id) ON DELETE RESTRICT,
+    -- Deleting a workspace removes its whole chain, never part of one (see the guard below).
+    workspace_id uuid NOT NULL REFERENCES workspaces (id) ON DELETE CASCADE,
     seq          bigint NOT NULL CHECK (seq >= 0),
     type         text NOT NULL,
     ts_ns        bigint NOT NULL,
     payload      json NOT NULL,
     prev_hash    sha256_hex NOT NULL,
-    hash         sha256_hex NOT NULL UNIQUE,
+    hash         sha256_hex NOT NULL,
     created_at   timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (workspace_id, seq)
+    PRIMARY KEY (workspace_id, seq),
+    -- Unique within a workspace, not the database: a chain exported from one workspace can be
+    -- imported into another on the same server (a restore or a copy) with its original hashes.
+    UNIQUE (workspace_id, hash)
 );
 
 CREATE FUNCTION registry_events_check_append() RETURNS trigger
@@ -269,6 +245,9 @@ LANGUAGE plpgsql AS $$
 DECLARE
     last registry_events%ROWTYPE;
 BEGIN
+    -- Serialise appends per workspace: two writers must not both read the same tail. NO KEY
+    -- UPDATE does not block foreign-key checks (FOR KEY SHARE) from other tables.
+    PERFORM 1 FROM workspaces WHERE id = NEW.workspace_id FOR NO KEY UPDATE;
     SELECT * INTO last FROM registry_events
      WHERE workspace_id = NEW.workspace_id ORDER BY seq DESC LIMIT 1;
     IF NOT FOUND THEN
@@ -281,9 +260,22 @@ BEGIN
     RETURN NEW;
 END $$;
 
+-- Append-only rows (registry events, notes) may leave only with their whole workspace: the
+-- ON DELETE CASCADE from `workspaces` runs after the workspace row is deleted, so it is no
+-- longer visible here. Any other UPDATE, DELETE or TRUNCATE is refused.
+CREATE FUNCTION workspace_is_deleted(id uuid) RETURNS boolean
+LANGUAGE sql STABLE AS $$
+    SELECT NOT EXISTS (SELECT 1 FROM workspaces w WHERE w.id = workspace_is_deleted.id)
+$$;
+
 CREATE FUNCTION registry_events_forbid_change() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+    IF TG_OP = 'DELETE' THEN
+        IF workspace_is_deleted(OLD.workspace_id) THEN
+            RETURN OLD;
+        END IF;
+    END IF;
     RAISE EXCEPTION 'registry_events is append-only';
 END $$;
 
@@ -294,20 +286,3 @@ CREATE TRIGGER registry_events_no_update BEFORE UPDATE OR DELETE ON registry_eve
 CREATE TRIGGER registry_events_no_truncate BEFORE TRUNCATE ON registry_events
     FOR EACH STATEMENT EXECUTE FUNCTION registry_events_forbid_change();
 
--- ---------------------------------------------------------------------------
--- Audit log
--- ---------------------------------------------------------------------------
-
-CREATE TABLE audit_events (
-    id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    workspace_id uuid REFERENCES workspaces (id) ON DELETE SET NULL,
-    actor_id     uuid REFERENCES users (id) ON DELETE SET NULL,
-    action       text NOT NULL,  -- e.g. "job.created", "user.signed_in"
-    target_type  text NOT NULL DEFAULT '',
-    target_id    text NOT NULL DEFAULT '',
-    request_id   text NOT NULL DEFAULT '',
-    details      jsonb NOT NULL DEFAULT '{}'::jsonb,
-    created_at   timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX audit_events_workspace ON audit_events (workspace_id, id DESC);
-CREATE INDEX audit_events_actor ON audit_events (actor_id, id DESC);

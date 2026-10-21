@@ -33,7 +33,7 @@ echo "restore: restored $file"
 
 q() { psql "$RESTORE_DATABASE_URL" -X -A -t -v ON_ERROR_STOP=1 -c "$1"; }
 
-for table in _sqlx_migrations users workspaces jobs runs run_artifacts registry_events workers; do
+for table in schema_migrations _sqlx_migrations users workspaces jobs runs run_artifacts registry_events workers; do
   if [ "$(q "SELECT to_regclass('public.$table') IS NOT NULL")" != "t" ]; then
     echo "restore: FAILED: table $table is missing" >&2
     exit 1

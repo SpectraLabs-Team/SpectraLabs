@@ -70,32 +70,6 @@ ALTER TABLE run_artifacts
     ADD CONSTRAINT run_artifacts_registry_id_nonempty CHECK (length(btrim(registry_id)) > 0),
     ADD CONSTRAINT run_artifacts_workspace_registry_id_unique UNIQUE (workspace_id, registry_id);
 
--- A chain is unique within its workspace, not across the database: exporting a
--- workspace and importing it into another (a restore or a copy on the same
--- server) must keep the original hashes.
-ALTER TABLE registry_events DROP CONSTRAINT registry_events_hash_key;
-ALTER TABLE registry_events ADD CONSTRAINT registry_events_workspace_hash_key UNIQUE (workspace_id, hash);
-
--- Serialize all appends inside a workspace. The original M20 trigger validated
--- the tail but two simultaneous writers could both observe the same tail.
-CREATE OR REPLACE FUNCTION registry_events_check_append() RETURNS trigger
-LANGUAGE plpgsql AS $$
-DECLARE
-    last registry_events%ROWTYPE;
-BEGIN
-    PERFORM 1 FROM workspaces WHERE id = NEW.workspace_id FOR UPDATE;
-    SELECT * INTO last FROM registry_events
-     WHERE workspace_id = NEW.workspace_id ORDER BY seq DESC LIMIT 1;
-    IF NOT FOUND THEN
-        IF NEW.seq <> 0 OR NEW.prev_hash <> repeat('0', 64) THEN
-            RAISE EXCEPTION 'registry chain must start at seq 0 with the zero hash';
-        END IF;
-    ELSIF NEW.seq <> last.seq + 1 OR NEW.prev_hash <> last.hash THEN
-        RAISE EXCEPTION 'registry chain broken: expected seq % after hash %', last.seq + 1, last.hash;
-    END IF;
-    RETURN NEW;
-END $$;
-
 CREATE TABLE run_notes (
     id           uuid PRIMARY KEY DEFAULT spectra_uuidv7(),
     workspace_id uuid NOT NULL,
@@ -121,6 +95,11 @@ BEGIN
     END IF;
 
     IF OLD.status IN ('succeeded', 'failed', 'cancelled') THEN
+        -- The one change allowed: users.ON DELETE SET NULL when the creator's account is deleted.
+        IF NEW.created_by IS NULL AND OLD.created_by IS NOT NULL
+           AND to_jsonb(NEW) - 'created_by' = to_jsonb(OLD) - 'created_by' THEN
+            RETURN NEW;
+        END IF;
         RAISE EXCEPTION 'finished runs are immutable';
     END IF;
 
@@ -163,6 +142,18 @@ CREATE TRIGGER runs_lifecycle_guard BEFORE INSERT OR UPDATE ON runs
 CREATE FUNCTION run_notes_forbid_change() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
+    IF TG_OP = 'DELETE' THEN
+        -- Notes leave only with their workspace (see workspace_is_deleted).
+        IF workspace_is_deleted(OLD.workspace_id) THEN
+            RETURN OLD;
+        END IF;
+    ELSIF TG_OP = 'UPDATE' THEN
+        -- users.ON DELETE SET NULL when the author's account is deleted.
+        IF NEW.author_id IS NULL AND OLD.author_id IS NOT NULL
+           AND to_jsonb(NEW) - 'author_id' = to_jsonb(OLD) - 'author_id' THEN
+            RETURN NEW;
+        END IF;
+    END IF;
     RAISE EXCEPTION 'run notes are append-only';
 END $$;
 CREATE TRIGGER run_notes_no_update BEFORE UPDATE OR DELETE ON run_notes

@@ -4,10 +4,12 @@
 
 FROM rust:1-bookworm AS build
 WORKDIR /src
-# Manifests and sources. examples/ is read at compile time (include_str! of the sample portfolio).
+# Manifests and sources. examples/ is read at compile time (include_str! of the sample portfolio),
+# and so are the dashboard's migrations, which spectra-db applies before the engine's.
 COPY Cargo.toml Cargo.lock rustfmt.toml ./
 COPY crates ./crates
 COPY examples ./examples
+COPY web/frontend/db/migrations ./web/frontend/db/migrations
 # Optional cargo features, e.g. --build-arg CARGO_FEATURES=spectra-api/s3 for S3 artifact storage.
 ARG CARGO_FEATURES=""
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

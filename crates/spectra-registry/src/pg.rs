@@ -1548,7 +1548,7 @@ async fn lock_workspace(
     tx: &mut Transaction<'_, Postgres>,
     workspace_id: Uuid,
 ) -> Result<(), PgRegistryError> {
-    let locked = sqlx::query_scalar::<_, Uuid>("SELECT id FROM workspaces WHERE id = $1 FOR UPDATE")
+    let locked = sqlx::query_scalar::<_, Uuid>("SELECT id FROM workspaces WHERE id = $1 FOR NO KEY UPDATE")
         .bind(workspace_id)
         .fetch_optional(&mut **tx)
         .await?;

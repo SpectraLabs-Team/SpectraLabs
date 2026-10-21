@@ -114,6 +114,18 @@ Strategies written in Rust can place, besides market and limit orders:
 | `ctx.stop_limit(..)` | on the trigger bar at the stop (or gapped open) if within the limit, otherwise rests as a limit order |
 | `ctx.order(OrderSpec { tif, .. })` | any of the above with a time in force: `GoodTillCancelled` (default), `Day` (one bar, then `Expired`) or `GoodTillDate(ts)` |
 
+With `exchange` set in `config` (`XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`), orders fill
+only when that market is open:
+- **Intraday bars** (median interval under 20 hours): only bars inside a session, judged by the
+  bar's timestamp.
+- **Daily bars** (20 hours to 4 days): only bars for a trading day, so no fills on weekends or
+  holidays. The trading date is the bar's date in the exchange's timezone; a bar stamped at
+  18:00 local or later counts for the next day, so US daily bars stamped at 00:00 UTC map to
+  the right session.
+- **Weekly or longer bars:** always open.
+
+Orders wait through closed bars. A `Day` order is only used up by a bar it could trade on.
+
 Market impact (off by default) adds `impact_coefficient x volatility x sqrt(qty / bar volume)` to
 market and stop fills, capped at 10%; volatility is measured over the `impact_window` bars before
 the fill bar. Both are `config` fields.

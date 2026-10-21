@@ -262,7 +262,8 @@ pub struct BacktestConfig {
     pub financing: FinancingConfig,
     /// Volume-based market impact (off by default).
     pub impact: ImpactConfig,
-    /// Optional exchange calendar: when set, orders only fill during open market sessions.
+    /// Optional exchange calendar: when set, orders only fill when the market is open: inside a
+    /// session for intraday bars, on trading days for daily bars (see `SessionRule`).
     pub exchange: Option<spectra_data::calendar::Exchange>,
 }
 
@@ -975,7 +976,7 @@ fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order]
 
 /// Refuses data whose instruments have different median bar intervals (see
 /// the module documentation). Instruments with fewer than two bars are ignored.
-fn check_uniform_intervals(bars: &[Bar]) -> Result<()> {
+fn check_uniform_intervals(bars: &[Bar]) -> Result<Option<i64>> {
     let mut last: BTreeMap<InstrumentId, i64> = BTreeMap::new();
     let mut deltas: BTreeMap<InstrumentId, Vec<i64>> = BTreeMap::new();
     for b in bars {
@@ -987,7 +988,9 @@ fn check_uniform_intervals(bars: &[Bar]) -> Result<()> {
         let mid = d.len() / 2;
         (id, *d.select_nth_unstable(mid).1)
     });
+    let mut interval = None;
     if let Some((first_id, first)) = medians.next() {
+        interval = Some(first);
         if let Some((id, m)) = medians.find(|&(_, m)| m != first) {
             return Err(Error::InvalidArgument(format!(
                 "instruments have different bar intervals (instrument {first_id}: {first} ns, instrument {id}: \
@@ -996,7 +999,42 @@ fn check_uniform_intervals(bars: &[Bar]) -> Result<()> {
             )));
         }
     }
-    Ok(())
+    Ok(interval)
+}
+
+/// When orders may fill under an exchange calendar, by bar interval:
+///  * intraday bars (under 20 hours): only inside a session, at the bar's time;
+///  * daily bars (20 hours to 4 days): only on trading days, judged by the
+///    bar's trading date ([`spectra_data::calendar::Exchange::daily_bar_date`]),
+///    since a daily bar's timestamp is rarely inside the session;
+///  * weekly or longer bars: always (each spans several sessions).
+#[derive(Debug, Clone, Copy)]
+enum SessionRule {
+    Always,
+    Intraday(spectra_data::calendar::Exchange),
+    Daily(spectra_data::calendar::Exchange),
+}
+
+impl SessionRule {
+    const HOURS_20: i64 = 20 * 3_600_000_000_000;
+    const DAYS_4: i64 = 4 * 86_400_000_000_000;
+
+    fn new(exchange: Option<spectra_data::calendar::Exchange>, interval: Option<i64>) -> Self {
+        match (exchange, interval) {
+            (None, _) => Self::Always,
+            (Some(ex), Some(i)) if (Self::HOURS_20..=Self::DAYS_4).contains(&i) => Self::Daily(ex),
+            (Some(_), Some(i)) if i > Self::DAYS_4 => Self::Always,
+            (Some(ex), _) => Self::Intraday(ex),
+        }
+    }
+
+    fn is_open(self, ts: i64) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Intraday(ex) => ex.is_session_open(ts),
+            Self::Daily(ex) => ex.is_trading_day_bar(ts),
+        }
+    }
 }
 
 fn ledger_err(e: LedgerError) -> Error {
@@ -1367,7 +1405,8 @@ fn run_inner<'s>(
         per_period_rate(fin.margin_rate, cfg.periods_per_year),
     ];
     let financed = !fin.is_zero();
-    check_uniform_intervals(bars)?;
+    let interval = check_uniform_intervals(bars)?;
+    let sessions = SessionRule::new(cfg.exchange, interval);
     let progress_every = ctl.progress_every.max(1);
 
     let mut ledger = Ledger::new(cfg.ledger);
@@ -1458,7 +1497,7 @@ fn run_inner<'s>(
         expire(&mut orders, &mut open, |o| matches!(o.tif, TimeInForce::GoodTillDate(t) if ts > t));
 
         // 1. Fill orders submitted at earlier timestamps, in submission order.
-        let session_open = cfg.exchange.is_none_or(|ex| ex.is_session_open(ts));
+        let session_open = sessions.is_open(ts);
         let mut fills: Vec<(usize, Fill)> = Vec::new();
         if session_open {
             for k in open.candidates(group, &orders) {
@@ -1516,12 +1555,14 @@ fn run_inner<'s>(
             }
         }
 
-        // Day orders expire once they have had their one bar.
-        expire(&mut orders, &mut open, |o| {
-            o.tif == TimeInForce::Day
-                && step - o.submit_step >= min_wait
-                && find_bar(group, o.instrument).is_some()
-        });
+        // Day orders expire once they have had their one bar (one they could trade on).
+        if session_open {
+            expire(&mut orders, &mut open, |o| {
+                o.tif == TimeInForce::Day
+                    && step - o.submit_step >= min_wait
+                    && find_bar(group, o.instrument).is_some()
+            });
+        }
 
         // 2. Mark to the close and record equity.
         for b in group {

@@ -194,12 +194,23 @@ pub struct PercentileBand {
     pub p95: f64,
 }
 
+/// One fixed-width bin in the resampled terminal-P&L histogram.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct DistributionBin {
+    /// Inclusive lower edge.
+    pub lower: f64,
+    /// Exclusive upper edge, inclusive for the final bin.
+    pub upper: f64,
+    /// Samples in this bin.
+    pub count: usize,
+}
+
 /// Monte Carlo over the order and identity of trades (net P&L as fixed
 /// dollar amounts). Bootstrap draws n trades with replacement; reshuffle
 /// permutes the same trades (only the path, so the drawdown, changes).
 /// Trades are treated as exchangeable and drawdown is measured on closed
 /// trades only, so it understates true drawdown.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct TradeResampling {
     /// False with fewer than 2 trades.
     pub valid: bool,
@@ -209,6 +220,8 @@ pub struct TradeResampling {
     pub observed_max_drawdown: f64,
     /// Bootstrap terminal P&L.
     pub bootstrap_terminal_pnl: PercentileBand,
+    /// Histogram of the terminal-P&L bootstrap distribution (20 bins).
+    pub bootstrap_terminal_histogram: Vec<DistributionBin>,
     /// Bootstrap max drawdown.
     pub bootstrap_max_drawdown: PercentileBand,
     /// Fraction of bootstrap resamples ending below the starting equity.
@@ -217,6 +230,33 @@ pub struct TradeResampling {
     pub reshuffle_max_drawdown: PercentileBand,
     /// Fraction of orderings with a deeper drawdown than observed.
     pub reshuffle_prob_worse_drawdown: f64,
+}
+
+fn histogram(values: &[f64]) -> Vec<DistributionBin> {
+    if values.is_empty() {
+        return Vec::new();
+    }
+    const N_BINS: usize = 20;
+    let min = values.iter().copied().fold(f64::INFINITY, f64::min);
+    let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if min == max {
+        let mut bins = vec![DistributionBin::default(); N_BINS];
+        bins[0] = DistributionBin { lower: min, upper: max, count: values.len() };
+        return bins;
+    }
+    let width = (max - min) / N_BINS as f64;
+    let mut bins: Vec<_> = (0..N_BINS)
+        .map(|i| DistributionBin {
+            lower: min + width * i as f64,
+            upper: if i + 1 == N_BINS { max } else { min + width * (i + 1) as f64 },
+            count: 0,
+        })
+        .collect();
+    for &value in values {
+        let i = (((value - min) / width) as usize).min(N_BINS - 1);
+        bins[i].count += 1;
+    }
+    bins
 }
 
 fn band(mut v: Vec<f64>) -> PercentileBand {
@@ -270,6 +310,7 @@ pub fn resample_trades(pnl: &[f64], e0: f64, resamples: usize, seed: u64) -> Tra
             losses += 1;
         }
     }
+    r.bootstrap_terminal_histogram = histogram(&terminal);
     r.bootstrap_terminal_pnl = band(terminal);
     r.bootstrap_max_drawdown = band(boot_dd);
     r.bootstrap_prob_loss = losses as f64 / resamples as f64;
@@ -337,6 +378,8 @@ mod tests {
         let b = resample_trades(&pnl, 100.0, 500, 7);
         assert_eq!(a, b);
         assert!(a.valid);
+        assert_eq!(a.bootstrap_terminal_histogram.len(), 20);
+        assert_eq!(a.bootstrap_terminal_histogram.iter().map(|bin| bin.count).sum::<usize>(), 500);
         assert!(!resample_trades(&pnl[..1], 100.0, 500, 7).valid);
     }
 }

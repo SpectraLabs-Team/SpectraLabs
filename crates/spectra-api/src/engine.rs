@@ -57,6 +57,7 @@ pub(crate) fn unprocessable(msg: impl Into<String>) -> (u16, String) {
 
 fn engine_error(e: &Error) -> (u16, String) {
     match e {
+        Error::Cancelled => (409, e.to_string()),
         Error::InvalidArgument(_) | Error::Data(_) | Error::Unsupported(_) => (422, e.to_string()),
         _ => (500, e.to_string()),
     }

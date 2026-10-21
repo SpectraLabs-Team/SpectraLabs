@@ -14,6 +14,8 @@ use crate::ledger::LedgerError;
 /// Any failure reported by a Spectra Labs library call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
+    /// A long-running computation was cancelled by its caller.
+    Cancelled,
     /// A caller passed an invalid argument or configuration.
     InvalidArgument(String),
     /// An exact fixed-point result did not fit the representable range.
@@ -42,6 +44,7 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Cancelled => f.write_str("operation cancelled"),
             Self::Overflow => f.write_str("fixed-point overflow"),
             Self::InvalidArgument(s)
             | Self::Data(s)

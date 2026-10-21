@@ -17,6 +17,10 @@ async fn migrations_apply_and_leave_nothing_pending() {
     let Some(pool) = pool().await else { return };
     ping(&pool).await.unwrap();
     assert!(pending_migrations(&pool).await.unwrap().is_empty());
+    assert!(
+        spectra_db::web_migrations::pending(&pool).await.unwrap().is_empty(),
+        "dashboard migrations applied first"
+    );
     // Running them again is a no-op.
     migrate(&pool).await.unwrap();
 }
@@ -35,6 +39,16 @@ async fn the_dev_seed_is_idempotent() {
             .await
             .unwrap();
     assert_eq!(role, "owner");
+    // Like a dashboard sign-up: the admin also has exactly one personal workspace they own.
+    let personal: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM workspaces w JOIN workspace_members m ON m.workspace_id = w.id \
+         WHERE w.personal_owner_id = $1 AND m.user_id = $1 AND m.role = 'owner'",
+    )
+    .bind(a.admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(personal, 1);
 }
 
 #[tokio::test]

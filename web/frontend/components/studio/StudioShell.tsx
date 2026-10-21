@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Briefcase, ChevronsLeft, ChevronsRight, Cpu, LayoutDashboard, Lock, LogOut, Menu, PlugZap, ShieldAlert, X } from 'lucide-react';
+import { Briefcase, ChevronsLeft, ChevronsRight, Cpu, Database, LayoutDashboard, Lock, LogOut, Menu, PlugZap, ShieldAlert, X } from 'lucide-react';
 import { RolePill } from '@/components/landing/Header';
 import { StatusPills } from '@/components/ui/StatusPills';
 import { Logo } from '@/components/ui/primitives';
@@ -13,12 +13,13 @@ import { cn, formatCompactCurrency, formatCurrency } from '@/lib/utils';
 import { usePortfolio } from './PortfolioContext';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
-export type StudioTab = 'risk' | 'portfolio' | 'benchmark' | 'settings';
+export type StudioTab = 'risk' | 'portfolio' | 'benchmark' | 'registry' | 'settings';
 
 export const TABS: { id: StudioTab; label: string; short: string; icon: typeof Cpu }[] = [
   { id: 'risk', label: 'Risk & Stress Lab', short: 'Risk', icon: ShieldAlert },
   { id: 'portfolio', label: 'Portfolio Studio', short: 'Portfolio', icon: Briefcase },
   { id: 'benchmark', label: 'Hardware Benchmarks', short: 'Benchmarks', icon: Cpu },
+  { id: 'registry', label: 'Experiment Registry', short: 'Experiments', icon: Database },
   { id: 'settings', label: 'Market Data & Alpaca Settings', short: 'Settings', icon: PlugZap },
 ];
 

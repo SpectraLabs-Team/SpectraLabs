@@ -51,7 +51,18 @@ async fn main() -> ExitCode {
         }
     };
     tracing::info!(engine_version = spectra_core::ENGINE_VERSION, address = %cfg.addr, cors_origins = %cfg.cors_origins.join(", "), "API listening");
-    let result = serve(listener, ApiConfig::from(&cfg), Some(pool.clone()), shutdown_signal()).await;
+    let mut api_cfg = ApiConfig::from(&cfg);
+    match spectra_api::config::artifact_backend(&cfg.artifact_storage) {
+        Ok(store) => {
+            tracing::info!(artifact_store = %store.describe(), "run artifacts readable");
+            api_cfg.artifacts = Some(store);
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "cannot open the artifact store");
+            return ExitCode::from(1);
+        }
+    }
+    let result = serve(listener, api_cfg, Some(pool.clone()), shutdown_signal()).await;
     pool.close().await;
     match result {
         Ok(()) => {

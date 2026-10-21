@@ -26,14 +26,19 @@ build has no CUDA backend, so CUDA runs show as a fallback to `Parallel`.
 ## Database
 
 Accounts and sign-in codes live in Postgres (16 recommended). The connection is `DATABASE_URL` in
-`.env.local`. `npm run dev` creates the database if it is missing and applies any new migrations
-from `db/migrations/`; `npm start` applies migrations. Pick one way to run Postgres on your machine:
+`.env.local`. The dashboard and the Rust engine share **one database**: the dashboard's migrations
+(`db/migrations/`) own users, workspaces, sessions, invites, API tokens and the audit log; the
+engine's (`crates/spectra-db/migrations/`) own research data and reference those tables. Use the
+same URL as the engine's `DATABASE_URL`. `npm run dev` creates the database if it is missing and
+applies the dashboard's migrations; `just migrate` (`spectra-db migrate`) applies both, dashboard
+first. The two runners share one tracking table and lock, so either can run first. Pick one way to
+run Postgres on your machine:
 
 - **Postgres.app** (simplest on macOS): download from postgresapp.com, open it, click Initialize.
-  Keep the default `DATABASE_URL=postgresql://localhost:5432/spectralabs`.
+  Keep the default `DATABASE_URL=postgresql://localhost:5432/spectra`.
 - **Homebrew**: `brew install postgresql@16 && brew services start postgresql@16`. Same default URL.
-- **Docker**: `docker compose up -d db` from the repository root, then set
-  `DATABASE_URL=postgresql://spectra:spectra@localhost:5432/spectralabs`.
+- **Docker**: `docker compose up -d postgres` from the repository root, then set
+  `DATABASE_URL=postgresql://spectra:<POSTGRES_PASSWORD>@localhost:5432/spectra`.
 
 | Command | What it does |
 | --- | --- |

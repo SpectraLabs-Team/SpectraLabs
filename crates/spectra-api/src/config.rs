@@ -60,6 +60,8 @@ pub struct Config {
     pub migrate_on_start: bool,
     /// Shared with the Next.js proxy; signs the identity headers.
     pub engine_secret: Secret,
+    /// Where run artifacts are read from (the worker's `ARTIFACT_*` settings).
+    pub artifact_storage: ArtifactStorage,
 }
 
 /// Everything wrong with the environment, one line per problem.
@@ -162,15 +164,50 @@ impl Config {
             }
         };
 
+        let artifact_storage = parse_artifact_storage(&val, &mut problems);
+
         if problems.is_empty() {
-            Ok(Self { addr, cors_origins, database_url, db_max_connections, migrate_on_start, engine_secret })
+            Ok(Self {
+                addr,
+                cors_origins,
+                database_url,
+                db_max_connections,
+                migrate_on_start,
+                engine_secret,
+                artifact_storage,
+            })
         } else {
             Err(ConfigError(problems))
         }
     }
 }
 
-/// Where the worker stores artifacts.
+/// `ARTIFACT_STORAGE`, `ARTIFACT_DIR`, `ARTIFACT_S3_BUCKET` and
+/// `ARTIFACT_S3_PREFIX`, shared by the API (which reads artifacts) and the
+/// worker (which writes them).
+fn parse_artifact_storage(
+    val: &impl Fn(&str) -> Option<String>,
+    problems: &mut Vec<String>,
+) -> ArtifactStorage {
+    let artifact_dir = val("ARTIFACT_DIR").map_or_else(|| std::path::PathBuf::from("artifacts"), Into::into);
+    match val("ARTIFACT_STORAGE").as_deref().unwrap_or("local") {
+        "local" => ArtifactStorage::Local(artifact_dir),
+        "s3" => {
+            if let Some(bucket) = val("ARTIFACT_S3_BUCKET") {
+                ArtifactStorage::S3 { bucket, prefix: val("ARTIFACT_S3_PREFIX").unwrap_or_default() }
+            } else {
+                problems.push("ARTIFACT_S3_BUCKET must be set when ARTIFACT_STORAGE=s3".into());
+                ArtifactStorage::Local(artifact_dir)
+            }
+        }
+        other => {
+            problems.push(format!("ARTIFACT_STORAGE must be local or s3, not {other:?}"));
+            ArtifactStorage::Local(artifact_dir)
+        }
+    }
+}
+
+/// Where the worker stores artifacts and the API reads them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactStorage {
     /// `ARTIFACT_STORAGE=local` (the default): the `ARTIFACT_DIR` directory.
@@ -264,23 +301,7 @@ impl WorkerConfig {
                 Secret::new("")
             }
         };
-        let artifact_dir =
-            val("ARTIFACT_DIR").map_or_else(|| std::path::PathBuf::from("artifacts"), Into::into);
-        let artifact_storage = match val("ARTIFACT_STORAGE").as_deref().unwrap_or("local") {
-            "local" => ArtifactStorage::Local(artifact_dir),
-            "s3" => {
-                if let Some(bucket) = val("ARTIFACT_S3_BUCKET") {
-                    ArtifactStorage::S3 { bucket, prefix: val("ARTIFACT_S3_PREFIX").unwrap_or_default() }
-                } else {
-                    problems.push("ARTIFACT_S3_BUCKET must be set when ARTIFACT_STORAGE=s3".into());
-                    ArtifactStorage::Local(artifact_dir)
-                }
-            }
-            other => {
-                problems.push(format!("ARTIFACT_STORAGE must be local or s3, not {other:?}"));
-                ArtifactStorage::Local(artifact_dir)
-            }
-        };
+        let artifact_storage = parse_artifact_storage(&val, &mut problems);
         let metrics_addr = val("SPECTRA_WORKER_METRICS_ADDR").and_then(|v| {
             let addr = v.parse::<SocketAddr>().ok();
             if addr.is_none() {
@@ -301,6 +322,27 @@ impl WorkerConfig {
         } else {
             Err(ConfigError(problems))
         }
+    }
+}
+
+/// The artifact backend for `storage`.
+///
+/// # Errors
+/// An S3 store that cannot be configured, or `s3` without the `s3` feature.
+pub fn artifact_backend(storage: &ArtifactStorage) -> Result<spectra_db::artifacts::ArtifactBackend, String> {
+    use spectra_db::artifacts::{ArtifactBackend, ArtifactStore};
+    match storage {
+        ArtifactStorage::Local(dir) => Ok(ArtifactBackend::Local(ArtifactStore::new(dir))),
+        #[cfg(feature = "s3")]
+        ArtifactStorage::S3 { bucket, prefix } => {
+            spectra_db::artifacts::s3::S3ArtifactStore::from_env(bucket, prefix)
+                .map(ArtifactBackend::S3)
+                .map_err(|e| format!("cannot use artifact bucket {bucket}: {e}"))
+        }
+        #[cfg(not(feature = "s3"))]
+        ArtifactStorage::S3 { .. } => Err("ARTIFACT_STORAGE=s3, but this binary was built without the `s3` \
+             feature (cargo build --features s3)"
+            .into()),
     }
 }
 

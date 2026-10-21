@@ -5,7 +5,7 @@ import { record as audit, requestMeta } from '@/lib/server/audit';
 import { hasRole } from '@/lib/server/authz';
 import { clientIp, hit, tooMany } from '@/lib/server/rateLimit';
 import { ENGINE_IDENTITY_HEADER, signEngineIdentity } from '@/lib/server/engineIdentity';
-import { allowsMethod, ENGINE_ROUTES, minimumRole, routePolicyKey } from '@/lib/server/engineRoutes';
+import { allowsMethod, ENGINE_ROUTES, maxBodyBytes, minimumRole, routePolicyKey } from '@/lib/server/engineRoutes';
 import { requireWorkspace } from '@/lib/server/requireUser';
 import { engineSecret, signEngineRequest } from '@/lib/server/engineSign';
 
@@ -17,7 +17,6 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const ENGINE_URL = (process.env.ENGINE_URL || 'http://127.0.0.1:8000').replace(/\/+$/, '');
-const MAX_BODY = 2 * 1024 * 1024;
 
 async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
   const key = path.join('/');
@@ -102,10 +101,11 @@ async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
 
   let body: string | undefined;
   if (method === 'POST') {
+    const maxBody = maxBodyBytes(route);
     const len = Number(req.headers.get('content-length') || 0);
-    if (len > MAX_BODY) return NextResponse.json({ detail: 'Request too large.' }, { status: 413 });
+    if (len > maxBody) return NextResponse.json({ detail: 'Request too large.' }, { status: 413 });
     body = await req.text();
-    if (body.length > MAX_BODY) return NextResponse.json({ detail: 'Request too large.' }, { status: 413 });
+    if (Buffer.byteLength(body) > maxBody) return NextResponse.json({ detail: 'Request too large.' }, { status: 413 });
     headers['Content-Type'] = 'application/json';
   }
 
@@ -138,14 +138,17 @@ async function proxy(req: Request, path: string[], method: 'GET' | 'POST') {
       signal: controller.signal,
       cache: 'no-store',
     });
-    return new NextResponse(await upstream.text(), {
-      status: upstream.status,
-      headers: {
-        'Content-Type': upstream.headers.get('content-type') || 'application/json',
-        'Cache-Control': 'no-store',
-        'X-Request-Id': upstream.headers.get('x-request-id') || requestId,
-      },
-    });
+    const responseHeaders: Record<string, string> = {
+      'Content-Type': upstream.headers.get('content-type') || 'application/json',
+      'Cache-Control': 'no-store',
+      'X-Request-Id': upstream.headers.get('x-request-id') || requestId,
+    };
+    // Artifact downloads keep their file name and checksum.
+    for (const name of ['content-disposition', 'x-content-sha256']) {
+      const value = upstream.headers.get(name);
+      if (value) responseHeaders[name] = value;
+    }
+    return new NextResponse(await upstream.text(), { status: upstream.status, headers: responseHeaders });
   } catch (e) {
     const timedOut = e instanceof Error && e.name === 'AbortError';
     return NextResponse.json(

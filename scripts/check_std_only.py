@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Fails if an engine crate depends on anything but other workspace crates (M20 decision 0.1).
+"""Fails if an engine crate's default build depends on non-workspace crates.
 
-Third-party crates are allowed only in the service crates (spectra-api, spectra-db), so a
-dependency upgrade can never change parity results.
+Optional integrations may add dependencies behind explicit features (for example the Postgres
+adapter in spectra-registry). Parity and engine code build without enabling those features.
 
     cargo metadata --format-version 1 --no-deps | python3 scripts/check_std_only.py
 """
@@ -18,7 +18,7 @@ packages = json.load(sys.stdin)["packages"]
 bad = [
     f"{p['name']} -> {d['name']}"
     for p in packages if p["name"] in STD_ONLY
-    for d in p["dependencies"] if d.get("path") is None
+    for d in p["dependencies"] if d.get("path") is None and not d.get("optional", False)
 ]
 missing = STD_ONLY - {p["name"] for p in packages}
 if missing:

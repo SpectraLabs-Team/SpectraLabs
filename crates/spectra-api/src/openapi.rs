@@ -88,6 +88,19 @@ pub struct StressRequest {
         crate::jobs_api::list_jobs,
         crate::jobs_api::get_job,
         crate::jobs_api::cancel_job,
+        crate::registry_api::list_experiments,
+        crate::registry_api::create_experiment,
+        crate::registry_api::get_experiment,
+        crate::registry_api::get_lineage,
+        crate::registry_api::create_backtest,
+        crate::registry_api::list_runs,
+        crate::registry_api::create_run,
+        crate::registry_api::get_run,
+        crate::registry_api::add_run_note,
+        crate::registry_api::get_run_artifact,
+        crate::registry_api::verify,
+        crate::registry_api::export_jsonl,
+        crate::registry_api::import_jsonl,
     ),
     components(schemas(
         ErrorDoc,
@@ -97,11 +110,15 @@ pub struct StressRequest {
         crate::jobs_api::CreateJob,
         crate::jobs_api::JobView,
         crate::jobs_api::JobPage,
+        crate::registry_api::CreateExperiment,
+        crate::registry_api::CreateBacktest,
+        crate::registry_api::CreateNote,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
         (name = "engine", description = "Synchronous engine calls"),
         (name = "jobs", description = "Queued engine work, run by spectra-worker"),
+        (name = "registry", description = "Workspace-scoped experiment and run registry"),
     )
 )]
 pub struct ApiDoc;
@@ -128,6 +145,17 @@ mod tests {
             "/api/v1/jobs",
             "/api/v1/jobs/{id}",
             "/api/v1/jobs/{id}/cancel",
+            "/api/v1/experiments",
+            "/api/v1/experiments/{id}",
+            "/api/v1/experiments/{id}/lineage",
+            "/api/v1/experiments/{id}/runs",
+            "/api/v1/runs",
+            "/api/v1/runs/{id}",
+            "/api/v1/runs/{id}/notes",
+            "/api/v1/runs/{id}/artifacts/{kind}",
+            "/api/v1/registry/verify",
+            "/api/v1/registry/export",
+            "/api/v1/registry/import",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

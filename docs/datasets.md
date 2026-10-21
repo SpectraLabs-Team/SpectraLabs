@@ -111,7 +111,7 @@ The JSON form of the engine's CSV options (`crates/spectra-data/src/settings.rs`
 | `time_format` | yes | `iso8601`, `epoch_s`, `epoch_ms`, `epoch_us` or `epoch_ns`. Bare numbers are never guessed. |
 | `timezone` | no | DST-aware timezone name (e.g. `America/New_York`, `America/Chicago`, `Europe/London`, `Europe/Berlin`, `Asia/Tokyo`, `Asia/Hong_Kong`, `Asia/Kolkata`, `UTC`). When specified, naive ISO timestamps without zone offsets are converted using local daylight saving rules. Takes precedence over `utc_offset_minutes`. |
 | `utc_offset_minutes` | if no `timezone` | Minutes east of UTC for ISO timestamps written without a zone (-720 to 840; 330 is IST, -300 is EST). Timestamps with a zone (`Z`, `+05:30`) ignore it. |
-| `exchange` | no | Exchange calendar code (`XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`). When set, bars falling outside session hours or on market holidays are flagged, and gap detection skips weekends/holidays and overnight closures. |
+| `exchange` | no | Exchange calendar code (`XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`). When set, bars falling outside session hours or on market holidays are flagged, and gap detection skips weekends/holidays and overnight closures. Daily bars are judged by their trading date (a bar stamped at 18:00 local or later counts for the next day, so US bars stamped at 00:00 UTC map to the right session); weekly or longer bars are not judged. |
 | `columns.timestamp` … `columns.close` | yes | Header names, matched without regard to case. Two fields can't use the same column. |
 | `columns.volume` | no | `null` or absent: the file has no volume (volume is zero, and the report warns). |
 | `columns.symbol` | no | `null` or absent: a single-symbol file, named by `default_symbol`. |

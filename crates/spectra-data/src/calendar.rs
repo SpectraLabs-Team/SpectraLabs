@@ -160,6 +160,31 @@ impl Exchange {
         }
     }
 
+    /// The trading date a daily bar stamped at `ts_ns` stands for, in the
+    /// exchange's timezone. Vendors stamp daily bars at midnight UTC, at local
+    /// midnight, or at the local close. A local time of 18:00 or later belongs
+    /// to the next date: US daily bars stamped at 00:00 UTC are 19:00 or 20:00
+    /// the evening before in New York, and they stand for the next day's session.
+    #[must_use]
+    pub fn daily_bar_date(self, ts_ns: i64) -> (i64, u32, u32) {
+        let utc_secs = ts_ns.div_euclid(1_000_000_000);
+        let offset = i64::from(self.timezone().offset_minutes_for_utc(utc_secs)) * 60;
+        let local = utc_secs + offset;
+        let mut days = local.div_euclid(86_400);
+        if local.rem_euclid(86_400) >= 18 * 3600 {
+            days += 1;
+        }
+        civil_from_days(days)
+    }
+
+    /// Whether a daily bar stamped at `ts_ns` is for a trading day (see
+    /// [`Self::daily_bar_date`]). Holidays and weekends are not; early closes are.
+    #[must_use]
+    pub fn is_trading_day_bar(self, ts_ns: i64) -> bool {
+        let (y, m, d) = self.daily_bar_date(ts_ns);
+        self.is_trading_day(y, m, d)
+    }
+
     /// Checks whether an exact UTC timestamp falls within an open session.
     #[must_use]
     pub fn is_session_open(self, ts_ns: i64) -> bool {
@@ -523,6 +548,31 @@ fn is_nse_trading_day(year: i64, month: u32, day: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    /// Nanoseconds at a UTC date and time.
+    fn utc(y: i64, m: u32, d: u32, h: i64, min: i64) -> i64 {
+        (crate::time::days_from_civil(y, m, d) * 86_400 + h * 3600 + min * 60) * 1_000_000_000
+    }
+
+    #[test]
+    fn daily_bars_map_to_their_trading_date() {
+        let ny = Exchange::Xnys;
+        // Stamped at 00:00 UTC (20:00 the evening before in New York): the next day.
+        assert_eq!(ny.daily_bar_date(utc(2024, 7, 5, 0, 0)), (2024, 7, 5));
+        assert_eq!(ny.daily_bar_date(utc(2024, 1, 5, 0, 0)), (2024, 1, 5), "winter: 19:00 EST");
+        // Stamped at the New York close (16:00 EDT = 20:00 UTC) or local midnight: that day.
+        assert_eq!(ny.daily_bar_date(utc(2024, 7, 5, 20, 0)), (2024, 7, 5));
+        assert_eq!(ny.daily_bar_date(utc(2024, 7, 5, 4, 0)), (2024, 7, 5));
+        // India and Japan, stamped at local midnight (the previous day in UTC).
+        assert_eq!(Exchange::Xnse.daily_bar_date(utc(2024, 7, 4, 18, 30)), (2024, 7, 5));
+        assert_eq!(Exchange::Xtks.daily_bar_date(utc(2024, 7, 4, 15, 0)), (2024, 7, 5));
+        // Holidays and weekends are not trading days; the day after is.
+        assert!(!ny.is_trading_day_bar(utc(2024, 7, 4, 0, 0)), "Independence Day");
+        assert!(!ny.is_trading_day_bar(utc(2024, 7, 6, 0, 0)), "Saturday");
+        assert!(ny.is_trading_day_bar(utc(2024, 7, 5, 0, 0)));
+        assert!(Exchange::Continuous24_7.is_trading_day_bar(utc(2024, 7, 6, 0, 0)));
+    }
+
     use super::*;
 
     #[test]

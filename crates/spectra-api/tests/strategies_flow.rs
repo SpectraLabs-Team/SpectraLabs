@@ -325,6 +325,7 @@ async fn backtests_from_a_strategy_version() {
 async fn parity_between_saved_version_and_direct_builtin_run() {
     let Some(pool) = pool().await else { return };
     let f = Fixture::new(pool);
+    spectra_db::identity::ensure_identity(&f.pool, Some(f.user), f.ws).await.unwrap();
 
     // 1. Ingest/register a real dataset with bars so sma_cross produces trades and equity.
     let mut bars = Vec::with_capacity(120);

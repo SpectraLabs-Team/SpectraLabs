@@ -37,7 +37,9 @@ behaviour change.
 
 ## Build and test
 
-Requires Rust 1.89 or newer.
+The toolchain is pinned in `rust-toolchain.toml` (rustup installs it on first use); CI and the
+Docker build use the same version, so formatting and lints agree everywhere. The minimum supported
+Rust for the crates is 1.89.
 
 ```bash
 cargo build --release
@@ -46,6 +48,18 @@ cargo test --workspace --release
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 ```
+
+### Before you push
+
+```bash
+scripts/install-hooks.sh     # once per clone (npm ci in web/frontend also does it)
+```
+
+The hooks run the CI checks locally: **pre-commit** checks formatting (seconds), **pre-push** runs
+`scripts/ci-local.sh` (`just ci`) for what the branch changed — rustfmt, clippy with every feature
+set, tests, the std-only check, the generated API description and, when `DATABASE_URL` /
+`TEST_DATABASE_URL` are set, the Postgres and dashboard tests. `just ci --all` runs everything.
+`main` only accepts pull requests whose CI checks pass and that are up to date with `main`.
 
 ## Run
 
@@ -89,7 +103,7 @@ To run the API and dashboard natively against the containerised database, with
 [`just`](https://just.systems): `just db`, `just seed`, then run `just api`, `just worker` and
 `just web` in separate terminals. `just import-users-dry-run` previews importing the old
 `web/frontend/.data/users.json`; `just import-users` runs the import. `just` lists every task;
-`just check` runs what CI runs.
+`just ci` runs what CI runs.
 
 API settings are read once at startup, and the API refuses to start until every problem is fixed:
 `DATABASE_URL` and `ENGINE_SECRET` are required; `SPECTRA_API_ADDR` (default `127.0.0.1:8000`),

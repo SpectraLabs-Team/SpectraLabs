@@ -73,7 +73,11 @@ mod tests {
             csv += &format!("{day},BBB,50,51,49,50,1\n");
         }
         let opt = CsvOptions {
-            time: crate::TimeOptions { format: crate::TimeFormat::EpochSeconds, naive_utc_offset_minutes: 0 },
+            time: crate::TimeOptions {
+                format: crate::TimeFormat::EpochSeconds,
+                naive_utc_offset_minutes: 0,
+                timezone: None,
+            },
             ..CsvOptions::default()
         };
         load_csv(csv.as_bytes(), &opt).unwrap()

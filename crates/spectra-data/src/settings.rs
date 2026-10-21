@@ -30,12 +30,14 @@
 
 use spectra_core::Json;
 
+use crate::calendar::Exchange;
 use crate::dataset::{
     find_column, normalise_header, CsvOptions, InvalidRowPolicy, CLOSE_ALIASES, HIGH_ALIASES, LOW_ALIASES,
     OPEN_ALIASES, SYMBOL_ALIASES, TIMESTAMP_ALIASES, VOLUME_ALIASES,
 };
 use crate::records::{parse_records, Record};
 use crate::time::{parse_timestamp, TimeFormat, TimeOptions};
+use crate::timezone::Timezone;
 
 /// One problem with a settings document. `field` is a dotted path
 /// (`columns.close`, `quality.gap_factor`); empty for the document itself.
@@ -58,6 +60,8 @@ const FIELDS: &[&str] = &[
     "delimiter",
     "time_format",
     "utc_offset_minutes",
+    "timezone",
+    "exchange",
     "columns",
     "default_symbol",
     "skip_bad_rows",
@@ -137,18 +141,57 @@ pub fn parse_settings(doc: &Json) -> Result<CsvOptions, Vec<SettingsError>> {
         Some(Err(_)) => errors.push(SettingsError::new("time_format", "must be a string")),
     }
 
-    match present("utc_offset_minutes").map(Json::as_int) {
-        None => errors.push(SettingsError::new(
+    let has_tz = present("timezone").is_some();
+    let has_offset = present("utc_offset_minutes").is_some();
+
+    if !has_tz && !has_offset {
+        errors.push(SettingsError::new(
             "utc_offset_minutes",
-            "required: minutes east of UTC for timestamps without a zone (0 for UTC, 330 for IST, -300 for EST)",
-        )),
-        Some(Ok(m)) if (MIN_UTC_OFFSET_MINUTES..=MAX_UTC_OFFSET_MINUTES).contains(&m) => {
-            opt.time.naive_utc_offset_minutes = i32::try_from(m).unwrap_or(0);
+            "required: minutes east of UTC for timestamps without a zone (0 for UTC, 330 for IST, -300 for EST) or a timezone (e.g. \"America/New_York\")",
+        ));
+    }
+
+    if let Some(tz_doc) = present("timezone") {
+        match tz_doc.as_str() {
+            Ok(s) => match Timezone::parse(s) {
+                Some(tz) => {
+                    opt.time.timezone = Some(tz);
+                    if !has_offset {
+                        opt.time.naive_utc_offset_minutes = tz.offset_minutes(2024, 1, 1, 12, 0);
+                    }
+                }
+                None => errors.push(SettingsError::new(
+                    "timezone",
+                    "unknown timezone; use a standard IANA timezone (e.g. \"America/New_York\", \"Europe/London\", \"UTC\", \"Asia/Tokyo\") or fixed offset like \"+05:30\"",
+                )),
+            },
+            Err(_) => errors.push(SettingsError::new("timezone", "must be a string")),
         }
-        Some(_) => errors.push(SettingsError::new(
-            "utc_offset_minutes",
-            format!("must be a whole number from {MIN_UTC_OFFSET_MINUTES} to {MAX_UTC_OFFSET_MINUTES}"),
-        )),
+    }
+
+    if let Some(off_doc) = present("utc_offset_minutes") {
+        match off_doc.as_int() {
+            Ok(m) if (MIN_UTC_OFFSET_MINUTES..=MAX_UTC_OFFSET_MINUTES).contains(&m) => {
+                opt.time.naive_utc_offset_minutes = i32::try_from(m).unwrap_or(0);
+            }
+            _ => errors.push(SettingsError::new(
+                "utc_offset_minutes",
+                format!("must be a whole number from {MIN_UTC_OFFSET_MINUTES} to {MAX_UTC_OFFSET_MINUTES}"),
+            )),
+        }
+    }
+
+    if let Some(ex_doc) = present("exchange") {
+        match ex_doc.as_str() {
+            Ok(s) => match Exchange::parse(s) {
+                Some(ex) => opt.exchange = Some(ex),
+                None => errors.push(SettingsError::new(
+                    "exchange",
+                    "unknown exchange; supported: XNYS (NYSE/NASDAQ), XCME (CME), XLON (LSE), XTKS (TSE), XNSE (NSE), 24/7 (Crypto)",
+                )),
+            },
+            Err(_) => errors.push(SettingsError::new("exchange", "must be a string")),
+        }
     }
 
     let mut has_symbol_column = false;
@@ -294,7 +337,7 @@ pub fn settings_json(opt: &CsvOptions) -> Json {
     let col = |name: &str| if name.is_empty() { Json::Null } else { Json::string(name) };
     let num = |v: f64| Json::number(v).unwrap_or(Json::Null);
     let has_symbol = !opt.symbol_column.is_empty();
-    Json::object()
+    let mut doc = Json::object()
         .with("delimiter", Json::string((opt.delimiter as char).to_string()))
         .with("time_format", Json::string(time_format_name(opt.time.format)))
         .with("utc_offset_minutes", Json::integer(i64::from(opt.time.naive_utc_offset_minutes)))
@@ -317,7 +360,14 @@ pub fn settings_json(opt: &CsvOptions) -> Json {
                 .with("gap_factor", num(opt.gap_factor))
                 .with("outlier_z", num(opt.outlier_z))
                 .with("stale_run", Json::integer(i64::try_from(opt.stale_run).unwrap_or(i64::MAX))),
-        )
+        );
+    if let Some(tz) = opt.time.timezone {
+        doc = doc.with("timezone", Json::string(tz.name()));
+    }
+    if let Some(ex) = opt.exchange {
+        doc = doc.with("exchange", Json::string(ex.code()));
+    }
+    doc
 }
 
 /// Delimiters [`suggest`] considers, most common first.
@@ -343,6 +393,10 @@ pub struct Suggestions {
     /// For ISO timestamps: `Some(true)` if they carry a zone (`Z`, `+05:30`),
     /// so `utc_offset_minutes` does not affect them.
     pub timestamps_have_zone: Option<bool>,
+    /// Suggested exchange code (e.g. "XNYS").
+    pub exchange: Option<&'static str>,
+    /// Suggested timezone identifier (e.g. "America/New_York").
+    pub timezone: Option<&'static str>,
 }
 
 impl Suggestions {
@@ -356,12 +410,19 @@ impl Suggestions {
         for h in &self.header {
             let _ = header.push(Json::string(h.clone()));
         }
-        Json::object()
+        let mut doc = Json::object()
             .with("delimiter", self.delimiter.map_or(Json::Null, |d| Json::string(d.to_string())))
             .with("header", header)
             .with("columns", columns)
             .with("time_format", self.time_format.map_or(Json::Null, Json::string))
-            .with("timestamps_have_zone", self.timestamps_have_zone.map_or(Json::Null, Json::boolean))
+            .with("timestamps_have_zone", self.timestamps_have_zone.map_or(Json::Null, Json::boolean));
+        if let Some(ex) = self.exchange {
+            doc = doc.with("exchange", Json::string(ex));
+        }
+        if let Some(tz) = self.timezone {
+            doc = doc.with("timezone", Json::string(tz));
+        }
+        doc
     }
 }
 
@@ -415,7 +476,17 @@ pub fn suggest(sample: &[u8]) -> Suggestions {
         })
         .unwrap_or_default();
     let (time_format, timestamps_have_zone) = guess_time_format(&values);
-    Suggestions { delimiter: Some(delim as char), header, columns, time_format, timestamps_have_zone }
+    let timezone = if timestamps_have_zone == Some(true) { Some("UTC") } else { Some("America/New_York") };
+    let exchange = Some("XNYS");
+    Suggestions {
+        delimiter: Some(delim as char),
+        header,
+        columns,
+        time_format,
+        timestamps_have_zone,
+        exchange,
+        timezone,
+    }
 }
 
 /// A time format every value parses with, and whether ISO values carry a zone.
@@ -437,7 +508,7 @@ fn guess_time_format(values: &[&str]) -> (Option<&'static str>, Option<bool>) {
         };
         return (Some(name), None);
     }
-    let iso = TimeOptions { format: TimeFormat::Iso8601, naive_utc_offset_minutes: 0 };
+    let iso = TimeOptions { format: TimeFormat::Iso8601, naive_utc_offset_minutes: 0, timezone: None };
     let parsed: Option<Vec<bool>> =
         values.iter().map(|v| parse_timestamp(v, &iso).map(|t| t.naive)).collect();
     match parsed {
@@ -463,7 +534,10 @@ mod tests {
         let opt = parse_settings(&doc(GOOD)).unwrap();
         assert!(opt.explicit_columns);
         assert_eq!(opt.delimiter, b',');
-        assert_eq!(opt.time, TimeOptions { format: TimeFormat::Iso8601, naive_utc_offset_minutes: 330 });
+        assert_eq!(
+            opt.time,
+            TimeOptions { format: TimeFormat::Iso8601, naive_utc_offset_minutes: 330, timezone: None }
+        );
         assert_eq!(
             (opt.timestamp_column.as_str(), opt.close_column.as_str(), opt.volume_column.as_str()),
             ("Date", "Close", "")
@@ -588,5 +662,27 @@ mod tests {
         assert_eq!(zoned.timestamps_have_zone, Some(true));
         assert_eq!(suggest(b"").delimiter, None);
         assert_eq!(suggest(b"just one column\nx\n").time_format, None);
+    }
+
+    #[test]
+    fn timezone_and_exchange_settings() {
+        let text = r#"{"delimiter":",","time_format":"iso8601","timezone":"America/New_York","exchange":"XNYS",
+            "columns":{"timestamp":"Date","open":"Open","high":"High","low":"Low","close":"Close","volume":"Vol"},
+            "default_symbol":"SPY"}"#;
+        let opt = parse_settings(&doc(text)).unwrap();
+        assert_eq!(opt.time.timezone, Some(Timezone::AmericaNewYork));
+        assert_eq!(opt.exchange, Some(Exchange::Xnys));
+        // Canonical JSON round trip
+        let round_trip = parse_settings(&settings_json(&opt)).unwrap();
+        assert_eq!(round_trip.time.timezone, Some(Timezone::AmericaNewYork));
+        assert_eq!(round_trip.exchange, Some(Exchange::Xnys));
+
+        // Invalid timezone and exchange report errors
+        let bad = r#"{"delimiter":",","time_format":"iso8601","timezone":"Mars/Colony","exchange":"INVALID",
+            "columns":{"timestamp":"Date","open":"Open","high":"High","low":"Low","close":"Close","volume":"Vol"},
+            "default_symbol":"SPY"}"#;
+        let errs = parse_settings(&doc(bad)).unwrap_err();
+        assert!(errs.iter().any(|e| e.field == "timezone"));
+        assert!(errs.iter().any(|e| e.field == "exchange"));
     }
 }

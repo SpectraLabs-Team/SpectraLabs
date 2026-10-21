@@ -26,6 +26,9 @@ pub struct TimeOptions {
     /// Offset applied to ISO timestamps that carry no zone designator, in
     /// minutes east of UTC (e.g. 330 for IST). Zoned timestamps ignore it.
     pub naive_utc_offset_minutes: i32,
+    /// Optional DST-aware timezone (e.g. `America/New_York`, `Europe/London`).
+    /// When present, overrides `naive_utc_offset_minutes` for naive timestamps.
+    pub timezone: Option<crate::timezone::Timezone>,
 }
 
 /// A parsed timestamp.
@@ -316,7 +319,10 @@ pub fn parse_timestamp(text: &str, opts: &TimeOptions) -> Option<ParsedTime> {
     }
 
     let mut naive = true;
-    let mut offset_min = i64::from(opts.naive_utc_offset_minutes);
+    let mut offset_min = match opts.timezone {
+        Some(tz) => i64::from(tz.offset_minutes(year, month as u32, day as u32, hour as u32, minute as u32)),
+        None => i64::from(opts.naive_utc_offset_minutes),
+    };
     if pos < s.len() {
         if s[pos] == b'Z' {
             naive = false;
@@ -413,12 +419,26 @@ mod tests {
         assert!(parse_timestamp("2020-13-01", &iso).is_none());
         assert!(parse_timestamp("2020-01-01T24:00", &iso).is_none());
         assert!(parse_timestamp("2020-01-01T00:00:00.1234567891Z", &iso).is_none());
-        let ist = TimeOptions { format: TimeFormat::Iso8601, naive_utc_offset_minutes: 330 };
+        let ist = TimeOptions { format: TimeFormat::Iso8601, naive_utc_offset_minutes: 330, timezone: None };
         assert_eq!(parse_timestamp("2020-01-01T05:30", &ist).unwrap().ts_ns, 1_577_836_800_000_000_000);
-        let secs = TimeOptions { format: TimeFormat::EpochSeconds, naive_utc_offset_minutes: 0 };
+        let secs =
+            TimeOptions { format: TimeFormat::EpochSeconds, naive_utc_offset_minutes: 0, timezone: None };
         assert_eq!(parse_timestamp("1577836800", &secs).unwrap().ts_ns, 1_577_836_800_000_000_000);
         assert!(parse_timestamp("1.5", &secs).is_none());
         assert!(parse_timestamp("99999999999999999", &secs).is_none());
+
+        // DST-aware timezone parsing
+        let ny = TimeOptions {
+            format: TimeFormat::Iso8601,
+            naive_utc_offset_minutes: 0,
+            timezone: Some(crate::timezone::Timezone::AmericaNewYork),
+        };
+        // Winter: 2024-01-15 09:30 EST (UTC-5) -> 14:30 UTC
+        let winter_parsed = parse_timestamp("2024-01-15 09:30:00", &ny).unwrap();
+        assert_eq!(format_timestamp(winter_parsed.ts_ns), "2024-01-15T14:30:00Z");
+        // Summer: 2024-06-15 09:30 EDT (UTC-4) -> 13:30 UTC
+        let summer_parsed = parse_timestamp("2024-06-15 09:30:00", &ny).unwrap();
+        assert_eq!(format_timestamp(summer_parsed.ts_ns), "2024-06-15T13:30:00Z");
     }
 
     #[test]

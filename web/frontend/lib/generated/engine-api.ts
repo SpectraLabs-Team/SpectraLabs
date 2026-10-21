@@ -111,6 +111,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/calendars": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /api/v1/calendars` (M1 task 10): lists supported exchange calendars and timezones. */
+        get: operations["list_calendars"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets": {
         parameters: {
             query?: never;
@@ -663,6 +680,24 @@ export interface components {
              */
             warmups?: number | null;
         };
+        /** @description An exchange calendar supported by the platform. */
+        CalendarView: {
+            /** @description MIC or short code (e.g. `XNYS`). */
+            code: string;
+            /** @description Exchange name. */
+            name: string;
+            /** @description Regular session hours. */
+            sessions: string;
+            /** @description Primary operating timezone. */
+            timezone: string;
+        };
+        /** @description Supported calendars and timezones. */
+        CalendarsResponse: {
+            /** @description Supported exchanges. */
+            calendars: components["schemas"]["CalendarView"][];
+            /** @description Common IANA timezones. */
+            timezones: string[];
+        };
         /** @description After a chunk. */
         ChunkView: {
             /**
@@ -892,17 +927,21 @@ export interface components {
             default_symbol?: string | null;
             /** @description One punctuation character (not `"`) or a tab. */
             delimiter: string;
+            /** @description Optional exchange calendar for session enforcement and calendar-aware checks (e.g. `XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`). */
+            exchange?: string | null;
             quality?: null | components["schemas"]["QualityThresholds"];
             /** @description Optional, default `false`: bad rows abort the load. `true` skips and counts them. */
             skip_bad_rows?: boolean | null;
             /** @description `iso8601`, `epoch_s`, `epoch_ms`, `epoch_us` or `epoch_ns`. */
             time_format: string;
+            /** @description Optional DST-aware timezone name (e.g. `America/New_York`, `Europe/London`, `UTC`, `Asia/Tokyo`). */
+            timezone?: string | null;
             /**
              * Format: int32
              * @description Minutes east of UTC for ISO timestamps written without a zone
-             *     (-720 to 840). A fixed offset: daylight saving is not modelled.
+             *     (-720 to 840). Optional if `timezone` is provided.
              */
-            utc_offset_minutes: number;
+            utc_offset_minutes?: number | null;
         };
         /** @description A page of jobs. */
         JobPage: {
@@ -1021,6 +1060,8 @@ export interface components {
         QualityReport: {
             /** @description Fingerprint of the bars (recorded in backtest results). */
             bars_sha256: string;
+            /** @description Exchange calendar used, if any. */
+            exchange?: string | null;
             /** @description First bar, RFC 3339. */
             first_ts: string;
             /**
@@ -1066,6 +1107,8 @@ export interface components {
             symbols: string[];
             /** @description Thresholds the checks used. */
             thresholds: components["schemas"]["QualityThresholds"];
+            /** @description Timezone used, if any. */
+            timezone?: string | null;
             /** @description Things worth a human look. */
             warnings: string[];
         };
@@ -1196,12 +1239,16 @@ export interface components {
             columns: components["schemas"]["SuggestedColumns"];
             /** @description Delimiter that splits every sampled row into the same number of fields. */
             delimiter?: string | null;
+            /** @description Suggested exchange calendar (e.g. `XNYS`). */
+            exchange?: string | null;
             /** @description The header split with that delimiter, as written. */
             header: string[];
             /** @description Likely `time_format`. */
             time_format?: string | null;
             /** @description For ISO timestamps: whether they carry a zone (then the UTC offset does not apply to them). */
             timestamps_have_zone?: boolean | null;
+            /** @description Suggested timezone identifier (e.g. `America/New_York`). */
+            timezone?: string | null;
         };
         /** @description Quality checks for one symbol. */
         SymbolStats: {
@@ -1229,6 +1276,16 @@ export interface components {
              * @description Median interval between bars, nanoseconds.
              */
             median_interval_ns: number;
+            /**
+             * Format: int64
+             * @description Bars recorded on non-trading days/holidays.
+             */
+            non_trading_day_bars?: number | null;
+            /**
+             * Format: int64
+             * @description Bars recorded outside regular exchange sessions.
+             */
+            out_of_session_bars?: number | null;
             /**
              * Format: int64
              * @description Returns beyond `outlier_z` robust sigma.
@@ -1696,6 +1753,35 @@ export interface operations {
                 content?: never;
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_calendars: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Supported exchange calendars and timezones. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarsResponse"];
+                };
+            };
+            /** @description Missing or invalid signature. */
+            401: {
                 headers: {
                     [name: string]: unknown;
                 };

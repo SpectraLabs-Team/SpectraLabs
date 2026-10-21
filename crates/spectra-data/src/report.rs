@@ -48,22 +48,27 @@ pub fn quality_report_json(d: &Dataset, opt: &CsvOptions) -> Json {
     }
     let mut stats = Json::array();
     for s in &q.symbols {
-        let _ = stats.push(
-            Json::object()
-                .with("symbol", Json::string(s.symbol.clone()))
-                .with("bars", count(s.bars))
-                .with("first_ts", Json::string(format_timestamp(s.first_ts)))
-                .with("last_ts", Json::string(format_timestamp(s.last_ts)))
-                .with("median_interval_ns", Json::integer(s.median_interval_ns))
-                .with("gaps", count(s.gaps))
-                .with("largest_gap_ns", Json::integer(s.largest_gap_ns))
-                .with("zero_volume_bars", count(s.zero_volume_bars))
-                .with("outlier_returns", count(s.outlier_returns))
-                .with("stale_runs", count(s.stale_runs)),
-        );
+        let mut obj = Json::object()
+            .with("symbol", Json::string(s.symbol.clone()))
+            .with("bars", count(s.bars))
+            .with("first_ts", Json::string(format_timestamp(s.first_ts)))
+            .with("last_ts", Json::string(format_timestamp(s.last_ts)))
+            .with("median_interval_ns", Json::integer(s.median_interval_ns))
+            .with("gaps", count(s.gaps))
+            .with("largest_gap_ns", Json::integer(s.largest_gap_ns))
+            .with("zero_volume_bars", count(s.zero_volume_bars))
+            .with("outlier_returns", count(s.outlier_returns))
+            .with("stale_runs", count(s.stale_runs));
+        if s.out_of_session_bars > 0 {
+            obj = obj.with("out_of_session_bars", count(s.out_of_session_bars));
+        }
+        if s.non_trading_day_bars > 0 {
+            obj = obj.with("non_trading_day_bars", count(s.non_trading_day_bars));
+        }
+        let _ = stats.push(obj);
     }
     let num = |v: f64| Json::number(v).unwrap_or(Json::Null);
-    Json::object()
+    let mut root = Json::object()
         .with("rows_total", count(q.rows_total))
         .with("rows_accepted", count(q.rows_accepted))
         .with("rows_rejected", count(q.rows_rejected))
@@ -85,7 +90,14 @@ pub fn quality_report_json(d: &Dataset, opt: &CsvOptions) -> Json {
                 .with("gap_factor", num(opt.gap_factor))
                 .with("outlier_z", num(opt.outlier_z))
                 .with("stale_run", count(opt.stale_run)),
-        )
+        );
+    if let Some(ex) = opt.exchange {
+        root = root.with("exchange", Json::string(ex.code().to_string()));
+    }
+    if let Some(tz) = opt.time.timezone {
+        root = root.with("timezone", Json::string(tz.name().to_string()));
+    }
+    root
 }
 
 /// The preview response body: the header, the parsed rows (at most
@@ -172,7 +184,11 @@ mod tests {
             csv += &format!("{},1,2,0.5,1.5\n", start + i as i64 * 60);
         }
         let opt = CsvOptions {
-            time: crate::TimeOptions { format: crate::TimeFormat::EpochSeconds, naive_utc_offset_minutes: 0 },
+            time: crate::TimeOptions {
+                format: crate::TimeFormat::EpochSeconds,
+                naive_utc_offset_minutes: 0,
+                timezone: None,
+            },
             ..CsvOptions::default()
         };
         let mut seen = Vec::new();

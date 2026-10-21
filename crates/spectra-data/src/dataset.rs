@@ -76,6 +76,8 @@ pub struct CsvOptions {
     /// The Studio's ingest settings set it, so a guessed column is never used
     /// silently; the command line keeps the alias matching (`false`).
     pub explicit_columns: bool,
+    /// Optional exchange calendar for session enforcement and calendar-aware quality checks.
+    pub exchange: Option<crate::calendar::Exchange>,
 }
 
 impl Default for CsvOptions {
@@ -96,6 +98,7 @@ impl Default for CsvOptions {
             outlier_z: 10.0,
             stale_run: 5,
             explicit_columns: false,
+            exchange: None,
         }
     }
 }
@@ -134,6 +137,10 @@ pub struct SymbolStats {
     pub outlier_returns: usize,
     /// Runs of `stale_run` or more frozen bars.
     pub stale_runs: usize,
+    /// Bars recorded outside regular trading sessions.
+    pub out_of_session_bars: usize,
+    /// Bars recorded on non-trading days (weekends or exchange holidays).
+    pub non_trading_day_bars: usize,
 }
 
 /// What ingestion found.
@@ -281,11 +288,28 @@ pub fn assess_quality(bars: &[Bar], symbols: &SymbolTable, cfg: &CsvOptions) -> 
             if b.volume.is_zero() {
                 st.zero_volume_bars += 1;
             }
+            if let Some(cal) = cfg.exchange {
+                if !cal.is_session_open(b.ts_ns) {
+                    st.out_of_session_bars += 1;
+                    let tz = cal.timezone();
+                    let utc_secs = b.ts_ns / 1_000_000_000;
+                    let local_secs = utc_secs + i64::from(tz.offset_minutes_for_utc(utc_secs)) * 60;
+                    let (y, m, d) = crate::time::civil_from_days(local_secs.div_euclid(86_400));
+                    if !cal.is_trading_day(y, m, d) {
+                        st.non_trading_day_bars += 1;
+                    }
+                }
+            }
             if k == 0 {
                 continue;
             }
             let p = &bars[idx[k - 1]];
-            deltas.push((b.ts_ns - p.ts_ns) as f64);
+            let delta = if let Some(cal) = cfg.exchange {
+                cal.trading_time_between(p.ts_ns, b.ts_ns) as f64
+            } else {
+                (b.ts_ns - p.ts_ns) as f64
+            };
+            deltas.push(delta);
             returns.push(b.close.to_f64() / p.close.to_f64() - 1.0);
             let frozen = b.open == b.high && b.high == b.low && b.low == b.close && b.close == p.close;
             stale_len = if frozen { stale_len + 1 } else { 0 };
@@ -319,12 +343,31 @@ pub fn assess_quality(bars: &[Bar], symbols: &SymbolTable, cfg: &CsvOptions) -> 
 
     for st in &rep.symbols {
         if st.gaps > 0 {
+            let msg = if let Some(ex) = cfg.exchange {
+                format!(
+                    "{}: {} calendar gap(s) longer than {}x the median trading interval (largest {} s). Missing bars during market sessions ({})?",
+                    st.symbol,
+                    st.gaps,
+                    cfg.gap_factor as i32,
+                    st.largest_gap_ns / 1_000_000_000,
+                    ex.code()
+                )
+            } else {
+                format!(
+                    "{}: {} gap(s) longer than {}x the median interval (largest {} s). Missing bars or market closures?",
+                    st.symbol,
+                    st.gaps,
+                    cfg.gap_factor as i32,
+                    st.largest_gap_ns / 1_000_000_000
+                )
+            };
+            rep.warnings.push(msg);
+        }
+        if st.out_of_session_bars > 0 {
+            let ex_code = cfg.exchange.map_or("exchange", |e| e.code());
             rep.warnings.push(format!(
-                "{}: {} gap(s) longer than {}x the median interval (largest {} s). Missing bars or market closures?",
-                st.symbol,
-                st.gaps,
-                cfg.gap_factor as i32,
-                st.largest_gap_ns / 1_000_000_000
+                "{}: {} bar(s) recorded outside active exchange sessions or on holidays ({}).",
+                st.symbol, st.out_of_session_bars, ex_code
             ));
         }
         if st.outlier_returns > 0 {

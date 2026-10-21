@@ -16,6 +16,7 @@
 //! | `GET /api/v1/telemetry/{cpu,workers,gpu}` | signed | host readings |
 //! | `/api/v1/alpaca/*` | signed | 501: not ported yet |
 //! | `POST /api/v1/jobs`, `GET /api/v1/jobs[/{id}]`, `POST /api/v1/jobs/{id}/cancel` | signed | queued work; see [`jobs_api`] |
+//! | `/api/v1/experiments`, `/api/v1/runs`, `/api/v1/registry/*` | signed | workspace-scoped research registry |
 //! | `POST /api/v1/datasets/preview` | signed | parse a file's first rows with ingest settings; see [`datasets_api`] |
 //! | `POST /api/v1/uploads` | signed (streamed) | store a data file of up to 100 MiB; see [`uploads_api`] |
 //! | `POST /api/v1/datasets/ingest` | signed | queue an `ingest` job: upload → dataset version |
@@ -49,6 +50,7 @@ pub mod ingest;
 pub mod jobs_api;
 pub mod observability;
 pub mod openapi;
+pub mod registry_api;
 pub mod sessions_api;
 pub mod telemetry;
 pub mod uploads_api;
@@ -101,8 +103,8 @@ pub struct ApiConfig {
     pub cors_origins: Vec<String>,
     /// Verifies the proxy's request signatures.
     pub engine_secret: Secret,
-    /// The worker's artifact store (local or S3), read for backtest chart
-    /// series and written by uploads. `None` answers those routes with 503.
+    /// The worker's artifact store (local or S3), read for run artifacts, chart series, and uploads.
+    /// `None` answers artifact routes with 503.
     pub artifacts: Option<spectra_db::artifacts::ArtifactBackend>,
     /// Default storage quota per workspace, for uploads.
     pub artifact_quota_bytes: i64,
@@ -135,7 +137,7 @@ impl From<&Config> for ApiConfig {
         Self {
             cors_origins: c.cors_origins.clone(),
             engine_secret: c.engine_secret.clone(),
-            // Set by the caller once the backend is built (S3 setup can fail).
+            // The binary sets the backend after constructing it (S3 setup can fail).
             artifacts: None,
             artifact_quota_bytes: c.artifact_quota_bytes,
             data_dir: c.data_dir.clone(),
@@ -686,7 +688,25 @@ fn job_routes() -> Router<AppState> {
         .route("/api/v1/jobs/{id}/cancel", only(post(jobs_api::cancel_job)))
 }
 
-/// Backtests (jobs of kind `backtest`) and the built-in strategy list (`/api/v1` only).
+fn registry_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/v1/experiments",
+            only(get(registry_api::list_experiments).post(registry_api::create_experiment)),
+        )
+        .route("/api/v1/experiments/{id}", only(get(registry_api::get_experiment)))
+        .route("/api/v1/experiments/{id}/lineage", only(get(registry_api::get_lineage)))
+        .route("/api/v1/experiments/{id}/runs", only(post(registry_api::create_backtest)))
+        .route("/api/v1/runs", only(get(registry_api::list_runs).post(registry_api::create_run)))
+        .route("/api/v1/runs/{id}", only(get(registry_api::get_run)))
+        .route("/api/v1/runs/{id}/notes", only(post(registry_api::add_run_note)))
+        .route("/api/v1/runs/{id}/artifacts/{kind}", only(get(registry_api::get_run_artifact)))
+        .route("/api/v1/registry/verify", only(get(registry_api::verify)))
+        .route("/api/v1/registry/export", only(get(registry_api::export_jsonl)))
+        .route("/api/v1/registry/import", only(post(registry_api::import_jsonl)))
+}
+
+/// Backtests, datasets, and built-in strategies (`/api/v1` only).
 fn backtest_routes() -> Router<AppState> {
     Router::new()
         .route(
@@ -734,8 +754,7 @@ fn backtest_routes() -> Router<AppState> {
         .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
 }
 
-/// The upload route. Outside [`require_signature`], which holds the whole
-/// body: this one checks the signature against a declared hash and streams.
+/// The upload route streams after validating its declared body hash.
 fn upload_routes() -> Router<AppState> {
     Router::new().route("/api/v1/uploads", only(post(uploads_api::upload)))
 }
@@ -753,6 +772,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
     let signed = engine_routes("/api/v1")
         .merge(engine_routes("/api"))
         .merge(job_routes())
+        .merge(registry_routes())
         .merge(backtest_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()

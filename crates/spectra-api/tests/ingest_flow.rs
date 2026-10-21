@@ -171,11 +171,6 @@ impl Fixture {
     }
 
     async fn clean_up(self) {
-        sqlx::query("DELETE FROM audit_events WHERE workspace_id = $1")
-            .bind(self.ws)
-            .execute(&self.pool)
-            .await
-            .unwrap();
         sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(self.ws).execute(&self.pool).await.unwrap();
         sqlx::query("DELETE FROM users WHERE id = $1").bind(self.user).execute(&self.pool).await.unwrap();
         let _ = std::fs::remove_dir_all(&self.dir);
@@ -491,8 +486,8 @@ async fn datasets_can_be_browsed_charted_renamed_and_deleted() {
     .await
     .unwrap();
     sqlx::query(
-        "INSERT INTO runs (workspace_id, job_id, dataset_version_id, status, params, metrics) \
-         VALUES ($1, $2, $3, 'succeeded', '{\"strategy\":\"sma_cross\"}', '{\"metrics\":{\"total_return\":0.05}}')",
+        "INSERT INTO runs (workspace_id, job_id, dataset_version_id, status, finished_at, params, metrics) \
+         VALUES ($1, $2, $3, 'succeeded', now(), '{\"strategy\":\"sma_cross\"}', '{\"metrics\":{\"total_return\":0.05}}')",
     )
     .bind(f.ws)
     .bind(job)

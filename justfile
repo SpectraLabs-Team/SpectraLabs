@@ -44,6 +44,15 @@ api:
 web:
     cd web/frontend && npm run dev
 
+# The checks CI runs, for what this branch changed (`just ci --all` for everything). The pre-push
+# hook runs this; set DATABASE_URL / TEST_DATABASE_URL to include the database tests.
+ci *args:
+    scripts/ci-local.sh {{args}}
+
+# Use the repository's git hooks: formatting on commit, `just ci` on push.
+hooks:
+    scripts/install-hooks.sh
+
 # Everything CI runs for Rust, plus the schema checks when DATABASE_URL is set.
 check:
     cargo fmt --all --check

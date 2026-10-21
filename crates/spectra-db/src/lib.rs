@@ -24,6 +24,7 @@ pub mod datasets;
 pub mod identity;
 pub mod jobs;
 pub mod uploads;
+pub mod web_migrations;
 
 /// The migrations in `crates/spectra-db/migrations`, embedded at build time.
 pub static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -75,11 +76,13 @@ pub async fn connect(cfg: &PoolConfig) -> Result<PgPool, Error> {
     }
 }
 
-/// Applies every pending migration.
+/// Applies every pending migration of the shared database: the dashboard's
+/// (identity and tenancy, see [`web_migrations`]) first, then the engine's.
 ///
 /// # Errors
-/// A migration that fails, or one already applied whose file has changed.
+/// A migration that fails, or an engine migration already applied whose file has changed.
 pub async fn migrate(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    web_migrations::apply(pool).await?;
     MIGRATOR.run(pool).await
 }
 
@@ -91,7 +94,8 @@ pub async fn ping(pool: &PgPool) -> Result<(), Error> {
     sqlx::query("SELECT 1").execute(pool).await.map(|_| ())
 }
 
-/// Versions of the embedded migrations that the database has not applied.
+/// Versions of the embedded engine migrations that the database has not
+/// applied (see [`web_migrations::pending`] for the dashboard's).
 ///
 /// # Errors
 /// Any query error. A database that has never been migrated reports every
@@ -126,8 +130,8 @@ fn seed_statements() -> impl Iterator<Item = &'static str> {
         .filter(|s| s.lines().any(|l| !l.trim().is_empty() && !l.trim_start().starts_with("--")))
 }
 
-/// Seeds an admin user (`admin_email`, no usable password) and a `dev`
-/// workspace they own. Safe to run repeatedly.
+/// Seeds an admin user (`admin_email`, no usable password) with a personal
+/// workspace, and a `dev` workspace they own. Safe to run repeatedly.
 ///
 /// # Errors
 /// Any query error, including an invalid email.
@@ -156,9 +160,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_seed_has_three_statements_all_taking_the_email() {
+    fn the_seed_has_five_statements_all_taking_the_email() {
         let stmts: Vec<_> = seed_statements().collect();
-        assert_eq!(stmts.len(), 3, "{stmts:#?}");
+        assert_eq!(stmts.len(), 5, "{stmts:#?}");
         assert!(stmts.iter().all(|s| s.contains("$1")));
     }
 

@@ -15,6 +15,14 @@ spectra-engine = { path = "../spectra-engine" }
 spectra-research = { path = "../spectra-research" }
 spectra-registry = { path = "../spectra-registry" }
 spectra-risk = { path = "../spectra-risk" }
+spectra-db = { path = "../spectra-db", optional = true }
+tokio = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+
+[features]
+# `spectra-registry export/import` move a workspace chain between Postgres and a
+# registry.jsonl folder. The default CLI build stays standard-library only.
+postgres = ["spectra-registry/postgres", "dep:spectra-db", "dep:tokio", "dep:uuid"]
 
 [lints]
 workspace = true

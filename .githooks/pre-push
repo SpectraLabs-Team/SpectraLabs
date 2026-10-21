@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Before every push: the checks CI runs, for what this branch changed (scripts/ci-local.sh).
+# Set DATABASE_URL / TEST_DATABASE_URL to include the Postgres and dashboard tests.
+# Skip once with `git push --no-verify` (CI will still check, and main requires it to pass).
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+exec scripts/ci-local.sh

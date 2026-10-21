@@ -33,6 +33,7 @@ use spectra_db::datasets::{self, NewBacktestRun};
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
 use spectra_db::{PgPool, PoolConfig};
 use spectra_engine::{Progress, RunControl, RunLimits};
+use spectra_registry::PgRegistry;
 use std::time::Instant;
 use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
@@ -274,6 +275,50 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
         return;
     }
     let job_start = Instant::now();
+    if job.kind == "backtest" {
+        let run_id = job
+            .payload
+            .get("registry_run_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok());
+        let Some(run_id) = run_id else {
+            let _ = jobs::fail(
+                &ctx.pool,
+                job.id,
+                &ctx.worker_id,
+                "Backtest job has no valid registry run id.",
+                false,
+            )
+            .await;
+            return;
+        };
+        let experiment_id = job
+            .payload
+            .get("experiment_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok());
+        let Some(experiment_id) = experiment_id else {
+            let _ = jobs::fail(
+                &ctx.pool,
+                job.id,
+                &ctx.worker_id,
+                "Backtest job has no valid experiment id.",
+                false,
+            )
+            .await;
+            let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+            let _ = registry.fail_run(run_id, "Backtest job has no valid experiment id.").await;
+            return;
+        };
+        let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+        if let Err(error) = registry.start_run(run_id).await {
+            error!(job_id = %job.id, run_id = %run_id, error = %error, "could not start registry run");
+            let _ = jobs::fail(&ctx.pool, job.id, &ctx.worker_id, "Could not start the registry run.", false)
+                .await;
+            return;
+        }
+        let _ = experiment_id;
+    }
     let (kind, payload_text) = (job.kind.clone(), job.payload.to_string());
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut work = tokio::task::spawn_blocking(move || {
@@ -349,29 +394,69 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
             );
             (
                 if retryable { "failed_retryable" } else { "failed_permanent" },
-                jobs::fail(pool, job.id, wid, &msg, retryable).await.map(|_| ()),
+                async {
+                    let failed = jobs::fail(pool, job.id, wid, &msg, retryable).await?;
+                    if job.kind == "backtest" && failed.as_ref().is_some_and(|j| j.status == "failed") {
+                        if let Some(id) = job.payload.get("registry_run_id").and_then(serde_json::Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+                            let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+                            if let Err(error) = registry.fail_run(id, &msg).await {
+                                error!(job_id = %job.id, run_id = %id, error = %error, "could not fail registry run");
+                            }
+                        }
+                    }
+                    Ok(())
+                }.await,
             )
         }
         Outcome::Panicked => {
             observability::JobMetrics::job_completed(&job.kind, "panicked");
             observability::JobMetrics::job_duration(&job.kind, "panicked", job_duration);
-            (
-                "panicked",
-                jobs::fail(pool, job.id, wid, "The engine crashed while running this job.", true)
-                    .await
-                    .map(|_| ()),
-            )
+            let message = "The engine crashed while running this job.";
+            ("panicked", async {
+                let failed = jobs::fail(pool, job.id, wid, message, true).await?;
+                if job.kind == "backtest" && failed.as_ref().is_some_and(|j| j.status == "failed") {
+                    if let Some(id) = job.payload.get("registry_run_id").and_then(serde_json::Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+                        let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+                        if let Err(error) = registry.fail_run(id, message).await {
+                            error!(job_id = %job.id, run_id = %id, error = %error, "could not fail panicked registry run");
+                        }
+                    }
+                }
+                Ok(())
+            }.await)
         }
         Outcome::Cancelled => {
             observability::JobMetrics::job_completed(&job.kind, "cancelled");
             observability::JobMetrics::job_duration(&job.kind, "cancelled", job_duration);
-            ("cancelled", jobs::mark_cancelled(pool, job.id, wid).await.map(|_| ()))
+            ("cancelled", async {
+                jobs::mark_cancelled(pool, job.id, wid).await?;
+                if job.kind == "backtest" {
+                    if let Some(id) = job.payload.get("registry_run_id").and_then(serde_json::Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+                        let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+                        if let Err(error) = registry.cancel_run(id).await {
+                            error!(job_id = %job.id, run_id = %id, error = %error, "could not cancel registry run");
+                        }
+                    }
+                }
+                Ok(())
+            }.await)
         }
         Outcome::TimedOut(t) => {
             let msg = format!("The job ran longer than its {} s limit.", t.as_secs());
             observability::JobMetrics::job_completed(&job.kind, "timeout");
             observability::JobMetrics::job_duration(&job.kind, "timeout", job_duration);
-            ("timeout", jobs::fail(pool, job.id, wid, &msg, false).await.map(|_| ()))
+            ("timeout", async {
+                jobs::fail(pool, job.id, wid, &msg, false).await?;
+                if job.kind == "backtest" {
+                    if let Some(id) = job.payload.get("registry_run_id").and_then(serde_json::Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+                        let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+                        if let Err(error) = registry.fail_run(id, &msg).await {
+                            error!(job_id = %job.id, run_id = %id, error = %error, "could not fail timed-out registry run");
+                        }
+                    }
+                }
+                Ok(())
+            }.await)
         }
         Outcome::Lost => {
             warn!(job_id = %job.id, "job was taken over after a missed heartbeat; dropping it");

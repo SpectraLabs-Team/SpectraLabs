@@ -14,12 +14,37 @@ and monitoring. `just --list` shows the shortcuts used below.
 | `prometheus` (profile `monitoring`) | `127.0.0.1:9090` | scrapes the API and every worker |
 | `grafana` (profile `monitoring`) | `127.0.0.1:3001` | provisioned overview dashboard; configure `GRAFANA_ADMIN_PASSWORD` in `.env` |
 
+## One database
+
+The dashboard and the engine share one Postgres database (`DATABASE_URL` for every service).
+
+| Owner | Tables | Migrations |
+|---|---|---|
+| Dashboard | `users`, `workspaces`, `workspace_members`, sessions, invites, API tokens, secrets, `audit_events` | `web/frontend/db/migrations` (tracked in `schema_migrations`) |
+| Engine | datasets, strategies, experiments, jobs, runs, artifacts, `registry_events`, `workspace_quotas` | `crates/spectra-db/migrations` (tracked in `_sqlx_migrations`) |
+
+- `spectra-db migrate` (the compose `migrate` service, `just migrate`) applies the dashboard's
+  migrations, then the engine's. It records the dashboard's files exactly as `npm run db:migrate`
+  does (same table, checksum and advisory lock), so either runner can go first. The engine's first
+  migration refuses to run without the dashboard's tables.
+- The engine references `users (id)` and `workspaces (id)` and never alters those tables. Its own
+  per-workspace settings live in `workspace_quotas`.
+- **Deleting a workspace** (a team, or a personal one with its account) deletes everything the
+  engine holds for it, including the whole registry chain. A chain can never lose single events:
+  registry events and notes refuse any other delete. Export the registry first
+  (`GET /api/v1/registry/export` or `spectra-registry export`) and keep the anchored head hashes.
+  Artifact bytes are content-addressed and may be shared, so they stay in the store; they no longer
+  count against any quota.
+- **Deleting a user** keeps the runs and notes they created and clears `created_by` / `author_id`.
+  Finished runs and notes accept no other change.
+
 ## Staging and production
 
 1. Copy the template and fill in every `CHANGE-ME` (use different secrets per environment):
    ```bash
    cp deploy/production.env.example .env        # or deploy/staging.env.example
-   cp web/frontend/.env.example web/frontend/.env.local   # AUTH_SECRET, SECRETS_MASTER_KEY, mail, DATABASE_URL
+   cp web/frontend/.env.example web/frontend/.env.local   # AUTH_SECRET, SECRETS_MASTER_KEY, mail
+   # (compose points the dashboard at the shared database; DATABASE_URL in .env.local is not used there)
    ```
    Secrets: `openssl rand -base64 48`. `ENGINE_SECRET` must be the same in both files.
 2. Point DNS for `SITE_ADDRESS` at the host and open ports 80 and 443.

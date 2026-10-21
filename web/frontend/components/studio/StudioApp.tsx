@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { BacktestLab } from './BacktestLab';
 import { BenchmarkLab } from './BenchmarkLab';
 import { DataLab } from './DataLab';
+import { ExperimentRegistry } from './ExperimentRegistry';
 import { MarketSettings } from './MarketSettings';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';
@@ -31,6 +32,7 @@ export function StudioApp() {
             {tab === 'data' && <DataLab />}
             {tab === 'backtests' && <BacktestLab />}
             {tab === 'benchmark' && <BenchmarkLab />}
+            {tab === 'registry' && <ExperimentRegistry />}
             {tab === 'settings' && <MarketSettings />}
           </motion.div>
         </AnimatePresence>

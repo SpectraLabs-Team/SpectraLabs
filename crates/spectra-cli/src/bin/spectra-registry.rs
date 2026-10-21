@@ -8,6 +8,11 @@
 //! spectra-registry --root DIR holdouts --data DATA_DIR
 //! spectra-registry --root DIR verify
 //! spectra-registry --root DIR repair      (new: removes a crashed writer's incomplete last line)
+//!
+//! # built with --features postgres; the database URL comes from --database-url or DATABASE_URL
+//! spectra-registry --root DIR export --workspace UUID   (writes DIR/registry.jsonl, then verifies it)
+//! spectra-registry --root DIR import --workspace UUID   (verifies DIR/registry.jsonl, then loads it
+//!                                                        into an empty workspace)
 //! ```
 //!
 //! Exit codes: 0 success, 1 error or failed verification, 2 usage.
@@ -19,8 +24,91 @@ use spectra_data::DataStore;
 use spectra_registry::{repair_incomplete_tail, system_clock_ns, Registry, RunFilter, Vault};
 
 const USAGE: &str = "usage: spectra-registry --root DIR (experiments | runs [--experiment ID] [--strategy NAME] [--min-sharpe X] |
-                                     show RUN_ID | trials | holdouts --data DIR | verify | repair)
+                                     show RUN_ID | trials | holdouts --data DIR | verify | repair |
+                                     export --workspace UUID [--database-url URL] |
+                                     import --workspace UUID [--database-url URL])
 ";
+
+/// Where a Postgres transfer reads or writes.
+struct Transfer {
+    root: String,
+    workspace: Option<String>,
+    database_url: Option<String>,
+}
+
+#[cfg(feature = "postgres")]
+fn transfer(command: &str, t: &Transfer) -> ExitCode {
+    use spectra_registry::PgRegistry;
+
+    let Some(workspace) = t.workspace.as_deref() else { return usage() };
+    let Ok(workspace_id) = uuid::Uuid::parse_str(workspace) else {
+        eprintln!("error: --workspace must be a UUID");
+        return ExitCode::from(2);
+    };
+    let Some(url) = t.database_url.clone().or_else(|| std::env::var("DATABASE_URL").ok()) else {
+        eprintln!("error: pass --database-url or set DATABASE_URL");
+        return ExitCode::from(2);
+    };
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: could not start the async runtime: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    let path = std::path::Path::new(&t.root).join("registry.jsonl");
+    let result: Result<String, String> = runtime.block_on(async {
+        let pool = spectra_db::connect(&spectra_db::PoolConfig::new(url)).await.map_err(|e| e.to_string())?;
+        let registry = PgRegistry::new(pool, workspace_id);
+        if command == "export" {
+            if path.exists() {
+                return Err(format!("{} already exists; export into an empty folder", path.display()));
+            }
+            let report = registry.verify().await.map_err(|e| e.to_string())?;
+            if !report.ok {
+                return Err(format!("the workspace chain is broken: {}", report.detail));
+            }
+            let text = registry.export_jsonl().await.map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(&t.root).map_err(|e| e.to_string())?;
+            std::fs::write(&path, text).map_err(|e| e.to_string())?;
+            // Re-open with the file registry: the same check the C++ engine applies.
+            let file = Registry::open(&t.root).map_err(|e| format!("exported file does not verify: {e}"))?;
+            let v = file.verify();
+            if !v.ok {
+                return Err(format!("exported file does not verify: {}", v.detail));
+            }
+            Ok(format!("EXPORTED: {} events to {}, head {}", v.events, path.display(), v.last_hash))
+        } else {
+            // Opening verifies the whole chain before anything touches the database.
+            let file = Registry::open(&t.root).map_err(|e| e.to_string())?;
+            let v = file.verify();
+            if !v.ok {
+                return Err(format!("{} does not verify: {}", path.display(), v.detail));
+            }
+            let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            let n = registry.import_jsonl(&text).await.map_err(|e| e.to_string())?;
+            let head = registry.verify().await.map_err(|e| e.to_string())?;
+            Ok(format!("IMPORTED: {n} events into workspace {workspace_id}, head {}", head.last_hash))
+        }
+    });
+    match result {
+        Ok(line) => {
+            println!("{line}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(not(feature = "postgres"))]
+fn transfer(command: &str, t: &Transfer) -> ExitCode {
+    let _ = (&t.root, &t.workspace, &t.database_url);
+    eprintln!("error: `{command}` needs a build with `--features postgres`");
+    ExitCode::from(2)
+}
 
 fn usage() -> ExitCode {
     eprint!("{USAGE}");
@@ -31,6 +119,7 @@ fn usage() -> ExitCode {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (mut root, mut data_dir, mut command, mut positional) = (None, None, None::<String>, None::<String>);
+    let (mut workspace, mut database_url) = (None, None);
     let mut filter = RunFilter::default();
     let mut i = 0;
     while i < args.len() {
@@ -42,6 +131,8 @@ fn main() -> ExitCode {
         match a.as_str() {
             "--root" => root = value(),
             "--data" => data_dir = value(),
+            "--workspace" => workspace = value(),
+            "--database-url" => database_url = value(),
             "--experiment" => filter.experiment_id = value(),
             "--strategy" => filter.strategy = value(),
             "--min-sharpe" => match value().and_then(|v| v.parse().ok()) {
@@ -55,6 +146,10 @@ fn main() -> ExitCode {
         i += 1;
     }
     let (Some(root), Some(command)) = (root, command) else { return usage() };
+
+    if command == "export" || command == "import" {
+        return transfer(&command, &Transfer { root, workspace, database_url });
+    }
 
     if command == "repair" {
         return match repair_incomplete_tail(&root, system_clock_ns()) {

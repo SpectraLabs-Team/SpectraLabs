@@ -4,7 +4,7 @@
 //! `sha256/<first 2 hex>/<next 2 hex>/<full hash>`: the same bytes are stored
 //! once, a file's name is its checksum, and every read re-verifies it. Each
 //! use of an artifact is a `run_artifacts` row, and a workspace's distinct
-//! hashes count against its quota (`workspaces.artifact_quota_bytes`, or a
+//! hashes count against its quota (`workspace_quotas.artifact_quota_bytes`, or a
 //! default).
 //!
 //! [`ArtifactBackend`] picks where the bytes go: the local volume

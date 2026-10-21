@@ -1,9 +1,9 @@
 //! `spectra-db`: database maintenance.
 //!
 //! ```text
-//! spectra-db migrate   apply pending migrations
+//! spectra-db migrate   apply pending migrations: the dashboard's, then the engine's
 //! spectra-db seed      migrate, then seed the dev workspace and admin (ADMIN_EMAIL)
-//! spectra-db status    list pending migrations; exit 1 if any
+//! spectra-db status    list pending migrations of both; exit 1 if any
 //! spectra-db dataset-add --workspace ID|SLUG --name NAME --store DIR --id CHECKSUM
 //!                      register a dataset-store entry (from `spectra-ingest`) as the next
 //!                      version of a workspace dataset, and print the version id to run on
@@ -14,7 +14,7 @@
 use std::process::ExitCode;
 
 use spectra_db::datasets::{register_version, resolve_workspace, NewDatasetVersion};
-use spectra_db::{connect, migrate, pending_migrations, seed_dev, PoolConfig};
+use spectra_db::{connect, migrate, pending_migrations, seed_dev, web_migrations, PoolConfig};
 
 const USAGE: &str =
     "usage: spectra-db <migrate|seed|status>   (reads DATABASE_URL; seed also reads ADMIN_EMAIL)
@@ -64,12 +64,23 @@ async fn main() -> ExitCode {
 
 async fn run(cmd: &str, pool: &spectra_db::PgPool) -> Result<(), String> {
     if cmd == "status" {
+        let web = web_migrations::pending(pool).await.map_err(|e| e.to_string())?;
         let pending = pending_migrations(pool).await.map_err(|e| e.to_string())?;
-        if !pending.is_empty() {
-            return Err(format!("pending migrations: {pending:?}"));
+        if !web.is_empty() || !pending.is_empty() {
+            return Err(format!("pending migrations: dashboard {web:?}, engine {pending:?}"));
         }
         eprintln!("spectra-db: schema is up to date");
         return Ok(());
+    }
+    let (applied, edited) = web_migrations::apply(pool).await.map_err(|e| e.to_string())?;
+    for name in applied {
+        eprintln!("spectra-db: applied dashboard migration {name}");
+    }
+    for web_migrations::Edited(name) in edited {
+        eprintln!(
+            "spectra-db: warning: dashboard migration {name} was edited after it was applied; \
+             add a new migration instead"
+        );
     }
     migrate(pool).await.map_err(|e| e.to_string())?;
     eprintln!("spectra-db: migrations applied");

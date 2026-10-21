@@ -116,6 +116,13 @@ SELECT pg_temp.check((SELECT count(*) = 2 FROM p1)
                      'cursor pagination covers every job once');
 CREATE TEMP TABLE p3 AS EXECUTE job_list('00000000-0000-7000-8000-0000000000a1', 'failed', NULL, 100);
 SELECT pg_temp.check((SELECT bool_and(status = 'failed') AND count(*) = 2 FROM p3), 'status filter');
+CREATE TEMP TABLE pk AS EXECUTE job_list_kind('00000000-0000-7000-8000-0000000000a1', 'benchmark', NULL, NULL, 100);
+SELECT pg_temp.check((SELECT bool_and(kind = 'benchmark') FROM pk)
+                     AND (SELECT count(*) FROM pk) = (SELECT count(*) FROM jobs
+                          WHERE workspace_id = '00000000-0000-7000-8000-0000000000a1' AND kind = 'benchmark')
+                     AND (SELECT count(*) FROM pk) > 0, 'kind filter');
+CREATE TEMP TABLE pk2 AS EXECUTE job_list_kind('00000000-0000-7000-8000-0000000000a1', 'nope', NULL, NULL, 100);
+SELECT pg_temp.check((SELECT count(*) = 0 FROM pk2), 'unknown kind lists nothing');
 CREATE TEMP TABLE g1 AS EXECUTE job_get('00000000-0000-7000-8000-0000000000b1', :'j1');
 SELECT pg_temp.check((SELECT count(*) = 0 FROM g1), 'get is workspace scoped');
 

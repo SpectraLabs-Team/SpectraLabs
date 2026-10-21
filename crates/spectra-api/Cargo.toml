@@ -9,6 +9,9 @@ rust-version.workspace = true
 
 [dependencies]
 spectra-core = { path = "../spectra-core" }
+spectra-backtest = { path = "../spectra-backtest" }
+spectra-data = { path = "../spectra-data" }
+spectra-engine = { path = "../spectra-engine" }
 spectra-risk = { path = "../spectra-risk" }
 spectra-db = { path = "../spectra-db" }
 spectra-registry = { path = "../spectra-registry", features = ["postgres"] }
@@ -17,6 +20,7 @@ spectra-engine = { path = "../spectra-engine" }
 spectra-research = { path = "../spectra-research" }
 sqlx.workspace = true
 axum.workspace = true
+http-body-util.workspace = true
 tokio.workspace = true
 tower-http.workspace = true
 uuid.workspace = true
@@ -35,7 +39,7 @@ sentry.workspace = true
 s3 = ["spectra-db/s3"]
 
 [dev-dependencies]
-http-body-util.workspace = true
+sqlx.workspace = true
 tower.workspace = true
 
 [lints]

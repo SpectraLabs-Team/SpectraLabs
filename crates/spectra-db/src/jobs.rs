@@ -207,6 +207,36 @@ pub async fn list(
     Ok(Page { items, next_cursor })
 }
 
+/// A page of a workspace's jobs of one `kind`, newest first (see [`list`]).
+///
+/// # Errors
+/// Any database error.
+pub async fn list_kind(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    kind: &str,
+    status: Option<JobStatus>,
+    cursor: Option<Uuid>,
+    limit: u32,
+) -> Result<Page<Job>, Error> {
+    let limit = limit.clamp(1, 200);
+    let mut items: Vec<Job> = sqlx::query_as(include_str!("../queries/job_list_kind.sql"))
+        .bind(workspace_id)
+        .bind(kind)
+        .bind(status.map(JobStatus::as_str))
+        .bind(cursor)
+        .bind(i64::from(limit) + 1)
+        .fetch_all(pool)
+        .await?;
+    let next_cursor = if items.len() > limit as usize {
+        items.truncate(limit as usize);
+        items.last().map(|j| j.id)
+    } else {
+        None
+    };
+    Ok(Page { items, next_cursor })
+}
+
 /// Asks for a job to stop: a queued job is cancelled at once, a running one
 /// is flagged for its worker. Finished jobs come back unchanged.
 ///
@@ -308,6 +338,27 @@ pub async fn fail(
         .bind(worker_id)
         .bind(error)
         .bind(retryable)
+        .fetch_optional(pool)
+        .await
+}
+
+/// Fails a running job for good (never retried), keeping `result` to explain
+/// why: an ingest whose file was rejected carries its quality report.
+///
+/// # Errors
+/// Any database error.
+pub async fn reject(
+    pool: &PgPool,
+    id: Uuid,
+    worker_id: &str,
+    error: &str,
+    result: &serde_json::Value,
+) -> Result<Option<Job>, Error> {
+    sqlx::query_as(include_str!("../queries/job_reject.sql"))
+        .bind(id)
+        .bind(worker_id)
+        .bind(error)
+        .bind(result)
         .fetch_optional(pool)
         .await
 }

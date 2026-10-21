@@ -54,11 +54,19 @@ async fn main() -> ExitCode {
     let mut api_cfg = ApiConfig::from(&cfg);
     match spectra_api::config::artifact_backend(&cfg.artifact_storage) {
         Ok(store) => {
+<<<<<<< HEAD
             tracing::info!(artifact_store = %store.describe(), "run artifacts readable");
             api_cfg.artifacts = Some(store);
         }
         Err(e) => {
             tracing::error!(error = %e, "cannot open the artifact store");
+=======
+            tracing::info!(artifact_store = %store.describe(), "reading backtest series from the artifact store");
+            api_cfg.artifacts = Some(store);
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "cannot use the artifact store");
+>>>>>>> origin/main
             return ExitCode::from(1);
         }
     }

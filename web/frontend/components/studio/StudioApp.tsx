@@ -3,8 +3,13 @@
 import { useCallback } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
+import { BacktestLab } from './BacktestLab';
 import { BenchmarkLab } from './BenchmarkLab';
+<<<<<<< HEAD
 import { ExperimentRegistry } from './ExperimentRegistry';
+=======
+import { DataLab } from './DataLab';
+>>>>>>> origin/main
 import { MarketSettings } from './MarketSettings';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';
@@ -27,6 +32,8 @@ export function StudioApp() {
           <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.18 }}>
             {tab === 'risk' && <RiskLab />}
             {tab === 'portfolio' && <PortfolioStudio />}
+            {tab === 'data' && <DataLab />}
+            {tab === 'backtests' && <BacktestLab />}
             {tab === 'benchmark' && <BenchmarkLab />}
             {tab === 'registry' && <ExperimentRegistry />}
             {tab === 'settings' && <MarketSettings />}

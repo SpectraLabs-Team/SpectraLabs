@@ -5,11 +5,17 @@ import type { WorkspaceRole } from './workspaces';
  * workspace role (in the caller's active workspace) needed to call it. Anything not listed is a
  * 404, so new engine routes stay private until added here.
  *
+<<<<<<< HEAD
  *   viewer → reads (sample data, telemetry, the research registry)
  *   editor → computations ("create and run"), registry writes and broker account data
  *   owner  → whole-registry operations (verify the chain, import a registry.jsonl)
+=======
+ *   viewer → reads (sample data, telemetry, datasets and backtests)
+ *   editor → computations ("create and run"), data uploads, renaming and deleting datasets, and
+ *            broker account data
+>>>>>>> origin/main
  */
-export type EngineMethod = 'GET' | 'POST';
+export type EngineMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 export type EngineRoute = {
   method: EngineMethod | EngineMethod[];
   public?: boolean;
@@ -34,6 +40,7 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/jobs': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/jobs/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/jobs/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
+<<<<<<< HEAD
   // M5 experiment registry, always scoped to the caller's active workspace by the engine.
   'api/v1/experiments': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 15_000 },
   'api/v1/experiments/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
@@ -59,12 +66,48 @@ const REGISTRY_PATTERNS: [RegExp, string][] = [
   [new RegExp(`^api/v1/runs/${ID}/notes$`, 'i'), 'api/v1/runs/{id}/notes'],
   [new RegExp(`^api/v1/runs/${ID}/artifacts/[a-z][a-z0-9_]{0,63}$`, 'i'), 'api/v1/runs/{id}/artifacts/{kind}'],
 ];
+=======
+  'api/v1/backtests': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/backtests/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  'api/v1/backtests/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
+  'api/v1/backtests/{id}/series': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/backtests/{id}/artifacts/{kind}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
+  'api/v1/datasets': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  // Data Studio (M1). A preview stores nothing, but it is the first step of an upload: editors only.
+  'api/v1/datasets/preview': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/datasets/ingest': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/datasets/{id}': { method: ['GET', 'PATCH'], minRole: 'viewer', methodRoles: { PATCH: 'editor' }, timeoutMs: 10_000 },
+  'api/v1/datasets/versions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/datasets/versions/{id}/runs': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  'api/v1/datasets/versions/{id}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
+  'api/v1/calendars': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+};
+
+/**
+ * File uploads don't go through the JSON proxy (2 MB bodies): app/api/engine-upload streams the file
+ * (up to 100 MiB) to POST /api/v1/uploads. Editors only, signed-in sessions only.
+ */
+export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };
+>>>>>>> origin/main
 
 /** Map UUID job URLs to their allowlist policy while preserving the real path for signing. */
 export function routePolicyKey(path: string): string {
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}\/cancel$/i.test(path)) return 'api/v1/jobs/{id}/cancel';
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/jobs/{id}';
+<<<<<<< HEAD
   for (const [pattern, key] of REGISTRY_PATTERNS) if (pattern.test(path)) return key;
+=======
+  // Only the stored files the API serves; any other name stays unlisted (a 404 here).
+  if (/^api\/v1\/backtests\/[0-9a-f-]{36}\/artifacts\/(summary|request|equity_csv|orders_csv|fills_csv|returns_csv|strategies_csv)$/i.test(path)) {
+    return 'api/v1/backtests/{id}/artifacts/{kind}';
+  }
+  const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series)?$/i.exec(path);
+  if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
+  const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars)?$/i.exec(path);
+  if (version) return `api/v1/datasets/versions/{id}${version[1] ?? ''}`;
+  if (/^api\/v1\/datasets\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/datasets/{id}';
+>>>>>>> origin/main
   return path;
 }
 

@@ -88,6 +88,7 @@ pub struct StressRequest {
         crate::jobs_api::list_jobs,
         crate::jobs_api::get_job,
         crate::jobs_api::cancel_job,
+<<<<<<< HEAD
         crate::registry_api::list_experiments,
         crate::registry_api::create_experiment,
         crate::registry_api::get_experiment,
@@ -101,6 +102,26 @@ pub struct StressRequest {
         crate::registry_api::verify,
         crate::registry_api::export_jsonl,
         crate::registry_api::import_jsonl,
+=======
+        crate::backtests_api::create_backtest,
+        crate::backtests_api::list_backtests,
+        crate::backtests_api::get_backtest,
+        crate::backtests_api::cancel_backtest,
+        crate::backtests_api::backtest_series,
+        crate::backtests_api::backtest_artifact,
+        crate::backtests_api::list_datasets,
+        crate::backtests_api::builtin_strategies,
+        crate::datasets_api::preview,
+        crate::uploads_api::upload,
+        crate::datasets_api::ingest,
+        crate::datasets_api::get_dataset,
+        crate::datasets_api::update_dataset,
+        crate::datasets_api::get_version,
+        crate::datasets_api::delete_version,
+        crate::datasets_api::version_runs,
+        crate::datasets_api::bars,
+        crate::datasets_api::list_calendars,
+>>>>>>> origin/main
     ),
     components(schemas(
         ErrorDoc,
@@ -110,15 +131,55 @@ pub struct StressRequest {
         crate::jobs_api::CreateJob,
         crate::jobs_api::JobView,
         crate::jobs_api::JobPage,
+<<<<<<< HEAD
         crate::registry_api::CreateExperiment,
         crate::registry_api::CreateBacktest,
         crate::registry_api::CreateNote,
+=======
+        crate::backtests_api::CreateBacktest,
+        crate::backtests_api::BacktestView,
+        crate::backtests_api::BacktestListItem,
+        crate::backtests_api::BacktestPage,
+        crate::backtests_api::DatasetVersionView,
+        crate::backtests_api::DatasetList,
+        crate::datasets_api::PreviewRequest,
+        crate::datasets_api::IngestSettings,
+        crate::datasets_api::IngestColumns,
+        crate::datasets_api::QualityThresholds,
+        crate::datasets_api::PreviewResponse,
+        crate::datasets_api::Suggestions,
+        crate::datasets_api::SuggestedColumns,
+        crate::datasets_api::Preview,
+        crate::datasets_api::PreviewRow,
+        crate::datasets_api::QualityReport,
+        crate::datasets_api::RowIssue,
+        crate::datasets_api::SymbolStats,
+        crate::uploads_api::UploadView,
+        crate::datasets_api::IngestRequest,
+        crate::datasets_api::DatasetSummaryView,
+        crate::datasets_api::DatasetDetailView,
+        crate::datasets_api::VersionEntryView,
+        crate::datasets_api::VersionDetailView,
+        crate::datasets_api::VersionRunView,
+        crate::datasets_api::VersionRunList,
+        crate::datasets_api::UpdateDataset,
+        crate::datasets_api::DeletedVersionView,
+        crate::datasets_api::BarsView,
+        crate::datasets_api::BarPoint,
+        crate::datasets_api::CalendarView,
+        crate::datasets_api::CalendarsResponse,
+>>>>>>> origin/main
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
         (name = "engine", description = "Synchronous engine calls"),
         (name = "jobs", description = "Queued engine work, run by spectra-worker"),
+<<<<<<< HEAD
         (name = "registry", description = "Workspace-scoped experiment and run registry"),
+=======
+        (name = "backtests", description = "Backtests: jobs of kind backtest, and the built-in strategies"),
+        (name = "datasets", description = "Data Studio: ingest settings, previews and datasets"),
+>>>>>>> origin/main
     )
 )]
 pub struct ApiDoc;
@@ -145,6 +206,7 @@ mod tests {
             "/api/v1/jobs",
             "/api/v1/jobs/{id}",
             "/api/v1/jobs/{id}/cancel",
+<<<<<<< HEAD
             "/api/v1/experiments",
             "/api/v1/experiments/{id}",
             "/api/v1/experiments/{id}/lineage",
@@ -156,6 +218,22 @@ mod tests {
             "/api/v1/registry/verify",
             "/api/v1/registry/export",
             "/api/v1/registry/import",
+=======
+            "/api/v1/backtests",
+            "/api/v1/backtests/{id}",
+            "/api/v1/backtests/{id}/cancel",
+            "/api/v1/backtests/{id}/series",
+            "/api/v1/backtests/{id}/artifacts/{kind}",
+            "/api/v1/datasets",
+            "/api/v1/strategies/builtin",
+            "/api/v1/datasets/preview",
+            "/api/v1/uploads",
+            "/api/v1/datasets/ingest",
+            "/api/v1/datasets/{id}",
+            "/api/v1/datasets/versions/{id}",
+            "/api/v1/datasets/versions/{id}/runs",
+            "/api/v1/datasets/versions/{id}/bars",
+>>>>>>> origin/main
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

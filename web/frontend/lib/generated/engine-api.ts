@@ -4,6 +4,96 @@
  */
 
 export interface paths {
+    "/api/v1/backtests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The workspace's backtests, newest first, with headline numbers once finished. */
+        get: operations["list_backtests"];
+        put?: never;
+        /** Queue a backtest. */
+        post: operations["create_backtest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One backtest: status and progress, then the summary and fingerprints. */
+        get: operations["get_backtest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{id}/artifacts/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A stored file of a finished backtest, as stored (CSV or JSON), with a
+         *     download file name. `kind` is one of `summary`, `request`, `equity_csv`,
+         *     `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`. */
+        get: operations["backtest_artifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a backtest: a queued one stops at once, a running one at its next
+         *     bar group (the worker checks within a few seconds). */
+        post: operations["cancel_backtest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{id}/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A finished backtest's equity or drawdown series, downsampled for charts:
+         *     `{kind, total_points, downsampled, points: [[ts_ns, value], ...]}`. */
+        get: operations["backtest_series"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/benchmark": {
         parameters: {
             query?: never;
@@ -21,13 +111,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+<<<<<<< HEAD
     "/api/v1/experiments": {
+=======
+    "/api/v1/calendars": {
+>>>>>>> origin/main
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
+<<<<<<< HEAD
         get: operations["list_experiments"];
         put?: never;
         post: operations["create_experiment"];
@@ -45,6 +140,10 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_experiment"];
+=======
+        /** `GET /api/v1/calendars` (M1 task 10): lists supported exchange calendars and timezones. */
+        get: operations["list_calendars"];
+>>>>>>> origin/main
         put?: never;
         post?: never;
         delete?: never;
@@ -53,14 +152,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+<<<<<<< HEAD
     "/api/v1/experiments/{id}/lineage": {
+=======
+    "/api/v1/datasets": {
+>>>>>>> origin/main
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
+<<<<<<< HEAD
         get: operations["get_lineage"];
+=======
+        /** The dataset versions of the caller's workspace, newest first (for the
+         *     backtest form); with `?view=grouped`, also one entry per dataset. */
+        get: operations["list_datasets"];
+>>>>>>> origin/main
         put?: never;
         post?: never;
         delete?: never;
@@ -69,7 +178,11 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+<<<<<<< HEAD
     "/api/v1/experiments/{id}/runs": {
+=======
+    "/api/v1/datasets/ingest": {
+>>>>>>> origin/main
         parameters: {
             query?: never;
             header?: never;
@@ -78,13 +191,108 @@ export interface paths {
         };
         get?: never;
         put?: never;
+<<<<<<< HEAD
         post: operations["create_backtest"];
+=======
+        /** Turn an upload into a dataset version (queues an `ingest` job). */
+        post: operations["ingest"];
+>>>>>>> origin/main
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
+<<<<<<< HEAD
+=======
+    "/api/v1/datasets/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview a file with ingest settings, or get suggested settings. */
+        post: operations["preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/versions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One dataset version: metadata, symbols, date range and the full quality report. */
+        get: operations["get_version"];
+        put?: never;
+        post?: never;
+        /** Delete a dataset version that no run uses. */
+        delete: operations["delete_version"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/versions/{id}/bars": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A symbol's bars, reduced to at most `points` points, for a price chart. */
+        get: operations["bars"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/versions/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Runs that used a dataset version, newest first. */
+        get: operations["version_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A dataset and its version history. */
+        get: operations["get_dataset"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Rename a dataset or change its description. */
+        patch: operations["update_dataset"];
+        trace?: never;
+    };
+>>>>>>> origin/main
     "/api/v1/jobs": {
         parameters: {
             query?: never;
@@ -301,6 +509,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategies/builtin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Built-in strategies with their parameter schemas, the configuration form's
+         *     JSON Schema, and the configuration presets: everything the Studio needs to
+         *     build the backtest form. */
+        get: operations["builtin_strategies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/stress": {
         parameters: {
             query?: never;
@@ -312,6 +539,23 @@ export interface paths {
         put?: never;
         /** Run a stress scenario on a portfolio. */
         post: operations["stress_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload a data file (raw bytes; at most 100 MiB). */
+        post: operations["upload"];
         delete?: never;
         options?: never;
         head?: never;
@@ -357,6 +601,134 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description One backtest in a list: what was asked for, its state and headline numbers. */
+        BacktestListItem: {
+            /** @description A cancel was asked for while it ran. */
+            cancel_requested: boolean;
+            /**
+             * Format: date-time
+             * @description Queued at (UTC, RFC 3339).
+             */
+            created_at: string;
+            /** @description Why it failed. */
+            error?: string | null;
+            /**
+             * Format: date-time
+             * @description Finished at.
+             */
+            finished_at?: string | null;
+            /** @description `{total_return, sharpe, max_drawdown, final_equity, fill_count}`, once finished. */
+            headline?: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description The job id (UUIDv7).
+             */
+            id: string;
+            /**
+             * Format: float
+             * @description 0..1.
+             */
+            progress: number;
+            /** @description What was asked for: dataset version, strategy or strategies, params, config. */
+            request: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The recorded run, once finished.
+             */
+            run_id?: string | null;
+            /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
+            status: string;
+        };
+        /** @description A page of backtests, newest first. */
+        BacktestPage: {
+            /** @description This page. */
+            items: components["schemas"]["BacktestListItem"][];
+            /**
+             * Format: uuid
+             * @description Pass as `cursor` for the next page; null on the last.
+             */
+            next_cursor?: string | null;
+        };
+        /** @description A backtest as the API shows it. */
+        BacktestView: {
+            /** @description Stored files `[{kind, file_name, content_type, sha256, size}]`, once finished. */
+            artifacts?: Record<string, never> | null;
+            /** @description A cancel was asked for while it ran. */
+            cancel_requested: boolean;
+            /**
+             * Format: date-time
+             * @description Queued at (UTC, RFC 3339).
+             */
+            created_at: string;
+            /** @description Why it failed (or the latest retryable error). */
+            error?: string | null;
+            /** @description Engine, dataset, config, result and strategy hashes, once finished. */
+            fingerprints?: Record<string, never> | null;
+            /**
+             * Format: date-time
+             * @description Finished at.
+             */
+            finished_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The job id (UUIDv7); use it for every `/backtests/{id}` route.
+             */
+            id: string;
+            /**
+             * Format: float
+             * @description 0..1, updated with every worker heartbeat while it runs.
+             */
+            progress: number;
+            /** @description What was asked for: dataset version, strategy, params, config. */
+            request: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The recorded run, once finished.
+             */
+            run_id?: string | null;
+            /**
+             * Format: date-time
+             * @description Latest attempt started at.
+             */
+            started_at?: string | null;
+            /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
+            status: string;
+            /** @description Metrics, drawdown, tail, activity and trade statistics, once finished. */
+            summary?: Record<string, never> | null;
+        };
+        /** @description One chart point. Prices are decimal numbers (for drawing only). */
+        BarPoint: {
+            /** Format: double */
+            close: number;
+            /** Format: double */
+            high: number;
+            /** Format: double */
+            low: number;
+            /** Format: double */
+            open: number;
+            /**
+             * Format: int64
+             * @description Milliseconds since the epoch, UTC.
+             */
+            t: number;
+            /** Format: double */
+            volume: number;
+        };
+        /** @description A symbol's bars for a chart. */
+        BarsView: {
+            /** @description At most `points` points; each groups consecutive bars (first open,
+             *     highest high, lowest low, last close, summed volume). */
+            points: components["schemas"]["BarPoint"][];
+            /** @description The symbol charted. */
+            symbol: string;
+            /** @description Every symbol in the version. */
+            symbols: string[];
+            /**
+             * Format: int64
+             * @description Bars in the range, before reducing them to points.
+             */
+            total_bars: number;
+        };
         /** @description `POST /api/v1/benchmark` body (also the `benchmark` job payload). */
         BenchmarkRequest: {
             /** @description Portfolio CSV. */
@@ -377,6 +749,7 @@ export interface components {
              */
             warmups?: number | null;
         };
+<<<<<<< HEAD
         CreateBacktest: {
             /** @description OHLCV CSV with timestamp, symbol, open, high, low, close and volume columns. */
             csv: string;
@@ -406,6 +779,48 @@ export interface components {
             name: string;
             parent_id?: string;
             tags?: string[];
+=======
+        /** @description An exchange calendar supported by the platform. */
+        CalendarView: {
+            /** @description MIC or short code (e.g. `XNYS`). */
+            code: string;
+            /** @description Exchange name. */
+            name: string;
+            /** @description Regular session hours. */
+            sessions: string;
+            /** @description Primary operating timezone. */
+            timezone: string;
+        };
+        /** @description Supported calendars and timezones. */
+        CalendarsResponse: {
+            /** @description Supported exchanges. */
+            calendars: components["schemas"]["CalendarView"][];
+            /** @description Common IANA timezones. */
+            timezones: string[];
+        };
+        /** @description `POST /api/v1/backtests` body: the `backtest` job payload, plus a priority. */
+        CreateBacktest: {
+            /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
+            config?: Record<string, never> | null;
+            /**
+             * Format: uuid
+             * @description A dataset version of the caller's workspace.
+             */
+            dataset_version_id: string;
+            /** @description Strategy parameters; missing ones take their defaults. */
+            params?: Record<string, never> | null;
+            /**
+             * Format: int32
+             * @description -10..10; higher runs first. Default 0.
+             */
+            priority?: number;
+            /** @description Several strategies on one account: `[{"strategy", "params", "weight"}]`,
+             *     each `weight` a share of the starting cash (adding up to at most 1). */
+            strategies?: Record<string, never>[] | null;
+            /** @description A built-in strategy name (see `GET /api/v1/strategies/builtin`).
+             *     Give either `strategy` (with `params`) or `strategies`. */
+            strategy?: string | null;
+>>>>>>> origin/main
         };
         /** @description `POST /api/v1/jobs` body. */
         CreateJob: {
@@ -419,9 +834,135 @@ export interface components {
              */
             priority?: number;
         };
+<<<<<<< HEAD
         CreateNote: {
             /** @description The note, 1 through 2,000 characters. */
             text: string;
+=======
+        /** @description A dataset and its versions. */
+        DatasetDetailView: {
+            /**
+             * Format: date-time
+             * @description Created.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who created it.
+             */
+            created_by?: string | null;
+            /** @description Free text. */
+            description: string;
+            /**
+             * Format: uuid
+             * @description Dataset id.
+             */
+            id: string;
+            /** @description Name. */
+            name: string;
+            /** @description Newest first. */
+            versions: components["schemas"]["VersionEntryView"][];
+        };
+        /** @description The workspace's dataset versions, newest first. */
+        DatasetList: {
+            /** @description Only with `?view=grouped`: the same versions' datasets, most recently
+             *     updated first, each with its latest version (the Studio's Data tab). */
+            datasets?: components["schemas"]["DatasetSummaryView"][] | null;
+            /** @description At most 500. */
+            items: components["schemas"]["DatasetVersionView"][];
+        };
+        /** @description A dataset, with its latest version, for the dataset list. */
+        DatasetSummaryView: {
+            /**
+             * Format: int64
+             * @description Bytes stored for the latest version.
+             */
+            byte_size?: number | null;
+            /**
+             * Format: date-time
+             * @description Created.
+             */
+            created_at: string;
+            /** @description Free text. */
+            description: string;
+            /** @description First bar of the latest version (RFC 3339). */
+            first_ts?: string | null;
+            /**
+             * Format: uuid
+             * @description Dataset id.
+             */
+            id: string;
+            /** @description Last bar of the latest version (RFC 3339). */
+            last_ts?: string | null;
+            /**
+             * Format: int32
+             * @description The latest version's number.
+             */
+            latest_version?: number | null;
+            /**
+             * Format: uuid
+             * @description The latest version's id.
+             */
+            latest_version_id?: string | null;
+            /** @description Name (unique in the workspace). */
+            name: string;
+            /**
+             * Format: int64
+             * @description Bars in the latest version.
+             */
+            row_count?: number | null;
+            /** @description Symbols in the latest version. */
+            symbols: string[];
+            /**
+             * Format: date-time
+             * @description When the latest version was added.
+             */
+            updated_at?: string | null;
+            /**
+             * Format: int64
+             * @description Versions.
+             */
+            version_count: number;
+        };
+        /** @description A dataset version a backtest can run on. */
+        DatasetVersionView: {
+            /**
+             * Format: int64
+             * @description Stored size in bytes.
+             */
+            byte_size: number;
+            /** @description Dataset-store checksum. */
+            checksum: string;
+            /**
+             * Format: date-time
+             * @description Registered at.
+             */
+            created_at: string;
+            /** @description The dataset's name. */
+            dataset_name: string;
+            /**
+             * Format: uuid
+             * @description Version id: a backtest's `dataset_version_id`.
+             */
+            id: string;
+            /**
+             * Format: int64
+             * @description Number of bars.
+             */
+            row_count: number;
+            /**
+             * Format: int32
+             * @description Version number within the dataset.
+             */
+            version: number;
+        };
+        /** @description What deleting a version did. */
+        DeletedVersionView: {
+            /** @description It was the dataset's last version, so the dataset was deleted too. */
+            dataset_deleted: boolean;
+            /** @description The version was deleted. */
+            deleted: boolean;
+>>>>>>> origin/main
         };
         /** @description Every error response. */
         ErrorDoc: {
@@ -435,6 +976,61 @@ export interface components {
             message: string;
             /** @description Matches the `X-Request-Id` response header. */
             request_id: string;
+        };
+        /** @description Header names (matched without regard to case). */
+        IngestColumns: {
+            /** @description Close price column. */
+            close: string;
+            /** @description High price column. */
+            high: string;
+            /** @description Low price column. */
+            low: string;
+            /** @description Open price column. */
+            open: string;
+            /** @description Symbol column, or null for a single-symbol file (then `default_symbol`). */
+            symbol?: string | null;
+            /** @description Timestamp column. */
+            timestamp: string;
+            /** @description Volume column, or null if the file has none (volume is then zero). */
+            volume?: string | null;
+        };
+        /** @description `POST /api/v1/datasets/ingest` body. */
+        IngestRequest: {
+            /** @description The dataset to add a version to (created if new). Different content
+             *     becomes its next version; the same content changes nothing. */
+            dataset_name: string;
+            /** @description How to read the file (as previewed). */
+            settings: components["schemas"]["IngestSettings"];
+            /**
+             * Format: uuid
+             * @description From `POST /api/v1/uploads`.
+             */
+            upload_id: string;
+        };
+        /** @description Ingest settings (the JSON form of the engine's CSV options). Every field
+         *     below without "optional" must be given: nothing is guessed. */
+        IngestSettings: {
+            /** @description Which header name holds each field. */
+            columns: components["schemas"]["IngestColumns"];
+            /** @description The symbol for every row when `columns.symbol` is null; not allowed otherwise. */
+            default_symbol?: string | null;
+            /** @description One punctuation character (not `"`) or a tab. */
+            delimiter: string;
+            /** @description Optional exchange calendar for session enforcement and calendar-aware checks (e.g. `XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`). */
+            exchange?: string | null;
+            quality?: null | components["schemas"]["QualityThresholds"];
+            /** @description Optional, default `false`: bad rows abort the load. `true` skips and counts them. */
+            skip_bad_rows?: boolean | null;
+            /** @description `iso8601`, `epoch_s`, `epoch_ms`, `epoch_us` or `epoch_ns`. */
+            time_format: string;
+            /** @description Optional DST-aware timezone name (e.g. `America/New_York`, `Europe/London`, `UTC`, `Asia/Tokyo`). */
+            timezone?: string | null;
+            /**
+             * Format: int32
+             * @description Minutes east of UTC for ISO timestamps written without a zone
+             *     (-720 to 840). Optional if `timezone` is provided.
+             */
+            utc_offset_minutes?: number | null;
         };
         /** @description A page of jobs. */
         JobPage: {
@@ -504,6 +1100,125 @@ export interface components {
             /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
             status: string;
         };
+        /** @description The sample, parsed. */
+        Preview: {
+            /** @description The header, trimmed and lower-cased (how columns are matched). */
+            header: string[];
+            /** @description The quality report of the parsed rows. Every bad row in the sample is
+             *     counted here, whatever `skip_bad_rows` says. */
+            quality: components["schemas"]["QualityReport"];
+            /** @description The first 200 parsed rows, sorted by timestamp then symbol. Prices are exact decimal text. */
+            rows: components["schemas"]["PreviewRow"][];
+            /**
+             * Format: int64
+             * @description Data rows in the sample that were not checked. Every row of the
+             *     sample (at most 1 MB) is checked, so this is 0.
+             */
+            rows_not_read: number;
+            /** @description Why ingesting would stop with these settings (the first bad row when
+             *     bad rows abort, or "no valid data rows"); null if these rows would load. */
+            would_abort?: string | null;
+        };
+        /** @description `POST /api/v1/datasets/preview` body. */
+        PreviewRequest: {
+            /** @description The start of the file as UTF-8 text, header included (at most 1 MB). */
+            sample: string;
+            settings?: null | components["schemas"]["IngestSettings"];
+            /** @description `true` when `sample` was cut from a longer file: its last line may be
+             *     incomplete, so it is ignored. */
+            truncated?: boolean;
+        };
+        /** @description `POST /api/v1/datasets/preview` response. */
+        PreviewResponse: {
+            preview?: null | components["schemas"]["Preview"];
+            /** @description Proposals from the sample, for the person to confirm. Never applied. */
+            suggestions: components["schemas"]["Suggestions"];
+        };
+        /** @description One parsed row. */
+        PreviewRow: {
+            close: string;
+            high: string;
+            low: string;
+            open: string;
+            symbol: string;
+            /** @description UTC, RFC 3339. */
+            timestamp: string;
+            volume: string;
+        };
+        /** @description A dataset's quality report (also what a dataset version stores). */
+        QualityReport: {
+            /** @description Fingerprint of the bars (recorded in backtest results). */
+            bars_sha256: string;
+            /** @description Exchange calendar used, if any. */
+            exchange?: string | null;
+            /** @description First bar, RFC 3339. */
+            first_ts: string;
+            /**
+             * Format: int64
+             * @description First bar, nanoseconds since the epoch.
+             */
+            first_ts_ns: number;
+            /** @description Whether rows arrived sorted by timestamp and symbol. */
+            input_was_sorted: boolean;
+            /** @description Last bar, RFC 3339. */
+            last_ts: string;
+            /**
+             * Format: int64
+             * @description Last bar, nanoseconds since the epoch.
+             */
+            last_ts_ns: number;
+            /** @description Standing limitations of the processing. */
+            notes: string[];
+            /** @description Rejected rows by category (`bad_number`, `bad_timestamp`, `duplicate`, ...). */
+            rejected_by_category: {
+                [key: string]: number;
+            };
+            /**
+             * Format: int64
+             * @description Rows that became bars.
+             */
+            rows_accepted: number;
+            /**
+             * Format: int64
+             * @description Rows dropped (only when bad rows are skipped).
+             */
+            rows_rejected: number;
+            /**
+             * Format: int64
+             * @description Data rows read (header excluded).
+             */
+            rows_total: number;
+            /** @description The first rejected rows (at most 50). */
+            sample_issues: components["schemas"]["RowIssue"][];
+            /** @description Per-symbol checks. */
+            symbol_stats: components["schemas"]["SymbolStats"][];
+            /** @description Symbol names. */
+            symbols: string[];
+            /** @description Thresholds the checks used. */
+            thresholds: components["schemas"]["QualityThresholds"];
+            /** @description Timezone used, if any. */
+            timezone?: string | null;
+            /** @description Things worth a human look. */
+            warnings: string[];
+        };
+        /** @description Quality-check thresholds. */
+        QualityThresholds: {
+            /**
+             * Format: double
+             * @description A gap is an interval longer than this many median intervals (default 5).
+             */
+            gap_factor?: number | null;
+            /**
+             * Format: double
+             * @description Robust z-score of a close-to-close return that counts as an outlier (default 10).
+             */
+            outlier_z?: number | null;
+            /**
+             * Format: int64
+             * @description Frozen bars in a row that count as a stale run (default 5).
+             */
+            stale_run?: number | null;
+        };
         /** @description `POST /api/v1/risk` body. */
         RiskRequest: {
             /** @description `auto`, `cpu` or `parallel`. */
@@ -533,6 +1248,18 @@ export interface components {
              */
             simulations?: number | null;
         };
+        /** @description A rejected row. */
+        RowIssue: {
+            /** @description Rejection category. */
+            category: string;
+            /**
+             * Format: int64
+             * @description 1-based line in the file.
+             */
+            line: number;
+            /** @description What was wrong. */
+            message: string;
+        };
         /** @description `POST /api/v1/stress` body (also the `stress` job payload). */
         StressRequest: {
             /** @description Portfolio CSV. */
@@ -550,6 +1277,269 @@ export interface components {
              */
             simulations?: number | null;
         };
+        /** @description Suggested header name per field. */
+        SuggestedColumns: {
+            close?: string | null;
+            high?: string | null;
+            low?: string | null;
+            open?: string | null;
+            symbol?: string | null;
+            timestamp?: string | null;
+            volume?: string | null;
+        };
+        /** @description Suggested settings; null where there is no confident guess. */
+        Suggestions: {
+            /** @description Header names matched by common aliases. */
+            columns: components["schemas"]["SuggestedColumns"];
+            /** @description Delimiter that splits every sampled row into the same number of fields. */
+            delimiter?: string | null;
+            /** @description Suggested exchange calendar (e.g. `XNYS`). */
+            exchange?: string | null;
+            /** @description The header split with that delimiter, as written. */
+            header: string[];
+            /** @description Likely `time_format`. */
+            time_format?: string | null;
+            /** @description For ISO timestamps: whether they carry a zone (then the UTC offset does not apply to them). */
+            timestamps_have_zone?: boolean | null;
+            /** @description Suggested timezone identifier (e.g. `America/New_York`). */
+            timezone?: string | null;
+        };
+        /** @description Quality checks for one symbol. */
+        SymbolStats: {
+            /**
+             * Format: int64
+             * @description Bars.
+             */
+            bars: number;
+            /** @description First bar, RFC 3339. */
+            first_ts: string;
+            /**
+             * Format: int64
+             * @description Intervals longer than `gap_factor` median intervals.
+             */
+            gaps: number;
+            /**
+             * Format: int64
+             * @description Longest gap, nanoseconds.
+             */
+            largest_gap_ns: number;
+            /** @description Last bar, RFC 3339. */
+            last_ts: string;
+            /**
+             * Format: int64
+             * @description Median interval between bars, nanoseconds.
+             */
+            median_interval_ns: number;
+            /**
+             * Format: int64
+             * @description Bars recorded on non-trading days/holidays.
+             */
+            non_trading_day_bars?: number | null;
+            /**
+             * Format: int64
+             * @description Bars recorded outside regular exchange sessions.
+             */
+            out_of_session_bars?: number | null;
+            /**
+             * Format: int64
+             * @description Returns beyond `outlier_z` robust sigma.
+             */
+            outlier_returns: number;
+            /**
+             * Format: int64
+             * @description Runs of `stale_run` or more frozen bars.
+             */
+            stale_runs: number;
+            /** @description Symbol. */
+            symbol: string;
+            /**
+             * Format: int64
+             * @description Bars with zero volume.
+             */
+            zero_volume_bars: number;
+        };
+        /** @description `PATCH /api/v1/datasets/{id}` body: what to change. */
+        UpdateDataset: {
+            /** @description New description (at most 2000 characters; empty clears it). */
+            description?: string | null;
+            /** @description New name (unique in the workspace). */
+            name?: string | null;
+        };
+        /** @description A stored upload. */
+        UploadView: {
+            /**
+             * Format: date-time
+             * @description Removed at this time unless ingested (UTC, RFC 3339).
+             */
+            expires_at: string;
+            /** @description As uploaded. */
+            filename: string;
+            /**
+             * Format: uuid
+             * @description Pass this to `POST /api/v1/datasets/ingest`.
+             */
+            id: string;
+            /** @description Hex SHA-256 of the file. */
+            sha256: string;
+            /**
+             * Format: int64
+             * @description Bytes.
+             */
+            size: number;
+        };
+        /** @description A dataset version in full. */
+        VersionDetailView: {
+            /**
+             * Format: int64
+             * @description Bytes stored.
+             */
+            byte_size: number;
+            /** @description Whether its bars can be charted here (`/bars`). */
+            chartable: boolean;
+            /** @description The dataset id (content hash of bars and symbols). */
+            checksum: string;
+            /**
+             * Format: date-time
+             * @description Registered at.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who registered it.
+             */
+            created_by?: string | null;
+            /**
+             * Format: uuid
+             * @description Its dataset.
+             */
+            dataset_id: string;
+            /** @description The dataset's name. */
+            dataset_name: string;
+            /**
+             * Format: uuid
+             * @description Version id.
+             */
+            id: string;
+            /** @description The quality report. Versions ingested through the Studio have every
+             *     field of `QualityReport`; command-line versions only some
+             *     (`rows_total`, `rows_accepted`, `rows_rejected`, `warnings`, `symbols`, ...). */
+            quality_report: Record<string, never>;
+            /**
+             * Format: int64
+             * @description Bars.
+             */
+            row_count: number;
+            /**
+             * Format: int64
+             * @description Runs that used it.
+             */
+            run_count: number;
+            /** @description How it was made from an upload (`upload_id`, `file_sha256`, `filename`,
+             *     `settings`); null when registered from the command line. */
+            source?: Record<string, never> | null;
+            /**
+             * Format: int32
+             * @description Version number.
+             */
+            version: number;
+        };
+        /** @description One version in a dataset's history. */
+        VersionEntryView: {
+            /**
+             * Format: int64
+             * @description Bytes stored.
+             */
+            byte_size: number;
+            /** @description The dataset id (content hash of bars and symbols). */
+            checksum: string;
+            /**
+             * Format: date-time
+             * @description Registered at.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who registered it.
+             */
+            created_by?: string | null;
+            /** @description Uploaded file name; null when registered from the command line. */
+            filename?: string | null;
+            /** @description First bar (RFC 3339). */
+            first_ts?: string | null;
+            /**
+             * Format: uuid
+             * @description Version id (a backtest's `dataset_version_id`).
+             */
+            id: string;
+            /** @description Last bar (RFC 3339). */
+            last_ts?: string | null;
+            /**
+             * Format: int64
+             * @description Bars.
+             */
+            row_count: number;
+            /**
+             * Format: int64
+             * @description Rows dropped at ingest.
+             */
+            rows_rejected: number;
+            /**
+             * Format: int64
+             * @description Runs that used it (a version with runs can't be deleted).
+             */
+            run_count: number;
+            /** @description Symbols. */
+            symbols: string[];
+            /**
+             * Format: int32
+             * @description Version number.
+             */
+            version: number;
+            /**
+             * Format: int64
+             * @description Warnings in its quality report.
+             */
+            warning_count: number;
+        };
+        /** @description Runs of a version, newest first (at most 100). */
+        VersionRunList: {
+            /** @description The runs. */
+            items: components["schemas"]["VersionRunView"][];
+        };
+        /** @description A run that used a dataset version. */
+        VersionRunView: {
+            /**
+             * Format: date-time
+             * @description Started.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Finished.
+             */
+            finished_at?: string | null;
+            /**
+             * Format: uuid
+             * @description Run id.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The job; for a backtest, its id in `/api/v1/backtests/{id}`.
+             */
+            job_id?: string | null;
+            /** @description `backtest`, ... */
+            kind: string;
+            /** @description Run status. */
+            status: string;
+            /** @description The strategy, or `multi-strategy`. */
+            strategy?: string | null;
+            /**
+             * Format: double
+             * @description Total return (a fraction) for finished backtests.
+             */
+            total_return?: number | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -559,6 +1549,225 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_backtests: {
+        parameters: {
+            query?: {
+                /** @description queued, running, succeeded, failed or cancelled */
+                status?: string;
+                /** @description next_cursor from the previous page */
+                cursor?: string;
+                /** @description 1..200, default 50 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestPage"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    create_backtest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBacktest"];
+            };
+        };
+        responses: {
+            /** @description Queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestView"];
+                };
+            };
+            /** @description The account has no workspace (code `no_workspace`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every problem with the strategy, params, config or dataset version */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_backtest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest (job) id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    backtest_artifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest (job) id */
+                id: string;
+                /** @description summary, request, equity_csv, orders_csv, fills_csv, returns_csv or strategies_csv */
+                kind: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such backtest, kind or file */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The backtest has not succeeded (yet) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    cancel_backtest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest (job) id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    backtest_series: {
+        parameters: {
+            query?: {
+                /** @description equity (default) or drawdown */
+                kind?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Backtest (job) id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The series */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such backtest, or no such series */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The backtest has not succeeded (yet) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     benchmark_handler: {
         parameters: {
             query?: never;
@@ -589,7 +1798,11 @@ export interface operations {
             };
         };
     };
+<<<<<<< HEAD
     list_experiments: {
+=======
+    list_calendars: {
+>>>>>>> origin/main
         parameters: {
             query?: never;
             header?: never;
@@ -598,16 +1811,79 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+<<<<<<< HEAD
             /** @description Workspace experiments */
+=======
+            /** @description Supported exchange calendars and timezones. */
+>>>>>>> origin/main
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
+<<<<<<< HEAD
                 content?: never;
             };
         };
     };
     create_experiment: {
+=======
+                content: {
+                    "application/json": components["schemas"]["CalendarsResponse"];
+                };
+            };
+            /** @description Missing or invalid signature. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_datasets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `grouped` adds `datasets` (one entry per dataset). Without it the
+                 *     response is exactly the version list the backtest form reads. */
+                view: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetList"];
+                };
+            };
+            /** @description Unknown view */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    ingest: {
+>>>>>>> origin/main
         parameters: {
             query?: never;
             header?: never;
@@ -616,6 +1892,7 @@ export interface operations {
         };
         requestBody: {
             content: {
+<<<<<<< HEAD
                 "application/json": components["schemas"]["CreateExperiment"];
             };
         };
@@ -628,6 +1905,22 @@ export interface operations {
                 content?: never;
             };
             /** @description Invalid request */
+=======
+                "application/json": components["schemas"]["IngestRequest"];
+            };
+        };
+        responses: {
+            /** @description Queued: follow it with GET /api/v1/jobs/{id}. A rejected file ends as a failed job whose result holds the quality report */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobView"];
+                };
+            };
+            /** @description Every problem with the upload, name and settings (`details.errors`) */
+>>>>>>> origin/main
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -638,25 +1931,85 @@ export interface operations {
             };
         };
     };
+<<<<<<< HEAD
     get_experiment: {
+=======
+    preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Suggestions, and the parsed sample when settings were sent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewResponse"];
+                };
+            };
+            /** @description The sample is over 1 MB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid settings (`details.errors` lists every field), or the file does not match them (a missing column) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_version: {
+>>>>>>> origin/main
         parameters: {
             query?: never;
             header?: never;
             path: {
+<<<<<<< HEAD
+=======
+                /** @description Dataset version id */
+>>>>>>> origin/main
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
+<<<<<<< HEAD
             /** @description Experiment */
+=======
+>>>>>>> origin/main
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
+<<<<<<< HEAD
                 content?: never;
             };
             /** @description Not found */
+=======
+                content: {
+                    "application/json": components["schemas"]["VersionDetailView"];
+                };
+            };
+>>>>>>> origin/main
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -667,31 +2020,70 @@ export interface operations {
             };
         };
     };
+<<<<<<< HEAD
     get_lineage: {
+=======
+    delete_version: {
+>>>>>>> origin/main
         parameters: {
             query?: never;
             header?: never;
             path: {
+<<<<<<< HEAD
+=======
+                /** @description Dataset version id */
+>>>>>>> origin/main
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
+<<<<<<< HEAD
             /** @description Root-to-leaf experiment lineage */
+=======
+>>>>>>> origin/main
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
+<<<<<<< HEAD
                 content?: never;
             };
         };
     };
     create_backtest: {
+=======
+                content: {
+                    "application/json": components["schemas"]["DeletedVersionView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description A run or a queued backtest uses it (code `in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    bars: {
+>>>>>>> origin/main
         parameters: {
             query?: never;
             header?: never;
             path: {
+<<<<<<< HEAD
                 id: string;
             };
             cookie?: never;
@@ -710,6 +2102,161 @@ export interface operations {
                 content?: never;
             };
             /** @description Invalid dataset or request */
+=======
+                /** @description Dataset version id */
+                id: string;
+                /** @description Symbol; default: the version's first. */
+                symbol: string | null;
+                /** @description From (inclusive), RFC 3339 or a date (`2024-01-02`). */
+                from: string | null;
+                /** @description To (inclusive), RFC 3339 or a date. */
+                to: string | null;
+                /** @description Most points to return, 10 to 5000 (default 1000). */
+                points: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BarsView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Bars not reachable (code `not_chartable`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every invalid parameter (`details.errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    version_runs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset version id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionRunList"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_dataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetDetailView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    update_dataset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateDataset"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetDetailView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Another dataset has that name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every invalid field (`details.errors`) */
+>>>>>>> origin/main
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -1148,6 +2695,24 @@ export interface operations {
             };
         };
     };
+    builtin_strategies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description {strategies, config_schema, presets} */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     stress_handler: {
         parameters: {
             query?: never;
@@ -1169,6 +2734,70 @@ export interface operations {
                 content?: never;
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    upload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The file's name as the person chose it (for display; at most 255 characters kept). */
+                filename: string | null;
+            };
+            cookie?: never;
+        };
+        /** @description The file's bytes. Send X-Spectra-Content-SHA256 (signed) and Content-Length. */
+        requestBody: {
+            content: {
+                "application/octet-stream": number[];
+            };
+        };
+        responses: {
+            /** @description Stored */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadView"];
+                };
+            };
+            /** @description The body does not match its declared SHA-256 or length */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Bad signature */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description No Content-Length */
+            411: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Over 100 MiB, or the workspace's storage quota (code `quota_exceeded`) */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

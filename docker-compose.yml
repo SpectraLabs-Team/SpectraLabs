@@ -58,10 +58,17 @@ services:
       SPECTRA_API_ADDR: 0.0.0.0:8000
       SPECTRA_CORS_ORIGINS: http://localhost:3000
       SPECTRA_MIGRATE_ON_START: "false"
+<<<<<<< HEAD
       ARTIFACT_STORAGE: local # read side of run artifacts; must match the worker
       ARTIFACT_DIR: /var/lib/spectra/artifacts
+=======
+      ARTIFACT_STORAGE: local # uploads and backtest chart series; s3: see deploy/compose.s3.yml
+      ARTIFACT_DIR: /var/lib/spectra/artifacts
+      SPECTRA_DATA_DIR: /var/lib/spectra/datasets # read only, to chart command-line datasets
+>>>>>>> origin/main
     volumes:
-      - artifacts:/var/lib/spectra/artifacts
+      - artifacts:/var/lib/spectra/artifacts # written by uploads (M1), read for backtest series
+      - datasets:/var/lib/spectra/datasets:ro
     expose:
       - "8000"
     healthcheck:
@@ -88,12 +95,14 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       ARTIFACT_STORAGE: local # s3: see deploy/compose.s3.yml
       ARTIFACT_DIR: /var/lib/spectra/artifacts
+      SPECTRA_DATA_DIR: /var/lib/spectra/datasets
       SPECTRA_WORKER_CONCURRENCY: ${SPECTRA_WORKER_CONCURRENCY:-2}
       SPECTRA_WORKSPACE_MAX_RUNNING: ${SPECTRA_WORKSPACE_MAX_RUNNING:-2}
       SPECTRA_WORKER_METRICS_ADDR: 0.0.0.0:9100 # /health and Prometheus /metrics, private network only
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - artifacts:/var/lib/spectra/artifacts
+      - datasets:/var/lib/spectra/datasets
     expose:
       - "9100"
     healthcheck:
@@ -187,6 +196,7 @@ services:
 volumes:
   pgdata:
   artifacts:
+  datasets:
   web-data:
   caddy-data:
   caddy-config:

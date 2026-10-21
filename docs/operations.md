@@ -62,6 +62,47 @@ The dashboard and the engine share one Postgres database (`DATABASE_URL` for eve
    `checks.worker` is `none_alive` when no worker has sent a heartbeat in 30 seconds. That does not
    make the API unready (synchronous routes work without workers), so alert on it separately.
 
+## Accounts and workspaces in the engine database
+
+The dashboard (Next.js) and the engine use separate databases, each with its own `users` and
+`workspaces` tables. The dashboard's tables are the source of truth: sign-up, names, members and
+roles live there, and roles are enforced by the `/api/engine` proxy (`lib/server/engineRoutes.ts`).
+
+Every engine table points at the engine's own copies (`workspace_id`, `created_by`). So the API
+mirrors the caller on every signed request before anything else runs
+(`crates/spectra-db/queries/identity_mirror.sql`): if the signed user id or workspace id has no row
+yet, one is created **with the same id**. Existing rows are never changed. This also backfills
+accounts created before the mirror existed, the first time they call the engine.
+
+- The engine is never sent the user's email or the workspace's name, so mirrored rows carry
+  placeholders: user email `u-<id hex>@mirror.invalid` with no usable password (`'!'`), workspace
+  slug `ws-<id hex>` and name `Workspace <first 8 hex>`. Don't use them for display; ask the
+  dashboard's database.
+- Membership is not mirrored (`workspace_members` stays empty for mirrored workspaces): the engine
+  scopes data by the signed workspace and never reads it.
+- An API token with no user mirrors only the workspace; its jobs have no `created_by`.
+- Each API process remembers which pairs it has mirrored, so this costs one idempotent insert per
+  new (user, workspace) pair per process.
+- The `dev` workspace from `spectra-db seed` is unaffected and is still what the command-line tools
+  use.
+
+## Data uploads and storage
+
+- The API writes uploaded files into the artifact store (`ARTIFACT_DIR`, or S3), so its
+  `artifacts` volume is mounted read-write. With S3, it stages each upload in the system
+  temporary directory before sending it.
+- Datasets ingested through the Studio are stored in the artifact store as well. A worker copies
+  one into its own `SPECTRA_DATA_DIR` the first time it backtests it, so the `datasets` volume
+  is a cache. Workers on different hosts don't need to share it.
+- One quota covers a workspace's run artifacts, uploads and dataset files (each distinct file
+  counted once): `workspaces.artifact_quota_bytes`, else `SPECTRA_ARTIFACT_QUOTA_BYTES` (set it on
+  the API and the workers; default 1 GiB).
+- Uploads not ingested within 24 hours are removed by the workers, with their files unless
+  something else uses the same bytes.
+- Volumes created by an image older than M1 may have a root-owned `datasets` directory. If a
+  worker logs a permission error there, run
+  `docker compose run --rm -u root worker chown -R 10001 /var/lib/spectra/datasets`.
+
 ## Backups
 
 Nightly, from cron on the host (or any machine that reaches the database):

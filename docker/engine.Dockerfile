@@ -25,7 +25,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --system --uid 10001 --home /var/lib/spectra --create-home spectra \
- && mkdir -p /var/lib/spectra/artifacts \
+ && mkdir -p /var/lib/spectra/artifacts /var/lib/spectra/datasets \
  && chown -R spectra /var/lib/spectra
 COPY --from=build /out/spectra-api /out/spectra-worker /out/spectra-db /usr/local/bin/
 USER spectra

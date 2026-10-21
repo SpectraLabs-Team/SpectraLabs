@@ -37,6 +37,8 @@ pub mod headers {
     pub const SIGNATURE: &str = "x-spectra-signature";
     /// The request id.
     pub const REQUEST_ID: &str = "x-request-id";
+    /// Uploads only: hex SHA-256 of the streamed body, which the signature covers.
+    pub const CONTENT_SHA256: &str = "x-spectra-content-sha256";
 }
 
 /// Who a verified request acts for. Handlers read it from the request's
@@ -88,10 +90,31 @@ pub fn canonical(
     request_id: &str,
     body: &[u8],
 ) -> String {
+    canonical_with_body_hash(
+        method,
+        path_and_query,
+        timestamp,
+        user,
+        workspace,
+        request_id,
+        &sha256_hex(body),
+    )
+}
+
+/// [`canonical`] with the body's hex SHA-256 already computed. The string is
+/// the same; uploads use this because the body is streamed, not held.
+pub fn canonical_with_body_hash(
+    method: &str,
+    path_and_query: &str,
+    timestamp: &str,
+    user: &str,
+    workspace: &str,
+    request_id: &str,
+    body_sha256: &str,
+) -> String {
     format!(
-        "spectra-v1\n{}\n{path_and_query}\n{timestamp}\n{user}\n{workspace}\n{request_id}\n{}",
+        "spectra-v1\n{}\n{path_and_query}\n{timestamp}\n{user}\n{workspace}\n{request_id}\n{body_sha256}",
         method.to_ascii_uppercase(),
-        sha256_hex(body)
     )
 }
 
@@ -134,6 +157,21 @@ pub struct SignedRequest<'a> {
 /// # Errors
 /// A short reason, safe to return to the caller.
 pub fn verify(secret: &[u8], req: &SignedRequest<'_>, now_secs: i64) -> Result<Identity, &'static str> {
+    verify_with_body_hash(secret, req, &sha256_hex(req.body), now_secs)
+}
+
+/// [`verify`] for a request whose body is not in `req.body` but streamed:
+/// `body_sha256` is the hash the proxy declared (`X-Spectra-Content-SHA256`).
+/// The caller must check the body it then reads against that hash.
+///
+/// # Errors
+/// As [`verify`].
+pub fn verify_with_body_hash(
+    secret: &[u8],
+    req: &SignedRequest<'_>,
+    body_sha256: &str,
+    now_secs: i64,
+) -> Result<Identity, &'static str> {
     let (Some(user), Some(ts), Some(sig)) = (req.user, req.timestamp, req.signature) else {
         return Err("Missing engine signature headers.");
     };
@@ -143,8 +181,18 @@ pub fn verify(secret: &[u8], req: &SignedRequest<'_>, now_secs: i64) -> Result<I
     if (now_secs - ts_val).abs() > MAX_SKEW_SECS {
         return Err("Signature expired.");
     }
-    let expected =
-        sign(secret, &canonical(req.method, req.path_and_query, ts, user, workspace, request_id, req.body));
+    let expected = sign(
+        secret,
+        &canonical_with_body_hash(
+            req.method,
+            req.path_and_query,
+            ts,
+            user,
+            workspace,
+            request_id,
+            body_sha256,
+        ),
+    );
     if !constant_time_eq(expected.as_bytes(), sig.trim().to_ascii_lowercase().as_bytes()) {
         return Err("Invalid engine signature.");
     }

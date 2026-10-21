@@ -81,3 +81,167 @@ async fn queue_depth_counts_newly_enqueued_work() {
     assert_eq!(after.0, before.0 + 1);
     assert_eq!(after.1, before.1);
 }
+
+#[tokio::test]
+async fn backtest_runs_link_dataset_versions_and_artifacts() {
+    use spectra_db::artifacts::{find_for_run, store_for_run, ArtifactBackend, ArtifactStore, NewArtifact};
+    use spectra_db::datasets::{
+        insert_backtest_run, register_version, resolve_version, resolve_workspace, NewBacktestRun,
+        NewDatasetVersion,
+    };
+
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "backtest-test@example.com").await.unwrap();
+    let ws = resolve_workspace(&pool, &seeded.workspace_id.to_string()).await.unwrap().unwrap();
+    assert_eq!(ws, seeded.workspace_id);
+
+    // A fresh checksum and dataset name, so the test can run against a shared database.
+    let checksum = format!("{}{}", spectra_db::new_id().simple(), spectra_db::new_id().simple());
+    let name = format!("bt-{}", spectra_db::new_id().simple());
+    let new = NewDatasetVersion {
+        workspace_id: ws,
+        dataset_name: &name,
+        checksum: &checksum,
+        row_count: 2400,
+        byte_size: 9000,
+        quality_report: serde_json::json!({ "rows_rejected": 0 }),
+        created_by: Some(seeded.admin_id),
+        blob_sha256: None,
+        source: None,
+    };
+    let v1 = register_version(&pool, &new).await.unwrap();
+    assert_eq!((v1.version, v1.existed), (1, false));
+    let again = register_version(&pool, &new).await.unwrap();
+    assert_eq!((again.id, again.existed), (v1.id, true));
+
+    let resolved = resolve_version(&pool, ws, v1.id).await.unwrap().unwrap();
+    assert_eq!(
+        (resolved.checksum.as_str(), resolved.row_count, resolved.dataset_name.as_str()),
+        (checksum.as_str(), 2400, name.as_str())
+    );
+    assert!(resolve_version(&pool, spectra_db::new_id(), v1.id).await.unwrap().is_none(), "other workspace");
+    let listed = spectra_db::datasets::list_versions(&pool, ws, 500).await.unwrap();
+    let mine = listed.iter().find(|v| v.id == v1.id).expect("listed");
+    assert_eq!(
+        (mine.dataset_name.as_str(), mine.version, mine.row_count, mine.byte_size),
+        (name.as_str(), 1, 2400, 9000)
+    );
+    assert!(spectra_db::datasets::list_versions(&pool, spectra_db::new_id(), 500).await.unwrap().is_empty());
+
+    let job_id: uuid::Uuid = sqlx::query_scalar(
+        "INSERT INTO jobs (workspace_id, kind, payload, status, attempts, started_at, finished_at, created_by) \
+         VALUES ($1, 'backtest', $2, 'succeeded', 1, now(), now(), $3) RETURNING id",
+    )
+    .bind(ws)
+    .bind(serde_json::json!({ "dataset_version_id": v1.id.to_string() }))
+    .bind(seeded.admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let page = spectra_db::jobs::list_kind(&pool, ws, "backtest", None, None, 200).await.unwrap();
+    assert!(page.items.iter().all(|j| j.kind == "backtest"));
+    assert!(page.items.iter().any(|j| j.id == job_id), "listed by kind");
+    let run_id = insert_backtest_run(
+        &pool,
+        &NewBacktestRun {
+            id: spectra_db::new_id(),
+            workspace_id: ws,
+            job_id,
+            params: serde_json::json!({ "strategy": "sma_cross" }),
+            metrics: serde_json::json!({ "schema": "spectra.backtest.summary/v1" }),
+            seed: Some(7),
+            engine_version: "test".into(),
+            created_by: Some(seeded.admin_id),
+            started_at: chrono::Utc::now(),
+            dataset_version_id: v1.id,
+        },
+    )
+    .await
+    .unwrap();
+
+    let dir = std::env::temp_dir().join(format!("spectra-db-bt-{}", spectra_db::new_id().simple()));
+    let store = ArtifactBackend::Local(ArtifactStore::new(&dir));
+    let bytes = br#"{"kind":"equity","points":[]}"#;
+    let artifact = NewArtifact {
+        workspace_id: ws,
+        run_id,
+        kind: "equity_series",
+        content_type: "application/json",
+        bytes,
+    };
+    let stored = store_for_run(&pool, &store, artifact, 1 << 30).await.unwrap();
+    let found = find_for_run(&pool, ws, run_id, "equity_series").await.unwrap().unwrap();
+    assert_eq!(found.sha256, stored.sha256);
+    assert_eq!(store.get(&found.sha256).await.unwrap(), bytes);
+    assert!(find_for_run(&pool, ws, run_id, "drawdown_series").await.unwrap().is_none());
+    assert!(find_for_run(&pool, spectra_db::new_id(), run_id, "equity_series").await.unwrap().is_none());
+    let _ = std::fs::remove_dir_all(dir);
+
+    // Leave the shared database as found: the SQL checks that run later count jobs and events.
+    for (sql, id) in [
+        ("DELETE FROM runs WHERE id = $1", run_id),
+        ("DELETE FROM jobs WHERE id = $1", job_id),
+        ("DELETE FROM datasets WHERE id = (SELECT dataset_id FROM dataset_versions WHERE id = $1)", v1.id),
+    ] {
+        sqlx::query(sql).bind(id).execute(&pool).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn signed_in_identities_are_mirrored_once() {
+    use spectra_db::identity::ensure_identity;
+
+    let Some(pool) = pool().await else { return };
+    // Ids the engine has never seen (the frontend makes its own).
+    let (user, workspace) = (spectra_db::new_id(), spectra_db::new_id());
+    let enqueue = |by: uuid::Uuid| {
+        let pool = pool.clone();
+        async move {
+            spectra_db::jobs::enqueue(
+                &pool,
+                &spectra_db::jobs::NewJob {
+                    workspace_id: workspace,
+                    kind: "backtest".into(),
+                    payload: serde_json::json!({}),
+                    priority: 0,
+                    max_attempts: 1,
+                    created_by: Some(by),
+                },
+            )
+            .await
+        }
+    };
+    let err = enqueue(user).await.expect_err("unknown workspace and user");
+    assert_eq!(err.as_database_error().and_then(sqlx::error::DatabaseError::code).as_deref(), Some("23503"));
+
+    ensure_identity(&pool, Some(user), workspace).await.unwrap();
+    sqlx::query("UPDATE workspaces SET name = 'Kept' WHERE id = $1")
+        .bind(workspace)
+        .execute(&pool)
+        .await
+        .unwrap();
+    ensure_identity(&pool, Some(user), workspace).await.unwrap();
+    let (name, created_by): (String, Option<uuid::Uuid>) =
+        sqlx::query_as("SELECT name, created_by FROM workspaces WHERE id = $1")
+            .bind(workspace)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((name.as_str(), created_by), ("Kept", Some(user)), "existing rows are left alone");
+
+    let job = enqueue(user).await.expect("mirrored identity can queue work");
+    assert_eq!(job.created_by, Some(user));
+    assert!(spectra_db::datasets::list_versions(&pool, workspace, 500).await.unwrap().is_empty());
+
+    // Without a user (an API token with none), only the workspace is created.
+    let token_ws = spectra_db::new_id();
+    ensure_identity(&pool, None, token_ws).await.unwrap();
+
+    for (sql, id) in [
+        ("DELETE FROM workspaces WHERE id = $1", workspace),
+        ("DELETE FROM workspaces WHERE id = $1", token_ws),
+        ("DELETE FROM users WHERE id = $1", user),
+    ] {
+        sqlx::query(sql).bind(id).execute(&pool).await.unwrap();
+    }
+}

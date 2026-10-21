@@ -55,7 +55,7 @@ const build = path.join(root, 'node_modules', '.cache', 'spectra-auth-test');
 fs.rmSync(build, { recursive: true, force: true });
 fs.mkdirSync(build, { recursive: true });
 fs.writeFileSync(path.join(build, 'package.json'), '{"type":"commonjs"}');
-for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts', 'lib/server/engineSign.ts']) {
+for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts', 'lib/server/engineSign.ts', 'lib/server/engineUpload.ts', 'lib/api.ts', 'lib/jobs.ts', 'lib/datasets.ts']) {
   const { outputText } = ts.transpileModule(fs.readFileSync(path.join(root, rel), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
   });
@@ -74,6 +74,9 @@ let sessions = load('lib/server/sessions.js');
 let workspaces = load('lib/server/workspaces.js');
 const engineId = load('lib/server/engineIdentity.js');
 const engineSign = load('lib/server/engineSign.js');
+const engineUpload = load('lib/server/engineUpload.js');
+const apiClient = load('lib/api.js');
+const datasetsClient = load('lib/datasets.js');
 let authz = load('lib/server/authz.js');
 let lockout = load('lib/server/lockout.js');
 let vault = load('lib/server/vault.js');
@@ -660,7 +663,7 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
     const methods = Array.isArray(r.method) ? r.method : [r.method];
     for (const method of methods) {
       const role = engineRoutes.minimumRole(r, method);
-      if (method === 'POST') assert.ok(authz.hasRole(role, 'editor'), `${path}: running a computation needs editor`);
+      if (method !== 'GET') assert.ok(authz.hasRole(role, 'editor'), `${path}: ${method} changes data, so it needs editor`);
     }
   }
   for (const p of ['api/risk', 'api/stress', 'api/benchmark', 'api/alpaca/account']) assert.equal(routes[p].minRole, 'editor', p);
@@ -671,6 +674,7 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.routePolicyKey('api/v1/jobs/0192f3a4-0000-7000-8000-000000000002/cancel'), 'api/v1/jobs/{id}/cancel');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/jobs'], 'GET'), 'viewer');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/jobs'], 'POST'), 'editor');
+<<<<<<< HEAD
   // M5 registry: reads are viewer, writes editor, whole-chain operations owner.
   const run = '0192f3a4-0000-7000-8000-000000000003';
   const key = (p) => engineRoutes.routePolicyKey(p);
@@ -693,6 +697,50 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   for (const p of ['api/v1/registry/verify', 'api/v1/registry/import']) assert.equal(routes[p].minRole, 'owner', p);
   assert.equal(engineRoutes.maxBodyBytes(routes['api/risk']), 2 * 1024 * 1024, 'default body limit');
   assert.ok(engineRoutes.maxBodyBytes(routes['api/v1/runs']) > 10 * 1024 * 1024, 'a 10 MB dataset fits');
+=======
+  const bt = '0192f3a4-0000-7000-8000-000000000002';
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}`), 'api/v1/backtests/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/cancel`), 'api/v1/backtests/{id}/cancel');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/series`), 'api/v1/backtests/{id}/series');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/other`), `api/v1/backtests/${bt}/other`, 'unknown sub-routes stay unlisted');
+  assert.equal(engineRoutes.routePolicyKey('api/v1/backtests/not-a-uuid'), 'api/v1/backtests/not-a-uuid');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests'], 'POST'), 'editor', 'running a backtest needs editor');
+  for (const p of ['api/v1/backtests/{id}', 'api/v1/backtests/{id}/series', 'api/v1/strategies/builtin']) {
+    assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
+  }
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests/{id}/cancel'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests'], 'GET'), 'viewer', 'listing backtests is a read');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/orders_csv`), 'api/v1/backtests/{id}/artifacts/{kind}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/strategies_csv`), 'api/v1/backtests/{id}/artifacts/{kind}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/secrets`), `api/v1/backtests/${bt}/artifacts/secrets`, 'unknown file kinds stay unlisted');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/orders_csv/x`), `api/v1/backtests/${bt}/artifacts/orders_csv/x`);
+  for (const p of ['api/v1/backtests/{id}/artifacts/{kind}', 'api/v1/datasets', 'api/v1/calendars']) {
+    assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
+    assert.ok(!engineRoutes.allowsMethod(routes[p], 'POST'), `${p} is read-only`);
+  }
+  // Data Studio (M1): previewing a file is part of uploading one, so viewers can't.
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/preview'], 'POST'), 'editor');
+  assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/preview'], 'GET'), 'preview is POST only');
+  assert.equal(engineRoutes.routePolicyKey('api/v1/datasets/preview'), 'api/v1/datasets/preview');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/ingest'], 'POST'), 'editor', 'ingesting needs editor');
+  assert.equal(engineRoutes.ENGINE_UPLOAD_ROUTE.minRole, 'editor', 'uploading needs editor');
+  assert.ok(!Object.prototype.hasOwnProperty.call(routes, 'api/v1/uploads'), 'uploads never go through the 2 MB JSON proxy');
+  // Browsing datasets is a read; renaming and deleting need editor.
+  const ds = '0192f3a4-0000-7000-8000-000000000009';
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/${ds}`), 'api/v1/datasets/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}`), 'api/v1/datasets/versions/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/bars`), 'api/v1/datasets/versions/{id}/bars');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/runs`), 'api/v1/datasets/versions/{id}/runs');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/other`), `api/v1/datasets/versions/${ds}/other`, 'unknown sub-routes stay unlisted');
+  assert.equal(engineRoutes.routePolicyKey('api/v1/datasets/not-a-uuid'), 'api/v1/datasets/not-a-uuid');
+  for (const p of ['api/v1/datasets/{id}', 'api/v1/datasets/versions/{id}', 'api/v1/datasets/versions/{id}/runs', 'api/v1/datasets/versions/{id}/bars']) {
+    assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
+  }
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/{id}'], 'PATCH'), 'editor', 'renaming needs editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/versions/{id}'], 'DELETE'), 'editor', 'deleting needs editor');
+  assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/{id}'], 'DELETE'), 'datasets are deleted version by version');
+  assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/versions/{id}/bars'], 'POST'));
+>>>>>>> origin/main
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {
@@ -1897,6 +1945,9 @@ const ROUTE_RULES = {
   'csp-report POST': 'public',
   'engine/[...path] GET': 'engine',
   'engine/[...path] POST': 'engine',
+  'engine/[...path] PATCH': 'engine',
+  'engine/[...path] DELETE': 'engine',
+  'engine-upload POST': 'editor',
   'invites/[token] GET': 'public',
   'invites/[token] POST': 'session',
   'secrets GET': 'viewer',
@@ -2002,7 +2053,7 @@ test('permissions: viewer = read only, editor = create and run, owner = members,
   for (const [p, r] of Object.entries(engineRoutes.ENGINE_ROUTES)) {
     const methods = Array.isArray(r.method) ? r.method : [r.method];
     for (const method of methods) {
-      if (method === 'POST' && !r.public) assert.ok(rank[engineRoutes.minimumRole(r, method)] >= rank.editor, `engine ${p}`);
+      if (method !== 'GET' && !r.public) assert.ok(rank[engineRoutes.minimumRole(r, method)] >= rank.editor, `engine ${method} ${p}`);
     }
   }
 
@@ -2425,6 +2476,89 @@ test('toQrSvg generates deterministic SVG from otpauth URI and rejects invalid l
 });
 
 
+test('uploads: spooled to a temp file while hashed, refused past the limit, names cleaned', async () => {
+  const data = Buffer.from('Date,Close\n2024-01-02,471.5\n');
+  const stream = (chunks) => new ReadableStream({ start(c) { for (const x of chunks) c.enqueue(x); c.close(); } });
+  const s = await engineUpload.spoolToTempFile(stream([data.subarray(0, 5), data.subarray(5)]));
+  try {
+    assert.equal(s.size, data.length);
+    assert.equal(s.sha256, crypto.createHash('sha256').update(data).digest('hex'));
+    assert.deepEqual(fs.readFileSync(s.file), data);
+    assert.equal(fs.statSync(s.file).mode & 0o077, 0, 'temp file is private');
+  } finally {
+    fs.rmSync(s.file, { force: true });
+  }
+  const tmpBefore = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('spectra-upload-')).length;
+  await assert.rejects(engineUpload.spoolToTempFile(stream([data, data]), data.length + 1), engineUpload.UploadTooLarge);
+  assert.equal(fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('spectra-upload-')).length, tmpBefore, 'nothing left behind');
+  assert.equal(engineUpload.MAX_UPLOAD_BYTES, 100 * 1024 * 1024);
+  assert.equal(engineUpload.cleanFilename('C:\\Users\\me\\prices.csv'), 'prices.csv');
+  assert.equal(engineUpload.cleanFilename('../../etc/passwd'), 'passwd');
+  assert.equal(engineUpload.cleanFilename(' spy\u0000daily.csv '), 'spydaily.csv');
+  assert.equal(engineUpload.cleanFilename(null), '');
+  assert.equal(engineUpload.cleanFilename('x'.repeat(400)).length, 255);
+});
+
+test('uploads skip the middleware (it cuts bodies at 10 MB), and only that route does', () => {
+  const text = fs.readFileSync(path.join(root, 'middleware.ts'), 'utf8');
+  // The matcher is a single-quoted string literal; as JSON it reads the same.
+  const literal = /matcher: \['((?:[^'\\]|\\.)+)'\]/.exec(text)[1];
+  const re = new RegExp(`^${JSON.parse(`"${literal}"`)}$`);
+  assert.ok(!re.test('/api/engine-upload'), 'upload route skipped');
+  for (const p of ['/api/engine/api/v1/datasets', '/api/engine-upload/x', '/api/engine-uploads', '/studio', '/api/auth/login']) {
+    assert.ok(re.test(p), `${p} still goes through the middleware`);
+  }
+});
+
+test('data tab: settings come only from what the person chose; suggestions apply on request', async () => {
+  const d = datasetsClient.emptyDraft();
+  const empty = datasetsClient.settingsFromDraft(d);
+  // Nothing is filled in: the engine reports every missing choice.
+  assert.equal(empty.delimiter, '');
+  assert.equal(empty.time_format, '');
+  assert.equal(empty.utc_offset_minutes, null);
+  assert.equal(empty.columns.close, '');
+  assert.equal(empty.columns.volume, null, 'an optional column left empty means "none"');
+  assert.equal(empty.skip_bad_rows, false, 'bad rows abort by default');
+  const suggestions = {
+    delimiter: ';',
+    header: ['Date', 'Ticker', 'Open', 'High', 'Low', 'Close'],
+    columns: { timestamp: 'Date', open: 'Open', high: 'High', low: 'Low', close: 'Close', volume: null, symbol: 'Ticker' },
+    time_format: 'iso8601',
+    timestamps_have_zone: false,
+  };
+  const applied = datasetsClient.applySuggestions(d, suggestions);
+  assert.equal(applied.utc_offset_minutes, null, 'the offset is never suggested');
+  const s = datasetsClient.settingsFromDraft({ ...applied, utc_offset_minutes: 330, default_symbol: 'IGNORED' });
+  assert.deepEqual(
+    { delimiter: s.delimiter, time_format: s.time_format, utc: s.utc_offset_minutes, symbol: s.columns.symbol, volume: s.columns.volume, default_symbol: s.default_symbol },
+    { delimiter: ';', time_format: 'iso8601', utc: 330, symbol: 'Ticker', volume: null, default_symbol: null },
+    'a symbol column means no default symbol',
+  );
+  const single = datasetsClient.settingsFromDraft({ ...applied, columns: { ...applied.columns, symbol: '' }, default_symbol: 'NIFTY' });
+  assert.equal(single.default_symbol, 'NIFTY');
+  assert.equal(datasetsClient.formatOffset(330), 'UTC+05:30');
+  assert.equal(datasetsClient.formatOffset(-300), 'UTC−05:00');
+  assert.equal(datasetsClient.formatOffset(0), 'UTC+00:00');
+
+  // The preview sample: the first 1 MB, flagged when cut.
+  const small = await datasetsClient.readSample(new Blob(['a,b\n1,2\n']));
+  assert.deepEqual(small, { text: 'a,b\n1,2\n', truncated: false });
+  const big = await datasetsClient.readSample(new Blob(['x'.repeat(datasetsClient.PREVIEW_SAMPLE_BYTES + 10)]));
+  assert.equal(big.text.length, datasetsClient.PREVIEW_SAMPLE_BYTES);
+  assert.ok(big.truncated);
+
+  // Field errors from a 422's details, joined per field.
+  const err = new apiClient.ApiError('bad', 422, { errors: [{ field: 'settings.columns.close', message: 'required' }, { field: 'dataset_name', message: 'required' }, { field: 'dataset_name', message: 'too long' }, { message: 'whole request' }] });
+  assert.deepEqual(apiClient.detailErrors(err), { 'settings.columns.close': 'required', dataset_name: 'required; too long', '': 'whole request' });
+  assert.deepEqual(apiClient.detailErrors(new Error('x')), {});
+  assert.deepEqual(apiClient.detailErrors(new apiClient.ApiError('x', 500)), {});
+  const fromResponse = await apiClient.errorFrom(new Response(JSON.stringify({ code: 'in_use', message: 'kept', details: null }), { status: 409 }));
+  assert.equal(fromResponse.code, 'in_use');
+  assert.equal(fromResponse.status, 409);
+  assert.equal(fromResponse.message, 'kept');
+});
+
 test('engine request signing matches the Rust verifier', () => {
   const secret = 'test-secret-test-secret-test-secret!';
   const body = '{"metric":"var","note":"ünïcødé"}';
@@ -2443,6 +2577,19 @@ test('engine request signing matches the Rust verifier', () => {
     engineSign.canonical('post', '/api/v1/risk?x=1', '1700000000', 'u', '', 'r', ''),
     'spectra-v1\nPOST\n/api/v1/risk?x=1\n1700000000\nu\n\nr\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   );
+  // Uploads sign a body hash they computed while streaming: the same signature as signing the body.
+  const hashed = engineSign.signEngineRequest(
+    secret,
+    {
+      method: 'post',
+      pathAndQuery: '/api/v1/risk',
+      requestId: '6f1c0e5e-1111-4222-8333-444455556666',
+      bodySha256: crypto.createHash('sha256').update(body, 'utf8').digest('hex'),
+    },
+    { user: 'alice@example.com' },
+    1700000000 * 1000 + 999,
+  );
+  assert.equal(hashed['X-Spectra-Signature'], h['X-Spectra-Signature']);
   const before = process.env.ENGINE_SECRET;
   process.env.ENGINE_SECRET = 'too-short';
   assert.equal(engineSign.engineSecret(), null, 'short secrets are refused');

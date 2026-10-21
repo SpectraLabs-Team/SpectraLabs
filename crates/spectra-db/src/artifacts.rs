@@ -37,7 +37,8 @@ pub struct Stored {
     pub size: u64,
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+/// Lower-case hex SHA-256 of `bytes` (the address [`ArtifactStore::put`] gives them).
+pub fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
     h.hex_digest()
@@ -90,6 +91,91 @@ impl ArtifactStore {
             }
         }
         Ok(Stored { sha256, path: rel, size: bytes.len() as u64 })
+    }
+
+    /// A directory inside the store for files on their way in, so that
+    /// [`ArtifactStore::put_file`] can rename them into place.
+    pub fn staging_dir(&self) -> PathBuf {
+        self.root.join("staging")
+    }
+
+    /// Moves `file`, whose SHA-256 the caller has computed as `sha256`, into
+    /// the store without reading it into memory. The hash is checked again
+    /// while copying when the file is not on the store's file system. If the
+    /// store already holds these bytes, `file` is just removed.
+    ///
+    /// # Errors
+    /// `InvalidInput` for a malformed hash, `InvalidData` if the copied bytes
+    /// do not match it, or any I/O error.
+    pub fn put_file(&self, file: &Path, sha256: &str) -> io::Result<Stored> {
+        if !is_sha256_hex(sha256) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a lower-case SHA-256 hex string"));
+        }
+        let size = fs::metadata(file)?.len();
+        let rel = Self::relative_path(sha256);
+        let path = self.root.join(&rel);
+        if path.exists() {
+            let _ = fs::remove_file(file);
+            return Ok(Stored { sha256: sha256.to_string(), path: rel, size });
+        }
+        let dir = path.parent().expect("artifact paths have a parent");
+        fs::create_dir_all(dir)?;
+        if fs::rename(file, &path).is_err() {
+            // Another file system: copy (hashing as we go), then rename into place.
+            let tmp = dir.join(format!(".{sha256}.{}.tmp", std::process::id()));
+            let copied = (|| -> io::Result<String> {
+                let mut src = fs::File::open(file)?;
+                let mut dst = fs::File::create(&tmp)?;
+                let mut h = Sha256::new();
+                let mut buf = vec![0u8; 1 << 20];
+                loop {
+                    let n = io::Read::read(&mut src, &mut buf)?;
+                    if n == 0 {
+                        break;
+                    }
+                    h.update(&buf[..n]);
+                    dst.write_all(&buf[..n])?;
+                }
+                dst.sync_all()?;
+                Ok(h.hex_digest())
+            })();
+            match copied {
+                Ok(got) if got == sha256 => {}
+                Ok(_) => {
+                    let _ = fs::remove_file(&tmp);
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "file does not match its SHA-256",
+                    ));
+                }
+                Err(e) => {
+                    let _ = fs::remove_file(&tmp);
+                    return Err(e);
+                }
+            }
+            if let Err(e) = fs::rename(&tmp, &path) {
+                let _ = fs::remove_file(&tmp);
+                if !path.exists() {
+                    return Err(e);
+                }
+            }
+            let _ = fs::remove_file(file);
+        }
+        Ok(Stored { sha256: sha256.to_string(), path: rel, size })
+    }
+
+    /// Removes the bytes for `sha256`. Removing what is not there is not an error.
+    ///
+    /// # Errors
+    /// `InvalidInput` for a malformed hash, or any other I/O error.
+    pub fn delete(&self, sha256: &str) -> io::Result<()> {
+        if !is_sha256_hex(sha256) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a lower-case SHA-256 hex string"));
+        }
+        match fs::remove_file(self.root.join(Self::relative_path(sha256))) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
     }
 
     /// The bytes for `sha256`, re-verified against it.
@@ -154,6 +240,63 @@ impl ArtifactBackend {
             }
             #[cfg(feature = "s3")]
             Self::S3(store) => store.get(sha256).await,
+        }
+    }
+
+    /// Stores a file whose SHA-256 the caller computed while writing it.
+    /// Locally the file is moved into place without being read into memory;
+    /// for S3 it is read and uploaded. `file` is gone afterwards.
+    ///
+    /// # Errors
+    /// As [`ArtifactStore::put_file`], or any object-store error.
+    pub async fn put_file(&self, file: PathBuf, sha256: &str) -> io::Result<Stored> {
+        match self {
+            Self::Local(store) => {
+                let (store, sha256) = (store.clone(), sha256.to_string());
+                tokio::task::spawn_blocking(move || store.put_file(&file, &sha256))
+                    .await
+                    .map_err(io::Error::other)?
+            }
+            #[cfg(feature = "s3")]
+            Self::S3(store) => {
+                let bytes = tokio::fs::read(&file).await?;
+                let stored = store.put(bytes).await?;
+                let _ = tokio::fs::remove_file(&file).await;
+                if stored.sha256 != sha256 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "file does not match its SHA-256",
+                    ));
+                }
+                Ok(stored)
+            }
+        }
+    }
+
+    /// Removes the bytes for `sha256`; removing what is not there is fine.
+    /// Callers check first that nothing references the hash.
+    ///
+    /// # Errors
+    /// Any I/O or object-store error.
+    pub async fn delete(&self, sha256: &str) -> io::Result<()> {
+        match self {
+            Self::Local(store) => {
+                let (store, sha256) = (store.clone(), sha256.to_string());
+                tokio::task::spawn_blocking(move || store.delete(&sha256)).await.map_err(io::Error::other)?
+            }
+            #[cfg(feature = "s3")]
+            Self::S3(store) => store.delete(sha256).await,
+        }
+    }
+
+    /// A local directory to write incoming files to before [`Self::put_file`]:
+    /// inside the store for a local backend (so the move is a rename), the
+    /// system temporary directory otherwise.
+    pub fn staging_dir(&self) -> PathBuf {
+        match self {
+            Self::Local(store) => store.staging_dir(),
+            #[cfg(feature = "s3")]
+            Self::S3(_) => std::env::temp_dir().join("spectra-staging"),
         }
     }
 
@@ -224,6 +367,38 @@ pub struct NewArtifact<'a> {
     pub bytes: &'a [u8],
 }
 
+/// A workspace's storage: its quota, the bytes it uses, and whether it
+/// already holds a given hash (then storing it again costs nothing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Quota {
+    /// Bytes allowed.
+    pub quota: i64,
+    /// Bytes used (each distinct hash once: run artifacts, uploads, dataset files).
+    pub used: i64,
+    /// The hash asked about is already stored for the workspace.
+    pub present: bool,
+}
+
+/// The storage quota and usage of `workspace_id`, and whether it holds
+/// `sha256`. `None` for an unknown workspace.
+///
+/// # Errors
+/// Any database error.
+pub async fn quota(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    sha256: &str,
+    default_quota: i64,
+) -> Result<Option<Quota>, sqlx::Error> {
+    let row: Option<(i64, i64, bool)> = sqlx::query_as(include_str!("../queries/artifact_quota.sql"))
+        .bind(workspace_id)
+        .bind(sha256)
+        .bind(default_quota)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(quota, used, present)| Quota { quota, used, present }))
+}
+
 /// Stores an artifact and records it against its run, refusing it when the
 /// workspace's quota would be exceeded. The quota is checked before any
 /// bytes are written, and again (under a lock on the workspace row) when the
@@ -274,6 +449,36 @@ pub async fn store_for_run(
         });
     }
     Ok(stored)
+}
+
+/// A stored artifact of a run, as recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactRef {
+    /// Lower-case hex SHA-256 (the key in [`ArtifactStore`]).
+    pub sha256: String,
+    /// MIME type.
+    pub content_type: String,
+    /// Byte count.
+    pub size: i64,
+}
+
+/// The newest artifact of `kind` for `run_id`, if that run belongs to `workspace_id`.
+///
+/// # Errors
+/// Any database error.
+pub async fn find_for_run(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    kind: &str,
+) -> Result<Option<ArtifactRef>, sqlx::Error> {
+    let row: Option<(String, String, i64)> = sqlx::query_as(include_str!("../queries/run_artifact_get.sql"))
+        .bind(workspace_id)
+        .bind(run_id)
+        .bind(kind)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(sha256, content_type, size)| ArtifactRef { sha256, content_type, size }))
 }
 
 /// S3-compatible artifact storage (the `s3` feature).
@@ -355,6 +560,23 @@ pub mod s3 {
             Ok(Stored { path: ArtifactStore::relative_path(&sha256), sha256, size })
         }
 
+        /// Removes the object for `sha256`; a missing object is not an error.
+        ///
+        /// # Errors
+        /// `InvalidInput` for a malformed hash, or any object-store error.
+        pub async fn delete(&self, sha256: &str) -> io::Result<()> {
+            if !is_sha256_hex(sha256) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "not a lower-case SHA-256 hex string",
+                ));
+            }
+            match self.store.delete(&self.location(sha256)).await {
+                Err(e) if !not_found(&e) => Err(io::Error::other(e)),
+                _ => Ok(()),
+            }
+        }
+
         /// The bytes for `sha256`, re-verified against it.
         ///
         /// # Errors
@@ -409,6 +631,16 @@ pub mod s3 {
             assert_eq!(s.get(&"0".repeat(64)).await.unwrap_err().kind(), io::ErrorKind::NotFound);
             assert_eq!(s.get("../x").await.unwrap_err().kind(), io::ErrorKind::InvalidInput);
         }
+
+        #[tokio::test]
+        async fn delete_removes_the_object_and_tolerates_absence() {
+            let s = S3ArtifactStore::new(Arc::new(InMemory::new()), "bucket", "p");
+            let a = s.put(b"bye".to_vec()).await.unwrap();
+            s.delete(&a.sha256).await.unwrap();
+            assert_eq!(s.get(&a.sha256).await.unwrap_err().kind(), io::ErrorKind::NotFound);
+            s.delete(&a.sha256).await.unwrap();
+            assert_eq!(s.delete("x").await.unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        }
     }
 }
 
@@ -458,6 +690,30 @@ mod tests {
         assert_eq!(s.get(&a.sha256).unwrap_err().kind(), io::ErrorKind::InvalidData);
         assert_eq!(s.get("../../etc/passwd").unwrap_err().kind(), io::ErrorKind::InvalidInput);
         assert_eq!(s.get(&"0".repeat(64)).unwrap_err().kind(), io::ErrorKind::NotFound);
+        let _ = fs::remove_dir_all(s.root());
+    }
+
+    #[test]
+    fn put_file_moves_a_hashed_file_in_and_delete_removes_it() {
+        let s = temp_store("put-file");
+        let staging = s.staging_dir();
+        fs::create_dir_all(&staging).unwrap();
+        let file = staging.join("upload-1");
+        fs::write(&file, b"date,close\n").unwrap();
+        let sha = sha256_hex(b"date,close\n");
+        let stored = s.put_file(&file, &sha).unwrap();
+        assert_eq!((stored.sha256.as_str(), stored.size), (sha.as_str(), 11));
+        assert!(!file.exists(), "moved, not copied");
+        assert_eq!(s.get(&sha).unwrap(), b"date,close\n");
+        // The same bytes again: the incoming file is dropped, the stored one kept.
+        fs::write(&file, b"date,close\n").unwrap();
+        assert_eq!(s.put_file(&file, &sha).unwrap(), stored);
+        assert!(!file.exists());
+        assert_eq!(s.put_file(&file, "nope").unwrap_err().kind(), io::ErrorKind::InvalidInput);
+
+        s.delete(&sha).unwrap();
+        assert_eq!(s.get(&sha).unwrap_err().kind(), io::ErrorKind::NotFound);
+        s.delete(&sha).unwrap();
         let _ = fs::remove_dir_all(s.root());
     }
 }

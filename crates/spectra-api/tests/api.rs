@@ -416,6 +416,70 @@ async fn job_routes_report_503_without_a_database() {
 }
 
 #[tokio::test]
+async fn backtest_routes_need_a_signature() {
+    for (method, path) in [
+        ("POST", "/api/v1/backtests"),
+        ("GET", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002"),
+        ("POST", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/cancel"),
+        ("GET", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/series"),
+        ("GET", "/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/artifacts/orders_csv"),
+        ("GET", "/api/v1/backtests"),
+        ("GET", "/api/v1/datasets"),
+        ("GET", "/api/v1/strategies/builtin"),
+    ] {
+        assert_eq!(call(unsigned(method, path)).await.0, 401, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn backtest_routes_report_503_without_a_database() {
+    let body = Json::object()
+        .with("dataset_version_id", Json::string("0192f3a4-0000-7000-8000-000000000003"))
+        .with("strategy", Json::string("sma_cross"));
+    let (status, j) = call(post("/api/v1/backtests", &body)).await;
+    assert_eq!(status, 503, "{}", j.dump());
+    assert_eq!(call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002")).await.0, 503);
+    assert_eq!(call(get("/api/v1/backtests")).await.0, 503);
+    assert_eq!(call(get("/api/v1/datasets")).await.0, 503);
+    assert_eq!(
+        call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/artifacts/orders_csv")).await.0,
+        503
+    );
+    // An unknown file kind is refused before the database is needed.
+    assert_eq!(
+        call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/artifacts/secrets")).await.0,
+        404
+    );
+}
+
+#[tokio::test]
+async fn backtest_requests_are_checked_before_the_database() {
+    // Unknown fields and a missing dataset are refused before anything is queued.
+    let extra = Json::object().with("strategy", Json::string("sma_cross")).with("dataset", Json::integer(1));
+    assert_eq!(call(post("/api/v1/backtests", &extra)).await.0, 422);
+    let (status, j) =
+        call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/series?kind=pnl")).await;
+    assert_eq!(status, 422, "{}", j.dump());
+}
+
+#[tokio::test]
+async fn builtin_strategies_describe_the_backtest_form() {
+    let (status, j) = call(get("/api/v1/strategies/builtin")).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let names: Vec<String> = j
+        .at("strategies")
+        .unwrap()
+        .items()
+        .unwrap()
+        .iter()
+        .map(|s| s.at("name").unwrap().as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, ["buy_and_hold", "equal_weight", "sma_cross", "zscore_reversion"]);
+    assert!(j.at("config_schema").unwrap().at("properties").unwrap().at("slippage_bps").is_ok());
+    assert_eq!(j.at("presets").unwrap().items().unwrap().len(), 3);
+}
+
+#[tokio::test]
 async fn job_routes_are_not_served_at_the_old_paths() {
     assert_eq!(call(get("/api/jobs")).await.0, 404);
 }
@@ -425,7 +489,19 @@ async fn openapi_spec_is_served_unsigned() {
     let (status, j) = call(unsigned("GET", "/api/v1/openapi.json")).await;
     assert_eq!(status, 200);
     let paths = j.at("paths").unwrap();
-    for path in ["/api/v1/jobs", "/api/v1/jobs/{id}", "/api/v1/jobs/{id}/cancel", "/api/v1/risk", "/ready"] {
+    for path in [
+        "/api/v1/jobs",
+        "/api/v1/jobs/{id}",
+        "/api/v1/jobs/{id}/cancel",
+        "/api/v1/backtests",
+        "/api/v1/backtests/{id}/series",
+        "/api/v1/backtests/{id}/artifacts/{kind}",
+        "/api/v1/datasets",
+        "/api/v1/strategies/builtin",
+        "/api/v1/datasets/preview",
+        "/api/v1/risk",
+        "/ready",
+    ] {
         assert!(paths.at(path).is_ok(), "missing {path}");
     }
 }
@@ -438,4 +514,154 @@ async fn prometheus_metrics_are_served_unsigned() {
     let (status, headers, _) = send(cfg(), unsigned("GET", "/metrics")).await;
     assert_eq!(status, 200);
     assert!(headers.get("content-type").unwrap().to_str().unwrap().starts_with("text/plain"));
+}
+
+// ---------------------------------------------------------------------------
+// Data Studio: POST /api/v1/datasets/preview (M1 tasks 2-3)
+// ---------------------------------------------------------------------------
+
+const PREVIEW_CSV: &str = "Date,Open,High,Low,Close,Volume\n\
+    2024-01-02,470.10,472,469,471.5,100\n\
+    2024-01-03,471.5,473,470,472.25,0\n\
+    2024-01-04,abc,1,1,1,1\n";
+
+fn preview_settings() -> Json {
+    Json::parse(
+        r#"{"delimiter":",","time_format":"iso8601","utc_offset_minutes":0,"default_symbol":"SPY",
+            "columns":{"timestamp":"Date","open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"}}"#,
+    )
+    .unwrap()
+}
+
+fn preview_body(sample: &str, settings: Option<Json>) -> Json {
+    let mut b = Json::object().with("sample", Json::string(sample));
+    if let Some(s) = settings {
+        b = b.with("settings", s);
+    }
+    b
+}
+
+#[tokio::test]
+async fn preview_without_settings_only_suggests() {
+    let (status, j) = call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, None))).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    assert!(j.at("preview").unwrap().is_null());
+    let s = j.at("suggestions").unwrap();
+    assert_eq!(s.at("delimiter").unwrap().as_str().unwrap(), ",");
+    assert_eq!(s.at("time_format").unwrap().as_str().unwrap(), "iso8601");
+    assert_eq!(s.at("columns").unwrap().at("close").unwrap().as_str().unwrap(), "Close");
+    assert!(s.at("columns").unwrap().at("symbol").unwrap().is_null());
+}
+
+#[tokio::test]
+async fn preview_parses_the_sample_and_reports_every_bad_row() {
+    let (status, j) =
+        call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, Some(preview_settings())))).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    // The response is exactly the documented schema (deny_unknown_fields on every type).
+    let typed: spectra_api::datasets_api::PreviewResponse = serde_json::from_str(&j.dump()).unwrap();
+    let p = typed.preview.expect("preview");
+    assert_eq!(p.rows.len(), 2);
+    assert_eq!((p.rows[0].symbol.as_str(), p.rows[0].open.as_str()), ("SPY", "470.1"));
+    assert_eq!(p.quality.rows_rejected, 1);
+    assert_eq!(p.quality.rejected_by_category.get("bad_number"), Some(&1));
+    assert!(p.would_abort.as_deref().unwrap().starts_with("line 4"), "bad rows abort by default");
+    assert_eq!(p.quality.symbol_stats[0].zero_volume_bars, 1);
+
+    let mut skip = preview_settings();
+    skip.set("skip_bad_rows", Json::boolean(true)).unwrap();
+    let (_, j) = call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, Some(skip)))).await;
+    assert!(j.at("preview").unwrap().at("would_abort").unwrap().is_null());
+}
+
+#[tokio::test]
+async fn preview_lists_every_invalid_setting_with_its_path() {
+    let settings = Json::parse(r#"{"delimiter":"::","columns":{"open":"Open"},"colour":1}"#).unwrap();
+    let (status, j) =
+        call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, Some(settings)))).await;
+    assert_eq!(status, 422, "{}", j.dump());
+    assert_eq!(j.at("code").unwrap().as_str().unwrap(), "invalid_request");
+    let fields: Vec<String> = j
+        .at("details")
+        .unwrap()
+        .at("errors")
+        .unwrap()
+        .items()
+        .unwrap()
+        .iter()
+        .map(|e| e.at("field").unwrap().as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            "settings.colour",
+            "settings.delimiter",
+            "settings.time_format",
+            "settings.utc_offset_minutes",
+            "settings.columns.timestamp",
+            "settings.columns.high",
+            "settings.columns.low",
+            "settings.columns.close",
+            "settings.default_symbol",
+        ]
+    );
+    assert!(j.at("message").unwrap().as_str().unwrap().contains("settings.time_format: required"));
+}
+
+#[tokio::test]
+async fn preview_refuses_a_file_that_does_not_match_the_settings() {
+    let mut settings = preview_settings();
+    let cols = Json::parse(
+        r#"{"timestamp":"Date","open":"Open","high":"High","low":"Low","close":"Adj Close","volume":null}"#,
+    )
+    .unwrap();
+    settings.set("columns", cols).unwrap();
+    let (status, j) =
+        call(post("/api/v1/datasets/preview", &preview_body(PREVIEW_CSV, Some(settings)))).await;
+    assert_eq!(status, 422, "{}", j.dump());
+    let e = &j.at("details").unwrap().at("errors").unwrap().items().unwrap()[0];
+    assert_eq!(e.at("field").unwrap().as_str().unwrap(), "sample");
+    assert!(e.at("message").unwrap().as_str().unwrap().contains("missing required column: close"));
+}
+
+#[tokio::test]
+async fn preview_limits_the_sample_and_drops_a_cut_last_line() {
+    let big = "x".repeat(spectra_api::datasets_api::MAX_PREVIEW_SAMPLE + 1);
+    assert_eq!(call(post("/api/v1/datasets/preview", &preview_body(&big, None))).await.0, 413);
+
+    // The last line was cut mid-row: with `truncated` it is ignored rather than reported as bad.
+    let cut = "Date,Open,High,Low,Close,Volume\n2024-01-02,470.10,472,469,471.5,100\n2024-01-03,47";
+    let body = preview_body(cut, Some(preview_settings())).with("truncated", Json::boolean(true));
+    let (status, j) = call(post("/api/v1/datasets/preview", &body)).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let q = j.at("preview").unwrap().at("quality").unwrap();
+    assert_eq!(
+        (q.at("rows_total").unwrap().as_int().unwrap(), q.at("rows_rejected").unwrap().as_int().unwrap()),
+        (1, 0)
+    );
+
+    let extra = preview_body(PREVIEW_CSV, None).with("file", Json::string("x"));
+    assert_eq!(call(post("/api/v1/datasets/preview", &extra)).await.0, 422, "unknown fields are refused");
+    assert_eq!(call(unsigned("POST", "/api/v1/datasets/preview")).await.0, 401);
+}
+
+#[tokio::test]
+async fn preview_checks_every_row_of_the_sample_not_just_the_rows_it_returns() {
+    let mut csv = String::from("Date,Open,High,Low,Close,Volume\n");
+    for i in 0..300 {
+        csv += &format!("{},1,2,0.5,1.5,10\n", 1_704_153_600 + i * 86_400);
+    }
+    csv += "1800000000,1,2,0.5,oops,10\n";
+    let settings = Json::parse(
+        r#"{"delimiter":",","time_format":"epoch_s","utc_offset_minutes":0,"default_symbol":"X",
+            "columns":{"timestamp":"Date","open":"Open","high":"High","low":"Low","close":"Close","volume":"Volume"}}"#,
+    )
+    .unwrap();
+    let (status, j) = call(post("/api/v1/datasets/preview", &preview_body(&csv, Some(settings)))).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    let p = j.at("preview").unwrap();
+    assert_eq!(p.at("rows").unwrap().items().unwrap().len(), 200, "the first 200 are returned");
+    assert_eq!(p.at("rows_not_read").unwrap().as_int().unwrap(), 0);
+    assert_eq!(p.at("quality").unwrap().at("rows_total").unwrap().as_int().unwrap(), 301, "all checked");
+    assert!(p.at("would_abort").unwrap().as_str().unwrap().starts_with("line 302 [bad_number]"));
 }

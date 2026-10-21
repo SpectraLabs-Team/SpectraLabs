@@ -109,14 +109,14 @@ pub struct ListJobs {
     pub limit: Option<u32>,
 }
 
-fn to_json<T: Serialize>(status: u16, value: &T) -> Response {
+pub(crate) fn to_json<T: Serialize>(status: u16, value: &T) -> Response {
     match serde_json::to_string(value) {
         Ok(text) => json_response(status, text),
         Err(_) => error_response(500, "Could not encode the response."),
     }
 }
 
-fn db_error(e: &spectra_db::Error) -> Response {
+pub(crate) fn db_error(e: &spectra_db::Error) -> Response {
     // 23503: foreign key violation, i.e. the signed workspace or user id does not exist.
     if e.as_database_error().is_some_and(|d| d.code().as_deref() == Some("23503")) {
         return error_response(422, "The workspace or user for this job does not exist.");
@@ -127,7 +127,7 @@ fn db_error(e: &spectra_db::Error) -> Response {
 
 /// The pool and the caller's workspace, or the response explaining why not.
 #[allow(clippy::result_large_err)] // the error is the finished response
-fn context(st: &AppState, id: &Identity) -> Result<(spectra_db::PgPool, Uuid), Response> {
+pub(crate) fn context(st: &AppState, id: &Identity) -> Result<(spectra_db::PgPool, Uuid), Response> {
     let Some(pool) = st.db.clone() else {
         return Err(error_response(503, "Jobs need the database, which this server was started without."));
     };
@@ -149,46 +149,82 @@ pub(crate) async fn create_job(
     Extension(id): Extension<Identity>,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    let (pool, ws) = match context(&st, &id) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
     let Ok(bytes) = body else { return error_response(400, "Could not read the request body.") };
     let req: CreateJob = match serde_json::from_slice(&bytes) {
         Ok(r) => r,
         Err(e) => return error_response(422, format!("Invalid job request: {e}")),
     };
+<<<<<<< HEAD
     if req.kind == "backtest" {
         return error_response(422, "Backtests must be created under an experiment so their run record and job are linked atomically.");
     }
     if !(-10..=10).contains(&req.priority) {
         return error_response(422, "priority must be between -10 and 10.");
+=======
+    match submit(&st, &id, req.kind, req.payload, req.priority).await {
+        Ok(job) => to_json(202, &JobView::from(job)),
+        Err(r) => r,
+    }
+}
+
+/// Validates and queues a job in the caller's workspace: the shared path of
+/// `POST /api/v1/jobs` and `POST /api/v1/backtests`.
+///
+/// # Errors
+/// The finished error response (400, 422, 503).
+#[allow(clippy::result_large_err)] // the error is the finished response
+pub(crate) async fn submit(
+    st: &AppState,
+    id: &Identity,
+    kind: String,
+    payload: serde_json::Value,
+    priority: i32,
+) -> Result<Job, Response> {
+    let (pool, ws) = context(st, id)?;
+    if !(-10..=10).contains(&priority) {
+        return Err(error_response(422, "priority must be between -10 and 10."));
+>>>>>>> origin/main
     }
     // Validate exactly as the synchronous route would, off the async threads
     // (parsing a large portfolio CSV is real work).
-    let (kind, payload_text) = (req.kind.clone(), req.payload.to_string());
+    let (k, payload_text) = (kind.clone(), payload.to_string());
     let checked = tokio::task::spawn_blocking(move || {
         let payload = Json::parse(&payload_text).map_err(|e| (422, format!("Invalid payload: {e}")))?;
-        engine::validate_job(&kind, &payload)
+        engine::validate_job(&k, &payload)
     })
     .await;
     match checked {
         Ok(Ok(())) => {}
-        Ok(Err((code, msg))) => return error_response(code, msg),
-        Err(_) => return error_response(500, "Could not validate the job."),
+        Ok(Err((code, msg))) => return Err(error_response(code, msg)),
+        Err(_) => return Err(error_response(500, "Could not validate the job.")),
+    }
+    // A backtest must name a dataset version of this workspace; say so now rather than on the worker.
+    if kind == spectra_backtest::JOB_KIND {
+        let version = Json::parse(&payload.to_string())
+            .ok()
+            .and_then(|p| engine::backtest_job(&p).ok())
+            .and_then(|j| Uuid::parse_str(&j.dataset_version_id).ok());
+        let Some(version) = version else { return Err(error_response(422, "Invalid backtest payload.")) };
+        match spectra_db::datasets::resolve_version(&pool, ws, version).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                return Err(error_response(
+                    422,
+                    "dataset_version_id: no such dataset version in this workspace.",
+                ));
+            }
+            Err(e) => return Err(db_error(&e)),
+        }
     }
     let new = NewJob {
         workspace_id: ws,
-        kind: req.kind,
-        payload: req.payload,
-        priority: req.priority,
+        kind,
+        payload,
+        priority,
         max_attempts: MAX_ATTEMPTS,
         created_by: Uuid::parse_str(&id.user).ok(),
     };
-    match jobs::enqueue(&pool, &new).await {
-        Ok(job) => to_json(202, &JobView::from(job)),
-        Err(e) => db_error(&e),
-    }
+    jobs::enqueue(&pool, &new).await.map_err(|e| db_error(&e))
 }
 
 /// One job.

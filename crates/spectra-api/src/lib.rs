@@ -16,7 +16,14 @@
 //! | `GET /api/v1/telemetry/{cpu,workers,gpu}` | signed | host readings |
 //! | `/api/v1/alpaca/*` | signed | 501: not ported yet |
 //! | `POST /api/v1/jobs`, `GET /api/v1/jobs[/{id}]`, `POST /api/v1/jobs/{id}/cancel` | signed | queued work; see [`jobs_api`] |
+<<<<<<< HEAD
 //! | `/api/v1/experiments`, `/api/v1/runs`, `/api/v1/registry/*` | signed | workspace-scoped research registry |
+=======
+//! | `POST /api/v1/datasets/preview` | signed | parse a file's first rows with ingest settings; see [`datasets_api`] |
+//! | `POST /api/v1/uploads` | signed (streamed) | store a data file of up to 100 MiB; see [`uploads_api`] |
+//! | `POST /api/v1/datasets/ingest` | signed | queue an `ingest` job: upload → dataset version |
+//! | `GET/PATCH /api/v1/datasets/{id}`, `GET/DELETE /api/v1/datasets/versions/{id}`, `.../runs`, `.../bars` | signed | browse, rename, delete; chart data |
+>>>>>>> origin/main
 //!
 //! Every engine route is also served at its old `/api/...` path (the jobs
 //! routes are `/api/v1` only). Those
@@ -35,17 +42,22 @@
 //! Configuration is read once at startup: see [`config`].
 
 pub mod auth;
+pub mod backtests_api;
 pub mod config;
+pub mod datasets_api;
 pub mod engine;
 pub mod identity;
+pub mod ingest;
 pub mod jobs_api;
 pub mod observability;
 pub mod openapi;
 pub mod registry_api;
 pub mod telemetry;
+pub mod uploads_api;
 
+use std::collections::HashSet;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use axum::body::{Body, Bytes};
@@ -91,14 +103,34 @@ pub struct ApiConfig {
     pub cors_origins: Vec<String>,
     /// Verifies the proxy's request signatures.
     pub engine_secret: Secret,
+<<<<<<< HEAD
     /// Where run artifacts are read from; `None` makes artifact downloads 503.
     pub artifacts: Option<spectra_db::artifacts::ArtifactBackend>,
+=======
+    /// The worker's artifact store (local or S3), read for backtest chart
+    /// series and written by uploads. `None` answers those routes with 503.
+    pub artifacts: Option<spectra_db::artifacts::ArtifactBackend>,
+    /// Default storage quota per workspace, for uploads.
+    pub artifact_quota_bytes: i64,
+    /// Local dataset store to chart command-line versions from, if mounted.
+    pub data_dir: Option<std::path::PathBuf>,
+>>>>>>> origin/main
 }
 
 impl ApiConfig {
-    /// Default CORS origins (`http://localhost:3000`) and the given secret.
+    /// Default CORS origins (`http://localhost:3000`), the given secret, no artifact store.
     pub fn new(engine_secret: Secret) -> Self {
+<<<<<<< HEAD
         Self { cors_origins: vec!["http://localhost:3000".into()], engine_secret, artifacts: None }
+=======
+        Self {
+            cors_origins: vec!["http://localhost:3000".into()],
+            engine_secret,
+            artifacts: None,
+            artifact_quota_bytes: config::DEFAULT_ARTIFACT_QUOTA_BYTES,
+            data_dir: None,
+        }
+>>>>>>> origin/main
     }
 
     fn allows(&self, origin: &str) -> bool {
@@ -108,8 +140,19 @@ impl ApiConfig {
 
 impl From<&Config> for ApiConfig {
     fn from(c: &Config) -> Self {
+<<<<<<< HEAD
         // The artifact backend is opened by the binary (it can fail); see `config::artifact_backend`.
         Self { cors_origins: c.cors_origins.clone(), engine_secret: c.engine_secret.clone(), artifacts: None }
+=======
+        Self {
+            cors_origins: c.cors_origins.clone(),
+            engine_secret: c.engine_secret.clone(),
+            // Set by the caller once the backend is built (S3 setup can fail).
+            artifacts: None,
+            artifact_quota_bytes: c.artifact_quota_bytes,
+            data_dir: c.data_dir.clone(),
+        }
+>>>>>>> origin/main
     }
 }
 
@@ -122,7 +165,21 @@ struct AppState {
     cfg: Arc<ApiConfig>,
     compute: Arc<Semaphore>,
     db: Option<PgPool>,
+    /// (user, workspace) pairs this process has already mirrored; see [`mirror_identity`].
+    mirrored: Arc<Mutex<HashSet<MirrorKey>>>,
+    /// The last few datasets charted, decoded; see [`datasets_api::bars`].
+    charted: Arc<Mutex<Vec<ChartedDataset>>>,
 }
+
+/// A decoded dataset kept for charts, by its checksum.
+type ChartedDataset = (String, Arc<spectra_data::Dataset>);
+
+/// A signed caller as mirrored: (user id if it is a UUID, workspace id).
+type MirrorKey = (Option<Uuid>, Uuid);
+
+/// Largest number of mirrored (user, workspace) pairs remembered before the
+/// cache is cleared (a cleared pair costs one more idempotent insert).
+const MIRROR_CACHE_MAX: usize = 100_000;
 
 // ---------------------------------------------------------------------------
 // Responses and the error format
@@ -135,6 +192,8 @@ struct AppState {
 struct ErrorBody {
     code: &'static str,
     message: String,
+    /// Structured detail (for example every invalid field); rendered as `null` when absent.
+    details: Option<Json>,
 }
 
 /// The machine-readable `code` for a status.
@@ -164,7 +223,11 @@ fn json_response(status: u16, text: String) -> Response {
 
 fn error_response(status: u16, message: impl Into<String>) -> Response {
     let mut resp = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR).into_response();
-    resp.extensions_mut().insert(ErrorBody { code: error_code(status), message: message.into() });
+    resp.extensions_mut().insert(ErrorBody {
+        code: error_code(status),
+        message: message.into(),
+        details: None,
+    });
     resp
 }
 
@@ -172,7 +235,30 @@ fn error_response(status: u16, message: impl Into<String>) -> Response {
 /// example `no_workspace`).
 fn error_with_code(status: u16, code: &'static str, message: impl Into<String>) -> Response {
     let mut resp = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR).into_response();
-    resp.extensions_mut().insert(ErrorBody { code, message: message.into() });
+    resp.extensions_mut().insert(ErrorBody { code, message: message.into(), details: None });
+    resp
+}
+
+/// A 422 listing every invalid field at once:
+/// `details: {"errors": [{"field": "settings.columns.close", "message": "required"}, ...]}`.
+/// `message` joins them for people reading only that.
+fn invalid_fields(errors: &[(String, String)]) -> Response {
+    let mut list = Json::array();
+    let mut parts = Vec::with_capacity(errors.len());
+    for (field, message) in errors {
+        let _ = list.push(
+            Json::object()
+                .with("field", Json::string(field.clone()))
+                .with("message", Json::string(message.clone())),
+        );
+        parts.push(if field.is_empty() { message.clone() } else { format!("{field}: {message}") });
+    }
+    let mut resp = StatusCode::UNPROCESSABLE_ENTITY.into_response();
+    resp.extensions_mut().insert(ErrorBody {
+        code: error_code(422),
+        message: parts.join("; "),
+        details: Some(Json::object().with("errors", list)),
+    });
     resp
 }
 
@@ -181,7 +267,7 @@ fn render_error(resp: Response, err: ErrorBody, request_id: &str) -> Response {
     let body = Json::object()
         .with("code", Json::string(err.code))
         .with("message", Json::string(err.message.clone()))
-        .with("details", Json::Null)
+        .with("details", err.details.unwrap_or(Json::Null))
         .with("request_id", Json::string(request_id))
         // Deprecated: the old `{"detail"}` shape, kept while the /api/... aliases exist.
         .with("detail", Json::string(err.message));
@@ -234,8 +320,18 @@ async fn reject_oversized(req: Request, next: Next) -> Response {
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.trim().parse::<u64>().ok());
-    if declared.is_some_and(|n| n > MAX_BODY as u64) {
-        return error_response(413, "Request body exceeds the 12 MB limit.");
+    // Uploads stream and enforce their own, larger limit.
+    let limit =
+        if req.uri().path() == "/api/v1/uploads" { uploads_api::MAX_UPLOAD_BYTES } else { MAX_BODY as u64 };
+    if declared.is_some_and(|n| n > limit) {
+        return error_response(
+            413,
+            if limit == MAX_BODY as u64 {
+                "Request body exceeds the 12 MB limit."
+            } else {
+                "Uploads are limited to 100 MiB for now."
+            },
+        );
     }
     next.run(req).await
 }
@@ -320,11 +416,40 @@ async fn require_signature(State(st): State<AppState>, req: Request, next: Next)
     };
     match auth::verify(st.cfg.engine_secret.expose(), &signed, now_secs()) {
         Ok(identity) => {
+            mirror_identity(&st, &identity).await;
             let mut req = Request::from_parts(parts, Body::from(bytes));
             req.extensions_mut().insert(identity);
             next.run(req).await
         }
         Err(reason) => error_response(401, reason),
+    }
+}
+
+/// Makes sure the engine's `users` and `workspaces` tables hold the signed
+/// caller (M1 task 1): the frontend owns accounts and workspaces in its own
+/// database, and every engine table references the engine's copies. Runs once
+/// per (user, workspace) pair per process. A user header that is not a UUID
+/// (an API token with no user) mirrors only the workspace, matching the
+/// `created_by: None` such callers get.
+///
+/// A database error is logged and the request goes on: routes that need the
+/// database report their own error, and the others don't need the rows.
+async fn mirror_identity(st: &AppState, identity: &Identity) {
+    let (Some(pool), Some(workspace)) = (&st.db, identity.workspace) else { return };
+    let key = (Uuid::parse_str(&identity.user).ok(), workspace);
+    if st.mirrored.lock().is_ok_and(|seen| seen.contains(&key)) {
+        return;
+    }
+    match spectra_db::identity::ensure_identity(pool, key.0, key.1).await {
+        Ok(()) => {
+            if let Ok(mut seen) = st.mirrored.lock() {
+                if seen.len() >= MIRROR_CACHE_MAX {
+                    seen.clear();
+                }
+                seen.insert(key);
+            }
+        }
+        Err(error) => tracing::warn!(%error, %workspace, "could not mirror the signed identity"),
     }
 }
 
@@ -361,6 +486,22 @@ async fn compute(st: &AppState, work: impl FnOnce() -> Reply + Send + 'static) -
     .await;
     match joined {
         Ok(reply) => respond(reply),
+        Err(_) => error_response(500, "The engine failed while handling this request."),
+    }
+}
+
+/// Like [`compute`], for work that builds its own response (success or error).
+async fn compute_with(st: &AppState, work: impl FnOnce() -> Response + Send + 'static) -> Response {
+    let Ok(permit) = Arc::clone(&st.compute).try_acquire_owned() else {
+        return error_response(503, "Server busy; try again.");
+    };
+    let joined = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await;
+    match joined {
+        Ok(resp) => resp,
         Err(_) => error_response(500, "The engine failed while handling this request."),
     }
 }
@@ -544,6 +685,7 @@ fn job_routes() -> Router<AppState> {
         .route("/api/v1/jobs/{id}/cancel", only(post(jobs_api::cancel_job)))
 }
 
+<<<<<<< HEAD
 fn registry_routes() -> Router<AppState> {
     Router::new()
         .route(
@@ -560,18 +702,63 @@ fn registry_routes() -> Router<AppState> {
         .route("/api/v1/registry/verify", only(get(registry_api::verify)))
         .route("/api/v1/registry/export", only(get(registry_api::export_jsonl)))
         .route("/api/v1/registry/import", only(post(registry_api::import_jsonl)))
+=======
+/// Backtests (jobs of kind `backtest`) and the built-in strategy list (`/api/v1` only).
+fn backtest_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/v1/backtests",
+            only(get(backtests_api::list_backtests).post(backtests_api::create_backtest)),
+        )
+        .route("/api/v1/backtests/{id}", only(get(backtests_api::get_backtest)))
+        .route("/api/v1/backtests/{id}/cancel", only(post(backtests_api::cancel_backtest)))
+        .route("/api/v1/backtests/{id}/series", only(get(backtests_api::backtest_series)))
+        .route("/api/v1/backtests/{id}/artifacts/{kind}", only(get(backtests_api::backtest_artifact)))
+        .route("/api/v1/datasets", only(get(backtests_api::list_datasets)))
+        .route("/api/v1/datasets/preview", only(post(datasets_api::preview)))
+        .route("/api/v1/datasets/ingest", only(post(datasets_api::ingest)))
+        .route(
+            "/api/v1/datasets/{id}",
+            only(get(datasets_api::get_dataset).patch(datasets_api::update_dataset)),
+        )
+        .route(
+            "/api/v1/datasets/versions/{id}",
+            only(get(datasets_api::get_version).delete(datasets_api::delete_version)),
+        )
+        .route("/api/v1/datasets/versions/{id}/runs", only(get(datasets_api::version_runs)))
+        .route("/api/v1/datasets/versions/{id}/bars", only(get(datasets_api::bars)))
+        .route("/api/v1/calendars", only(get(datasets_api::list_calendars)))
+        .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
+}
+
+/// The upload route. Outside [`require_signature`], which holds the whole
+/// body: this one checks the signature against a declared hash and streams.
+fn upload_routes() -> Router<AppState> {
+    Router::new().route("/api/v1/uploads", only(post(uploads_api::upload)))
+>>>>>>> origin/main
 }
 
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
-    let st = AppState { cfg: Arc::new(cfg), compute: Arc::new(Semaphore::new(MAX_CONCURRENT_COMPUTE)), db };
+    let st = AppState {
+        cfg: Arc::new(cfg),
+        compute: Arc::new(Semaphore::new(MAX_CONCURRENT_COMPUTE)),
+        db,
+        mirrored: Arc::new(Mutex::new(HashSet::new())),
+        charted: Arc::new(Mutex::new(Vec::new())),
+    };
     let signed = engine_routes("/api/v1")
         .merge(engine_routes("/api"))
         .merge(job_routes())
+<<<<<<< HEAD
         .merge(registry_routes())
+=======
+        .merge(backtest_routes())
+>>>>>>> origin/main
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
+        .merge(upload_routes())
         .route("/", only(get(root)))
         .route("/health", only(get(health)))
         .route("/ready", only(get(ready)))

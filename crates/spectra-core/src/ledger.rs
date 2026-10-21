@@ -136,6 +136,12 @@ pub enum EntryType {
     Withdrawal,
     /// An executed trade.
     Fill,
+    /// Interest on cash (`amount` > 0, earned) or on a margin debit
+    /// (`amount` < 0, paid). Only written when financing is configured.
+    Interest,
+    /// Borrow fee on a short position (`amount` > 0, paid; `fill.instrument`
+    /// names the instrument). Only written when financing is configured.
+    BorrowFee,
 }
 
 /// One accepted operation.
@@ -147,7 +153,7 @@ pub struct JournalEntry {
     pub kind: EntryType,
     /// Event time, nanoseconds.
     pub ts_ns: i64,
-    /// Deposits and withdrawals: the amount.
+    /// Deposits, withdrawals and financing entries: the amount (see [`EntryType`] for signs).
     pub amount: Money,
     /// Fills: the fill.
     pub fill: Fill,
@@ -185,6 +191,15 @@ impl LedgerConfig {
     }
 }
 
+/// A fill that passed every check, ready to commit.
+struct PreparedFill {
+    position: Position,
+    cash: Money,
+    realized: Money,
+    realized_total: Money,
+    fees_total: Money,
+}
+
 /// The accounting ledger. See the module documentation.
 #[derive(Debug, Clone, Default)]
 pub struct Ledger {
@@ -193,6 +208,8 @@ pub struct Ledger {
     net_deposits: Money,
     realized: Money,
     fees: Money,
+    /// Net financing: interest earned minus interest and borrow fees paid.
+    financing: Money,
     positions: BTreeMap<InstrumentId, Position>,
     marks: BTreeMap<InstrumentId, Price>,
     journal: Vec<JournalEntry>,
@@ -253,12 +270,83 @@ impl Ledger {
         });
     }
 
+    /// Post interest: `amount` > 0 credits cash (interest earned), `amount` < 0
+    /// debits it (interest on a margin debit). A financing charge is a debt, not
+    /// a choice, so it posts even when it takes cash below zero.
+    ///
+    /// # Errors
+    /// `InvalidAmount` if `amount` is zero; overflow.
+    pub fn apply_interest(&mut self, amount: Money, ts_ns: i64) -> Result<()> {
+        if amount.is_zero() {
+            return Err(Reject::InvalidAmount.into());
+        }
+        let new_cash = self.cash.checked_add(amount)?;
+        let new_fin = self.financing.checked_add(amount)?;
+        self.push_cash_entry(EntryType::Interest, amount, ts_ns, new_cash);
+        self.cash = new_cash;
+        self.financing = new_fin;
+        Ok(())
+    }
+
+    /// Charge a borrow fee of `amount` (> 0) for a short position in
+    /// `instrument`. Posts even when it takes cash below zero (see
+    /// [`Self::apply_interest`]).
+    ///
+    /// # Errors
+    /// `InvalidAmount` if `amount <= 0`; overflow.
+    pub fn charge_borrow_fee(&mut self, instrument: InstrumentId, amount: Money, ts_ns: i64) -> Result<()> {
+        if amount.raw() <= 0 {
+            return Err(Reject::InvalidAmount.into());
+        }
+        let new_cash = self.cash.checked_sub(amount)?;
+        let new_fin = self.financing.checked_sub(amount)?;
+        self.journal.push(JournalEntry {
+            seq: self.journal.len() as u64,
+            kind: EntryType::BorrowFee,
+            ts_ns,
+            amount,
+            fill: Fill { instrument, ts_ns, ..Fill::default() },
+            realized: Money::ZERO,
+            cash_after: new_cash,
+        });
+        self.cash = new_cash;
+        self.financing = new_fin;
+        Ok(())
+    }
+
     /// Apply an executed fill. Nothing changes unless it returns `Ok`.
     ///
     /// # Errors
     /// `InvalidFill`, `InsufficientCash`, `ShortNotAllowed`,
     /// `LeverageExceeded`, or overflow.
     pub fn apply_fill(&mut self, f: &Fill) -> Result<()> {
+        let p = self.prepare_fill(f)?;
+        self.journal.push(JournalEntry {
+            seq: self.journal.len() as u64,
+            kind: EntryType::Fill,
+            ts_ns: f.ts_ns,
+            amount: Money::ZERO,
+            fill: *f,
+            realized: p.realized,
+            cash_after: p.cash,
+        });
+        self.positions.insert(f.instrument, p.position);
+        self.cash = p.cash;
+        self.realized = p.realized_total;
+        self.fees = p.fees_total;
+        Ok(())
+    }
+
+    /// Whether [`Self::apply_fill`] would accept `f`, without changing anything.
+    ///
+    /// # Errors
+    /// The error `apply_fill` would return.
+    pub fn check_fill(&self, f: &Fill) -> Result<()> {
+        self.prepare_fill(f).map(|_| ())
+    }
+
+    /// Every check and computation of a fill; the caller commits the result.
+    fn prepare_fill(&self, f: &Fill) -> Result<PreparedFill> {
         if f.qty.raw() <= 0 || f.price.raw() <= 0 || f.fee.raw() < 0 {
             return Err(Reject::InvalidFill.into());
         }
@@ -324,21 +412,13 @@ impl Ledger {
         let new_realized_total = self.realized.checked_add(realized)?;
         let new_fees_total = self.fees.checked_add(f.fee)?;
 
-        // Everything fallible has run; commit.
-        self.journal.push(JournalEntry {
-            seq: self.journal.len() as u64,
-            kind: EntryType::Fill,
-            ts_ns: f.ts_ns,
-            amount: Money::ZERO,
-            fill: *f,
+        Ok(PreparedFill {
+            position: next,
+            cash: new_cash,
             realized,
-            cash_after: new_cash,
-        });
-        self.positions.insert(f.instrument, next);
-        self.cash = new_cash;
-        self.realized = new_realized_total;
-        self.fees = new_fees_total;
-        Ok(())
+            realized_total: new_realized_total,
+            fees_total: new_fees_total,
+        })
     }
 
     /// Post-trade gross exposure must not exceed `limit` times post-trade
@@ -403,6 +483,10 @@ impl Ledger {
     pub fn total_fees(&self) -> Money {
         self.fees
     }
+    /// Net financing: interest earned minus interest and borrow fees paid.
+    pub fn financing(&self) -> Money {
+        self.financing
+    }
     /// The policy this ledger enforces.
     pub fn config(&self) -> &LedgerConfig {
         &self.cfg
@@ -466,6 +550,8 @@ impl Ledger {
                 EntryType::Deposit => out.deposit(e.amount, e.ts_ns),
                 EntryType::Withdrawal => out.withdraw(e.amount, e.ts_ns),
                 EntryType::Fill => out.apply_fill(&e.fill),
+                EntryType::Interest => out.apply_interest(e.amount, e.ts_ns),
+                EntryType::BorrowFee => out.charge_borrow_fee(e.fill.instrument, e.amount, e.ts_ns),
             };
             if let Err(err) = r {
                 return Err(format!("replay: journal entry {} rejected: {err}", e.seq));
@@ -518,6 +604,14 @@ impl Ledger {
                     let q = t.qty.entry(f.instrument).or_default();
                     *q = q.checked_add(if buy { f.qty } else { f.qty.checked_neg()? })?;
                 }
+                EntryType::Interest => {
+                    t.cash = t.cash.checked_add(e.amount)?;
+                    t.financing = t.financing.checked_add(e.amount)?;
+                }
+                EntryType::BorrowFee => {
+                    t.cash = t.cash.checked_sub(e.amount)?;
+                    t.financing = t.financing.checked_sub(e.amount)?;
+                }
             }
             if e.cash_after != t.cash {
                 return Err(fail(format!("cash_after mismatch at seq {}", e.seq)));
@@ -530,7 +624,7 @@ impl Ledger {
         use InvariantFailure::Violated as fail;
 
         // 1. Independent recomputation from the journal alone.
-        let JournalTotals { cash, net, fees, realized, qty } = self.journal_totals()?;
+        let JournalTotals { cash, net, fees, realized, financing, qty } = self.journal_totals()?;
         if cash != self.cash {
             return Err(fail(format!("cash {} != journal {cash}", self.cash)));
         }
@@ -542,6 +636,9 @@ impl Ledger {
         }
         if realized != self.realized {
             return Err(fail("realized P&L differs from journal".into()));
+        }
+        if financing != self.financing {
+            return Err(fail("financing differs from journal".into()));
         }
 
         // 2. Quantities from the journal match the positions.
@@ -574,8 +671,12 @@ impl Ledger {
                 return Err(fail(format!("short position while shorting is disabled, instrument {id}")));
             }
         }
-        let expected_cash =
-            self.net_deposits.checked_sub(self.fees)?.checked_sub(total_cost)?.checked_add(self.realized)?;
+        let expected_cash = self
+            .net_deposits
+            .checked_sub(self.fees)?
+            .checked_sub(total_cost)?
+            .checked_add(self.realized)?
+            .checked_add(self.financing)?;
         if self.cash != expected_cash {
             return Err(fail("cash does not reconcile with cost basis and realized P&L".into()));
         }
@@ -585,16 +686,18 @@ impl Ledger {
         if pos_fees != self.fees {
             return Err(fail("per-position fees != total".into()));
         }
-        if !self.cfg.allow_negative_cash && self.cash.raw() < 0 {
+        // Financing charges post even past zero cash; nothing else may.
+        if !self.cfg.allow_negative_cash && self.cash.raw() < 0 && self.financing.raw() >= 0 {
             return Err(fail("negative cash while disabled".into()));
         }
 
-        // 4. equity = net deposits - fees + realized + unrealized.
+        // 4. equity = net deposits - fees + realized + unrealized + financing.
         let identity = self
             .net_deposits
             .checked_sub(self.fees)?
             .checked_add(self.realized)?
-            .checked_add(self.unrealized_pnl()?)?;
+            .checked_add(self.unrealized_pnl()?)?
+            .checked_add(self.financing)?;
         if self.equity()? != identity {
             return Err(fail("equity identity violated".into()));
         }
@@ -608,6 +711,7 @@ impl Ledger {
             || r.net_deposits != self.net_deposits
             || r.realized != self.realized
             || r.fees != self.fees
+            || r.financing != self.financing
         {
             return Err(fail("replayed totals differ".into()));
         }
@@ -624,6 +728,7 @@ struct JournalTotals {
     net: Money,
     fees: Money,
     realized: Money,
+    financing: Money,
     qty: BTreeMap<InstrumentId, Qty>,
 }
 

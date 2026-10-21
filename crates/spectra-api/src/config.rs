@@ -44,6 +44,9 @@ impl fmt::Debug for Secret {
     }
 }
 
+/// Storage per workspace when it has no quota of its own (1 GiB).
+pub const DEFAULT_ARTIFACT_QUOTA_BYTES: i64 = 1 << 30;
+
 /// Everything `spectra-api` reads from the environment.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -60,8 +63,21 @@ pub struct Config {
     pub migrate_on_start: bool,
     /// Shared with the Next.js proxy; signs the identity headers.
     pub engine_secret: Secret,
+<<<<<<< HEAD
     /// Where run artifacts are read from (the worker's `ARTIFACT_*` settings).
     pub artifact_storage: ArtifactStorage,
+=======
+    /// Where the worker stores artifacts (the same `ARTIFACT_STORAGE` settings);
+    /// read for backtest chart series, and written by uploads.
+    pub artifact_storage: ArtifactStorage,
+    /// Default storage quota per workspace (`SPECTRA_ARTIFACT_QUOTA_BYTES`,
+    /// the worker's setting), applied to uploads.
+    pub artifact_quota_bytes: i64,
+    /// Optional local dataset store (`SPECTRA_DATA_DIR`), read to chart
+    /// versions registered from the command line (the others are read from
+    /// the artifact store).
+    pub data_dir: Option<std::path::PathBuf>,
+>>>>>>> origin/main
 }
 
 /// Everything wrong with the environment, one line per problem.
@@ -164,8 +180,20 @@ impl Config {
             }
         };
 
+<<<<<<< HEAD
         let artifact_storage = parse_artifact_storage(&val, &mut problems);
 
+=======
+        let artifact_storage = read_artifact_storage(&val, &mut problems);
+        let artifact_quota_bytes = match val("SPECTRA_ARTIFACT_QUOTA_BYTES").map(|v| v.parse::<i64>()) {
+            None => DEFAULT_ARTIFACT_QUOTA_BYTES,
+            Some(Ok(n)) if n >= 0 => n,
+            Some(_) => {
+                problems.push("SPECTRA_ARTIFACT_QUOTA_BYTES must be a whole number of bytes".into());
+                DEFAULT_ARTIFACT_QUOTA_BYTES
+            }
+        };
+>>>>>>> origin/main
         if problems.is_empty() {
             Ok(Self {
                 addr,
@@ -175,6 +203,11 @@ impl Config {
                 migrate_on_start,
                 engine_secret,
                 artifact_storage,
+<<<<<<< HEAD
+=======
+                artifact_quota_bytes,
+                data_dir: val("SPECTRA_DATA_DIR").map(Into::into),
+>>>>>>> origin/main
             })
         } else {
             Err(ConfigError(problems))
@@ -182,11 +215,19 @@ impl Config {
     }
 }
 
+<<<<<<< HEAD
 /// `ARTIFACT_STORAGE`, `ARTIFACT_DIR`, `ARTIFACT_S3_BUCKET` and
 /// `ARTIFACT_S3_PREFIX`, shared by the API (which reads artifacts) and the
 /// worker (which writes them).
 fn parse_artifact_storage(
     val: &impl Fn(&str) -> Option<String>,
+=======
+/// `ARTIFACT_STORAGE` with `ARTIFACT_DIR` or `ARTIFACT_S3_BUCKET` and
+/// `ARTIFACT_S3_PREFIX`, shared by the worker (which writes) and the API
+/// (which reads chart series).
+fn read_artifact_storage(
+    val: &dyn Fn(&str) -> Option<String>,
+>>>>>>> origin/main
     problems: &mut Vec<String>,
 ) -> ArtifactStorage {
     let artifact_dir = val("ARTIFACT_DIR").map_or_else(|| std::path::PathBuf::from("artifacts"), Into::into);
@@ -207,7 +248,33 @@ fn parse_artifact_storage(
     }
 }
 
+<<<<<<< HEAD
 /// Where the worker stores artifacts and the API reads them.
+=======
+/// The artifact backend for `storage`.
+///
+/// # Errors
+/// An S3 bucket that cannot be configured, or `s3` asked of a build without
+/// the `s3` feature.
+pub fn artifact_backend(storage: &ArtifactStorage) -> Result<spectra_db::artifacts::ArtifactBackend, String> {
+    use spectra_db::artifacts::{ArtifactBackend, ArtifactStore};
+    match storage {
+        ArtifactStorage::Local(dir) => Ok(ArtifactBackend::Local(ArtifactStore::new(dir))),
+        #[cfg(feature = "s3")]
+        ArtifactStorage::S3 { bucket, prefix } => {
+            spectra_db::artifacts::s3::S3ArtifactStore::from_env(bucket, prefix)
+                .map(ArtifactBackend::S3)
+                .map_err(|e| format!("cannot use artifact bucket {bucket}: {e}"))
+        }
+        #[cfg(not(feature = "s3"))]
+        ArtifactStorage::S3 { .. } => Err("ARTIFACT_STORAGE=s3, but this build lacks the `s3` feature \
+                                           (cargo build --features s3)"
+            .into()),
+    }
+}
+
+/// Where the worker stores artifacts.
+>>>>>>> origin/main
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactStorage {
     /// `ARTIFACT_STORAGE=local` (the default): the `ARTIFACT_DIR` directory.
@@ -241,6 +308,12 @@ pub struct WorkerConfig {
     pub kinds: Vec<String>,
     /// Default artifact quota per workspace.
     pub artifact_quota_bytes: i64,
+    /// Root of the content-addressed dataset store that backtests read (`SPECTRA_DATA_DIR`).
+    pub data_dir: std::path::PathBuf,
+    /// Most bars one backtest may load (`SPECTRA_BACKTEST_MAX_BARS`).
+    pub backtest_max_bars: usize,
+    /// Most instruments one backtest may trade (`SPECTRA_BACKTEST_MAX_INSTRUMENTS`).
+    pub backtest_max_instruments: usize,
 }
 
 impl WorkerConfig {
@@ -275,8 +348,12 @@ impl WorkerConfig {
         };
         let concurrency = number("SPECTRA_WORKER_CONCURRENCY", 2, 1..=64) as usize;
         let workspace_max_running = number("SPECTRA_WORKSPACE_MAX_RUNNING", 2, 1..=1000);
-        let artifact_quota_bytes = number("SPECTRA_ARTIFACT_QUOTA_BYTES", 1 << 30, 0..=i64::MAX);
-        let all: Vec<String> = crate::engine::JOB_KINDS.iter().map(|kind| (*kind).to_string()).collect();
+        let artifact_quota_bytes =
+            number("SPECTRA_ARTIFACT_QUOTA_BYTES", DEFAULT_ARTIFACT_QUOTA_BYTES, 0..=i64::MAX);
+        let backtest_max_bars = number("SPECTRA_BACKTEST_MAX_BARS", 20_000_000, 1..=1_000_000_000) as usize;
+        let backtest_max_instruments =
+            number("SPECTRA_BACKTEST_MAX_INSTRUMENTS", 1000, 1..=1_000_000) as usize;
+        let all: Vec<String> = crate::engine::WORKER_KINDS.iter().map(|kind| (*kind).to_string()).collect();
         let kinds = match val("SPECTRA_WORKER_KINDS") {
             None => all,
             Some(value) => {
@@ -301,7 +378,11 @@ impl WorkerConfig {
                 Secret::new("")
             }
         };
+<<<<<<< HEAD
         let artifact_storage = parse_artifact_storage(&val, &mut problems);
+=======
+        let artifact_storage = read_artifact_storage(&val, &mut problems);
+>>>>>>> origin/main
         let metrics_addr = val("SPECTRA_WORKER_METRICS_ADDR").and_then(|v| {
             let addr = v.parse::<SocketAddr>().ok();
             if addr.is_none() {
@@ -309,6 +390,7 @@ impl WorkerConfig {
             }
             addr
         });
+        let data_dir = val("SPECTRA_DATA_DIR").map_or_else(|| std::path::PathBuf::from("data"), Into::into);
         if problems.is_empty() {
             Ok(Self {
                 database_url,
@@ -318,6 +400,9 @@ impl WorkerConfig {
                 workspace_max_running,
                 kinds,
                 artifact_quota_bytes,
+                data_dir,
+                backtest_max_bars,
+                backtest_max_instruments,
             })
         } else {
             Err(ConfigError(problems))
@@ -429,5 +514,29 @@ mod tests {
         .unwrap();
         let shown = format!("{c:?}");
         assert!(!shown.contains("hunter2") && !shown.contains(SECRET), "{shown}");
+    }
+
+    #[test]
+    fn worker_config_reads_backtest_settings() {
+        let db = ("DATABASE_URL", "postgres://u:p@localhost/db");
+        let w = WorkerConfig::from_lookup(lookup(&[db])).unwrap();
+        assert_eq!(w.data_dir, std::path::PathBuf::from("data"));
+        assert_eq!((w.backtest_max_bars, w.backtest_max_instruments), (20_000_000, 1000));
+        assert!(w.kinds.iter().any(|k| k == "backtest"));
+
+        let w = WorkerConfig::from_lookup(lookup(&[
+            db,
+            ("SPECTRA_DATA_DIR", "/var/lib/spectra/datasets"),
+            ("SPECTRA_BACKTEST_MAX_BARS", "5000"),
+            ("SPECTRA_BACKTEST_MAX_INSTRUMENTS", "3"),
+            ("SPECTRA_WORKER_KINDS", "backtest"),
+        ]))
+        .unwrap();
+        assert_eq!(w.data_dir, std::path::PathBuf::from("/var/lib/spectra/datasets"));
+        assert_eq!((w.backtest_max_bars, w.backtest_max_instruments), (5000, 3));
+        assert_eq!(w.kinds, ["backtest"]);
+
+        let err = WorkerConfig::from_lookup(lookup(&[db, ("SPECTRA_BACKTEST_MAX_BARS", "0")])).unwrap_err();
+        assert!(err.to_string().contains("SPECTRA_BACKTEST_MAX_BARS"), "{err}");
     }
 }

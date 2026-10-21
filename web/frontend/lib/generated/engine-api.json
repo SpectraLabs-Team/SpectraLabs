@@ -10,6 +10,314 @@
     "version": "1"
   },
   "paths": {
+    "/api/v1/backtests": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "The workspace's backtests, newest first, with headline numbers once finished.",
+        "operationId": "list_backtests",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "queued, running, succeeded, failed or cancelled",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "next_cursor from the previous page",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1..200, default 50",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Queue a backtest.",
+        "operationId": "create_backtest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBacktest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The account has no workspace (code `no_workspace`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the strategy, params, config or dataset version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{id}": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "One backtest: status and progress, then the summary and fingerprints.",
+        "operationId": "get_backtest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest (job) id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{id}/artifacts/{kind}": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "A stored file of a finished backtest, as stored (CSV or JSON), with a\ndownload file name. `kind` is one of `summary`, `request`, `equity_csv`,\n`orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`.",
+        "operationId": "backtest_artifact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest (job) id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "summary, request, equity_csv, orders_csv, fills_csv, returns_csv or strategies_csv",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file"
+          },
+          "404": {
+            "description": "No such backtest, kind or file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The backtest has not succeeded (yet)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{id}/cancel": {
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Cancel a backtest: a queued one stops at once, a running one at its next\nbar group (the worker checks within a few seconds).",
+        "operationId": "cancel_backtest",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest (job) id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{id}/series": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "A finished backtest's equity or drawdown series, downsampled for charts:\n`{kind, total_points, downsampled, points: [[ts_ns, value], ...]}`.",
+        "operationId": "backtest_series",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest (job) id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "equity (default) or drawdown",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The series"
+          },
+          "404": {
+            "description": "No such backtest, or no such series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The backtest has not succeeded (yet)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/benchmark": {
       "post": {
         "tags": [
@@ -44,6 +352,7 @@
         }
       }
     },
+<<<<<<< HEAD
     "/api/v1/experiments": {
       "get": {
         "tags": [
@@ -77,6 +386,27 @@
           },
           "422": {
             "description": "Invalid request",
+=======
+    "/api/v1/calendars": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "`GET /api/v1/calendars` (M1 task 10): lists supported exchange calendars and timezones.",
+        "operationId": "list_calendars",
+        "responses": {
+          "200": {
+            "description": "Supported exchange calendars and timezones.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid signature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -84,6 +414,53 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "The dataset versions of the caller's workspace, newest first (for the\nbacktest form); with `?view=grouped`, also one entry per dataset.",
+        "operationId": "list_datasets",
+        "parameters": [
+          {
+            "name": "view",
+            "in": "path",
+            "description": "`grouped` adds `datasets` (one entry per dataset). Without it the\nresponse is exactly the version list the backtest form reads.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Unknown view",
+>>>>>>> origin/main
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+<<<<<<< HEAD
           }
         }
       }
@@ -110,6 +487,11 @@
           },
           "404": {
             "description": "Not found",
+=======
+          },
+          "503": {
+            "description": "",
+>>>>>>> origin/main
             "content": {
               "application/json": {
                 "schema": {
@@ -121,6 +503,7 @@
         }
       }
     },
+<<<<<<< HEAD
     "/api/v1/experiments/{id}/lineage": {
       "get": {
         "tags": [
@@ -160,11 +543,24 @@
             }
           }
         ],
+=======
+    "/api/v1/datasets/ingest": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Turn an upload into a dataset version (queues an `ingest` job).",
+        "operationId": "ingest",
+>>>>>>> origin/main
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
+<<<<<<< HEAD
                 "$ref": "#/components/schemas/CreateBacktest"
+=======
+                "$ref": "#/components/schemas/IngestRequest"
+>>>>>>> origin/main
               }
             }
           },
@@ -172,10 +568,438 @@
         },
         "responses": {
           "202": {
+<<<<<<< HEAD
             "description": "Backtest queued"
           },
           "422": {
             "description": "Invalid dataset or request",
+=======
+            "description": "Queued: follow it with GET /api/v1/jobs/{id}. A rejected file ends as a failed job whose result holds the quality report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the upload, name and settings (`details.errors`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/preview": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Preview a file with ingest settings, or get suggested settings.",
+        "operationId": "preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Suggestions, and the parsed sample when settings were sent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The sample is over 1 MB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid settings (`details.errors` lists every field), or the file does not match them (a missing column)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/versions/{id}": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "One dataset version: metadata, symbols, date range and the full quality report.",
+        "operationId": "get_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Delete a dataset version that no run uses.",
+        "operationId": "delete_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedVersionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A run or a queued backtest uses it (code `in_use`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/versions/{id}/bars": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "A symbol's bars, reduced to at most `points` points, for a price chart.",
+        "operationId": "bars",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "path",
+            "description": "Symbol; default: the version's first.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "path",
+            "description": "From (inclusive), RFC 3339 or a date (`2024-01-02`).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "to",
+            "in": "path",
+            "description": "To (inclusive), RFC 3339 or a date.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "points",
+            "in": "path",
+            "description": "Most points to return, 10 to 5000 (default 1000).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BarsView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bars not reachable (code `not_chartable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every invalid parameter (`details.errors`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/versions/{id}/runs": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Runs that used a dataset version, newest first.",
+        "operationId": "version_runs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionRunList"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{id}": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "A dataset and its version history.",
+        "operationId": "get_dataset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Rename a dataset or change its description.",
+        "operationId": "update_dataset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDataset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another dataset has that name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every invalid field (`details.errors`)",
+>>>>>>> origin/main
             "content": {
               "application/json": {
                 "schema": {
@@ -771,6 +1595,20 @@
         }
       }
     },
+    "/api/v1/strategies/builtin": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Built-in strategies with their parameter schemas, the configuration form's\nJSON Schema, and the configuration presets: everything the Studio needs to\nbuild the backtest form.",
+        "operationId": "builtin_strategies",
+        "responses": {
+          "200": {
+            "description": "{strategies, config_schema, presets}"
+          }
+        }
+      }
+    },
     "/api/v1/stress": {
       "post": {
         "tags": [
@@ -794,6 +1632,97 @@
           },
           "422": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/uploads": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Upload a data file (raw bytes; at most 100 MiB).",
+        "operationId": "upload",
+        "parameters": [
+          {
+            "name": "filename",
+            "in": "path",
+            "description": "The file's name as the person chose it (for display; at most 255 characters kept).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The file's bytes. Send X-Spectra-Content-SHA256 (signed) and Content-Length.",
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body does not match its declared SHA-256 or length",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Bad signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "411": {
+            "description": "No Content-Length",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Over 100 MiB, or the workspace's storage quota (code `quota_exceeded`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -839,6 +1768,269 @@
   },
   "components": {
     "schemas": {
+      "BacktestListItem": {
+        "type": "object",
+        "description": "One backtest in a list: what was asked for, its state and headline numbers.",
+        "required": [
+          "id",
+          "status",
+          "progress",
+          "cancel_requested",
+          "request",
+          "created_at"
+        ],
+        "properties": {
+          "cancel_requested": {
+            "type": "boolean",
+            "description": "A cancel was asked for while it ran."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Queued at (UTC, RFC 3339)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Finished at."
+          },
+          "headline": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "`{total_return, sharpe, max_drawdown, final_equity, fill_count}`, once finished."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The job id (UUIDv7)."
+          },
+          "progress": {
+            "type": "number",
+            "format": "float",
+            "description": "0..1."
+          },
+          "request": {
+            "type": "object",
+            "description": "What was asked for: dataset version, strategy or strategies, params, config."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The recorded run, once finished."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`."
+          }
+        }
+      },
+      "BacktestPage": {
+        "type": "object",
+        "description": "A page of backtests, newest first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BacktestListItem"
+            },
+            "description": "This page."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Pass as `cursor` for the next page; null on the last."
+          }
+        }
+      },
+      "BacktestView": {
+        "type": "object",
+        "description": "A backtest as the API shows it.",
+        "required": [
+          "id",
+          "status",
+          "progress",
+          "cancel_requested",
+          "request",
+          "created_at"
+        ],
+        "properties": {
+          "artifacts": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Stored files `[{kind, file_name, content_type, sha256, size}]`, once finished."
+          },
+          "cancel_requested": {
+            "type": "boolean",
+            "description": "A cancel was asked for while it ran."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Queued at (UTC, RFC 3339)."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed (or the latest retryable error)."
+          },
+          "fingerprints": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Engine, dataset, config, result and strategy hashes, once finished."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Finished at."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The job id (UUIDv7); use it for every `/backtests/{id}` route."
+          },
+          "progress": {
+            "type": "number",
+            "format": "float",
+            "description": "0..1, updated with every worker heartbeat while it runs."
+          },
+          "request": {
+            "type": "object",
+            "description": "What was asked for: dataset version, strategy, params, config."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The recorded run, once finished."
+          },
+          "started_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Latest attempt started at."
+          },
+          "status": {
+            "type": "string",
+            "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`."
+          },
+          "summary": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Metrics, drawdown, tail, activity and trade statistics, once finished."
+          }
+        }
+      },
+      "BarPoint": {
+        "type": "object",
+        "description": "One chart point. Prices are decimal numbers (for drawing only).",
+        "required": [
+          "t",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "properties": {
+          "close": {
+            "type": "number",
+            "format": "double"
+          },
+          "high": {
+            "type": "number",
+            "format": "double"
+          },
+          "low": {
+            "type": "number",
+            "format": "double"
+          },
+          "open": {
+            "type": "number",
+            "format": "double"
+          },
+          "t": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Milliseconds since the epoch, UTC."
+          },
+          "volume": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "BarsView": {
+        "type": "object",
+        "description": "A symbol's bars for a chart.",
+        "required": [
+          "symbol",
+          "symbols",
+          "total_bars",
+          "points"
+        ],
+        "properties": {
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BarPoint"
+            },
+            "description": "At most `points` points; each groups consecutive bars (first open,\nhighest high, lowest low, last close, summed volume)."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "The symbol charted."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every symbol in the version."
+          },
+          "total_bars": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars in the range, before reducing them to points.",
+            "minimum": 0
+          }
+        }
+      },
       "BenchmarkRequest": {
         "type": "object",
         "description": "`POST /api/v1/benchmark` body (also the `benchmark` job payload).",
@@ -879,6 +2071,7 @@
           }
         }
       },
+<<<<<<< HEAD
       "CreateBacktest": {
         "type": "object",
         "required": [
@@ -905,10 +2098,92 @@
           "note": {
             "type": "string",
             "description": "Optional note recorded with the run."
+=======
+      "CalendarView": {
+        "type": "object",
+        "description": "An exchange calendar supported by the platform.",
+        "required": [
+          "code",
+          "name",
+          "timezone",
+          "sessions"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "MIC or short code (e.g. `XNYS`)."
+          },
+          "name": {
+            "type": "string",
+            "description": "Exchange name."
+          },
+          "sessions": {
+            "type": "string",
+            "description": "Regular session hours."
+          },
+          "timezone": {
+            "type": "string",
+            "description": "Primary operating timezone."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CalendarsResponse": {
+        "type": "object",
+        "description": "Supported calendars and timezones.",
+        "required": [
+          "calendars",
+          "timezones"
+        ],
+        "properties": {
+          "calendars": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CalendarView"
+            },
+            "description": "Supported exchanges."
+          },
+          "timezones": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Common IANA timezones."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateBacktest": {
+        "type": "object",
+        "description": "`POST /api/v1/backtests` body: the `backtest` job payload, plus a priority.",
+        "required": [
+          "dataset_version_id"
+        ],
+        "properties": {
+          "config": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...)."
+          },
+          "dataset_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A dataset version of the caller's workspace."
+          },
+          "params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Strategy parameters; missing ones take their defaults."
+>>>>>>> origin/main
           },
           "priority": {
             "type": "integer",
             "format": "int32",
+<<<<<<< HEAD
             "description": "Job priority, -10 through 10."
           },
           "slow": {
@@ -940,6 +2215,26 @@
             "items": {
               "type": "string"
             }
+=======
+            "description": "-10..10; higher runs first. Default 0."
+          },
+          "strategies": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "Several strategies on one account: `[{\"strategy\", \"params\", \"weight\"}]`,\neach `weight` a share of the starting cash (adding up to at most 1)."
+          },
+          "strategy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A built-in strategy name (see `GET /api/v1/strategies/builtin`).\nGive either `strategy` (with `params`) or `strategies`."
+>>>>>>> origin/main
           }
         },
         "additionalProperties": false
@@ -968,6 +2263,7 @@
         },
         "additionalProperties": false
       },
+<<<<<<< HEAD
       "CreateNote": {
         "type": "object",
         "required": [
@@ -980,6 +2276,243 @@
           }
         },
         "additionalProperties": false
+=======
+      "DatasetDetailView": {
+        "type": "object",
+        "description": "A dataset and its versions.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "versions"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Created."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who created it."
+          },
+          "description": {
+            "type": "string",
+            "description": "Free text."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Dataset id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionEntryView"
+            },
+            "description": "Newest first."
+          }
+        }
+      },
+      "DatasetList": {
+        "type": "object",
+        "description": "The workspace's dataset versions, newest first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "datasets": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/DatasetSummaryView"
+            },
+            "description": "Only with `?view=grouped`: the same versions' datasets, most recently\nupdated first, each with its latest version (the Studio's Data tab)."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetVersionView"
+            },
+            "description": "At most 500."
+          }
+        }
+      },
+      "DatasetSummaryView": {
+        "type": "object",
+        "description": "A dataset, with its latest version, for the dataset list.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "version_count",
+          "created_at",
+          "symbols"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes stored for the latest version."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Created."
+          },
+          "description": {
+            "type": "string",
+            "description": "Free text."
+          },
+          "first_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "First bar of the latest version (RFC 3339)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Dataset id."
+          },
+          "last_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Last bar of the latest version (RFC 3339)."
+          },
+          "latest_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The latest version's number."
+          },
+          "latest_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The latest version's id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name (unique in the workspace)."
+          },
+          "row_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bars in the latest version."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbols in the latest version."
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the latest version was added."
+          },
+          "version_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Versions."
+          }
+        }
+      },
+      "DatasetVersionView": {
+        "type": "object",
+        "description": "A dataset version a backtest can run on.",
+        "required": [
+          "id",
+          "dataset_name",
+          "version",
+          "checksum",
+          "row_count",
+          "byte_size",
+          "created_at"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Stored size in bytes."
+          },
+          "checksum": {
+            "type": "string",
+            "description": "Dataset-store checksum."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Registered at."
+          },
+          "dataset_name": {
+            "type": "string",
+            "description": "The dataset's name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Version id: a backtest's `dataset_version_id`."
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of bars."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Version number within the dataset."
+          }
+        }
+      },
+      "DeletedVersionView": {
+        "type": "object",
+        "description": "What deleting a version did.",
+        "required": [
+          "deleted",
+          "dataset_deleted"
+        ],
+        "properties": {
+          "dataset_deleted": {
+            "type": "boolean",
+            "description": "It was the dataset's last version, so the dataset was deleted too."
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "The version was deleted."
+          }
+        }
+>>>>>>> origin/main
       },
       "ErrorDoc": {
         "type": "object",
@@ -1015,6 +2548,150 @@
             "description": "Matches the `X-Request-Id` response header."
           }
         }
+      },
+      "IngestColumns": {
+        "type": "object",
+        "description": "Header names (matched without regard to case).",
+        "required": [
+          "timestamp",
+          "open",
+          "high",
+          "low",
+          "close"
+        ],
+        "properties": {
+          "close": {
+            "type": "string",
+            "description": "Close price column."
+          },
+          "high": {
+            "type": "string",
+            "description": "High price column."
+          },
+          "low": {
+            "type": "string",
+            "description": "Low price column."
+          },
+          "open": {
+            "type": "string",
+            "description": "Open price column."
+          },
+          "symbol": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Symbol column, or null for a single-symbol file (then `default_symbol`)."
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "Timestamp column."
+          },
+          "volume": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Volume column, or null if the file has none (volume is then zero)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "IngestRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/datasets/ingest` body.",
+        "required": [
+          "upload_id",
+          "dataset_name",
+          "settings"
+        ],
+        "properties": {
+          "dataset_name": {
+            "type": "string",
+            "description": "The dataset to add a version to (created if new). Different content\nbecomes its next version; the same content changes nothing."
+          },
+          "settings": {
+            "$ref": "#/components/schemas/IngestSettings",
+            "description": "How to read the file (as previewed)."
+          },
+          "upload_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "From `POST /api/v1/uploads`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "IngestSettings": {
+        "type": "object",
+        "description": "Ingest settings (the JSON form of the engine's CSV options). Every field\nbelow without \"optional\" must be given: nothing is guessed.",
+        "required": [
+          "delimiter",
+          "time_format",
+          "columns"
+        ],
+        "properties": {
+          "columns": {
+            "$ref": "#/components/schemas/IngestColumns",
+            "description": "Which header name holds each field."
+          },
+          "default_symbol": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The symbol for every row when `columns.symbol` is null; not allowed otherwise."
+          },
+          "delimiter": {
+            "type": "string",
+            "description": "One punctuation character (not `\"`) or a tab."
+          },
+          "exchange": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional exchange calendar for session enforcement and calendar-aware checks (e.g. `XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`)."
+          },
+          "quality": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/QualityThresholds",
+                "description": "Optional quality-check thresholds."
+              }
+            ]
+          },
+          "skip_bad_rows": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Optional, default `false`: bad rows abort the load. `true` skips and counts them."
+          },
+          "time_format": {
+            "type": "string",
+            "description": "`iso8601`, `epoch_s`, `epoch_ms`, `epoch_us` or `epoch_ns`."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional DST-aware timezone name (e.g. `America/New_York`, `Europe/London`, `UTC`, `Asia/Tokyo`)."
+          },
+          "utc_offset_minutes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Minutes east of UTC for ISO timestamps written without a zone\n(-720 to 840). Optional if `timezone` is provided."
+          }
+        },
+        "additionalProperties": false
       },
       "JobPage": {
         "type": "object",
@@ -1135,6 +2812,308 @@
           }
         }
       },
+      "Preview": {
+        "type": "object",
+        "description": "The sample, parsed.",
+        "required": [
+          "header",
+          "rows",
+          "rows_not_read",
+          "quality"
+        ],
+        "properties": {
+          "header": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The header, trimmed and lower-cased (how columns are matched)."
+          },
+          "quality": {
+            "$ref": "#/components/schemas/QualityReport",
+            "description": "The quality report of the parsed rows. Every bad row in the sample is\ncounted here, whatever `skip_bad_rows` says."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PreviewRow"
+            },
+            "description": "The first 200 parsed rows, sorted by timestamp then symbol. Prices are exact decimal text."
+          },
+          "rows_not_read": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Data rows in the sample that were not checked. Every row of the\nsample (at most 1 MB) is checked, so this is 0.",
+            "minimum": 0
+          },
+          "would_abort": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why ingesting would stop with these settings (the first bad row when\nbad rows abort, or \"no valid data rows\"); null if these rows would load."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PreviewRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/datasets/preview` body.",
+        "required": [
+          "sample"
+        ],
+        "properties": {
+          "sample": {
+            "type": "string",
+            "description": "The start of the file as UTF-8 text, header included (at most 1 MB)."
+          },
+          "settings": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IngestSettings",
+                "description": "Ingest settings. Omit them to get only `suggestions`."
+              }
+            ]
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "`true` when `sample` was cut from a longer file: its last line may be\nincomplete, so it is ignored."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PreviewResponse": {
+        "type": "object",
+        "description": "`POST /api/v1/datasets/preview` response.",
+        "required": [
+          "suggestions"
+        ],
+        "properties": {
+          "preview": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Preview",
+                "description": "The sample parsed with `settings`; null when no settings were sent."
+              }
+            ]
+          },
+          "suggestions": {
+            "$ref": "#/components/schemas/Suggestions",
+            "description": "Proposals from the sample, for the person to confirm. Never applied."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PreviewRow": {
+        "type": "object",
+        "description": "One parsed row.",
+        "required": [
+          "timestamp",
+          "symbol",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "properties": {
+          "close": {
+            "type": "string"
+          },
+          "high": {
+            "type": "string"
+          },
+          "low": {
+            "type": "string"
+          },
+          "open": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "UTC, RFC 3339."
+          },
+          "volume": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "QualityReport": {
+        "type": "object",
+        "description": "A dataset's quality report (also what a dataset version stores).",
+        "required": [
+          "rows_total",
+          "rows_accepted",
+          "rows_rejected",
+          "warnings",
+          "symbols",
+          "first_ts_ns",
+          "last_ts_ns",
+          "bars_sha256",
+          "first_ts",
+          "last_ts",
+          "rejected_by_category",
+          "sample_issues",
+          "input_was_sorted",
+          "notes",
+          "symbol_stats",
+          "thresholds"
+        ],
+        "properties": {
+          "bars_sha256": {
+            "type": "string",
+            "description": "Fingerprint of the bars (recorded in backtest results)."
+          },
+          "exchange": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Exchange calendar used, if any."
+          },
+          "first_ts": {
+            "type": "string",
+            "description": "First bar, RFC 3339."
+          },
+          "first_ts_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "First bar, nanoseconds since the epoch."
+          },
+          "input_was_sorted": {
+            "type": "boolean",
+            "description": "Whether rows arrived sorted by timestamp and symbol."
+          },
+          "last_ts": {
+            "type": "string",
+            "description": "Last bar, RFC 3339."
+          },
+          "last_ts_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Last bar, nanoseconds since the epoch."
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Standing limitations of the processing."
+          },
+          "rejected_by_category": {
+            "type": "object",
+            "description": "Rejected rows by category (`bad_number`, `bad_timestamp`, `duplicate`, ...).",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "rows_accepted": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows that became bars.",
+            "minimum": 0
+          },
+          "rows_rejected": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows dropped (only when bad rows are skipped).",
+            "minimum": 0
+          },
+          "rows_total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Data rows read (header excluded).",
+            "minimum": 0
+          },
+          "sample_issues": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RowIssue"
+            },
+            "description": "The first rejected rows (at most 50)."
+          },
+          "symbol_stats": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SymbolStats"
+            },
+            "description": "Per-symbol checks."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbol names."
+          },
+          "thresholds": {
+            "$ref": "#/components/schemas/QualityThresholds",
+            "description": "Thresholds the checks used."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Timezone used, if any."
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Things worth a human look."
+          }
+        },
+        "additionalProperties": false
+      },
+      "QualityThresholds": {
+        "type": "object",
+        "description": "Quality-check thresholds.",
+        "properties": {
+          "gap_factor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "A gap is an interval longer than this many median intervals (default 5)."
+          },
+          "outlier_z": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Robust z-score of a close-to-close return that counts as an outlier (default 10)."
+          },
+          "stale_run": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Frozen bars in a row that count as a stale run (default 5).",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "RiskRequest": {
         "type": "object",
         "description": "`POST /api/v1/risk` body.",
@@ -1196,6 +3175,32 @@
           }
         }
       },
+      "RowIssue": {
+        "type": "object",
+        "description": "A rejected row.",
+        "required": [
+          "line",
+          "category",
+          "message"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Rejection category."
+          },
+          "line": {
+            "type": "integer",
+            "format": "int64",
+            "description": "1-based line in the file.",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string",
+            "description": "What was wrong."
+          }
+        },
+        "additionalProperties": false
+      },
       "StressRequest": {
         "type": "object",
         "description": "`POST /api/v1/stress` body (also the `stress` job payload).",
@@ -1233,6 +3238,519 @@
             "minimum": 0
           }
         }
+      },
+      "SuggestedColumns": {
+        "type": "object",
+        "description": "Suggested header name per field.",
+        "properties": {
+          "close": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "high": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "low": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "open": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "symbol": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timestamp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "volume": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "Suggestions": {
+        "type": "object",
+        "description": "Suggested settings; null where there is no confident guess.",
+        "required": [
+          "header",
+          "columns"
+        ],
+        "properties": {
+          "columns": {
+            "$ref": "#/components/schemas/SuggestedColumns",
+            "description": "Header names matched by common aliases."
+          },
+          "delimiter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Delimiter that splits every sampled row into the same number of fields."
+          },
+          "exchange": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Suggested exchange calendar (e.g. `XNYS`)."
+          },
+          "header": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The header split with that delimiter, as written."
+          },
+          "time_format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Likely `time_format`."
+          },
+          "timestamps_have_zone": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "For ISO timestamps: whether they carry a zone (then the UTC offset does not apply to them)."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Suggested timezone identifier (e.g. `America/New_York`)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SymbolStats": {
+        "type": "object",
+        "description": "Quality checks for one symbol.",
+        "required": [
+          "symbol",
+          "bars",
+          "first_ts",
+          "last_ts",
+          "median_interval_ns",
+          "gaps",
+          "largest_gap_ns",
+          "zero_volume_bars",
+          "outlier_returns",
+          "stale_runs"
+        ],
+        "properties": {
+          "bars": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars.",
+            "minimum": 0
+          },
+          "first_ts": {
+            "type": "string",
+            "description": "First bar, RFC 3339."
+          },
+          "gaps": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Intervals longer than `gap_factor` median intervals.",
+            "minimum": 0
+          },
+          "largest_gap_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Longest gap, nanoseconds."
+          },
+          "last_ts": {
+            "type": "string",
+            "description": "Last bar, RFC 3339."
+          },
+          "median_interval_ns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Median interval between bars, nanoseconds."
+          },
+          "non_trading_day_bars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bars recorded on non-trading days/holidays.",
+            "minimum": 0
+          },
+          "out_of_session_bars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bars recorded outside regular exchange sessions.",
+            "minimum": 0
+          },
+          "outlier_returns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Returns beyond `outlier_z` robust sigma.",
+            "minimum": 0
+          },
+          "stale_runs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Runs of `stale_run` or more frozen bars.",
+            "minimum": 0
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol."
+          },
+          "zero_volume_bars": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars with zero volume.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateDataset": {
+        "type": "object",
+        "description": "`PATCH /api/v1/datasets/{id}` body: what to change.",
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New description (at most 2000 characters; empty clears it)."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New name (unique in the workspace)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadView": {
+        "type": "object",
+        "description": "A stored upload.",
+        "required": [
+          "id",
+          "sha256",
+          "size",
+          "filename",
+          "expires_at"
+        ],
+        "properties": {
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Removed at this time unless ingested (UTC, RFC 3339)."
+          },
+          "filename": {
+            "type": "string",
+            "description": "As uploaded."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Pass this to `POST /api/v1/datasets/ingest`."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Hex SHA-256 of the file."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes.",
+            "minimum": 0
+          }
+        }
+      },
+      "VersionDetailView": {
+        "type": "object",
+        "description": "A dataset version in full.",
+        "required": [
+          "id",
+          "dataset_id",
+          "dataset_name",
+          "version",
+          "checksum",
+          "row_count",
+          "byte_size",
+          "created_at",
+          "run_count",
+          "chartable",
+          "quality_report"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes stored."
+          },
+          "chartable": {
+            "type": "boolean",
+            "description": "Whether its bars can be charted here (`/bars`)."
+          },
+          "checksum": {
+            "type": "string",
+            "description": "The dataset id (content hash of bars and symbols)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Registered at."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who registered it."
+          },
+          "dataset_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Its dataset."
+          },
+          "dataset_name": {
+            "type": "string",
+            "description": "The dataset's name."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Version id."
+          },
+          "quality_report": {
+            "type": "object",
+            "description": "The quality report. Versions ingested through the Studio have every\nfield of `QualityReport`; command-line versions only some\n(`rows_total`, `rows_accepted`, `rows_rejected`, `warnings`, `symbols`, ...)."
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars."
+          },
+          "run_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Runs that used it."
+          },
+          "source": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "How it was made from an upload (`upload_id`, `file_sha256`, `filename`,\n`settings`); null when registered from the command line."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Version number."
+          }
+        }
+      },
+      "VersionEntryView": {
+        "type": "object",
+        "description": "One version in a dataset's history.",
+        "required": [
+          "id",
+          "version",
+          "checksum",
+          "row_count",
+          "byte_size",
+          "created_at",
+          "symbols",
+          "rows_rejected",
+          "warning_count",
+          "run_count"
+        ],
+        "properties": {
+          "byte_size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes stored."
+          },
+          "checksum": {
+            "type": "string",
+            "description": "The dataset id (content hash of bars and symbols)."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Registered at."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who registered it."
+          },
+          "filename": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Uploaded file name; null when registered from the command line."
+          },
+          "first_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "First bar (RFC 3339)."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Version id (a backtest's `dataset_version_id`)."
+          },
+          "last_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Last bar (RFC 3339)."
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bars."
+          },
+          "rows_rejected": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows dropped at ingest."
+          },
+          "run_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Runs that used it (a version with runs can't be deleted)."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbols."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Version number."
+          },
+          "warning_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Warnings in its quality report."
+          }
+        }
+      },
+      "VersionRunList": {
+        "type": "object",
+        "description": "Runs of a version, newest first (at most 100).",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionRunView"
+            },
+            "description": "The runs."
+          }
+        }
+      },
+      "VersionRunView": {
+        "type": "object",
+        "description": "A run that used a dataset version.",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Started."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Finished."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Run id."
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The job; for a backtest, its id in `/api/v1/backtests/{id}`."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`backtest`, ..."
+          },
+          "status": {
+            "type": "string",
+            "description": "Run status."
+          },
+          "strategy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The strategy, or `multi-strategy`."
+          },
+          "total_return": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Total return (a fraction) for finished backtests."
+          }
+        }
       }
     }
   },
@@ -1250,8 +3768,17 @@
       "description": "Queued engine work, run by spectra-worker"
     },
     {
+<<<<<<< HEAD
       "name": "registry",
       "description": "Workspace-scoped experiment and run registry"
+=======
+      "name": "backtests",
+      "description": "Backtests: jobs of kind backtest, and the built-in strategies"
+    },
+    {
+      "name": "datasets",
+      "description": "Data Studio: ingest settings, previews and datasets"
+>>>>>>> origin/main
     }
   ]
 }

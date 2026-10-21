@@ -893,6 +893,149 @@
         }
       }
     },
+    "/api/v1/experiments": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "list_experiments",
+        "responses": {
+          "200": {
+            "description": "Workspace experiments"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "create_experiment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateExperiment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created"
+          },
+          "422": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/experiments/{id}": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "get_experiment",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Experiment"
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/experiments/{id}/lineage": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "get_lineage",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Root-to-leaf experiment lineage"
+          }
+        }
+      }
+    },
+    "/api/v1/experiments/{id}/runs": {
+      "post": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "create_registry_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRegistryRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Backtest queued"
+          },
+          "422": {
+            "description": "Invalid dataset or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/jobs": {
       "get": {
         "tags": [
@@ -1105,6 +1248,65 @@
         }
       }
     },
+    "/api/v1/registry/export": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "export_jsonl",
+        "responses": {
+          "200": {
+            "description": "Registry JSONL export"
+          }
+        }
+      }
+    },
+    "/api/v1/registry/import": {
+      "post": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "import_jsonl",
+        "responses": {
+          "200": {
+            "description": "Imported event count"
+          },
+          "409": {
+            "description": "Workspace is not empty",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid or corrupt JSONL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/registry/verify": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "verify",
+        "responses": {
+          "200": {
+            "description": "Registry chain verification"
+          }
+        }
+      }
+    },
     "/api/v1/risk": {
       "post": {
         "tags": [
@@ -1127,6 +1329,372 @@
             "description": "Risk report"
           },
           "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runs": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "list_runs",
+        "parameters": [
+          {
+            "name": "experiment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "dataset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "strategy",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "min_sharpe",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          },
+          {
+            "name": "only_trials",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "status",
+            "in": "path",
+            "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "path",
+            "description": "`next_cursor` from the previous page.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "Page size, 1 through 200 (default 50).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workspace runs"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "create_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRegistryRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Backtest queued; without experiment_id it is recorded under \"Unsorted\""
+          },
+          "422": {
+            "description": "Invalid dataset or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{id}": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run"
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{id}/artifacts/{kind}": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "get_run_artifact",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The artifact's bytes"
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{id}/notes": {
+      "post": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "add_run_note",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNote"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Note recorded"
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runs/{id}/survival": {
+      "get": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "List reports attached to one run.",
+        "operationId": "list_for_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Queue an M6 survival report for a successful run.",
+        "operationId": "start",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartSurvival"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -1189,6 +1757,190 @@
             "description": "Stress report"
           },
           "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/survival/presets": {
+      "get": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "List built-in and workspace survival presets.",
+        "operationId": "list_presets",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Save a workspace preset.",
+        "operationId": "create_preset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePreset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/survival/presets/{id}": {
+      "patch": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Update a saved workspace preset.",
+        "operationId": "update_preset",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavePreset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/survival/{id}": {
+      "get": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Read a saved report.",
+        "operationId": "get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/survival/{id}/text": {
+      "get": {
+        "tags": [
+          "survival"
+        ],
+        "summary": "Return the saved text report.",
+        "operationId": "text",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Text report"
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -1651,473 +2403,6 @@
           }
         }
       }
-    },
-    "/api/v1/experiments": {
-      "get": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "list_experiments",
-        "responses": {
-          "200": {
-            "description": "Workspace experiments"
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "create_experiment",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateExperiment"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Created"
-          },
-          "422": {
-            "description": "Invalid request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorDoc"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/experiments/{id}": {
-      "get": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "get_experiment",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Experiment"
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorDoc"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/experiments/{id}/lineage": {
-      "get": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "get_lineage",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Root-to-leaf experiment lineage"
-          }
-        }
-      }
-    },
-    "/api/v1/experiments/{id}/runs": {
-      "post": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "create_registry_run",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateRegistryRun"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "Backtest queued"
-          },
-          "422": {
-            "description": "Invalid dataset or request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorDoc"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/registry/export": {
-      "get": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "export_jsonl",
-        "responses": {
-          "200": {
-            "description": "Registry JSONL export"
-          }
-        }
-      }
-    },
-    "/api/v1/registry/import": {
-      "post": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "import_jsonl",
-        "responses": {
-          "200": {
-            "description": "Imported event count"
-          },
-          "409": {
-            "description": "Workspace is not empty",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorDoc"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Invalid or corrupt JSONL",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorDoc"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/registry/verify": {
-      "get": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "verify",
-        "responses": {
-          "200": {
-            "description": "Registry chain verification"
-          }
-        }
-      }
-    },
-    "/api/v1/runs": {
-      "get": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "list_runs",
-        "parameters": [
-          {
-            "name": "experiment_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "dataset_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "strategy",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "kind",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "min_sharpe",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": [
-                "number",
-                "null"
-              ],
-              "format": "double"
-            }
-          },
-          {
-            "name": "only_trials",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "status",
-            "in": "path",
-            "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`.",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "path",
-            "description": "`next_cursor` from the previous page.",
-            "required": true,
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "limit",
-            "in": "path",
-            "description": "Page size, 1 through 200 (default 50).",
-            "required": true,
-            "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
-              "format": "int32",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Workspace runs"
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "create_run",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateRegistryRun"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "202": {
-            "description": "Backtest queued; without experiment_id it is recorded under \"Unsorted\""
-          },
-          "422": {
-            "description": "Invalid dataset or request",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorDoc"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/runs/{id}": {
-      "get": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "get_run",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Run"
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorDoc"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/runs/{id}/artifacts/{kind}": {
-      "get": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "get_run_artifact",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "kind",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The artifact's bytes"
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorDoc"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/runs/{id}/notes": {
-      "post": {
-        "tags": [
-          "registry"
-        ],
-        "operationId": "add_run_note",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateNote"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Note recorded"
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorDoc"
-                }
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
@@ -2545,6 +2830,30 @@
         },
         "additionalProperties": false
       },
+      "CreateExperiment": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "hypothesis": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateJob": {
         "type": "object",
         "description": "`POST /api/v1/jobs` body.",
@@ -2565,6 +2874,60 @@
             "type": "integer",
             "format": "int32",
             "description": "-10..10; higher runs first. Default 0."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateNote": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The note, 1 through 2,000 characters."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateRegistryRun": {
+        "type": "object",
+        "required": [
+          "csv"
+        ],
+        "properties": {
+          "csv": {
+            "type": "string",
+            "description": "OHLCV CSV with timestamp, symbol, open, high, low, close and volume columns."
+          },
+          "experiment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`POST /api/v1/runs` only: the experiment to record the run under.\nOmitted: the workspace's default \"Unsorted\" experiment."
+          },
+          "fast": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Short SMA period; 1 through 999 and less than `slow`.",
+            "minimum": 0
+          },
+          "note": {
+            "type": "string",
+            "description": "Optional note recorded with the run."
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Job priority, -10 through 10."
+          },
+          "slow": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Long SMA period; 2 through 1,000 and greater than `fast`.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -3513,6 +3876,19 @@
         },
         "additionalProperties": false
       },
+      "SavePreset": {
+        "type": "object",
+        "required": [
+          "name",
+          "config"
+        ],
+        "properties": {
+          "config": {},
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "SessionView": {
         "type": "object",
         "description": "A resumable upload.",
@@ -3564,6 +3940,19 @@
             ],
             "format": "uuid",
             "description": "The upload it became, once completed."
+          }
+        }
+      },
+      "StartSurvival": {
+        "type": "object",
+        "properties": {
+          "config": {},
+          "preset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -4145,84 +4534,6 @@
             "description": "Total return (a fraction) for finished backtests."
           }
         }
-      },
-      "CreateRegistryRun": {
-        "type": "object",
-        "required": [
-          "csv"
-        ],
-        "properties": {
-          "csv": {
-            "type": "string",
-            "description": "OHLCV CSV with timestamp, symbol, open, high, low, close and volume columns."
-          },
-          "experiment_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "`POST /api/v1/runs` only: the experiment to record the run under.\nOmitted: the workspace's default \"Unsorted\" experiment."
-          },
-          "fast": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Short SMA period; 1 through 999 and less than `slow`.",
-            "minimum": 0
-          },
-          "note": {
-            "type": "string",
-            "description": "Optional note recorded with the run."
-          },
-          "priority": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Job priority, -10 through 10."
-          },
-          "slow": {
-            "type": "integer",
-            "format": "int32",
-            "description": "Long SMA period; 2 through 1,000 and greater than `fast`.",
-            "minimum": 0
-          }
-        },
-        "additionalProperties": false
-      },
-      "CreateExperiment": {
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "properties": {
-          "hypothesis": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "parent_id": {
-            "type": "string"
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "additionalProperties": false
-      },
-      "CreateNote": {
-        "type": "object",
-        "required": [
-          "text"
-        ],
-        "properties": {
-          "text": {
-            "type": "string",
-            "description": "The note, 1 through 2,000 characters."
-          }
-        },
-        "additionalProperties": false
       }
     }
   },
@@ -4240,6 +4551,10 @@
       "description": "Queued engine work, run by spectra-worker"
     },
     {
+      "name": "registry",
+      "description": "Workspace-scoped experiment and run registry"
+    },
+    {
       "name": "backtests",
       "description": "Backtests: jobs of kind backtest, and the built-in strategies"
     },
@@ -4248,8 +4563,8 @@
       "description": "Data Studio: ingest settings, previews and datasets"
     },
     {
-      "name": "registry",
-      "description": "Workspace-scoped experiment and run registry"
+      "name": "survival",
+      "description": "Strategy Survival Lab reports and presets"
     }
   ]
 }

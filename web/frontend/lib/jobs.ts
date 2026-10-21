@@ -11,7 +11,7 @@
  */
 import { ApiError, request } from './api';
 
-export type JobKind = 'benchmark' | 'risk' | 'stress';
+export type JobKind = 'benchmark' | 'risk' | 'stress' | 'survival';
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
 
 /** The stored report, addressed by its SHA-256. */

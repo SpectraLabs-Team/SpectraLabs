@@ -5,11 +5,8 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BacktestLab } from './BacktestLab';
 import { BenchmarkLab } from './BenchmarkLab';
-<<<<<<< HEAD
 import { ExperimentRegistry } from './ExperimentRegistry';
-=======
 import { DataLab } from './DataLab';
->>>>>>> origin/main
 import { MarketSettings } from './MarketSettings';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';

@@ -29,6 +29,7 @@ import { cn } from '@/lib/utils';
 import { DrawdownChart, EquityChart, StrategyCurvesChart } from './Charts';
 import { ago, cash, dash, int, pct, ratio, shortHash, signedPct, tone } from './format';
 import { StatusBadge } from './RunList';
+import { SurvivalLabPanel } from '../SurvivalLabPanel';
 
 type Row = [label: string, value: string, tone?: 'profit' | 'loss' | 'neutral'];
 
@@ -486,6 +487,15 @@ export function RunDetail({ backtestId, catalog, datasets, canRun, onRerun, onCh
 
       {b.status === 'succeeded' && b.summary && (
         <Results b={b} summary={b.summary} equity={equity} drawdown={drawdown} curves={curves} catalog={catalog} onDownload={download} downloading={downloading} />
+      )}
+      {b.status === 'succeeded' && b.run_id && (
+        <SurvivalLabPanel
+          runId={b.run_id}
+          enabled
+          strategy={b.request.strategy ?? describeRequest(b.request, catalog)}
+          params={b.request.params ?? {}}
+          datasetId={dataset ? `${dataset.dataset_name} v${dataset.version}` : b.request.dataset_version_id ?? ''}
+        />
       )}
     </div>
   );

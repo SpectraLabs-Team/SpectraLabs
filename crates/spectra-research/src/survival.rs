@@ -662,6 +662,14 @@ pub struct SurvivalReport {
     pub baseline_run: RunRecord,
     /// Baseline fill count.
     pub baseline_fills: usize,
+    /// Rebased baseline equity path for the benchmark comparison chart.
+    pub baseline_equity: Vec<f64>,
+    /// Rebased equal-weight buy-and-hold benchmark path.
+    pub benchmark_equity: Vec<f64>,
+    /// Baseline drawdown at each point in `baseline_equity`.
+    pub drawdown_curve: Vec<f64>,
+    /// Closed trade net P&L, ascending, for the concentration chart.
+    pub trade_pnl_sorted: Vec<f64>,
     /// 1.
     pub costs: CostSensitivity,
     /// 2.
@@ -870,6 +878,7 @@ impl SurvivalReport {
             .with("top_trade_share", json_f(self.sample.top_trade_share))
             .with("verdict", json_verdict(self.sample.verdict))
             .with("finding", Json::string(&self.sample.finding));
+        let json_series = |values: &[f64]| Json::Array(values.iter().map(|value| json_f(*value)).collect());
         let regimes = Json::object()
             .with(
                 "buckets",
@@ -956,6 +965,10 @@ impl SurvivalReport {
             .with("time", time)
             .with("trades", trades)
             .with("sample", sample)
+            .with("baseline_equity", json_series(&self.baseline_equity))
+            .with("benchmark_equity", json_series(&self.benchmark_equity))
+            .with("drawdown_curve", json_series(&self.drawdown_curve))
+            .with("trade_pnl_sorted", json_series(&self.trade_pnl_sorted))
             .with("regimes", regimes)
             .with("benchmark", benchmark)
             .with("risk", risk)
@@ -1013,6 +1026,32 @@ const NO_TRADES: &str =
     "The baseline run closed no trades, so there is nothing to stress; a strategy that never \
                          trades cannot be validated.";
 
+fn equity_index(returns: &[f64]) -> Vec<f64> {
+    let mut equity = Vec::with_capacity(returns.len() + 1);
+    let mut value = 1.0;
+    equity.push(value);
+    for &r in returns {
+        value *= 1.0 + r;
+        equity.push(value);
+    }
+    equity
+}
+
+fn drawdowns(equity: &[f64]) -> Vec<f64> {
+    let mut peak = f64::NEG_INFINITY;
+    equity
+        .iter()
+        .map(|value| {
+            peak = peak.max(*value);
+            if peak > 0.0 {
+                (peak - value) / peak
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
 fn f2(v: f64) -> String {
     fmt_f(v, 2)
 }
@@ -1060,10 +1099,16 @@ pub fn run_survival_lab_controlled<'a>(
     };
     let base = run_one(bars, factory, config, params)?;
     let base_sum = summarize(&base);
+    let base_returns = spectra_engine::returns_from_curve(&base.equity_curve);
+    rep.baseline_equity = equity_index(&base_returns);
+    rep.drawdown_curve = drawdowns(&rep.baseline_equity);
+    rep.benchmark_equity = equity_index(&benchmark_returns(bars));
     rep.baseline = base.metrics;
     rep.baseline_run = base.run.clone();
     rep.baseline_fills = count_fills(&base.ledger);
     let extraction = extract_trades(&base.ledger)?;
+    rep.trade_pnl_sorted = extraction.trades.iter().map(|trade| trade.net.to_f64()).collect();
+    rep.trade_pnl_sorted.sort_by(f64::total_cmp);
     let traded = rep.baseline_fills > 0 && base_sum.valid;
 
     rep.assumptions = [

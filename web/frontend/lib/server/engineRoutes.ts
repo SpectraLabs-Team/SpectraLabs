@@ -1,6 +1,14 @@
 import type { WorkspaceRole } from './workspaces';
 
-/** Routes that the authenticated Next.js proxy allows through to the engine. */
+/**
+ * Allowlist of engine routes the /api/engine proxy forwards: method, timeout, and the minimum
+ * workspace role (in the caller's active workspace) needed to call it. Anything not listed is a
+ * 404, so new engine routes stay private until added here.
+ *
+ *   viewer → reads (sample data, telemetry, datasets, backtests, and the research registry)
+ *   editor → computations ("create and run"), data uploads, registry writes and broker account data
+ *   owner  → whole-registry operations (verify the chain, import a registry.jsonl)
+ */
 export type EngineMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 export type EngineRoute = {
   method: EngineMethod | EngineMethod[];
@@ -25,6 +33,7 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/jobs': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/jobs/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/jobs/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
+  // M5 experiment registry, always scoped to the caller's active workspace by the engine.
   'api/v1/experiments': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 15_000 },
   'api/v1/experiments/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/experiments/{id}/lineage': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
@@ -82,7 +91,10 @@ export function routePolicyKey(path: string): string {
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}\/cancel$/i.test(path)) return 'api/v1/jobs/{id}/cancel';
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/jobs/{id}';
   for (const [pattern, key] of REGISTRY_PATTERNS) if (pattern.test(path)) return key;
-  if (/^api\/v1\/backtests\/[0-9a-f-]{36}\/artifacts\/(summary|request|equity_csv|orders_csv|fills_csv|returns_csv|strategies_csv)$/i.test(path)) return 'api/v1/backtests/{id}/artifacts/{kind}';
+  // Only the stored files the API serves; any other name stays unlisted (a 404 here).
+  if (/^api\/v1\/backtests\/[0-9a-f-]{36}\/artifacts\/(summary|request|equity_csv|orders_csv|fills_csv|returns_csv|strategies_csv)$/i.test(path)) {
+    return 'api/v1/backtests/{id}/artifacts/{kind}';
+  }
   const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series)?$/i.exec(path);
   if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
   const session = /^api\/v1\/uploads\/sessions\/[0-9a-f-]{36}(\/complete)?$/i.exec(path);

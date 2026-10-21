@@ -5,8 +5,7 @@ import { record as audit, requestMeta } from '@/lib/server/audit';
 import { hasRole } from '@/lib/server/authz';
 import { clientIp, hit, tooMany } from '@/lib/server/rateLimit';
 import { ENGINE_IDENTITY_HEADER, signEngineIdentity } from '@/lib/server/engineIdentity';
-import { allowsMethod, ENGINE_ROUTES, maxBodyBytes, minimumRole, routePolicyKey } from '@/lib/server/engineRoutes';
-import type { EngineMethod } from '@/lib/server/engineRoutes';
+import { allowsMethod, ENGINE_ROUTES, maxBodyBytes, minimumRole, routePolicyKey, type EngineMethod } from '@/lib/server/engineRoutes';
 import { requireWorkspace } from '@/lib/server/requireUser';
 import { engineSecret, signEngineRequest } from '@/lib/server/engineSign';
 

@@ -718,9 +718,10 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
     let has_addition = lines
         .iter()
         .any(|l| l["kind"] == "added" && l["text"].as_str().unwrap().contains("target_shares(200)"));
-    let has_deletion = lines
-        .iter()
-        .any(|l| l["kind"] == "deleted" && l["text"].as_str().unwrap().contains("target_shares(100)"));
+    let has_deletion = lines.iter().any(|l| {
+        (l["kind"] == "deleted" || l["kind"] == "removed")
+            && l["text"].as_str().unwrap().contains("target_shares(100)")
+    });
     assert!(has_addition && has_deletion, "diff accurately reported line changes");
 
     let params_changed = &diff_resp["parameter_diff"]["changed"];

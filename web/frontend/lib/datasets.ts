@@ -37,8 +37,8 @@ export type VersionDetail = Omit<S['VersionDetailView'], 'quality_report' | 'sou
   source: { upload_id?: string; file_sha256?: string; filename?: string; settings?: IngestSettings } | null;
 };
 
-/** The largest upload (the dashboard route and the engine both refuse more). */
-export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+/** The largest upload when the engine's limit is unknown (its default; see getUploadLimits). */
+export const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
 /** The preview sample: the first 1 MB of the file (the engine's limit). */
 export const PREVIEW_SAMPLE_BYTES = 1024 * 1024;
 
@@ -90,30 +90,145 @@ export const preview = (sample: string, truncated: boolean, settings?: IngestSet
     timeoutMs: 20_000,
   });
 
+/** Upload limits from the engine (resumable uploads). */
+export type UploadLimits = S['UploadLimits'];
+export type UploadSession = S['SessionView'];
+
+export const getUploadLimits = () => request<UploadLimits>('/api/v1/uploads/limits', { timeoutMs: 10_000 });
+
+/** Where a file's resumable session is remembered, so picking the same file again resumes it. */
+const sessionKey = (file: File) => `spectra-upload:${file.name}:${file.size}:${file.lastModified}`;
+
+/** What {@link uploadFile} needs from the browser; tests pass fakes. */
+export type UploadDeps = {
+  fetch: typeof fetch;
+  storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null;
+  /** Waits before a retry. */
+  sleep?: (ms: number) => Promise<void>;
+};
+
+const browserDeps = (): UploadDeps => {
+  let storage: UploadDeps['storage'] = null;
+  try {
+    storage = typeof window !== 'undefined' ? window.localStorage : null;
+  } catch {
+    storage = null; // blocked storage: uploads still work, they just can't resume after a reload
+  }
+  return { fetch: (...a) => fetch(...a), storage };
+};
+
+/** Chunk attempts before giving up (network errors and 5xx are retried with backoff). */
+const ATTEMPTS = 6;
+
 /**
- * Uploads `file` to app/api/engine-upload, reporting the bytes sent. Uses XMLHttpRequest because
- * fetch can't report upload progress.
+ * Uploads `file` in chunks to a resumable session (M1b task 9), reporting the bytes the server has.
+ * A chunk that fails is retried with backoff; a 409 `offset_mismatch` (a chunk that arrived though
+ * its answer was lost) continues from where the server is. The session is remembered per file, so
+ * choosing the same file again after a reload or a dropped connection resumes it. Completing is
+ * idempotent on the server, so a lost answer there is retried safely too.
  */
-export function uploadFile(file: File, onProgress: (sent: number, total: number) => void, signal?: AbortSignal): Promise<Upload> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `/api/engine-upload?filename=${encodeURIComponent(file.name)}`);
-    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-    xhr.withCredentials = true;
-    xhr.upload.onprogress = (e) => onProgress(e.loaded, e.lengthComputable ? e.total : file.size);
-    xhr.onerror = () => reject(new ApiError('The upload failed; check your connection and try again.', 0));
-    xhr.onabort = () => reject(new ApiError('Upload cancelled.', 0));
-    xhr.onload = () => {
-      const response = new Response(xhr.responseText, { status: xhr.status, headers: { 'Content-Type': 'application/json' } });
-      if (xhr.status === 201) {
-        response.json().then(resolve, () => reject(new ApiError('The server answered oddly; try again.', xhr.status)));
-      } else {
-        errorFrom(response).then(reject);
+export async function uploadFile(
+  file: File,
+  onProgress: (sent: number, total: number) => void,
+  signal?: AbortSignal,
+  deps: UploadDeps = browserDeps(),
+): Promise<Upload> {
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const json = async <T>(url: string, init: RequestInit = {}): Promise<T> => {
+    const r = await deps.fetch(url, { credentials: 'same-origin', ...init, signal });
+    if (!r.ok) throw await errorFrom(r);
+    return r.json() as Promise<T>;
+  };
+  const remembered = (() => {
+    try {
+      return deps.storage?.getItem(sessionKey(file)) ?? null;
+    } catch {
+      return null;
+    }
+  })();
+  const remember = (id: string | null) => {
+    try {
+      if (id) deps.storage?.setItem(sessionKey(file), id);
+      else deps.storage?.removeItem(sessionKey(file));
+    } catch {
+      /* resuming after a reload is a convenience */
+    }
+  };
+
+  let session: UploadSession | null = null;
+  if (remembered) {
+    session = await json<UploadSession>(`${API_BASE}/api/v1/uploads/sessions/${remembered}`).catch(() => null);
+    if (session && session.size !== file.size) session = null;
+  }
+  if (!session) {
+    session = await json<UploadSession>(`${API_BASE}/api/v1/uploads/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, size: file.size }),
+    });
+  }
+  remember(session.id);
+  const id = session.id;
+  const chunk = session.chunk_bytes || 8 * 1024 * 1024;
+  let at = session.received;
+  onProgress(at, file.size);
+
+  while (at < file.size && !session.upload_id) {
+    if (signal?.aborted) throw new ApiError('Upload cancelled.', 0);
+    const end = Math.min(file.size, at + chunk);
+    let done = false;
+    for (let attempt = 1; !done; attempt++) {
+      let r: Response | null = null;
+      try {
+        r = await deps.fetch(`/api/engine-upload/sessions/${id}?offset=${at}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: file.slice(at, end),
+          credentials: 'same-origin',
+          signal,
+        });
+      } catch (e) {
+        if (signal?.aborted) throw new ApiError('Upload cancelled.', 0);
+        if (attempt >= ATTEMPTS) throw new ApiError(`The upload stopped at ${at} of ${file.size} bytes; choose the file again to resume.`, 0);
+        void e;
       }
-    };
-    signal?.addEventListener('abort', () => xhr.abort());
-    xhr.send(file);
-  });
+      if (r?.ok) {
+        at = ((await r.json()) as { received: number }).received;
+        done = true;
+      } else if (r && r.status === 409) {
+        const err = await errorFrom(r);
+        const received = (err.details as { received?: unknown } | undefined)?.received;
+        if (err.code === 'offset_mismatch' && typeof received === 'number') {
+          at = received; // the server already has more (or less): continue from there
+          done = true;
+        } else if (err.code === 'already_complete') {
+          at = file.size;
+          done = true;
+        } else {
+          throw err;
+        }
+      } else if (r && r.status < 500 && r.status !== 429) {
+        if (r.status === 404) remember(null);
+        throw await errorFrom(r);
+      } else if (attempt >= ATTEMPTS) {
+        throw r ? await errorFrom(r) : new ApiError('The upload failed; check your connection and try again.', 0);
+      }
+      if (!done) await sleep(Math.min(8000, 500 * 2 ** (attempt - 1)));
+    }
+    onProgress(at, file.size);
+  }
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const upload = await json<Upload>(`${API_BASE}/api/v1/uploads/sessions/${id}/complete`, { method: 'POST' });
+      remember(null);
+      return upload;
+    } catch (e) {
+      const retry = !(e instanceof ApiError) || e.status === 0 || e.status >= 500;
+      if (!retry || attempt >= ATTEMPTS || signal?.aborted) throw e;
+      await sleep(Math.min(8000, 500 * 2 ** (attempt - 1)));
+    }
+  }
 }
 
 export const ingest = (body: { upload_id: string; dataset_name: string; settings: IngestSettings }) =>

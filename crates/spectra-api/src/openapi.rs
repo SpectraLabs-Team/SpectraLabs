@@ -105,6 +105,12 @@ pub struct StressRequest {
         crate::datasets_api::delete_version,
         crate::datasets_api::version_runs,
         crate::datasets_api::bars,
+        crate::sessions_api::limits,
+        crate::sessions_api::create,
+        crate::sessions_api::get,
+        crate::sessions_api::chunk,
+        crate::sessions_api::complete,
+        crate::sessions_api::abort,
     ),
     components(schemas(
         ErrorDoc,
@@ -144,6 +150,10 @@ pub struct StressRequest {
         crate::datasets_api::DeletedVersionView,
         crate::datasets_api::BarsView,
         crate::datasets_api::BarPoint,
+        crate::sessions_api::UploadLimits,
+        crate::sessions_api::CreateSession,
+        crate::sessions_api::SessionView,
+        crate::sessions_api::ChunkView,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
@@ -191,6 +201,11 @@ mod tests {
             "/api/v1/datasets/versions/{id}",
             "/api/v1/datasets/versions/{id}/runs",
             "/api/v1/datasets/versions/{id}/bars",
+            "/api/v1/uploads/limits",
+            "/api/v1/uploads/sessions",
+            "/api/v1/uploads/sessions/{id}",
+            "/api/v1/uploads/sessions/{id}/chunk",
+            "/api/v1/uploads/sessions/{id}/complete",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

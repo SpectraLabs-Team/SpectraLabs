@@ -164,8 +164,8 @@ mod tests {
     }
 
     #[test]
-    fn progress_is_reported_and_can_cancel() {
-        use crate::dataset::{load_csv_with_progress, PROGRESS_EVERY_ROWS};
+    fn progress_is_reported_in_bytes_and_can_cancel() {
+        use crate::dataset::{load_csv_reader, PROGRESS_EVERY_ROWS};
         let mut csv = String::from("date,open,high,low,close\n");
         let start = 1_700_000_000i64;
         for i in 0..(2 * PROGRESS_EVERY_ROWS + 5) {
@@ -176,15 +176,20 @@ mod tests {
             ..CsvOptions::default()
         };
         let mut seen = Vec::new();
-        let d = load_csv_with_progress(csv.as_bytes(), &opt, &mut |done, total| {
-            seen.push((done, total));
-            true
-        })
+        let d = load_csv_reader(
+            csv.as_bytes(),
+            &opt,
+            Some(&mut |bytes| {
+                seen.push(bytes);
+                true
+            }),
+        )
         .unwrap();
-        let total = 2 * PROGRESS_EVERY_ROWS + 5;
-        assert_eq!(seen, [(PROGRESS_EVERY_ROWS, total), (2 * PROGRESS_EVERY_ROWS, total), (total, total)]);
-        assert_eq!(d.info.id, load_csv(csv.as_bytes(), &opt).unwrap().info.id, "same result as load_csv");
-        let err = load_csv_with_progress(csv.as_bytes(), &opt, &mut |_, _| false).unwrap_err();
+        assert_eq!(seen.len(), 3, "every 10k rows, then once at the end");
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]));
+        assert_eq!(*seen.last().unwrap(), csv.len() as u64);
+        assert_eq!(d, load_csv(csv.as_bytes(), &opt).unwrap(), "same result as load_csv");
+        let err = load_csv_reader(csv.as_bytes(), &opt, Some(&mut |_| false)).unwrap_err();
         assert_eq!(err.to_string(), "cancelled");
     }
 

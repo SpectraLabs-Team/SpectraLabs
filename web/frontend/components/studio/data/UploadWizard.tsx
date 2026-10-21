@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, Eye, FileUp, LineChart, Sparkles, Upload as UploadIcon, X } from 'lucide-react';
 import { ApiError, detailErrors } from '@/lib/api';
 import {
@@ -9,6 +9,7 @@ import {
   emptyDraft,
   followIngest,
   formatOffset,
+  getUploadLimits,
   ingest,
   MAX_UPLOAD_BYTES,
   preview as previewSample,
@@ -83,6 +84,12 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
   const [running, setRunning] = useState<Running | null>(null);
   const [result, setResult] = useState<{ ok: IngestResult } | { rejected: IngestRejection | null; message: string } | null>(null);
   const uploaded = useRef<{ file: File; id: string } | null>(null);
+  const [maxBytes, setMaxBytes] = useState(MAX_UPLOAD_BYTES);
+  useEffect(() => {
+    getUploadLimits()
+      .then((l) => setMaxBytes(l.max_bytes))
+      .catch(() => {});
+  }, []);
   const abort = useRef<AbortController | null>(null);
 
   const settings = useMemo(() => settingsFromDraft(draft), [draft]);
@@ -96,7 +103,7 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
   const pick = async (f: File | undefined) => {
     if (!f) return;
     setError('');
-    if (f.size > MAX_UPLOAD_BYTES) return setError(`${f.name} is ${bytes(f.size)}; files are limited to ${bytes(MAX_UPLOAD_BYTES)} for now.`);
+    if (f.size > maxBytes) return setError(`${f.name} is ${bytes(f.size)}; files are limited to ${bytes(maxBytes)}.`);
     if (f.size === 0) return setError(`${f.name} is empty.`);
     setBusy(true);
     try {
@@ -222,7 +229,7 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
         >
           {busy ? <Spinner /> : <UploadIcon className="h-6 w-6 text-accent" />}
           <span className="text-sm font-medium text-ink">Drop a CSV here, or choose one</span>
-          <span className="text-[11.5px] text-ink/50">Up to {bytes(MAX_UPLOAD_BYTES)}. Columns: a timestamp, open, high, low, close; optionally volume and symbol.</span>
+          <span className="text-[11.5px] text-ink/50">Up to {bytes(maxBytes)}; an interrupted upload resumes when you choose the same file again. Columns: a timestamp, open, high, low, close; optionally volume and symbol.</span>
           <input type="file" accept=".csv,.tsv,.txt,text/csv" className="sr-only" onChange={(e) => pick(e.target.files?.[0])} disabled={busy} aria-label="CSV file" />
         </label>
       )}

@@ -53,11 +53,16 @@ struct Fixture {
 
 impl Fixture {
     fn new(pool: PgPool, quota: i64) -> Self {
+        Self::with_limit(pool, quota, 1 << 30)
+    }
+
+    fn with_limit(pool: PgPool, quota: i64, max_upload: u64) -> Self {
         let dir = std::env::temp_dir().join(format!("spectra-ingest-{}", spectra_db::new_id().simple()));
         let store = ArtifactBackend::Local(ArtifactStore::new(dir.join("artifacts")));
         let mut cfg = ApiConfig::new(Secret::new(SECRET));
         cfg.artifacts = Some(store.clone());
         cfg.artifact_quota_bytes = quota;
+        cfg.max_upload_bytes = max_upload;
         let app = router(cfg, Some(pool.clone()));
         Self { app, pool, store, dir, user: spectra_db::new_id(), ws: spectra_db::new_id() }
     }
@@ -119,6 +124,24 @@ impl Fixture {
             b = b.header(k, v);
         }
         b.body(Body::from(bytes.to_vec())).unwrap()
+    }
+
+    /// Raw bytes, signed as the dashboard's chunk route signs them.
+    fn raw(&self, method: &str, path: &str, body: &[u8]) -> Request<Body> {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
+        let (user, ws) = (self.user.to_string(), self.ws.to_string());
+        let sig = sign(SECRET.as_bytes(), &canonical(method, path, &ts, &user, &ws, "req-chunk", body));
+        Request::builder()
+            .method(method)
+            .uri(path)
+            .header("content-type", "application/octet-stream")
+            .header("x-spectra-user", user)
+            .header("x-spectra-workspace", ws)
+            .header("x-request-id", "req-chunk")
+            .header("x-spectra-timestamp", ts)
+            .header("x-spectra-signature", sig)
+            .body(Body::from(body.to_vec()))
+            .unwrap()
     }
 
     async fn call(&self, req: Request<Body>) -> (u16, Json) {
@@ -533,5 +556,177 @@ async fn datasets_can_be_browsed_charted_renamed_and_deleted() {
             && actions.contains(&"dataset.version_deleted".to_string())
     );
     sqlx::query("DELETE FROM runs WHERE job_id = $1").bind(job).execute(&f.pool).await.unwrap();
+    f.clean_up().await;
+}
+
+// ---------------------------------------------------------------------------
+// M1b task 9: resumable uploads, and ingest streaming from the store
+// ---------------------------------------------------------------------------
+
+fn code(j: &Json) -> String {
+    j.at("code").and_then(Json::as_str).unwrap_or_default().to_string()
+}
+
+#[tokio::test]
+async fn a_resumable_upload_survives_retries_and_ingests_like_any_upload() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool, 1 << 30);
+    let data = CSV.as_bytes();
+    let (status, j) = f
+        .call(f.json(
+            "POST",
+            "/api/v1/uploads/sessions",
+            &format!(r#"{{"filename":"C:\\x\\big.csv","size":{}}}"#, data.len()),
+        ))
+        .await;
+    assert_eq!(status, 201, "{}", j.dump());
+    assert_eq!(j.at("filename").unwrap().as_str().unwrap(), "big.csv", "no path kept");
+    assert_eq!(j.at("received").unwrap().as_int().unwrap(), 0);
+    let sid = j.at("id").unwrap().as_str().unwrap().to_string();
+    let chunk = |offset: usize, part: &[u8]| {
+        f.raw("PUT", &format!("/api/v1/uploads/sessions/{sid}/chunk?offset={offset}"), part)
+    };
+
+    // Three chunks; the first is sent twice (its answer "lost"): the retry is told where to go on.
+    let (a, b) = (100, 250);
+    assert_eq!(f.call(chunk(0, &data[..a])).await.0, 200);
+    let (status, j) = f.call(chunk(0, &data[..a])).await;
+    assert_eq!((status, code(&j).as_str()), (409, "offset_mismatch"), "{}", j.dump());
+    assert_eq!(j.at("details").unwrap().at("received").unwrap().as_int().unwrap(), a as i64);
+    // Completing early says how far it got.
+    let (status, j) = f.call(f.json("POST", &format!("/api/v1/uploads/sessions/{sid}/complete"), "")).await;
+    assert_eq!((status, code(&j).as_str()), (409, "incomplete"));
+    // A "reload": ask where it stands, then continue from there.
+    let (_, j) = f.call(f.json("GET", &format!("/api/v1/uploads/sessions/{sid}"), "")).await;
+    let at = j.at("received").unwrap().as_int().unwrap() as usize;
+    assert_eq!(at, a);
+    assert_eq!(f.call(chunk(at, &data[at..b])).await.0, 200);
+    let (status, _) = f.call(chunk(b, &[data, b"x"].concat()[b..])).await;
+    assert_eq!(status, 422, "past the declared size");
+    let (status, j) = f.call(chunk(b, &data[b..])).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    assert_eq!(j.at("received").unwrap().as_int().unwrap() as usize, data.len());
+
+    // Complete; a retry answers with the same upload.
+    let (status, j) = f.call(f.json("POST", &format!("/api/v1/uploads/sessions/{sid}/complete"), "")).await;
+    assert_eq!(status, 201, "{}", j.dump());
+    assert_eq!(j.at("sha256").unwrap().as_str().unwrap(), sha256_hex(data));
+    let upload = j.at("id").unwrap().as_str().unwrap().to_string();
+    let (status, j) = f.call(f.json("POST", &format!("/api/v1/uploads/sessions/{sid}/complete"), "")).await;
+    assert_eq!((status, j.at("id").unwrap().as_str().unwrap()), (200, upload.as_str()));
+    assert_eq!(code(&f.call(chunk(data.len(), b"x")).await.1), "already_complete");
+
+    // It ingests (streamed from the store) to the same dataset id as the command line.
+    let r = registered(f.ingest(&upload, "resumable", SETTINGS, false).await);
+    let cli = spectra_data::load_csv(data, &spectra_data::CsvOptions::default()).unwrap();
+    assert_eq!(r["checksum"].as_str(), Some(cli.info.id.as_str()));
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn resumable_uploads_are_limited_scoped_and_can_be_abandoned() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::with_limit(pool.clone(), 1 << 30, 2048);
+    let (_, j) = f.call(f.json("GET", "/api/v1/uploads/limits", "")).await;
+    assert_eq!(j.at("max_bytes").unwrap().as_int().unwrap(), 2048);
+    assert_eq!(j.at("chunk_bytes").unwrap().as_int().unwrap(), 8 << 20);
+    let create = |size: usize| {
+        f.json("POST", "/api/v1/uploads/sessions", &format!(r#"{{"filename":"a.csv","size":{size}}}"#))
+    };
+    assert_eq!(f.call(create(4096)).await.0, 413, "over the configured limit");
+    let (status, j) = f.call(create(0)).await;
+    assert_eq!(status, 422, "{}", j.dump());
+
+    // Five open at most.
+    let mut ids = Vec::new();
+    for _ in 0..5 {
+        let (status, j) = f.call(create(1000)).await;
+        assert_eq!(status, 201, "{}", j.dump());
+        ids.push(j.at("id").unwrap().as_str().unwrap().to_string());
+    }
+    let (status, j) = f.call(create(1000)).await;
+    assert_eq!((status, code(&j).as_str()), (409, "too_many_uploads"));
+
+    // Another workspace sees none of them.
+    let other = Fixture::new(pool.clone(), 1 << 30);
+    let first = &ids[0];
+    assert_eq!(other.call(other.json("GET", &format!("/api/v1/uploads/sessions/{first}"), "")).await.0, 404);
+    assert_eq!(
+        other
+            .call(other.raw("PUT", &format!("/api/v1/uploads/sessions/{first}/chunk?offset=0"), b"x"))
+            .await
+            .0,
+        404
+    );
+    assert_eq!(
+        other.call(other.json("POST", &format!("/api/v1/uploads/sessions/{first}/complete"), "")).await.0,
+        404
+    );
+    assert_eq!(
+        other.call(other.json("DELETE", &format!("/api/v1/uploads/sessions/{first}"), "")).await.0,
+        404
+    );
+
+    // Abandon one: its staging file goes, and a slot frees up.
+    assert_eq!(
+        f.call(f.raw("PUT", &format!("/api/v1/uploads/sessions/{first}/chunk?offset=0"), b"date,open"))
+            .await
+            .0,
+        200
+    );
+    let staging =
+        f.store.staging_dir().join(format!("session-{}.part", Uuid::parse_str(first).unwrap().simple()));
+    assert!(staging.exists());
+    assert_eq!(f.call(f.json("DELETE", &format!("/api/v1/uploads/sessions/{first}"), "")).await.0, 200);
+    assert!(!staging.exists());
+    assert_eq!(f.call(f.json("GET", &format!("/api/v1/uploads/sessions/{first}"), "")).await.0, 404);
+    assert_eq!(f.call(create(1000)).await.0, 201);
+
+    // Idle ones expire with their files.
+    let second = Uuid::parse_str(&ids[1]).unwrap();
+    assert_eq!(
+        f.call(f.raw("PUT", &format!("/api/v1/uploads/sessions/{second}/chunk?offset=0"), b"abc")).await.0,
+        200
+    );
+    sqlx::query("UPDATE upload_sessions SET expires_at = now() - interval '1 second' WHERE id = $1")
+        .bind(second)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let removed = spectra_api::sessions_api::sweep_expired(&f.pool, &f.store.staging_dir()).await.unwrap();
+    assert!(removed >= 1);
+    assert!(!f.store.staging_dir().join(format!("session-{}.part", second.simple())).exists());
+
+    // The quota is checked when starting.
+    let small = Fixture::new(pool, 100);
+    let (status, j) = small
+        .call(small.json("POST", "/api/v1/uploads/sessions", r#"{"filename":"a.csv","size":1000}"#))
+        .await;
+    assert_eq!((status, code(&j).as_str()), (413, "quota_exceeded"));
+    small.clean_up().await;
+    other.clean_up().await;
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn a_stored_upload_that_no_longer_matches_its_hash_is_refused() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool, 1 << 30);
+    let upload = f.upload(CSV).await;
+    let u =
+        spectra_db::uploads::get(&f.pool, f.ws, Uuid::parse_str(&upload).unwrap()).await.unwrap().unwrap();
+    // The fixture's local store lives under dir/artifacts.
+    let path = f.dir.join("artifacts").join(ArtifactStore::relative_path(&u.sha256));
+    // Corrupt in a way that still parses, and in a way that doesn't: both are "corrupt".
+    for tampered in [CSV.replace("1000", "1001"), CSV.replace("471.5", "999.5")] {
+        std::fs::write(&path, tampered).unwrap();
+        match f.ingest(&upload, "corrupt", SETTINGS, false).await {
+            IngestOutcome::Failed { message, retryable } => {
+                assert!(message.contains("corrupt"), "{message}");
+                assert!(!retryable);
+            }
+            other => panic!("expected a failure, got {other:?}"),
+        }
+    }
     f.clean_up().await;
 }

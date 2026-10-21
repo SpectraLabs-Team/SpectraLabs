@@ -390,6 +390,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/uploads/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Upload limits. */
+        get: operations["limits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/uploads/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start a resumable upload. */
+        post: operations["create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/uploads/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** How far a resumable upload has got. */
+        get: operations["get"];
+        put?: never;
+        post?: never;
+        /** Abandon a resumable upload. */
+        delete: operations["abort"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/uploads/sessions/{id}/chunk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Send one chunk of a resumable upload. */
+        put: operations["chunk"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/uploads/sessions/{id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finish a resumable upload: the file becomes an upload, ready to ingest. */
+        post: operations["complete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -577,6 +663,14 @@ export interface components {
              */
             warmups?: number | null;
         };
+        /** @description After a chunk. */
+        ChunkView: {
+            /**
+             * Format: int64
+             * @description Bytes received so far.
+             */
+            received: number;
+        };
         /** @description `POST /api/v1/backtests` body: the `backtest` job payload, plus a priority. */
         CreateBacktest: {
             /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
@@ -611,6 +705,16 @@ export interface components {
              * @description -10..10; higher runs first. Default 0.
              */
             priority?: number;
+        };
+        /** @description `POST /api/v1/uploads/sessions` body. */
+        CreateSession: {
+            /** @description The file's name (display only). */
+            filename: string;
+            /**
+             * Format: int64
+             * @description The file's size in bytes.
+             */
+            size: number;
         };
         /** @description A dataset and its versions. */
         DatasetDetailView: {
@@ -1024,6 +1128,41 @@ export interface components {
             /** @description What was wrong. */
             message: string;
         };
+        /** @description A resumable upload. */
+        SessionView: {
+            /**
+             * Format: int64
+             * @description Largest chunk.
+             */
+            chunk_bytes: number;
+            /**
+             * Format: date-time
+             * @description Removed at this time unless more arrives (UTC, RFC 3339).
+             */
+            expires_at: string;
+            /** @description File name. */
+            filename: string;
+            /**
+             * Format: uuid
+             * @description Session id.
+             */
+            id: string;
+            /**
+             * Format: int64
+             * @description Bytes received: where the next chunk starts.
+             */
+            received: number;
+            /**
+             * Format: int64
+             * @description The whole file, in bytes.
+             */
+            size: number;
+            /**
+             * Format: uuid
+             * @description The upload it became, once completed.
+             */
+            upload_id?: string | null;
+        };
         /** @description `POST /api/v1/stress` body (also the `stress` job payload). */
         StressRequest: {
             /** @description Portfolio CSV. */
@@ -1114,6 +1253,24 @@ export interface components {
             description?: string | null;
             /** @description New name (unique in the workspace). */
             name?: string | null;
+        };
+        /** @description Upload limits, for the Studio. */
+        UploadLimits: {
+            /**
+             * Format: int64
+             * @description Largest chunk.
+             */
+            chunk_bytes: number;
+            /**
+             * Format: int64
+             * @description Largest file a resumable upload accepts.
+             */
+            max_bytes: number;
+            /**
+             * Format: int32
+             * @description Unfinished uploads a workspace may have at once.
+             */
+            max_open_sessions: number;
         };
         /** @description A stored upload. */
         UploadView: {
@@ -2204,6 +2361,248 @@ export interface operations {
                 };
             };
             /** @description Over 100 MiB, or the workspace's storage quota (code `quota_exceeded`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    limits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadLimits"];
+                };
+            };
+        };
+    };
+    create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSession"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionView"];
+                };
+            };
+            /** @description Too many unfinished uploads (code `too_many_uploads`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Over the size limit, or the storage quota (code `quota_exceeded`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every invalid field (`details.errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    abort: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    chunk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                id: string;
+                /** @description Where this chunk starts: the bytes received so far. */
+                offset: number;
+            };
+            cookie?: never;
+        };
+        /** @description At most 8 MiB */
+        requestBody: {
+            content: {
+                "application/octet-stream": number[];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChunkView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not where the upload is (code `offset_mismatch`, `details.received`), or already completed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Chunk over 8 MiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Empty, or past the file's size */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    complete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Session id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stored (a retry answers 200 with the same upload) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not every byte has arrived (code `incomplete`, `details.received`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Storage quota (code `quota_exceeded`) */
             413: {
                 headers: {
                     [name: string]: unknown;

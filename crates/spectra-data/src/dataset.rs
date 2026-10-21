@@ -23,6 +23,7 @@ use spectra_core::{
     bars_sha256, validate_bars, Bar, Error, InstrumentId, Price, Qty, Result, Sha256, ENGINE_VERSION,
 };
 
+use crate::records::{parse_records, Record, RecordReader};
 use crate::time::{format_timestamp, parse_fixed, parse_timestamp, trim, TimeOptions};
 
 fn data_err(msg: impl Into<String>) -> Error {
@@ -349,83 +350,8 @@ pub fn assess_quality(bars: &[Bar], symbols: &SymbolTable, cfg: &CsvOptions) -> 
 // CSV ingestion
 // ---------------------------------------------------------------------------
 
-pub(crate) struct Record {
-    pub(crate) line: usize,
-    pub(crate) fields: Vec<String>,
-}
-
 fn to_string_lossy(b: &[u8]) -> String {
     String::from_utf8_lossy(b).into_owned()
-}
-
-pub(crate) fn parse_records(s: &[u8], delim: u8) -> Result<Vec<Record>> {
-    let mut out = Vec::new();
-    let mut cur = Record { line: 0, fields: Vec::new() };
-    let mut field: Vec<u8> = Vec::new();
-    let mut in_quotes = false;
-    let mut quoted_field = false;
-    let mut record_open = false;
-    let mut line = 1usize;
-
-    fn end_field(cur: &mut Record, field: &mut Vec<u8>, quoted: &mut bool) {
-        let text = if *quoted { to_string_lossy(field) } else { to_string_lossy(trim(field)) };
-        cur.fields.push(text);
-        field.clear();
-        *quoted = false;
-    }
-
-    let mut i = 0;
-    while i < s.len() {
-        let c = s[i];
-        if !record_open {
-            cur.line = line;
-            record_open = true;
-        }
-        if in_quotes {
-            if c == b'"' {
-                if i + 1 < s.len() && s[i + 1] == b'"' {
-                    field.push(b'"');
-                    i += 1;
-                } else {
-                    in_quotes = false;
-                }
-            } else {
-                if c == b'\n' {
-                    line += 1;
-                }
-                field.push(c);
-            }
-        } else if c == b'"' && trim(&field).is_empty() {
-            field.clear();
-            in_quotes = true;
-            quoted_field = true;
-        } else if c == delim {
-            end_field(&mut cur, &mut field, &mut quoted_field);
-        } else if c == b'\n' {
-            end_field(&mut cur, &mut field, &mut quoted_field);
-            let blank = cur.fields.len() == 1 && cur.fields[0].is_empty();
-            let done = std::mem::replace(&mut cur, Record { line: 0, fields: Vec::new() });
-            if !blank {
-                out.push(done);
-            }
-            record_open = false;
-            line += 1;
-        } else if c != b'\r' {
-            field.push(c);
-        }
-        i += 1;
-    }
-    if in_quotes {
-        return Err(data_err(format!("unterminated quoted field starting on line {}", cur.line)));
-    }
-    if record_open {
-        end_field(&mut cur, &mut field, &mut quoted_field);
-        let blank = cur.fields.len() == 1 && cur.fields[0].is_empty();
-        if !blank {
-            out.push(cur);
-        }
-    }
-    Ok(out)
 }
 
 /// Header names matched when no column name is given (lower case).
@@ -453,9 +379,11 @@ pub(crate) fn find_column(header: &[String], explicit: &str, aliases: &[&str], e
     aliases.iter().find_map(|a| header.iter().position(|h| h == a))
 }
 
+/// A parsed row. `sym` indexes the loader's table of symbol names, so a row
+/// holds no string (most of the memory of a large ingest).
 struct Row {
     line: usize,
-    symbol: String,
+    sym: u32,
     ts: i64,
     o: i64,
     h: i64,
@@ -496,34 +424,46 @@ impl Rejections<'_> {
 /// # Errors
 /// [`Error::Data`] as described.
 pub fn load_csv(content: &[u8], opt: &CsvOptions) -> Result<Dataset> {
-    let source_hash = spectra_core::sha256_hex(content);
-    let content = content.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(content);
-    let records = parse_records(content, opt.delimiter)?;
-    let mut ds = load_records(&records, opt, false, None)?;
-    ds.info.source_sha256 = source_hash;
+    load_csv_reader(content, opt, None)
+}
+
+/// How often the loaders report progress, in data rows.
+pub const PROGRESS_EVERY_ROWS: usize = 10_000;
+
+/// [`load_csv`] on a stream, reading it once and keeping one record at a
+/// time: memory grows with the number of bars, not the size of the text.
+/// `progress(bytes_read)` is called every [`PROGRESS_EVERY_ROWS`] data rows
+/// and once at the end; if it returns `false` the load stops with
+/// [`Error::Data`] `"cancelled"`. The result (bars, symbols, quality report,
+/// `source_sha256`, and the error for a refused file) is identical to
+/// [`load_csv`] on the same bytes.
+///
+/// # Errors
+/// As [`load_csv`], a read error, or `"cancelled"`.
+pub fn load_csv_reader<R: std::io::Read>(
+    reader: R,
+    opt: &CsvOptions,
+    progress: Option<&mut dyn FnMut(u64) -> bool>,
+) -> Result<Dataset> {
+    let mut src = RecordReader::new(reader, opt.delimiter);
+    let mut ds = load_stream(&mut src, opt, false, progress)?;
+    ds.info.source_sha256 = src.source_sha256();
     Ok(ds)
 }
 
-/// How often [`load_csv_with_progress`] reports, in data rows.
-pub const PROGRESS_EVERY_ROWS: usize = 10_000;
-
-/// [`load_csv`], calling `progress(rows_read, rows_total)` every
-/// [`PROGRESS_EVERY_ROWS`] data rows and once at the end. If it returns
-/// `false` the load stops with [`Error::Data`] `"cancelled"`. The result is
-/// identical to [`load_csv`]'s.
+/// The quality report of a whole stream, whatever the bad-row policy: every
+/// rejected row is counted (as under "skip bad rows") and a file with no
+/// valid row gives an empty dataset rather than an error. For explaining why
+/// a file was refused.
 ///
 /// # Errors
-/// As [`load_csv`], or `"cancelled"`.
-pub fn load_csv_with_progress(
-    content: &[u8],
-    opt: &CsvOptions,
-    progress: &mut dyn FnMut(usize, usize) -> bool,
-) -> Result<Dataset> {
-    let source_hash = spectra_core::sha256_hex(content);
-    let content = content.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(content);
-    let records = parse_records(content, opt.delimiter)?;
-    let mut ds = load_records(&records, opt, false, Some(progress))?;
-    ds.info.source_sha256 = source_hash;
+/// Problems with the file as a whole: unreadable quoting, no header, a
+/// missing column, or a read error.
+pub fn report_csv_reader<R: std::io::Read>(reader: R, opt: &CsvOptions) -> Result<Dataset> {
+    let lenient = CsvOptions { on_invalid: InvalidRowPolicy::Skip, ..opt.clone() };
+    let mut src = RecordReader::new(reader, opt.delimiter);
+    let mut ds = load_stream(&mut src, &lenient, true, None)?;
+    ds.info.source_sha256 = src.source_sha256();
     Ok(ds)
 }
 
@@ -555,12 +495,13 @@ pub struct CsvPreview {
 pub fn preview_csv(content: &[u8], opt: &CsvOptions, max_rows: usize) -> Result<CsvPreview> {
     let content = content.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(content);
     let mut records = parse_records(content, opt.delimiter)?;
-    let rows_not_read = records.len().saturating_sub(max_rows + 1);
-    records.truncate(max_rows + 1);
+    let rows_not_read = records.len().saturating_sub(max_rows.saturating_add(1));
+    records.truncate(max_rows.saturating_add(1));
     let lenient = CsvOptions { on_invalid: InvalidRowPolicy::Skip, ..opt.clone() };
-    let dataset = load_records(&records, &lenient, true, None)?;
     let header =
         records.first().map_or_else(Vec::new, |r| r.fields.iter().map(|f| normalise_header(f)).collect());
+    let mut src = Records(records.into_iter());
+    let dataset = load_stream(&mut src, &lenient, true, None)?;
     let would_abort = if opt.on_invalid == InvalidRowPolicy::Reject {
         dataset
             .quality
@@ -574,21 +515,82 @@ pub fn preview_csv(content: &[u8], opt: &CsvOptions, max_rows: usize) -> Result<
     Ok(CsvPreview { header, dataset, rows_not_read, would_abort })
 }
 
-/// [`load_csv`] after the records are parsed. `allow_empty` returns a dataset
-/// with no bars (and its quality report) instead of failing when no row is
-/// valid.
-#[allow(clippy::too_many_lines)] // one linear pass, kept in the C++ reference's order
-fn load_records(
-    records: &[Record],
+/// Where the loader gets records: a stream, or records already in memory.
+trait RecordSource {
+    fn next_record(&mut self) -> Result<Option<Record>>;
+    /// Bytes read so far (for progress); 0 when not streaming.
+    fn bytes(&self) -> u64;
+    /// Reads to the end; a file-level error found there (see [`RecordReader::drain`]).
+    fn drain(&mut self) -> Option<Error>;
+}
+
+impl<R: std::io::Read> RecordSource for RecordReader<R> {
+    fn next_record(&mut self) -> Result<Option<Record>> {
+        RecordReader::next_record(self)
+    }
+    fn bytes(&self) -> u64 {
+        self.bytes_read()
+    }
+    fn drain(&mut self) -> Option<Error> {
+        RecordReader::drain(self)
+    }
+}
+
+/// Records already parsed (their file-level errors were raised when parsing).
+struct Records(std::vec::IntoIter<Record>);
+
+impl RecordSource for Records {
+    fn next_record(&mut self) -> Result<Option<Record>> {
+        Ok(self.0.next())
+    }
+    fn bytes(&self) -> u64 {
+        0
+    }
+    fn drain(&mut self) -> Option<Error> {
+        None
+    }
+}
+
+/// Why the row pass stopped.
+enum Stop {
+    /// The tokenizer refused the file (or a read failed): final.
+    File(Error),
+    /// A row or the header: an unterminated quote later in the file wins.
+    Row(Error),
+    Cancelled,
+}
+
+/// The loader: header, then every row, then sorting, duplicates and the
+/// quality report. The whole-file parser it replaced tokenized everything
+/// before looking at a row, so a quoting error anywhere took precedence over
+/// a bad row or a missing column; on such an error this reads on to the end
+/// to keep that order.
+fn load_stream(
+    src: &mut dyn RecordSource,
     opt: &CsvOptions,
     allow_empty: bool,
-    mut progress: Option<&mut dyn FnMut(usize, usize) -> bool>,
+    progress: Option<&mut dyn FnMut(u64) -> bool>,
 ) -> Result<Dataset> {
-    let mut ds = Dataset::default();
-    if records.is_empty() {
-        return Err(data_err("CSV is empty"));
+    match load_rows(src, opt, allow_empty, progress) {
+        Ok(ds) => Ok(ds),
+        Err(Stop::File(e)) => Err(e),
+        Err(Stop::Cancelled) => Err(data_err("cancelled")),
+        Err(Stop::Row(e)) => Err(src.drain().unwrap_or(e)),
     }
-    let header: Vec<String> = records[0].fields.iter().map(|f| normalise_header(f)).collect();
+}
+
+#[allow(clippy::too_many_lines)] // one linear pass, kept in the C++ reference's order
+fn load_rows(
+    src: &mut dyn RecordSource,
+    opt: &CsvOptions,
+    allow_empty: bool,
+    mut progress: Option<&mut dyn FnMut(u64) -> bool>,
+) -> std::result::Result<Dataset, Stop> {
+    let mut ds = Dataset::default();
+    let Some(header_rec) = src.next_record().map_err(Stop::File)? else {
+        return Err(Stop::Row(data_err("CSV is empty")));
+    };
+    let header: Vec<String> = header_rec.fields.iter().map(|f| normalise_header(f)).collect();
     let exact = opt.explicit_columns;
     let col_ts = find_column(&header, &opt.timestamp_column, TIMESTAMP_ALIASES, exact);
     let col_open = find_column(&header, &opt.open_column, OPEN_ALIASES, exact);
@@ -602,48 +604,66 @@ fn load_records(
         [("volume", &opt.volume_column, col_volume), ("symbol", &opt.symbol_column, col_symbol)]
     {
         if exact && !given.is_empty() && found.is_none() {
-            return Err(data_err(format!("missing {name} column: {}", given.trim())));
+            return Err(Stop::Row(data_err(format!("missing {name} column: {}", given.trim()))));
         }
     }
-    let require =
-        |c: Option<usize>, name: &str| c.ok_or_else(|| data_err(format!("missing required column: {name}")));
+    let require = |c: Option<usize>, name: &str| {
+        c.ok_or_else(|| Stop::Row(data_err(format!("missing required column: {name}"))))
+    };
     let col_ts = require(col_ts, "timestamp")?;
     let col_open = require(col_open, "open")?;
     let col_high = require(col_high, "high")?;
     let col_low = require(col_low, "low")?;
     let col_close = require(col_close, "close")?;
 
+    // Symbol names seen so far; rows refer to them by index.
+    let mut names: Vec<String> = Vec::new();
+    let mut index: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut intern = |s: &str| -> u32 {
+        if let Some(&i) = index.get(s) {
+            return i;
+        }
+        let i = u32::try_from(names.len()).expect("fewer than 2^32 symbols");
+        names.push(s.to_string());
+        index.insert(s.to_string(), i);
+        i
+    };
+
     let mut rows: Vec<Row> = Vec::new();
     let mut naive_count = 0usize;
     {
         let mut rj = Rejections { policy: opt.on_invalid, rep: &mut ds.quality };
-        let total = records.len() - 1;
-        for (i, rec) in records[1..].iter().enumerate() {
-            if i % PROGRESS_EVERY_ROWS == 0 && i > 0 {
+        let mut i = 0usize;
+        while let Some(rec) = src.next_record().map_err(Stop::File)? {
+            if i.is_multiple_of(PROGRESS_EVERY_ROWS) && i > 0 {
                 if let Some(report) = progress.as_mut() {
-                    if !report(i, total) {
-                        return Err(data_err("cancelled"));
+                    if !report(src.bytes()) {
+                        return Err(Stop::Cancelled);
                     }
                 }
             }
+            i += 1;
             rj.rep.rows_total += 1;
+            let reject = |rj: &mut Rejections<'_>, category: &str, msg: String| {
+                rj.reject(rec.line, category, msg).map_err(Stop::Row)
+            };
             if rec.fields.len() != header.len() {
-                rj.reject(
-                    rec.line,
+                reject(
+                    &mut rj,
                     "column_count",
                     format!("expected {} fields, found {}", header.len(), rec.fields.len()),
                 )?;
                 continue;
             }
             let field = |c: usize| rec.fields[c].as_str();
-            let symbol = col_symbol.map_or_else(|| opt.default_symbol.clone(), |c| field(c).to_string());
+            let symbol = col_symbol.map_or(opt.default_symbol.as_str(), field);
             if symbol.is_empty() {
-                rj.reject(rec.line, "empty_symbol", "symbol is empty".into())?;
+                reject(&mut rj, "empty_symbol", "symbol is empty".into())?;
                 continue;
             }
             let Some(ts) = parse_timestamp(field(col_ts), &opt.time) else {
-                rj.reject(
-                    rec.line,
+                reject(
+                    &mut rj,
                     "bad_timestamp",
                     format!(
                         "cannot parse timestamp '{}' (formats must be explicit; see TimeFormat)",
@@ -663,8 +683,8 @@ fn load_records(
                 if let Some(v) = parse_fixed(field(*c)) {
                     nums[k] = v;
                 } else {
-                    rj.reject(
-                        rec.line,
+                    reject(
+                        &mut rj,
                         "bad_number",
                         format!("cannot parse {what} '{}' (max 8 decimal places, no rounding)", field(*c)),
                     )?;
@@ -677,34 +697,34 @@ fn load_records(
             }
             let [o, h, l, c, v] = nums;
             if o <= 0 || h <= 0 || l <= 0 || c <= 0 {
-                rj.reject(rec.line, "non_positive_price", "prices must be greater than zero".into())?;
+                reject(&mut rj, "non_positive_price", "prices must be greater than zero".into())?;
                 continue;
             }
             if l > o.min(c) || h < o.max(c) {
-                rj.reject(rec.line, "ohlc_inconsistent", "low/high do not bracket open and close".into())?;
+                reject(&mut rj, "ohlc_inconsistent", "low/high do not bracket open and close".into())?;
                 continue;
             }
             if v < 0 {
-                rj.reject(rec.line, "negative_volume", "volume is negative".into())?;
+                reject(&mut rj, "negative_volume", "volume is negative".into())?;
                 continue;
             }
-            rows.push(Row { line: rec.line, symbol, ts: ts.ts_ns, o, h, l, c, v, naive: ts.naive });
+            let sym = intern(symbol);
+            rows.push(Row { line: rec.line, sym, ts: ts.ts_ns, o, h, l, c, v, naive: ts.naive });
         }
     }
     if rows.is_empty() {
         if allow_empty {
             return Ok(ds);
         }
-        return Err(data_err("no valid data rows"));
+        return Err(Stop::Row(data_err("no valid data rows")));
     }
 
     // Symbol table: sorted unique names, so instrument ids do not depend on row order.
-    let names: BTreeSet<&str> = rows.iter().map(|r| r.symbol.as_str()).collect();
-    ds.symbols.symbols = names.into_iter().map(str::to_string).collect();
-    let ids: Vec<InstrumentId> =
-        rows.iter().map(|r| ds.symbols.id(&r.symbol).expect("symbol in table")).collect();
+    let sorted: BTreeSet<&str> = names.iter().map(String::as_str).collect();
+    ds.symbols.symbols = sorted.into_iter().map(str::to_string).collect();
+    let id_of: Vec<InstrumentId> = names.iter().map(|n| ds.symbols.id(n).expect("symbol in table")).collect();
     let mut order: Vec<usize> = (0..rows.len()).collect();
-    let key = |i: usize| (rows[i].ts, ids[i]);
+    let key = |i: usize| (rows[i].ts, id_of[rows[i].sym as usize]);
     ds.quality.input_was_sorted = order.windows(2).all(|w| key(w[0]) <= key(w[1]));
     order.sort_by_key(|&i| key(i)); // stable
 
@@ -715,7 +735,7 @@ fn load_records(
         let r = &rows[ri];
         if let Some(pi) = prev {
             let p = &rows[pi];
-            if p.ts == r.ts && p.symbol == r.symbol {
+            if p.ts == r.ts && p.sym == r.sym {
                 let identical = p.o == r.o && p.h == r.h && p.l == r.l && p.c == r.c && p.v == r.v;
                 if !identical {
                     conflicting += 1;
@@ -723,18 +743,19 @@ fn load_records(
                 let msg = format!(
                     "{} the {} bar at {} (first seen on line {})",
                     if identical { "exact duplicate of" } else { "CONFLICTS with" },
-                    r.symbol,
+                    names[r.sym as usize],
                     format_timestamp(r.ts),
                     p.line
                 );
                 let mut rj = Rejections { policy: opt.on_invalid, rep: &mut ds.quality };
-                rj.reject(r.line, if identical { "duplicate" } else { "duplicate_conflict" }, msg)?;
+                rj.reject(r.line, if identical { "duplicate" } else { "duplicate_conflict" }, msg)
+                    .map_err(Stop::Row)?;
                 continue; // under Skip: keep the first occurrence; `prev` stays on it
             }
         }
         ds.bars.push(Bar {
             ts_ns: r.ts,
-            instrument: ids[ri],
+            instrument: id_of[r.sym as usize],
             open: Price::from_raw(r.o),
             high: Price::from_raw(r.h),
             low: Price::from_raw(r.l),
@@ -746,6 +767,9 @@ fn load_records(
         }
         prev = Some(ri);
     }
+    // The rows are no longer needed: free them before the quality pass.
+    drop(order);
+    drop(rows);
 
     let analysis = assess_quality(&ds.bars, &ds.symbols, opt);
     let rep = &mut ds.quality;
@@ -784,8 +808,8 @@ fn load_records(
 
     ds.info = identify(&ds.bars, &ds.symbols);
     if let Some(report) = progress.as_mut() {
-        if !report(records.len() - 1, records.len() - 1) {
-            return Err(data_err("cancelled"));
+        if !report(src.bytes()) {
+            return Err(Stop::Cancelled);
         }
     }
     Ok(ds)
@@ -809,8 +833,9 @@ fn identify(bars: &[Bar], symbols: &SymbolTable) -> DatasetInfo {
 /// [`Error::Data`] if the file cannot be read or parsed.
 pub fn load_csv_file(path: impl AsRef<std::path::Path>, opt: &CsvOptions) -> Result<Dataset> {
     let path = path.as_ref();
-    let bytes = std::fs::read(path).map_err(|_| data_err(format!("cannot open file: {}", path.display())))?;
-    load_csv(&bytes, opt)
+    let file =
+        std::fs::File::open(path).map_err(|_| data_err(format!("cannot open file: {}", path.display())))?;
+    load_csv_reader(file, opt, None)
 }
 
 /// Builds a new dataset from transformed bars and records its lineage. Bars

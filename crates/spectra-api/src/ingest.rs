@@ -140,8 +140,11 @@ pub async fn run_ingest(
         Ok(None) => return failed("The upload has expired or was removed; upload the file again.", false),
         Err(e) => return failed(format!("Could not look up the upload: {e}"), true),
     };
-    let bytes = match env.store.get(&upload.sha256).await {
-        Ok(b) => b,
+    // Read the upload as a stream from the store (a download only for S3): the file is never
+    // held in memory, and hashing it while parsing verifies it.
+    let staging = env.store.staging_dir();
+    let file = match env.store.local_file(&upload.sha256, &staging).await {
+        Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return failed("The uploaded file is no longer stored; upload it again.", false);
         }
@@ -149,31 +152,58 @@ pub async fn run_ingest(
     };
     set_progress(0.05);
 
-    // 2. Parse it (CPU-bound: on the blocking pool), reporting rows read.
+    // 2. Parse it (CPU-bound: on the blocking pool), reporting the share of bytes read.
     let (opt, cancel_flag, progress_atomic) =
         (payload.options.clone(), Arc::clone(&cancel), Arc::clone(&progress));
+    let (path, size, expected) = (file.path.clone(), upload.size_bytes.max(1) as f32, upload.sha256.clone());
     let parsed = tokio::task::spawn_blocking(move || {
-        let loaded = spectra_data::load_csv_with_progress(&bytes, &opt, &mut |done, total| {
-            let frac = 0.05 + 0.80 * (done as f32 / total.max(1) as f32);
-            progress_atomic.store(frac.to_bits(), Ordering::Relaxed);
-            !cancel_flag.load(Ordering::Relaxed)
-        });
+        let open = || std::fs::File::open(&path).map(|f| std::io::BufReader::with_capacity(1 << 20, f));
+        let file = open().map_err(|e| (format!("cannot open the uploaded file: {e}"), None))?;
+        // Every byte is hashed on its way to the parser, and the rest of the file after it
+        // stops, so a corrupt upload is reported as such whatever the parser made of it.
+        let mut reader = Hashing { inner: file, hash: spectra_core::Sha256::new() };
+        let loaded = spectra_data::load_csv_reader(
+            &mut reader,
+            &opt,
+            Some(&mut |read| {
+                let frac = 0.05 + 0.80 * (read as f32 / size).min(1.0);
+                progress_atomic.store(frac.to_bits(), Ordering::Relaxed);
+                !cancel_flag.load(Ordering::Relaxed)
+            }),
+        );
+        let cancelled = matches!(&loaded, Err(e) if e.to_string() == "cancelled");
+        if !cancelled {
+            let intact = std::io::copy(&mut reader, &mut std::io::sink()).is_ok()
+                && reader.hash.clone().hex_digest() == expected;
+            if !intact {
+                return Err(("the stored upload does not match its SHA-256".to_string(), None));
+            }
+        }
         match loaded {
             Ok(d) => Ok(d),
+            Err(e) if e.to_string() == "cancelled" => Err((e.to_string(), None)),
             Err(e) => {
-                // Refused: go through the whole file once more without stopping, so the
-                // report lists every bad row, not just the first.
-                let report = spectra_data::preview_csv(&bytes, &opt, usize::MAX - 1)
-                    .map(|p| spectra_data::quality_report_json(&p.dataset, &opt));
-                Err((e.to_string(), report.ok()))
+                // Refused: read the whole file once more without stopping, so the report
+                // lists every bad row, not just the first. Also streamed.
+                let report = open()
+                    .ok()
+                    .and_then(|r| spectra_data::report_csv_reader(r, &opt).ok())
+                    .map(|d| spectra_data::quality_report_json(&d, &opt));
+                Err((e.to_string(), report))
             }
         }
     })
     .await;
+    if file.temporary {
+        let _ = tokio::fs::remove_file(&file.path).await;
+    }
     let dataset: Dataset = match parsed {
         Ok(Ok(d)) => d,
         Ok(Err((message, _))) if message == "cancelled" && cancel.load(Ordering::Relaxed) => {
             return IngestOutcome::Cancelled;
+        }
+        Ok(Err((message, _))) if message == "the stored upload does not match its SHA-256" => {
+            return failed("The stored upload is corrupt; upload the file again.", false);
         }
         Ok(Err((message, report))) => {
             let result = serde_json::json!({
@@ -321,4 +351,18 @@ pub async fn ensure_local(
     })
     .await
     .map_err(|_| ("Copying the dataset crashed.".to_string(), true))?
+}
+
+/// A reader that hashes what passes through it.
+struct Hashing<R> {
+    inner: R,
+    hash: spectra_core::Sha256,
+}
+
+impl<R: std::io::Read> std::io::Read for Hashing<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.hash.update(&buf[..n]);
+        Ok(n)
+    }
 }

@@ -52,6 +52,7 @@ pub mod observability;
 pub mod openapi;
 pub mod registry_api;
 pub mod sessions_api;
+pub mod strategies_api;
 pub mod telemetry;
 pub mod uploads_api;
 
@@ -752,6 +753,13 @@ fn backtest_routes() -> Router<AppState> {
             ),
         )
         .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
+        .route(
+            "/api/v1/strategies",
+            only(get(strategies_api::list_strategies).post(strategies_api::create_strategy)),
+        )
+        .route("/api/v1/strategies/{id}", only(get(strategies_api::get_strategy)))
+        .route("/api/v1/strategies/{id}/versions", only(post(strategies_api::save_version)))
+        .route("/api/v1/strategies/versions/{id}", only(get(strategies_api::get_version)))
 }
 
 /// The upload route streams after validating its declared body hash.

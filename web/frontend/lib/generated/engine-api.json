@@ -1927,7 +1927,7 @@
           "strategies"
         ],
         "summary": "One strategy version by id (what a backtest's `strategy_version_id` names).",
-        "operationId": "get_version",
+        "operationId": "get_strategy_version",
         "parameters": [
           {
             "name": "id",
@@ -2013,7 +2013,7 @@
           "strategies"
         ],
         "summary": "Save a version: a built-in with parameters. Saving the same code and\nparameters again returns the existing version (200, `created: false`).",
-        "operationId": "save_version",
+        "operationId": "save_strategy_version",
         "parameters": [
           {
             "name": "id",

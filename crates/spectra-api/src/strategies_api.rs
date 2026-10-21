@@ -419,7 +419,7 @@ pub(crate) async fn get_strategy(
         (status = 404, body = crate::openapi::ErrorDoc),
         (status = 422, description = "Every problem with the built-in or parameters", body = crate::openapi::ErrorDoc),
     ))]
-pub(crate) async fn save_version(
+pub(crate) async fn save_strategy_version(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
     strategy_id: Result<Path<Uuid>, PathRejection>,
@@ -452,7 +452,7 @@ pub(crate) async fn save_version(
 #[utoipa::path(get, path = "/api/v1/strategies/versions/{id}", tag = "strategies",
     params(("id" = Uuid, Path, description = "Strategy version id")),
     responses((status = 200, body = StrategyVersionView), (status = 404, body = crate::openapi::ErrorDoc)))]
-pub(crate) async fn get_version(
+pub(crate) async fn get_strategy_version(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
     version_id: Result<Path<Uuid>, PathRejection>,

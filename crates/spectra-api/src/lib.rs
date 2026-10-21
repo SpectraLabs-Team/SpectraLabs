@@ -758,8 +758,8 @@ fn backtest_routes() -> Router<AppState> {
             only(get(strategies_api::list_strategies).post(strategies_api::create_strategy)),
         )
         .route("/api/v1/strategies/{id}", only(get(strategies_api::get_strategy)))
-        .route("/api/v1/strategies/{id}/versions", only(post(strategies_api::save_version)))
-        .route("/api/v1/strategies/versions/{id}", only(get(strategies_api::get_version)))
+        .route("/api/v1/strategies/{id}/versions", only(post(strategies_api::save_strategy_version)))
+        .route("/api/v1/strategies/versions/{id}", only(get(strategies_api::get_strategy_version)))
 }
 
 /// The upload route streams after validating its declared body hash.

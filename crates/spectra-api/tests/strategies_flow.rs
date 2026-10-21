@@ -291,4 +291,7 @@ async fn backtests_from_a_strategy_version() {
         )
         .await;
     assert_eq!((status, body["code"].as_str()), (409, Some("strategy_version_stale")), "{body}");
+
+    // Leave no queued work behind: the SQL checks that run after the tests count every queued job.
+    sqlx::query("DELETE FROM jobs WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
 }

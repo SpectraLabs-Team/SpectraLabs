@@ -628,7 +628,7 @@ export interface paths {
             cookie?: never;
         };
         /** One strategy version by id (what a backtest's `strategy_version_id` names). */
-        get: operations["get_version"];
+        get: operations["get_strategy_version"];
         put?: never;
         post?: never;
         delete?: never;
@@ -665,7 +665,7 @@ export interface paths {
         put?: never;
         /** Save a version: a built-in with parameters. Saving the same code and
          *     parameters again returns the existing version (200, `created: false`). */
-        post: operations["save_version"];
+        post: operations["save_strategy_version"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3555,7 +3555,7 @@ export interface operations {
             };
         };
     };
-    get_version: {
+    get_strategy_version: {
         parameters: {
             query?: never;
             header?: never;
@@ -3615,7 +3615,7 @@ export interface operations {
             };
         };
     };
-    save_version: {
+    save_strategy_version: {
         parameters: {
             query?: never;
             header?: never;

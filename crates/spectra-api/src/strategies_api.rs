@@ -302,7 +302,7 @@ pub struct StrategyDetail {
 /// The workspace's saved strategies.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct StrategyList {
-    pub strategies: Vec<StrategyView>,
+    pub items: Vec<StrategyView>,
 }
 
 fn is_current(v: &StrategyVersion) -> bool {
@@ -591,9 +591,7 @@ pub(crate) async fn list_strategies(
         Err(r) => return r,
     };
     match strategies::list(&pool, ws, 200).await {
-        Ok(ss) => {
-            to_json(200, &StrategyList { strategies: ss.into_iter().map(StrategyView::from).collect() })
-        }
+        Ok(ss) => to_json(200, &StrategyList { items: ss.into_iter().map(StrategyView::from).collect() }),
         Err(e) => db_error(&e),
     }
 }

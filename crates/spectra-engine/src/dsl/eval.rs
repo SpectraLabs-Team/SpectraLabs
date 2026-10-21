@@ -488,7 +488,8 @@ impl<'a, 'c> ExecEnv<'a, 'c> {
                 Ok(Val::Int(v.to_f64().round() as i64))
             }
             "sma" => {
-                let period_val = self.eval_expr(&args[1])?;
+                let period_val =
+                    if args.len() == 1 { self.eval_expr(&args[0])? } else { self.eval_expr(&args[1])? };
                 let period = period_val.to_f64().max(1.0).round() as usize;
                 let h = self.ctx.history(self.instrument);
                 if h.len() < period {
@@ -502,7 +503,8 @@ impl<'a, 'c> ExecEnv<'a, 'c> {
                 Ok(Val::PriceRaw(avg as i64))
             }
             "ema" => {
-                let period_val = self.eval_expr(&args[1])?;
+                let period_val =
+                    if args.len() == 1 { self.eval_expr(&args[0])? } else { self.eval_expr(&args[1])? };
                 let period = period_val.to_f64().max(1.0);
                 let h = self.ctx.history(self.instrument);
                 if h.is_empty() {
@@ -516,7 +518,8 @@ impl<'a, 'c> ExecEnv<'a, 'c> {
                 Ok(Val::PriceRaw(ema.round() as i64))
             }
             "rsi" => {
-                let period_val = self.eval_expr(&args[1])?;
+                let period_val =
+                    if args.len() == 1 { self.eval_expr(&args[0])? } else { self.eval_expr(&args[1])? };
                 let period = period_val.to_f64().max(1.0).round() as usize;
                 let h = self.ctx.history(self.instrument);
                 if h.len() <= period {
@@ -539,6 +542,20 @@ impl<'a, 'c> ExecEnv<'a, 'c> {
                 let rs = (gains / period as f64) / (losses / period as f64);
                 let rsi = 100.0 - (100.0 / (1.0 + rs));
                 Ok(Val::Float(rsi))
+            }
+            "target_shares" => {
+                let target_val = self.eval_expr(&args[0])?;
+                let target_qty = target_val.to_f64();
+                let current_pos = self.ctx.position(self.instrument);
+                let current_shares = current_pos.raw() as f64 / 100_000_000.0;
+                let diff = target_qty - current_shares;
+                if diff.abs() > 1e-6 {
+                    let side = if diff > 0.0 { spectra_core::Side::Buy } else { spectra_core::Side::Sell };
+                    if let Ok(qty) = spectra_core::Qty::from_f64(diff.abs()) {
+                        self.ctx.market(self.instrument, side, qty);
+                    }
+                }
+                Ok(Val::Int(0))
             }
             "market_buy" => {
                 let qty_val = self.eval_expr(&args[0])?;

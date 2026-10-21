@@ -74,7 +74,7 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   // Saved strategies and their immutable versions (M2): reads are viewer, saving is editor.
   'api/v1/strategies': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 15_000 },
-  'api/v1/strategies/validate': { method: 'POST', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/strategies/validate': { method: 'POST', minRole: 'editor', timeoutMs: 15_000 },
   'api/v1/strategies/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/strategies/{id}/draft': { method: ['GET', 'PUT'], minRole: 'viewer', methodRoles: { PUT: 'editor' }, timeoutMs: 15_000 },
   'api/v1/strategies/{id}/diff': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },

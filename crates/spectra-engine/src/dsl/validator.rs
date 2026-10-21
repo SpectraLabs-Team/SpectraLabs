@@ -323,9 +323,36 @@ impl Validator {
     }
 
     fn validate_call(&self, name: &str, args: &[Expr], span: Span) -> Result<(), ValidationError> {
+        if matches!(name, "sma" | "ema" | "rsi") {
+            if args.len() == 1 {
+                return Ok(());
+            }
+            if args.len() == 2 {
+                if let Some(Expr::Ident(series_name, s_span)) = args.first() {
+                    if !self.is_series(series_name) {
+                        return Err(ValidationError {
+                            line: s_span.line,
+                            col: s_span.col,
+                            message: format!(
+                                "first argument to '{name}' must be a series (close, open, high, low, volume), found '{series_name}'"
+                            ),
+                            code: "invalid_series_argument",
+                        });
+                    }
+                }
+                return Ok(());
+            }
+            return Err(ValidationError {
+                line: span.line,
+                col: span.col,
+                message: format!("function '{name}' expects 1 or 2 argument(s), found {}", args.len()),
+                code: "argument_count_mismatch",
+            });
+        }
+
         let expected_args = match name {
-            "sma" | "ema" | "rsi" | "min" | "max" => 2,
-            "abs" | "round" | "market_buy" | "market_sell" | "cancel_order" => 1,
+            "min" | "max" => 2,
+            "abs" | "round" | "market_buy" | "market_sell" | "target_shares" | "cancel_order" => 1,
             "limit_buy" | "limit_sell" | "stop_buy" | "stop_sell" => 2,
             _ => {
                 return Err(ValidationError {
@@ -347,22 +374,6 @@ impl Validator {
                 ),
                 code: "argument_count_mismatch",
             });
-        }
-
-        // Validate indicator argument types
-        if matches!(name, "sma" | "ema" | "rsi") {
-            if let Some(Expr::Ident(series_name, s_span)) = args.first() {
-                if !self.is_series(series_name) {
-                    return Err(ValidationError {
-                        line: s_span.line,
-                        col: s_span.col,
-                        message: format!(
-                            "first argument to '{name}' must be a series (close, open, high, low, volume), found '{series_name}'"
-                        ),
-                        code: "invalid_series_argument",
-                    });
-                }
-            }
         }
 
         Ok(())

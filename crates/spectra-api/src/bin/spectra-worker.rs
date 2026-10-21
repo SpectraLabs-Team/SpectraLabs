@@ -32,8 +32,14 @@ use spectra_db::artifacts::{store_for_run, ArtifactBackend, NewArtifact};
 use spectra_db::datasets::{self, NewBacktestRun};
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
 use spectra_db::{PgPool, PoolConfig};
+use spectra_engine::RunRecord;
 use spectra_engine::{Progress, RunControl, RunLimits};
-use spectra_registry::PgRegistry;
+use spectra_registry::{
+    registry::{config_from_json, metrics_from_json, params_from_json, RunInput},
+    PgRegistry, StoredArtifact,
+};
+use spectra_research::{run_survival_lab_controlled, SurvivalProgress, Verdict};
+use sqlx::Row;
 use std::time::Instant;
 use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
@@ -270,6 +276,10 @@ enum Outcome {
 /// Runs one claimed job to a terminal state (or until another worker takes it over).
 #[allow(clippy::needless_pass_by_value)] // the spawned task owns its job and permit
 async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
+    if job.kind == "survival" {
+        run_survival_job(ctx, job, permit).await;
+        return;
+    }
     if job.kind == spectra_backtest::JOB_KIND {
         run_backtest_job(ctx, job, permit).await;
         return;
@@ -480,6 +490,11 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
 
 /// Records the run and its report artifact, then completes the job.
 async fn finish(ctx: &Ctx, job: &Job, report: &Json) -> Result<(), spectra_db::Error> {
+    if job.kind == "backtest" {
+        return finish_registry_backtest(ctx, job, report)
+            .await
+            .map_err(|error| sqlx::Error::Protocol(error.to_string()));
+    }
     let report_text = engine::to_text(report);
     let report_value: serde_json::Value =
         serde_json::from_str(&report_text).unwrap_or(serde_json::Value::Null);
@@ -530,6 +545,107 @@ async fn finish(ctx: &Ctx, job: &Job, report: &Json) -> Result<(), spectra_db::E
     });
     if jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await?.is_none() {
         warn!(job_id = %job.id, "job finished, but another worker had taken it over");
+    }
+    Ok(())
+}
+
+async fn finish_registry_backtest(
+    ctx: &Ctx,
+    job: &Job,
+    report: &Json,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let parse_string =
+        |object: &Json, key: &str| -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(object.at(key)?.as_str()?.to_owned())
+        };
+    let run_id = job
+        .payload
+        .get("registry_run_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+        .ok_or("missing registry run id")?;
+    let run = report.at("run")?;
+    let params = params_from_json(report.at("params")?)?;
+    let config = config_from_json(report.at("config")?)?;
+    let metrics = metrics_from_json(report.at("metrics")?)?;
+    let returns = report
+        .at("returns")?
+        .items()?
+        .iter()
+        .map(spectra_core::Json::as_double)
+        .collect::<Result<Vec<_>, _>>()?;
+    let input = RunInput {
+        experiment_id: parse_string(report, "experiment_id")?,
+        kind: "backtest".into(),
+        dataset_id: parse_string(report, "dataset_id")?,
+        strategy: parse_string(report, "strategy")?,
+        strategy_sha256: parse_string(report, "strategy_sha256")?,
+        params,
+        config,
+        run: RunRecord {
+            engine_version: parse_string(run, "engine_version")?,
+            dataset_sha256: parse_string(run, "dataset_sha256")?,
+            config_sha256: parse_string(run, "config_sha256")?,
+            result_sha256: parse_string(run, "result_sha256")?,
+            seed: parse_string(run, "seed")?.parse()?,
+            bar_count: usize::try_from(run.at("bar_count")?.as_int()?)?,
+        },
+        metrics,
+        returns,
+        counts_as_trial: true,
+        note: parse_string(report, "note")?,
+    };
+    let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+    // The series files are stored on their own; the report keeps the summary only.
+    let files = report.at(engine::BACKTEST_ARTIFACTS_KEY)?;
+    let summary_report = spectra_core::Json::Object(
+        report
+            .entries()?
+            .iter()
+            .filter(|(key, _)| key != engine::BACKTEST_ARTIFACTS_KEY && key != "returns")
+            .cloned()
+            .collect(),
+    );
+    let report_text = engine::to_text(&summary_report);
+    let report_value: serde_json::Value = serde_json::from_str(&report_text)?;
+    let mut uploads: Vec<(&str, &str, Vec<u8>)> =
+        vec![("report", "application/json", report_text.as_bytes().to_vec())];
+    for kind in ["equity_curve", "trades", "returns"] {
+        uploads.push((kind, "text/csv", files.at(kind)?.as_str()?.as_bytes().to_vec()));
+    }
+    let mut stored_artifacts = Vec::with_capacity(uploads.len());
+    let mut report_stored = None;
+    for (kind, content_type, bytes) in &uploads {
+        let artifact = NewArtifact { workspace_id: job.workspace_id, run_id, kind, content_type, bytes };
+        let stored = store_for_run(&ctx.pool, &ctx.store, artifact, ctx.quota).await?;
+        // CSV rows below the header line.
+        let rows = bytes.split(|b| *b == b'\n').filter(|line| !line.is_empty()).count().saturating_sub(1);
+        let summary = if *kind == "report" {
+            spectra_core::Json::object()
+        } else {
+            spectra_core::Json::object().with("rows", spectra_core::Json::integer(i64::try_from(rows)?))
+        };
+        stored_artifacts.push(StoredArtifact {
+            kind: (*kind).to_owned(),
+            sha256: stored.sha256.clone(),
+            uri: stored.path.clone(),
+            size_bytes: stored.size,
+            content_type: (*content_type).to_owned(),
+            summary,
+        });
+        if *kind == "report" {
+            report_stored = Some(stored);
+        }
+    }
+    let stored = report_stored.ok_or("report artifact was not stored")?;
+    let registry_run_id = registry.complete_run_with_artifacts(run_id, &input, &stored_artifacts).await?;
+    let result = serde_json::json!({
+        "run_id": registry_run_id,
+        "report": report_value,
+        "artifact": { "sha256": stored.sha256, "path": stored.path, "size": stored.size },
+    });
+    if jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await?.is_none() {
+        warn!(job_id = %job.id, "registry backtest finished, but another worker had taken it over");
     }
     Ok(())
 }
@@ -695,12 +811,29 @@ async fn run_backtest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
             fail_job(&ctx, &job, started, &message, retryable).await;
         }
         BacktestEnd::Panicked => {
-            fail_job(&ctx, &job, started, "The engine crashed while running this backtest.", true).await;
+            fail_job(
+                &ctx,
+                &job,
+                started,
+                "The backtest worker encountered an unexpected panic during execution.",
+                false,
+            )
+            .await;
         }
         BacktestEnd::Overran(t) => {
             let msg = format!("The backtest ran longer than its {} s limit.", t.as_secs());
             fail_job(&ctx, &job, started, &msg, false).await;
         }
+    }
+}
+
+/// The strategy name recorded on a run: the built-in's name, or for several
+/// strategies on one account their names joined with `+`.
+fn run_strategy_name(req: &spectra_backtest::BacktestRequest) -> String {
+    if req.is_multi() {
+        req.strategies.iter().map(|a| a.strategy.name).collect::<Vec<_>>().join("+")
+    } else {
+        req.strategy.name.to_string()
     }
 }
 
@@ -726,6 +859,9 @@ async fn finish_backtest(
             created_by: job.created_by,
             started_at: job.started_at.unwrap_or_else(chrono::Utc::now),
             dataset_version_id: version.id,
+            strategy_version_id: bt.strategy_version_id.as_deref().and_then(|v| Uuid::parse_str(v).ok()),
+            strategy: run_strategy_name(&bt.request),
+            strategy_sha256: bt.request.strategy_sha256(),
         },
     )
     .await?;
@@ -880,7 +1016,6 @@ async fn run_ingest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemap
         None => fail_job(&ctx, &job, started, "The ingest crashed.", true).await,
     }
 }
-
 async fn run_refresh_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
     let started = Instant::now();
     let env = spectra_api::providers::runner::RefreshEnv {
@@ -963,5 +1098,287 @@ async fn run_refresh_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSema
             fail_job(&ctx, &job, started, &message, retryable).await;
         }
         None => fail_job(&ctx, &job, started, "The refresh job crashed.", true).await,
+    }
+}
+
+/// Runs a Strategy Survival Lab report against the immutable inputs of a successful run.
+#[allow(clippy::needless_pass_by_value)]
+async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
+    let started = Instant::now();
+    let parse_uuid = |key: &str| {
+        job.payload.get(key).and_then(serde_json::Value::as_str).and_then(|v| Uuid::parse_str(v).ok())
+    };
+    let (Some(report_id), Some(run_id)) = (parse_uuid("report_id"), parse_uuid("run_id")) else {
+        fail_job(&ctx, &job, started, "Survival job has invalid report or run id.", false).await;
+        drop(permit);
+        return;
+    };
+    let config_value = job.payload.get("config").cloned().unwrap_or(serde_json::Value::Null);
+    let report_cfg = match spectra_research::SurvivalConfig::from_json(
+        &Json::parse(&config_value.to_string()).unwrap_or(Json::Null),
+    ) {
+        Ok(config) => config,
+        Err(error) => {
+            let message = format!("Invalid survival config: {error}");
+            let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id).bind(report_id).bind(&message).execute(&ctx.pool).await;
+            fail_job(&ctx, &job, started, &message, false).await;
+            drop(permit);
+            return;
+        }
+    };
+    let row = match sqlx::query("SELECT r.strategy, r.params, r.config, j.payload FROM runs r JOIN jobs j ON j.id = r.job_id WHERE r.workspace_id = $1 AND r.id = $2 AND r.status = 'succeeded'")
+        .bind(job.workspace_id).bind(run_id).fetch_optional(&ctx.pool).await {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            let message = "The source run is no longer available.";
+            let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id).bind(report_id).bind(message).execute(&ctx.pool).await;
+            fail_job(&ctx, &job, started, message, false).await;
+            drop(permit);
+            return;
+        }
+        Err(error) => {
+            let message = format!("Could not load source run: {error}");
+            fail_job(&ctx, &job, started, &message, true).await;
+            drop(permit);
+            return;
+        }
+    };
+    let original_payload: serde_json::Value = match row.try_get("payload") {
+        Ok(value) => value,
+        Err(error) => {
+            fail_job(&ctx, &job, started, &format!("Could not load run inputs: {error}"), true).await;
+            drop(permit);
+            return;
+        }
+    };
+    let strategy_from_run: String = row.try_get("strategy").unwrap_or_default();
+    let strategy = if strategy_from_run.is_empty() {
+        original_payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("").to_owned()
+    } else {
+        strategy_from_run
+    };
+    let params_value = if row
+        .try_get::<serde_json::Value, _>("params")
+        .is_ok_and(|v| v != serde_json::json!({}))
+    {
+        row.try_get::<serde_json::Value, _>("params").unwrap_or_default()
+    } else {
+        original_payload.get("params").cloned().unwrap_or_else(|| {
+            serde_json::json!({ "fast": original_payload.get("fast").and_then(serde_json::Value::as_f64).unwrap_or(5.0),
+                "slow": original_payload.get("slow").and_then(serde_json::Value::as_f64).unwrap_or(20.0) })
+        })
+    };
+    let config_value_run = row
+        .try_get::<serde_json::Value, _>("config")
+        .ok()
+        .filter(|v| *v != serde_json::json!({}))
+        .or_else(|| original_payload.get("config").cloned())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let raw_params = Json::parse(&params_value.to_string()).unwrap_or(Json::Null);
+    let params = match params_from_json(&raw_params) {
+        Ok(v) => v,
+        Err(error) => {
+            let message = format!("Source run parameters are invalid: {error}");
+            fail_job(&ctx, &job, started, &message, false).await;
+            drop(permit);
+            return;
+        }
+    };
+    let backtest_config =
+        match config_from_json(&Json::parse(&config_value_run.to_string()).unwrap_or(Json::Null)) {
+            Ok(v) => v,
+            Err(error) => {
+                let message = format!("Source run config is invalid: {error}");
+                fail_job(&ctx, &job, started, &message, false).await;
+                drop(permit);
+                return;
+            }
+        };
+    let bars = if let Some(csv) = original_payload.get("csv").and_then(serde_json::Value::as_str) {
+        match spectra_data::load_csv(csv.as_bytes(), &spectra_data::CsvOptions::default()) {
+            Ok(dataset) => dataset.bars,
+            Err(error) => {
+                let message = format!("Could not reload source dataset: {error}");
+                fail_job(&ctx, &job, started, &message, false).await;
+                drop(permit);
+                return;
+            }
+        }
+    } else if let Some(version) = original_payload
+        .get("dataset_version_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|v| Uuid::parse_str(v).ok())
+    {
+        let version = match datasets::resolve_version(&ctx.pool, job.workspace_id, version).await {
+            Ok(Some(v)) => v,
+            Ok(None) => {
+                fail_job(&ctx, &job, started, "The source dataset version no longer exists.", false).await;
+                drop(permit);
+                return;
+            }
+            Err(error) => {
+                fail_job(&ctx, &job, started, &format!("Could not load the source dataset: {error}"), true)
+                    .await;
+                drop(permit);
+                return;
+            }
+        };
+        if let Err((message, retryable)) =
+            ingest::ensure_local(&ctx.store, &ctx.data_dir, &version.checksum, version.blob_sha256.as_deref())
+                .await
+        {
+            fail_job(&ctx, &job, started, &message, retryable).await;
+            drop(permit);
+            return;
+        }
+        match spectra_backtest::load_bars(&ctx.data_dir, &version.checksum) {
+            Ok(bars) => bars,
+            Err(error) => {
+                fail_job(&ctx, &job, started, &format!("Could not read the source bars: {error}"), true)
+                    .await;
+                drop(permit);
+                return;
+            }
+        }
+    } else {
+        fail_job(&ctx, &job, started, "The source run does not identify reloadable dataset inputs.", false)
+            .await;
+        drop(permit);
+        return;
+    };
+    if let Err(error) = sqlx::query(
+        "UPDATE survival_reports SET status='running' WHERE workspace_id=$1 AND id=$2 AND status='queued'",
+    )
+    .bind(job.workspace_id)
+    .bind(report_id)
+    .execute(&ctx.pool)
+    .await
+    {
+        fail_job(&ctx, &job, started, &format!("Could not start survival report: {error}"), true).await;
+        drop(permit);
+        return;
+    }
+    let factory = match spectra_backtest::builtin_factory(&strategy) {
+        Ok(factory) => factory,
+        Err(error) => {
+            let message = format!("Unsupported source strategy: {error}");
+            let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id).bind(report_id).bind(&message).execute(&ctx.pool).await;
+            fail_job(&ctx, &job, started, &message, false).await;
+            drop(permit);
+            return;
+        }
+    };
+    let cancel = Arc::new(AtomicBool::new(false));
+    let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+    let mut work = {
+        let (cancel, progress, bars, config, params, factory) =
+            (Arc::clone(&cancel), Arc::clone(&progress), bars, backtest_config, params, factory);
+        tokio::task::spawn_blocking(move || {
+            let mut update = |p: SurvivalProgress| {
+                let done = (f32::from(p.test_number.saturating_sub(1))
+                    + p.step as f32 / p.total_steps.max(1) as f32)
+                    / 9.0;
+                progress.store(done.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+            };
+            let report = run_survival_lab_controlled(
+                &bars,
+                &factory,
+                &config,
+                &params,
+                &report_cfg,
+                Some(&cancel),
+                Some(&mut update),
+            )
+            .map_err(|e| e.to_string())?;
+            let json = report.to_json().map_err(|e| e.to_string())?;
+            let encoded = engine::to_text(&json);
+            let parsed: serde_json::Value = serde_json::from_str(&encoded).map_err(|e| e.to_string())?;
+            let text = spectra_research::format_survival_report(&report);
+            let verdicts =
+                ["costs", "delay", "stability", "time", "trades", "sample", "regimes", "benchmark", "risk"]
+                    .into_iter()
+                    .filter_map(|key| {
+                        parsed.get(key).and_then(|v| v.get("verdict")).map(|v| (key.to_owned(), v.clone()))
+                    })
+                    .collect::<serde_json::Map<_, _>>();
+            let worst = match report.worst {
+                Verdict::Pass => "pass",
+                Verdict::Warn => "warn",
+                Verdict::Insufficient => "insufficient",
+                Verdict::Fail => "fail",
+            }
+            .to_owned();
+            Ok::<_, String>((parsed, serde_json::Value::Object(verdicts), text, worst))
+        })
+    };
+    let mut beat = tokio::time::interval(HEARTBEAT);
+    beat.tick().await;
+    let mut cancel_requested = false;
+    let result = loop {
+        tokio::select! {
+            work_result = &mut work => break match work_result { Ok(result) => result, Err(error) => Err(format!("Survival worker panicked: {error}")) },
+            _ = beat.tick() => match jobs::heartbeat(&ctx.pool, job.id, &ctx.worker_id, Some(f32::from_bits(progress.load(Ordering::Relaxed)))).await {
+                Ok(Beat::Continue) => {},
+                Ok(Beat::CancelRequested) => { cancel_requested = true; cancel.store(true, Ordering::Relaxed); },
+                Ok(Beat::Lost) => { cancel.store(true, Ordering::Relaxed); record_metrics(&job.kind, "lost", started); drop(permit); return; },
+                Err(error) => warn!(job_id = %job.id, "survival heartbeat failed: {error}"),
+            }
+        }
+    };
+    drop(permit);
+    match result {
+        Ok((results, verdicts, text, worst)) => {
+            let text_artifact = NewArtifact {
+                workspace_id: job.workspace_id,
+                run_id,
+                kind: "survival_text",
+                content_type: "text/plain; charset=utf-8",
+                bytes: text.as_bytes(),
+            };
+            let stored_text = match store_for_run(&ctx.pool, &ctx.store, text_artifact, ctx.quota).await {
+                Ok(stored) => stored,
+                Err(error) => {
+                    let message = format!("Could not store the survival text artifact: {error}");
+                    let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                        .bind(job.workspace_id).bind(report_id).bind(&message).execute(&ctx.pool).await;
+                    fail_job(&ctx, &job, started, &message, true).await;
+                    return;
+                }
+            };
+            let saved = sqlx::query("UPDATE survival_reports SET status='succeeded', results=$3, verdicts=$4, worst_verdict=$5, text_sha256=$6, text_path=$7, finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id).bind(report_id).bind(&results).bind(&verdicts).bind(&worst).bind(&stored_text.sha256).bind(&stored_text.path).execute(&ctx.pool).await;
+            if let Err(error) = saved {
+                fail_job(&ctx, &job, started, &format!("Could not save survival results: {error}"), true)
+                    .await;
+                return;
+            }
+            let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+            if let Err(error) = registry.record_survival_report_saved(report_id, run_id, &worst).await {
+                error!(job_id = %job.id, report_id = %report_id, "could not append survival audit event: {error}");
+            }
+            let job_result =
+                serde_json::json!({ "report_id": report_id, "run_id": run_id, "worst_verdict": worst });
+            if let Err(error) = jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &job_result).await {
+                error!(job_id = %job.id, "could not complete survival job: {error}");
+            }
+            record_metrics(&job.kind, "succeeded", started);
+            info!(job_id = %job.id, report_id = %report_id, "survival report saved");
+        }
+        Err(message) if cancel_requested => {
+            let _ = sqlx::query("UPDATE survival_reports SET status='cancelled', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id).bind(report_id).bind(&message).execute(&ctx.pool).await;
+            record_metrics(&job.kind, "cancelled", started);
+            if let Err(error) = jobs::mark_cancelled(&ctx.pool, job.id, &ctx.worker_id).await {
+                error!(job_id = %job.id, "could not record survival cancellation: {error}");
+            }
+        }
+        Err(message) => {
+            let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id).bind(report_id).bind(&message).execute(&ctx.pool).await;
+            fail_job(&ctx, &job, started, &message, false).await;
+        }
     }
 }

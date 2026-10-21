@@ -57,6 +57,7 @@ pub(crate) fn unprocessable(msg: impl Into<String>) -> (u16, String) {
 
 fn engine_error(e: &Error) -> (u16, String) {
     match e {
+        Error::Cancelled => (409, e.to_string()),
         Error::InvalidArgument(_) | Error::Data(_) | Error::Unsupported(_) => (422, e.to_string()),
         _ => (500, e.to_string()),
     }
@@ -240,8 +241,8 @@ pub const INGEST_JOB_KIND: &str = "ingest";
 pub const PROVIDER_REFRESH_JOB_KIND: &str = crate::providers::runner::PROVIDER_REFRESH_JOB_KIND;
 
 /// Job kinds the background worker runs.
-pub const WORKER_KINDS: [&str; 6] =
-    ["backtest", "benchmark", "risk", "stress", INGEST_JOB_KIND, PROVIDER_REFRESH_JOB_KIND];
+pub const WORKER_KINDS: [&str; 7] =
+    ["backtest", "benchmark", "risk", "stress", INGEST_JOB_KIND, "survival", PROVIDER_REFRESH_JOB_KIND];
 
 /// A validated `backtest` payload, or a 422 listing every problem.
 ///
@@ -262,9 +263,9 @@ pub fn run_job(kind: &str, payload: &Json) -> Reply {
         "stress" => stress(payload),
         // Backtests need the database (dataset version) and report progress; the worker runs
         // them on its own path and never calls this for them.
-        "backtest" => Err((500, "backtest jobs run on the worker's backtest path".into())),
+        "backtest" => Err((409, "backtest jobs run on the worker's backtest path".into())),
         PROVIDER_REFRESH_JOB_KIND => {
-            Err((500, "provider refresh jobs run on the worker's refresh path".into()))
+            Err((409, "provider refresh jobs run on the worker's refresh path".into()))
         }
         _ => Err(unprocessable(format!("Unknown job kind {kind:?}."))),
     }
@@ -286,6 +287,9 @@ pub fn run_job_with_progress(kind: &str, payload: &Json, mut on_progress: impl F
         )
         .map_err(|e| engine_error(&e));
     }
+    if kind == "backtest" {
+        return Err((409, "backtest jobs run on the worker's backtest path".into()));
+    }
     let result = run_job(kind, payload);
     if result.is_ok() {
         on_progress(1.0);
@@ -293,10 +297,13 @@ pub fn run_job_with_progress(kind: &str, payload: &Json, mut on_progress: impl F
     result
 }
 
+/// Key of the backtest output holding files the worker stores as run artifacts.
+pub const BACKTEST_ARTIFACTS_KEY: &str = "artifacts";
+
 /// Maximum duration allowed for a job before its result is discarded.
 pub fn job_timeout(kind: &str) -> std::time::Duration {
     std::time::Duration::from_secs(match kind {
-        "backtest" | INGEST_JOB_KIND | PROVIDER_REFRESH_JOB_KIND => 900,
+        "backtest" | INGEST_JOB_KIND | "survival" | PROVIDER_REFRESH_JOB_KIND => 900,
         "benchmark" => 600,
         _ => 300,
     })

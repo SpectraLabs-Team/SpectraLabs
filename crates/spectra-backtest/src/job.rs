@@ -11,6 +11,10 @@
 //! }
 //! ```
 //!
+//! A backtest started from a saved strategy version (M2a) also carries
+//! `"strategy_version_id"`: the API fills `strategy` and `params` from the
+//! version, and the worker records the id on the run.
+//!
 //! The worker resolves `dataset_version_id` to a dataset-store checksum in the
 //! caller's workspace, then calls [`run_job_from_store`] on a blocking thread
 //! with a cancel flag and a progress callback, and stores [`JobProducts`].
@@ -33,6 +37,8 @@ pub const JOB_KIND: &str = "backtest";
 pub struct BacktestJob {
     /// Dataset version to run on (a UUID in the caller's workspace).
     pub dataset_version_id: String,
+    /// The saved strategy version this run was started from (lower-case UUID), if any.
+    pub strategy_version_id: Option<String>,
     /// Strategy, parameters and configuration.
     pub request: BacktestRequest,
 }
@@ -80,9 +86,20 @@ impl BacktestJob {
                 None
             }
         };
+        let strategy_version = match payload.find("strategy_version_id") {
+            None | Some(Json::Null) => None,
+            Some(Json::String(s)) if is_uuid(s.trim()) => Some(s.trim().to_ascii_lowercase()),
+            Some(_) => {
+                errors.push(FieldError {
+                    field: "strategy_version_id".into(),
+                    message: "must be a UUID".into(),
+                });
+                None
+            }
+        };
         let mut rest = Json::object();
         for (k, v) in entries {
-            if k != "dataset_version_id" {
+            if k != "dataset_version_id" && k != "strategy_version_id" {
                 // Keys are unique in a parsed object, so this cannot fail.
                 let _ = rest.set(k.clone(), v.clone());
             }
@@ -96,7 +113,7 @@ impl BacktestJob {
         };
         match (dataset, request) {
             (Some(dataset_version_id), Some(request)) if errors.is_empty() => {
-                Ok(Self { dataset_version_id, request })
+                Ok(Self { dataset_version_id, strategy_version_id: strategy_version, request })
             }
             _ => Err(ConfigError { errors }),
         }
@@ -274,5 +291,21 @@ pub fn run_job_from_store(
         Some(as_of_ns) => d.as_of(as_of_ns),
         None => d,
     };
-    run_job(&resolved.bars, &resolved.symbols.symbols, job, dataset_checksum, ctl).map_err(JobFailure::from)
+    let mut ctl = std::panic::AssertUnwindSafe(ctl);
+    let run_res = std::panic::catch_unwind(move || {
+        run_job(&resolved.bars, &resolved.symbols.symbols, job, dataset_checksum, *ctl)
+    });
+    match run_res {
+        Ok(res) => res.map_err(JobFailure::from),
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "an unexpected panic occurred".to_string()
+            };
+            Err(JobFailure::Failed { retryable: false, message: format!("The strategy panicked: {msg}") })
+        }
+    }
 }

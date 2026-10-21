@@ -2,6 +2,7 @@
 //! numbers themselves are pinned by the C++ parity test).
 
 use std::collections::BTreeSet;
+use std::sync::atomic::AtomicBool;
 
 use spectra_core::*;
 use spectra_engine::*;
@@ -142,7 +143,68 @@ fn survival_lab_handles_a_strategy_that_never_trades() {
     assert_eq!(r.costs.verdict, Verdict::Insufficient);
     assert!(r.costs.finding.contains("closed no trades"));
     assert_eq!(r.worst, Verdict::Insufficient);
+    assert!(r.paper_trading_allowed());
     assert!(format_survival_report(&r).contains("NOT a score"));
+    let json = r.to_json().unwrap();
+    assert_eq!(json.at("schema_version").unwrap().as_int().unwrap(), 2);
+    assert!(json.at("config").is_ok());
+    assert!(json.at("paper_trading_allowed").unwrap().as_bool().unwrap());
+    for key in [
+        "costs",
+        "delay",
+        "stability",
+        "time",
+        "trades",
+        "sample",
+        "regimes",
+        "benchmark",
+        "risk",
+        "statistical_strength",
+    ] {
+        assert!(json.at(key).is_ok(), "missing report component {key}");
+    }
+    let serialized = format!("{}\n", json.dump());
+    let golden = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/survival-report.json");
+    if std::env::var_os("UPDATE_SURVIVAL_GOLDEN").is_some() {
+        std::fs::write(golden, &serialized).unwrap();
+    }
+    assert_eq!(serialized, include_str!("golden/survival-report.json"));
+}
+
+#[test]
+fn survival_lab_reports_progress_and_honours_cancellation() {
+    struct Idle;
+    impl Strategy for Idle {
+        fn on_bar(&mut self, _: &mut Context<'_>, _: &[Bar]) {}
+    }
+    let idle = |_: &ParamSet| -> Result<Box<dyn Strategy>> { Ok(Box::new(Idle)) };
+    let bars = walk(300, 1, 0.0);
+    let cancelled = AtomicBool::new(true);
+    let result = run_survival_lab_controlled(
+        &bars,
+        &idle,
+        &BacktestConfig::default(),
+        &ParamSet::default(),
+        &SurvivalConfig::default(),
+        Some(&cancelled),
+        None,
+    );
+    assert!(matches!(result, Err(Error::Cancelled)));
+
+    let mut events = Vec::new();
+    let mut report_progress = |event| events.push(event);
+    run_survival_lab_controlled(
+        &bars,
+        &idle,
+        &BacktestConfig::default(),
+        &ParamSet::default(),
+        &SurvivalConfig::default(),
+        None,
+        Some(&mut report_progress),
+    )
+    .unwrap();
+    assert_eq!(events.iter().map(|event| event.test_number).collect::<Vec<_>>(), (1..=9).collect::<Vec<_>>());
+    assert!(events.iter().all(|event| event.step > 0 && event.total_steps >= event.step));
 }
 
 #[test]
@@ -164,4 +226,7 @@ fn survival_lab_flags_a_lucky_noise_winner_for_validation_not_stress() {
     };
     let r = run_survival_lab(&bars, &factory, &cfg, &best.params, &sc).unwrap();
     assert!(r.stability.neighbours.len() + r.stability.skipped >= 4);
+    assert_eq!(r.costs.execution_levels.len(), 12);
+    assert_eq!(r.regimes.market_states.len(), 3);
+    assert!(r.statistical_strength.return_bootstrap.valid);
 }

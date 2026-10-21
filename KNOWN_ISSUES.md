@@ -38,8 +38,7 @@
   the simple average of the assets' volatilities. There are no correlations and no per-asset paths, so
   it cannot attribute risk to positions, and it treats the assets as perfectly correlated.
 - Data: CSV only. There is no Parquet (corporate actions, exchange calendars, point-in-time revisions with symbol changes and delistings, and market data provider connectors with scheduled refreshes were added in tasks 10–13); datasets are held fully in memory during a backtest (ingest streams since M1b task 9; streaming backtests are M3 task 14).
-- Backtester: market and limit orders only, bar data only, flat-bps slippage, a single currency and
-  average-cost accounting.
+- Backtester: market, limit, stop and stop-limit orders; flat-bps slippage, bid-ask spread costs, volume-based slippage and square-root market impact; a single currency and average-cost accounting.
 - PSR and DSR assume serially independent returns and independent trials.
 - The registry loads the whole log into memory. The hash chain shows tampering but does not prevent
   it: anchor the head hash somewhere you trust.

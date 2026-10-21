@@ -1,25 +1,35 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Database, Layers, Play, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BookmarkCheck, Check, ChevronDown, ChevronUp, Database, Layers, Pencil, Play, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { ApiError } from '@/lib/api';
 import {
   createBacktest,
   defaultParams,
   fieldErrors,
+  getStrategy,
+  getStrategyVersion,
+  listStrategies,
   MAX_STRATEGIES,
   type Backtest,
   type Catalog,
   type CreateBacktest,
   type DatasetVersion,
   type ParamValues,
+  type SavedStrategy,
   type StoredRequest,
+  type StrategyDetail,
+  type StrategyVersion,
   type UserConfig,
 } from '@/lib/backtests';
 import { Badge, ErrorNote, GlassCard, Segmented, Spinner } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
 import { ConfigFields, Field, NumberInput, ParamFields } from './Fields';
 import { int } from './format';
+import { SaveVersion } from './SaveVersion';
+
+/** Option values in the strategy picker: a built-in's name, or `saved:<strategy id>`. */
+const SAVED = 'saved:';
 
 type Slot = { key: number; strategy: string; params: ParamValues; weightPct: number };
 
@@ -57,6 +67,53 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Saved strategies (M2a): the picked one, its versions, and the version to run.
+  const [saved, setSaved] = useState<SavedStrategy[]>([]);
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<StrategyDetail | null>(null);
+  const [versionId, setVersionId] = useState('');
+  const wantedVersion = useRef<string | null>(null);
+  const [detailNonce, setDetailNonce] = useState(0);
+  // What the last save did ("Saved as … v2" or "Already saved as … v1"), shown with the picked version.
+  const [savedNote, setSavedNote] = useState('');
+
+  const loadSaved = useCallback(() => {
+    listStrategies()
+      .then(setSaved)
+      .catch(() => setSaved([])); // an engine without M2a, or no database: built-ins still work
+  }, []);
+  useEffect(loadSaved, [loadSaved]);
+
+  // The picked saved strategy's versions, newest first; keep a requested version, else the latest.
+  useEffect(() => {
+    if (!savedId) {
+      setDetail(null);
+      setVersionId('');
+      return;
+    }
+    let live = true;
+    getStrategy(savedId)
+      .then((d) => {
+        if (!live) return;
+        setDetail(d);
+        const want = wantedVersion.current;
+        wantedVersion.current = null;
+        setVersionId(want && d.versions.some((v) => v.id === want) ? want : d.versions[0]?.id ?? '');
+      })
+      .catch((e) => live && setError(e instanceof Error ? e.message : 'Could not load the saved strategy.'));
+    return () => {
+      live = false;
+    };
+  }, [savedId, detailNonce]);
+
+  const pickVersion = (v: StrategyVersion) => {
+    // Always (re)load the strategy: it may be picked already, and it may have a new version.
+    wantedVersion.current = v.id;
+    setMode('single');
+    setSavedId(v.strategy_id);
+    setDetailNonce((n) => n + 1);
+    setErrors({});
+  };
 
   // Keep the dataset choice valid as the list loads or changes.
   useEffect(() => {
@@ -68,6 +125,14 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
     if (!prefill) return;
     const r = prefill.request;
     if (r.dataset_version_id && datasets.some((d) => d.id === r.dataset_version_id)) setDatasetId(r.dataset_version_id);
+    setSavedId(null);
+    setSavedNote('');
+    if (r.strategy_version_id) {
+      // Started from a saved version: pick that version again (it may have been run from another tab).
+      getStrategyVersion(r.strategy_version_id)
+        .then(pickVersion)
+        .catch(() => setError('The saved strategy version of that run is no longer available; loaded its parameters instead.'));
+    }
     if (r.strategies?.length) {
       setMode('multi');
       setSlots(r.strategies.map((s) => slotFor(catalog, s.strategy, Math.round(s.weight * 1e6) / 1e4, s.params)));
@@ -90,7 +155,11 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
   }, [prefill?.nonce]);
 
   const base = catalog.presets.find((p) => p.name === preset)?.config ?? {};
-  const current = catalog.strategies.find((s) => s.name === strategy);
+  const version = detail?.versions.find((v) => v.id === versionId) ?? null;
+  const usingSaved = mode === 'single' && savedId !== null;
+  const shownStrategy = usingSaved && version ? version.builtin : strategy;
+  const current = catalog.strategies.find((s) => s.name === shownStrategy);
+  const stale = usingSaved && version !== null && !version.current;
   const totalPct = slots.reduce((a, s) => a + (Number.isFinite(s.weightPct) ? s.weightPct : 0), 0);
   const overAllocated = toWeight(totalPct) > 1 + 1e-9;
   const dataset = datasets.find((d) => d.id === datasetId);
@@ -102,13 +171,14 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
   const body = useMemo((): CreateBacktest | null => {
     if (!datasetId) return null;
     const config: UserConfig = { preset, ...overrides };
+    if (mode === 'single' && savedId) return version ? { dataset_version_id: datasetId, strategy_version_id: version.id, config } : null;
     if (mode === 'single') return { dataset_version_id: datasetId, strategy, params, config };
     return {
       dataset_version_id: datasetId,
       strategies: slots.map((s) => ({ strategy: s.strategy, params: s.params, weight: toWeight(s.weightPct) })),
       config,
     };
-  }, [datasetId, mode, strategy, params, slots, preset, overrides]);
+  }, [datasetId, mode, savedId, version, strategy, params, slots, preset, overrides]);
 
   const submit = async () => {
     if (!body) return;
@@ -129,6 +199,8 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
         if (bad) setOpenSlot(slots[Number(bad[1])]?.key ?? null);
       } else if (e instanceof ApiError && e.status === 403) {
         setError('Running a backtest needs the editor role in this workspace.');
+      } else if (e instanceof ApiError && e.code === 'strategy_version_stale') {
+        setError(e.message);
       } else {
         setError(e instanceof Error ? e.message : 'Could not queue the backtest.');
       }
@@ -186,28 +258,116 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
         {/* Strategy or strategies */}
         {mode === 'single' ? (
           <div className="space-y-3">
-            <Field label="strategy" error={errors.strategy} hint={current?.description}>
+            <Field label="strategy" error={errors.strategy ?? errors.strategy_version_id} hint={usingSaved ? detail?.strategy.description || current?.description : current?.description}>
               <select
                 className="input py-1.5 text-[13px]"
                 aria-label="Strategy"
-                value={strategy}
+                value={savedId ? `${SAVED}${savedId}` : strategy}
                 disabled={disabled}
                 onChange={(e) => {
+                  setErrors({});
+                  setSavedNote('');
+                  if (e.target.value.startsWith(SAVED)) {
+                    setSavedId(e.target.value.slice(SAVED.length));
+                    return;
+                  }
                   const s = catalog.strategies.find((x) => x.name === e.target.value);
                   if (!s) return;
+                  setSavedId(null);
                   setStrategy(s.name);
                   setParams(defaultParams(s));
-                  setErrors({});
                 }}
               >
-                {catalog.strategies.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.label}
-                  </option>
-                ))}
+                <optgroup label="Built-in">
+                  {catalog.strategies.map((s) => (
+                    <option key={s.name} value={s.name}>
+                      {s.label}
+                    </option>
+                  ))}
+                </optgroup>
+                {saved.length > 0 && (
+                  <optgroup label="Saved strategies">
+                    {saved.map((s) => (
+                      <option key={s.id} value={`${SAVED}${s.id}`} disabled={!s.version_count}>
+                        {s.name}
+                        {s.latest_version ? ` · v${s.latest_version}` : ' · no versions'}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </Field>
-            {current && <ParamFields strategy={current} values={params} onChange={setParams} errors={errors} prefix="params." disabled={disabled} />}
+            {usingSaved ? (
+              <div className="space-y-3 rounded-xl border border-ink/[0.08] bg-ink/[0.015] p-3">
+                <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+                  <Field label="version" hint={version ? `${current?.label ?? version.builtin} · code ${version.strategy_sha256.slice(0, 12)}… · saved ${new Date(version.created_at).toLocaleDateString()}` : undefined}>
+                    <select className="input py-1.5 text-[13px]" aria-label="Strategy version" value={versionId} disabled={disabled || !detail} onChange={(e) => setVersionId(e.target.value)}>
+                      {!detail && <option value="">Loading…</option>}
+                      {detail?.versions.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          v{v.version}
+                          {v.current ? '' : ' (older code)'}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <button
+                    type="button"
+                    className="btn-ghost mb-0.5 h-8"
+                    disabled={disabled || !version || !current}
+                    title="Load these parameters into the built-in form to change them and save a new version"
+                    onClick={() => {
+                      if (!version || !current) return;
+                      setSavedNote('');
+                      setSavedId(null);
+                      setStrategy(current.name);
+                      setParams({ ...defaultParams(current), ...version.params });
+                    }}
+                  >
+                    <Pencil className="h-3.5 w-3.5" /> Edit as new
+                  </button>
+                </div>
+                {savedNote && (
+                  <p className="flex items-center gap-1.5 text-[11px] text-profit" role="status">
+                    <Check className="h-3.5 w-3.5" /> {savedNote}
+                  </p>
+                )}
+                {stale && (
+                  <ErrorNote>
+                    This version was saved with older {current?.label ?? version?.builtin} code, so running it would not reproduce its results. Use “Edit as new” and save a new version to run it on the current code.
+                  </ErrorNote>
+                )}
+                {version && current && (
+                  <>
+                    <p className="flex items-center gap-1.5 text-[11px] text-ink/50">
+                      <BookmarkCheck className="h-3.5 w-3.5 text-accent" /> Saved parameters: a version never changes.
+                    </p>
+                    <ParamFields strategy={current} values={version.params} onChange={() => {}} errors={{}} prefix="params." disabled />
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                {current && <ParamFields strategy={current} values={params} onChange={setParams} errors={errors} prefix="params." disabled={disabled} />}
+                {canRun && current && (
+                  <SaveVersion
+                    builtin={current.name}
+                    params={params}
+                    saved={saved}
+                    disabled={busy}
+                    onSaved={(v, created) => {
+                      loadSaved();
+                      pickVersion(v);
+                      setSavedNote(
+                        created
+                          ? `Saved as ${v.strategy_name} v${v.version}.`
+                          : `Already saved as ${v.strategy_name} v${v.version}: same code and parameters, so no new version.`,
+                      );
+                    }}
+                  />
+                )}
+              </>
+            )}
           </div>
         ) : (
           <div className="space-y-2.5">
@@ -320,9 +480,13 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink/[0.06] pt-4">
           <p className="text-[11px] text-ink/45">
-            {canRun ? (dataset ? `${mode === 'multi' ? `${slots.length} strategies` : current?.label ?? strategy} on ${dataset.dataset_name} v${dataset.version}` : 'Pick a dataset to run on.') : 'Viewers can look at runs; running one needs the editor role.'}
+            {canRun
+              ? dataset
+                ? `${mode === 'multi' ? `${slots.length} strategies` : usingSaved && version ? `${version.strategy_name} v${version.version}` : current?.label ?? strategy} on ${dataset.dataset_name} v${dataset.version}`
+                : 'Pick a dataset to run on.'
+              : 'Viewers can look at runs; running one needs the editor role.'}
           </p>
-          <button type="button" className="btn-primary px-4 py-2 text-xs" onClick={submit} disabled={disabled || !body || (mode === 'multi' && overAllocated)}>
+          <button type="button" className="btn-primary px-4 py-2 text-xs" onClick={submit} disabled={disabled || !body || stale || (mode === 'multi' && overAllocated)}>
             {busy ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             {busy ? 'Queuing…' : 'Run backtest'}
           </button>

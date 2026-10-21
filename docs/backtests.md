@@ -52,6 +52,36 @@ POST /api/v1/backtests
 - The same request also works as a generic job: `POST /api/v1/jobs` with
   `{"kind": "backtest", "payload": {...}}`.
 
+### From a saved strategy version
+
+A saved strategy (M2a) is a named record in the workspace; each version is a built-in with a full
+parameter set, stored once and never changed. Saving the same built-in code and parameters again
+returns the existing version, so a version id always means one computation.
+
+```http
+POST /api/v1/strategies
+{ "name": "Trend", "builtin": "sma_cross", "params": { "fast": 10, "slow": 50 } }
+→ 201 { "strategy": {...}, "versions": [{ "id": "<version id>", "version": 1, "params": {...}, "strategy_sha256": "...", "current": true }] }
+
+POST /api/v1/backtests
+{ "dataset_version_id": "<dataset version id>", "strategy_version_id": "<version id>" }
+```
+
+| Route | |
+| --- | --- |
+| `POST /api/v1/strategies` | create (409 `strategy_exists` for a taken name); with `builtin` and `params`, also version 1 |
+| `GET /api/v1/strategies` | the workspace's saved strategies, newest first, with version count and latest version |
+| `GET /api/v1/strategies/{id}` | one strategy and its versions, newest first |
+| `POST /api/v1/strategies/{id}/versions` | `{builtin, params}`: 201 with a new version, or 200 with `created: false` and the existing one |
+| `GET /api/v1/strategies/versions/{id}` | one version |
+
+- `strategy_version_id` replaces `strategy`, `params` and `strategies`; giving it with any of them
+  is a 422. The job runs the version's built-in and parameters, and the run records
+  `strategy_version_id`, `strategy` and `strategy_sha256`.
+- A version keeps the built-in's source hash from when it was saved. If that built-in's code has
+  changed since, the version shows `current: false` and a backtest from it is a 409
+  `strategy_version_stale`: it would not reproduce. Save a new version to run the new code.
+
 ## 4. Follow it
 
 | Route | Role | |
@@ -75,6 +105,14 @@ configuration, and run. It shows the job's progress with a cancel button, then t
 drawdown charts, the summary's metrics, exposure, trades, per-instrument and per-strategy tables,
 the fingerprints, and the CSVs to download. Past runs are listed beside it. Viewers can look at
 runs; starting or cancelling one needs the editor role.
+
+Saved strategies appear under **Saved strategies** in the strategy picker: choose one, then a
+version (newest first), and run it; its parameters are shown read-only because a version never
+changes. **Save as version** under a built-in's parameters stores them in a new or existing saved
+strategy (editors only; saving the same parameters again reports the version already saved), and
+**Edit as new** loads a version's parameters back into the built-in form to change them. A version
+saved with older built-in code is marked "(older code)" and cannot run. **Edit and run again** on a
+run started from a version picks that version again.
 
 ## Checking a job against the CLI
 
@@ -130,9 +168,11 @@ only when that market is open:
 
 Orders wait through closed bars. A `Day` order is only used up by a bar it could trade on.
 
-Market impact (off by default) adds `impact_coefficient x volatility x sqrt(qty / bar volume)` to
-market and stop fills, capped at 10%; volatility is measured over the `impact_window` bars before
-the fill bar. Both are `config` fields.
+Transaction costs on market and stop fills include:
+- Flat slippage via `slippage_bps` (basis points moved against the trader).
+- Bid-ask spread cost via `spread_bps` (half the spread is paid upon crossing on each fill).
+- Volume-based slippage via `volume_slippage_bps` (scaled linearly by participation: `volume_slippage_bps * (qty / bar volume)`).
+- Square-root market impact (off by default) adding `impact_coefficient x volatility x sqrt(qty / bar volume)` to market and stop fills, capped at 10%; volatility is measured over the `impact_window` bars before the fill bar. Both are `config` fields.
 
 ## Several strategies on one account
 

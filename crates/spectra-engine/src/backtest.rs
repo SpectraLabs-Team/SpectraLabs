@@ -735,13 +735,17 @@ fn impact_bps(cfg: &ImpactConfig, history: &[Bar], bar: &Bar, qty: Qty) -> f64 {
     frac.min(MAX_IMPACT) * 10_000.0
 }
 
-/// A market-type fill price: `base` moved against the trader by the flat
-/// slippage plus any impact.
-fn market_price(base: Price, side: Side, cfg: &BacktestConfig, impact: f64) -> Result<Price> {
-    let mut bps = cfg.costs.slippage;
-    if impact > 0.0 {
-        bps = bps.checked_add(spectra_core::Bps::from_f64(impact)?)?;
-    }
+/// A market-type fill price: `base` moved against the trader by flat slippage,
+/// spread, volume-based slippage, plus any impact.
+fn market_price(
+    base: Price,
+    side: Side,
+    bar: &Bar,
+    qty: Qty,
+    cfg: &BacktestConfig,
+    impact: f64,
+) -> Result<Price> {
+    let bps = crate::costs::effective_slippage_bps(&cfg.costs, qty, bar.volume, impact)?;
     Ok(slipped_price(base, side, bps)?)
 }
 
@@ -777,18 +781,18 @@ fn evaluate(o: &Order, bar: &Bar, history: &[Bar], cfg: &BacktestConfig) -> Resu
     let mut triggered = false;
     let price = match o.kind {
         OrderType::Market => {
-            Some(market_price(bar.open, o.side, cfg, impact_bps(&cfg.impact, history, bar, q))?)
+            Some(market_price(bar.open, o.side, bar, q, cfg, impact_bps(&cfg.impact, history, bar, q))?)
         }
         OrderType::Limit => limit_price(o.side, o.limit, bar),
         OrderType::StopLimit if o.triggered => limit_price(o.side, o.limit, bar),
         // A stop whose stop was reached on an earlier bar (a partial fill) is a market order now.
         OrderType::Stop if o.triggered => {
-            Some(market_price(bar.open, o.side, cfg, impact_bps(&cfg.impact, history, bar, q))?)
+            Some(market_price(bar.open, o.side, bar, q, cfg, impact_bps(&cfg.impact, history, bar, q))?)
         }
         OrderType::Stop => match stop_trigger(o.side, o.stop, bar) {
             Some(base) => {
                 triggered = true;
-                Some(market_price(base, o.side, cfg, impact_bps(&cfg.impact, history, bar, q))?)
+                Some(market_price(base, o.side, bar, q, cfg, impact_bps(&cfg.impact, history, bar, q))?)
             }
             None => None,
         },
@@ -872,6 +876,12 @@ pub fn canonical_config(c: &BacktestConfig) -> String {
     add("commission_bps", i128::from(c.costs.commission.bps_of_notional.raw()));
     add("commission_min", i128::from(c.costs.commission.min_fee.raw()));
     add("slippage_bps", i128::from(c.costs.slippage.raw()));
+    if c.costs.spread.raw() > 0 {
+        add("spread_bps", i128::from(c.costs.spread.raw()));
+    }
+    if c.costs.volume_slippage.raw() > 0 {
+        add("volume_slippage_bps", i128::from(c.costs.volume_slippage.raw()));
+    }
     add("max_participation", i128::from(c.exec.max_participation.raw()));
     add("delay_bars", c.exec.delay_bars as i128);
     add("seed", i128::from(c.seed as i64)); // the C++ engine printed the seed as a signed long long

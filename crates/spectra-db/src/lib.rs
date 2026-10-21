@@ -25,6 +25,7 @@ pub mod identity;
 pub mod jobs;
 pub mod lifecycle;
 pub mod providers;
+pub mod strategies;
 pub mod uploads;
 pub mod vault;
 pub mod web_migrations;

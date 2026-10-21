@@ -694,6 +694,16 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   }
   for (const p of ['api/v1/experiments/{id}/runs', 'api/v1/runs/{id}/notes']) assert.equal(routes[p].minRole, 'editor', p);
   for (const p of ['api/v1/registry/verify', 'api/v1/registry/import']) assert.equal(routes[p].minRole, 'owner', p);
+  assert.equal(key(`api/v1/runs/${run}/survival`), 'api/v1/runs/{id}/survival');
+  assert.equal(key(`api/v1/survival/${run}`), 'api/v1/survival/{id}');
+  assert.equal(key(`api/v1/survival/${run}/text`), 'api/v1/survival/{id}/text');
+  assert.equal(key(`api/v1/survival/presets/${run}`), 'api/v1/survival/presets/{id}');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/runs/{id}/survival'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/runs/{id}/survival'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/survival/presets'], 'POST'), 'editor');
+  assert.equal(routes['api/v1/survival/{id}'].minRole, 'viewer');
+  assert.equal(routes['api/v1/survival/{id}/text'].minRole, 'viewer');
+  assert.equal(routes['api/v1/survival/presets/{id}'].minRole, 'editor');
   assert.equal(engineRoutes.maxBodyBytes(routes['api/risk']), 2 * 1024 * 1024, 'default body limit');
   assert.ok(engineRoutes.maxBodyBytes(routes['api/v1/runs']) > 10 * 1024 * 1024, 'a 10 MB dataset fits');
   const bt = '0192f3a4-0000-7000-8000-000000000002';
@@ -713,6 +723,20 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/secrets`), `api/v1/backtests/${bt}/artifacts/secrets`, 'unknown file kinds stay unlisted');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/artifacts/orders_csv/x`), `api/v1/backtests/${bt}/artifacts/orders_csv/x`);
   for (const p of ['api/v1/backtests/{id}/artifacts/{kind}', 'api/v1/datasets', 'api/v1/calendars']) {
+    assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
+    assert.ok(!engineRoutes.allowsMethod(routes[p], 'POST'), `${p} is read-only`);
+  }
+  // Saved strategies (M2a): reads are viewer, saving a strategy or a version is editor.
+  const sv = '0192f3a4-0000-7000-8000-000000000004';
+  assert.equal(key(`api/v1/strategies/${sv}`), 'api/v1/strategies/{id}');
+  assert.equal(key(`api/v1/strategies/${sv}/versions`), 'api/v1/strategies/{id}/versions');
+  assert.equal(key(`api/v1/strategies/versions/${sv}`), 'api/v1/strategies/versions/{id}');
+  assert.equal(key('api/v1/strategies/builtin'), 'api/v1/strategies/builtin', 'the catalogue keeps its own entry');
+  assert.equal(key(`api/v1/strategies/${sv}/other`), `api/v1/strategies/${sv}/other`, 'unknown sub-routes stay unlisted');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/strategies'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/strategies'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/strategies/{id}/versions'], 'POST'), 'editor');
+  for (const p of ['api/v1/strategies/{id}', 'api/v1/strategies/versions/{id}']) {
     assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
     assert.ok(!engineRoutes.allowsMethod(routes[p], 'POST'), `${p} is read-only`);
   }

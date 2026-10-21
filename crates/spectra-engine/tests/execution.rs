@@ -270,4 +270,57 @@ fn new_features_change_fingerprints_only_when_used() {
         spectra_engine::config_fingerprint(&cfg()),
         "an unused window does not change the fingerprint"
     );
+    let with_spread = BacktestConfig {
+        costs: spectra_engine::CostModel { spread: Bps::from_f64(10.0).unwrap(), ..Default::default() },
+        ..cfg()
+    };
+    assert_ne!(spectra_engine::config_fingerprint(&with_spread), spectra_engine::config_fingerprint(&cfg()));
+    let with_vol_slip = BacktestConfig {
+        costs: spectra_engine::CostModel {
+            volume_slippage: Bps::from_f64(25.0).unwrap(),
+            ..Default::default()
+        },
+        ..cfg()
+    };
+    assert_ne!(
+        spectra_engine::config_fingerprint(&with_vol_slip),
+        spectra_engine::config_fingerprint(&cfg())
+    );
+}
+
+#[test]
+fn spread_cost_moves_market_orders_by_half_spread() {
+    // 10 bps spread => 5 bps half-spread paid on market orders
+    let mut c = cfg();
+    c.ledger.allow_short = true;
+    c.costs.spread = Bps::from_f64(10.0).unwrap();
+
+    let buy = spec(Side::Buy, OrderType::Market, 100.0);
+    // Open is 100.0; buy fills at 100.0 + 5 bps = 100.05
+    assert_eq!(fill_prices(&run(&[FLAT, FLAT], buy, &c)), [p(100.05)]);
+
+    let sell = spec(Side::Sell, OrderType::Market, 100.0);
+    // Sell fills at 100.0 - 5 bps = 99.95
+    assert_eq!(fill_prices(&run(&[FLAT, FLAT], sell, &c)), [p(99.95)]);
+
+    // Limit orders do not cross the spread
+    let limit = OrderSpec { limit: p(100.0), ..spec(Side::Buy, OrderType::Limit, 100.0) };
+    assert_eq!(fill_prices(&run(&[FLAT, FLAT], limit, &c)), [p(100.0)]);
+}
+
+#[test]
+fn volume_based_slippage_scales_with_participation() {
+    let mut c = cfg();
+    c.costs.volume_slippage = Bps::from_f64(20.0).unwrap();
+
+    // Bar volume = 1,000. Qty = 500 => 50% participation => 10 bps slippage
+    let buy_half = spec(Side::Buy, OrderType::Market, 500.0);
+    assert_eq!(fill_prices(&run(&[FLAT, (100.0, 101.0, 99.0, 100.0, 1_000.0)], buy_half, &c)), [p(100.1)]);
+
+    // Qty = 250 => 25% participation => 5 bps slippage
+    let buy_quarter = spec(Side::Buy, OrderType::Market, 250.0);
+    assert_eq!(
+        fill_prices(&run(&[FLAT, (100.0, 101.0, 99.0, 100.0, 1_000.0)], buy_quarter, &c)),
+        [p(100.05)]
+    );
 }

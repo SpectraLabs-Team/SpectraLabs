@@ -45,6 +45,9 @@ use spectra_core::{
     LedgerError, Money, Price, Qty, Ratio, Reject, Result, Sha256, Side, ENGINE_VERSION, SCALE,
 };
 
+use crate::corporate::{
+    apply_order, corporate_actions_sha256, split_price, split_qty, CorporateAction, CorporateActionKind,
+};
 use crate::costs::{commission_fee, slipped_price, CostModel};
 use crate::metrics::{compute_metrics, EquityPoint, Metrics};
 
@@ -262,7 +265,8 @@ pub struct BacktestConfig {
     pub financing: FinancingConfig,
     /// Volume-based market impact (off by default).
     pub impact: ImpactConfig,
-    /// Optional exchange calendar: when set, orders only fill during open market sessions.
+    /// Optional exchange calendar: when set, orders only fill when the market is open: inside a
+    /// session for intraday bars, on trading days for daily bars (see `SessionRule`).
     pub exchange: Option<spectra_data::calendar::Exchange>,
 }
 
@@ -398,6 +402,9 @@ pub trait Strategy {
     fn on_bar(&mut self, ctx: &mut Context<'_>, bars: &[Bar]);
     /// Called for each fill at the current timestamp, before `on_bar`.
     fn on_fill(&mut self, _ctx: &mut Context<'_>, _fill: &Fill) {}
+    /// Called for each corporate action applied at the current timestamp (the
+    /// books and open orders are already adjusted), before `on_fill`.
+    fn on_corporate_action(&mut self, _ctx: &mut Context<'_>, _action: &CorporateAction) {}
 }
 
 /// Open orders, indexed so a step only visits orders that can fill on it.
@@ -922,6 +929,8 @@ fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order]
             spectra_core::EntryType::Fill => 2,
             spectra_core::EntryType::Interest => 3,
             spectra_core::EntryType::BorrowFee => 4,
+            spectra_core::EntryType::Split => 5,
+            spectra_core::EntryType::Dividend => 6,
         });
         h.update_i64(e.ts_ns);
         h.update_i64(e.amount.raw());
@@ -975,7 +984,7 @@ fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order]
 
 /// Refuses data whose instruments have different median bar intervals (see
 /// the module documentation). Instruments with fewer than two bars are ignored.
-fn check_uniform_intervals(bars: &[Bar]) -> Result<()> {
+fn check_uniform_intervals(bars: &[Bar]) -> Result<Option<i64>> {
     let mut last: BTreeMap<InstrumentId, i64> = BTreeMap::new();
     let mut deltas: BTreeMap<InstrumentId, Vec<i64>> = BTreeMap::new();
     for b in bars {
@@ -987,7 +996,9 @@ fn check_uniform_intervals(bars: &[Bar]) -> Result<()> {
         let mid = d.len() / 2;
         (id, *d.select_nth_unstable(mid).1)
     });
+    let mut interval = None;
     if let Some((first_id, first)) = medians.next() {
+        interval = Some(first);
         if let Some((id, m)) = medians.find(|&(_, m)| m != first) {
             return Err(Error::InvalidArgument(format!(
                 "instruments have different bar intervals (instrument {first_id}: {first} ns, instrument {id}: \
@@ -996,7 +1007,42 @@ fn check_uniform_intervals(bars: &[Bar]) -> Result<()> {
             )));
         }
     }
-    Ok(())
+    Ok(interval)
+}
+
+/// When orders may fill under an exchange calendar, by bar interval:
+///  * intraday bars (under 20 hours): only inside a session, at the bar's time;
+///  * daily bars (20 hours to 4 days): only on trading days, judged by the
+///    bar's trading date ([`spectra_data::calendar::Exchange::daily_bar_date`]),
+///    since a daily bar's timestamp is rarely inside the session;
+///  * weekly or longer bars: always (each spans several sessions).
+#[derive(Debug, Clone, Copy)]
+enum SessionRule {
+    Always,
+    Intraday(spectra_data::calendar::Exchange),
+    Daily(spectra_data::calendar::Exchange),
+}
+
+impl SessionRule {
+    const HOURS_20: i64 = 20 * 3_600_000_000_000;
+    const DAYS_4: i64 = 4 * 86_400_000_000_000;
+
+    fn new(exchange: Option<spectra_data::calendar::Exchange>, interval: Option<i64>) -> Self {
+        match (exchange, interval) {
+            (None, _) => Self::Always,
+            (Some(ex), Some(i)) if (Self::HOURS_20..=Self::DAYS_4).contains(&i) => Self::Daily(ex),
+            (Some(_), Some(i)) if i > Self::DAYS_4 => Self::Always,
+            (Some(ex), _) => Self::Intraday(ex),
+        }
+    }
+
+    fn is_open(self, ts: i64) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Intraday(ex) => ex.is_session_open(ts),
+            Self::Daily(ex) => ex.is_trading_day_bar(ts),
+        }
+    }
 }
 
 fn ledger_err(e: LedgerError) -> Error {
@@ -1225,7 +1271,25 @@ pub fn run_backtest_controlled(
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<BacktestResult, RunError> {
-    run_inner(bars, &mut [strategy], None, cfg, ctl)
+    run_inner(bars, &[], &mut [strategy], None, cfg, ctl)
+}
+
+/// [`run_backtest_controlled`] on unadjusted prices with the instruments'
+/// corporate actions applied as they go ex (see [`crate::corporate`]). With
+/// no actions it is exactly [`run_backtest_controlled`]; with some, their
+/// fingerprint is part of `config_sha256`.
+///
+/// # Errors
+/// As [`run_backtest_controlled`], and [`RunError::Engine`] for an invalid
+/// action or one on an instrument with no bars.
+pub fn run_backtest_with_actions(
+    bars: &[Bar],
+    actions: &[CorporateAction],
+    strategy: &mut dyn Strategy,
+    cfg: &BacktestConfig,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestResult, RunError> {
+    run_inner(bars, actions, &mut [strategy], None, cfg, ctl)
 }
 
 /// Runs several strategies on one shared account. Each strategy gets
@@ -1244,8 +1308,24 @@ pub fn run_backtest_controlled(
 /// As [`run_backtest_controlled`], and [`RunError::Engine`] when there are no
 /// strategies or more than [`MAX_STRATEGIES`], a weight is not in (0, 1], or
 /// the weights add up to more than 1.
-pub fn run_multi_backtest<'a>(
+pub fn run_multi_backtest(
     bars: &[Bar],
+    allocations: &mut [Allocation<'_>],
+    cfg: &BacktestConfig,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestResult, RunError> {
+    run_multi_backtest_with_actions(bars, &[], allocations, cfg, ctl)
+}
+
+/// [`run_multi_backtest`] with corporate actions (see
+/// [`run_backtest_with_actions`]). Each strategy's books are adjusted and
+/// paid on their own positions; the account carries every change.
+///
+/// # Errors
+/// As [`run_multi_backtest`] and [`run_backtest_with_actions`].
+pub fn run_multi_backtest_with_actions<'a>(
+    bars: &[Bar],
+    actions: &[CorporateAction],
     allocations: &mut [Allocation<'a>],
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
@@ -1269,7 +1349,7 @@ pub fn run_multi_backtest<'a>(
     }
     let mut strategies: Vec<&mut (dyn Strategy + 'a)> =
         allocations.iter_mut().map(|a| &mut *a.strategy).collect();
-    run_inner(bars, &mut strategies, Some(&weights), cfg, ctl)
+    run_inner(bars, actions, &mut strategies, Some(&weights), cfg, ctl)
 }
 
 /// Each strategy's own books in a multi-strategy run.
@@ -1326,8 +1406,115 @@ impl Books {
     }
 }
 
+/// Applies one corporate action to the books and open orders.
+fn apply_action(
+    a: &CorporateAction,
+    ledger: &mut Ledger,
+    sleeves: &mut [Ledger],
+    orders: &mut [Order],
+    open: &mut OpenOrders,
+    ts: i64,
+) -> std::result::Result<(), RunError> {
+    let id = a.instrument;
+    match a.kind {
+        CorporateActionKind::Split { from, to } => {
+            // Each strategy's position first; the account's is their sum, so the books still add up.
+            let mut total = Qty::ZERO;
+            for book in sleeves.iter_mut() {
+                let q = book.position(id).qty;
+                if q.is_zero() {
+                    book.rescale_mark(id, from, to);
+                } else {
+                    let nq = split_qty(q, from, to);
+                    book.apply_split(id, from, to, nq, ts).map_err(ledger_err)?;
+                    total = total.checked_add(nq)?;
+                }
+            }
+            let q = ledger.position(id).qty;
+            if q.is_zero() {
+                ledger.rescale_mark(id, from, to);
+            } else {
+                let nq = if sleeves.is_empty() { split_qty(q, from, to) } else { total };
+                ledger.apply_split(id, from, to, nq, ts).map_err(ledger_err)?;
+            }
+            // Open orders, as a broker adjusts them: more shares at a lower price.
+            for (k, o) in orders.iter_mut().enumerate() {
+                if o.instrument != id || !o.state.is_open() {
+                    continue;
+                }
+                open.remove(o, k);
+                o.qty = split_qty(o.qty, from, to);
+                o.remaining = split_qty(o.remaining, from, to);
+                if !o.limit.is_zero() {
+                    o.limit = split_price(o.limit, from, to);
+                }
+                if !o.stop.is_zero() {
+                    o.stop = split_price(o.stop, from, to);
+                }
+                open.insert(o, k);
+            }
+        }
+        CorporateActionKind::Dividend { per_share } => {
+            let pay = |book: &mut Ledger| -> std::result::Result<Option<Money>, RunError> {
+                let q = book.position(id).qty;
+                if q.is_zero() {
+                    return Ok(None);
+                }
+                let amount = notional(per_share, q)?;
+                if amount.is_zero() {
+                    return Ok(None);
+                }
+                book.apply_dividend(id, amount, ts).map_err(ledger_err)?;
+                Ok(Some(amount))
+            };
+            if sleeves.is_empty() {
+                pay(ledger)?;
+            } else {
+                for book in sleeves.iter_mut() {
+                    if let Some(amount) = pay(book)? {
+                        ledger.apply_dividend(id, amount, ts).map_err(ledger_err)?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Checks and orders a run's corporate actions.
+fn prepare_actions(actions: &[CorporateAction], bars: &[Bar]) -> Result<Vec<CorporateAction>> {
+    if actions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let instruments: BTreeSet<InstrumentId> = bars.iter().map(|b| b.instrument).collect();
+    for (i, a) in actions.iter().enumerate() {
+        if let Some(p) = a.problem() {
+            return Err(Error::InvalidArgument(format!(
+                "corporate action {i} (instrument {}): {p}",
+                a.instrument
+            )));
+        }
+        if !instruments.contains(&a.instrument) {
+            return Err(Error::InvalidArgument(format!(
+                "corporate action {i}: instrument {} has no bars in this dataset",
+                a.instrument
+            )));
+        }
+    }
+    let mut sorted = actions.to_vec();
+    sorted.sort_by(apply_order);
+    if let Some(w) = sorted.windows(2).find(|w| w[0] == w[1]) {
+        return Err(Error::InvalidArgument(format!(
+            "corporate action for instrument {} at {} is listed twice",
+            w[0].instrument, w[0].ex_ts_ns
+        )));
+    }
+    Ok(sorted)
+}
+
 fn run_inner<'s>(
     bars: &[Bar],
+    actions: &[CorporateAction],
     strategies: &mut [&mut (dyn Strategy + 's)],
     weights: Option<&[Ratio]>,
     cfg: &BacktestConfig,
@@ -1367,7 +1554,10 @@ fn run_inner<'s>(
         per_period_rate(fin.margin_rate, cfg.periods_per_year),
     ];
     let financed = !fin.is_zero();
-    check_uniform_intervals(bars)?;
+    let interval = check_uniform_intervals(bars)?;
+    let sessions = SessionRule::new(cfg.exchange, interval);
+    let actions = prepare_actions(actions, bars)?;
+    let mut next_action = 0usize;
     let progress_every = ctl.progress_every.max(1);
 
     let mut ledger = Ledger::new(cfg.ledger);
@@ -1454,11 +1644,20 @@ fn run_inner<'s>(
             }
         }
 
+        // Corporate actions going ex now, on the positions held at the previous close.
+        let mut applied: Vec<CorporateAction> = Vec::new();
+        while next_action < actions.len() && actions[next_action].ex_ts_ns <= ts {
+            let a = actions[next_action];
+            apply_action(&a, &mut ledger, &mut sleeves, &mut orders, &mut open, ts)?;
+            applied.push(a);
+            next_action += 1;
+        }
+
         // Good-till-date orders past their date expire before this timestamp's fills.
         expire(&mut orders, &mut open, |o| matches!(o.tif, TimeInForce::GoodTillDate(t) if ts > t));
 
         // 1. Fill orders submitted at earlier timestamps, in submission order.
-        let session_open = cfg.exchange.is_none_or(|ex| ex.is_session_open(ts));
+        let session_open = sessions.is_open(ts);
         let mut fills: Vec<(usize, Fill)> = Vec::new();
         if session_open {
             for k in open.candidates(group, &orders) {
@@ -1516,12 +1715,14 @@ fn run_inner<'s>(
             }
         }
 
-        // Day orders expire once they have had their one bar.
-        expire(&mut orders, &mut open, |o| {
-            o.tif == TimeInForce::Day
-                && step - o.submit_step >= min_wait
-                && find_bar(group, o.instrument).is_some()
-        });
+        // Day orders expire once they have had their one bar (one they could trade on).
+        if session_open {
+            expire(&mut orders, &mut open, |o| {
+                o.tif == TimeInForce::Day
+                    && step - o.submit_step >= min_wait
+                    && find_bar(group, o.instrument).is_some()
+            });
+        }
 
         // 2. Mark to the close and record equity.
         for b in group {
@@ -1555,6 +1756,9 @@ fn run_inner<'s>(
                 seed: cfg.seed,
                 strategy: s,
             };
+            for a in &applied {
+                strategy.on_corporate_action(&mut ctx, a);
+            }
             for (_, f) in fills.iter().filter(|(owner, _)| *owner == s) {
                 strategy.on_fill(&mut ctx, f);
             }
@@ -1570,10 +1774,15 @@ fn run_inner<'s>(
     }
     let metrics = compute_metrics(&curve, cfg.periods_per_year, cfg.risk_free_rate);
     let result_sha256 = hash_result(&curve, ledger.journal(), &orders, weights.is_some());
-    let config_sha256 = match weights {
-        Some(w) => spectra_core::sha256_hex(canonical_multi_config(cfg, w).as_bytes()),
-        None => config_fingerprint(cfg),
+    let mut canonical = match weights {
+        Some(w) => canonical_multi_config(cfg, w),
+        None => canonical_config(cfg),
     };
+    // Written only when there are actions, so runs without them keep their fingerprints.
+    if !actions.is_empty() {
+        canonical.push_str(&format!("corporate_actions={};", corporate_actions_sha256(&actions)));
+    }
+    let config_sha256 = spectra_core::sha256_hex(canonical.as_bytes());
     let mut per_strategy = Vec::with_capacity(sleeves.len());
     let mut unallocated = None;
     if let (Some(b), Some(w)) = (books, weights) {

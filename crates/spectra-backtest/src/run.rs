@@ -29,12 +29,13 @@
 
 use spectra_core::{Bar, Json, Ratio, Result, SCALE};
 use spectra_engine::{
-    run_backtest_controlled, run_multi_backtest, Allocation, BacktestConfig, BacktestResult, RunControl,
-    RunError,
+    run_backtest_with_actions, run_multi_backtest_with_actions, Allocation, BacktestConfig, BacktestResult,
+    RunControl, RunError,
 };
 use spectra_research::ParamSet;
 
 use crate::config::{config_to_user_json, parse_config, stored_config_json, ConfigError, FieldError};
+use crate::corporate::{actions_to_json, parse_actions, resolve, RequestAction};
 use crate::strategies::{builtin, BuiltinStrategy};
 
 /// A validated request: a known strategy, complete parameters and a configuration.
@@ -49,6 +50,9 @@ pub struct BacktestRequest {
     /// Every strategy of a multi-strategy request, in order; empty for a
     /// single-strategy request.
     pub strategies: Vec<StrategyAllocation>,
+    /// Corporate actions to apply during the run (unadjusted prices); empty
+    /// for none. See [`crate::corporate`].
+    pub corporate_actions: Vec<RequestAction>,
 }
 
 /// One strategy of a multi-strategy request.
@@ -65,7 +69,7 @@ pub struct StrategyAllocation {
 /// Most strategies in one request.
 pub const MAX_REQUEST_STRATEGIES: usize = 10;
 
-const REQUEST_FIELDS: [&str; 4] = ["strategy", "params", "strategies", "config"];
+const REQUEST_FIELDS: [&str; 5] = ["strategy", "params", "strategies", "config", "corporate_actions"];
 const ENTRY_FIELDS: [&str; 3] = ["strategy", "params", "weight"];
 
 fn field_error(field: impl Into<String>, message: impl Into<String>) -> FieldError {
@@ -172,7 +176,13 @@ impl BacktestRequest {
         let s = builtin(strategy).map_err(|e| ConfigError {
             errors: vec![FieldError { field: "strategy".into(), message: e.to_string() }],
         })?;
-        Ok(Self { strategy: s, params: s.resolve_params(params)?, config, strategies: Vec::new() })
+        Ok(Self {
+            strategy: s,
+            params: s.resolve_params(params)?,
+            config,
+            strategies: Vec::new(),
+            corporate_actions: Vec::new(),
+        })
     }
 
     /// Builds a multi-strategy request in code: `(strategy, params, weight)`
@@ -203,6 +213,7 @@ impl BacktestRequest {
                 params: entries[0].params.clone(),
                 config,
                 strategies: entries,
+                corporate_actions: Vec::new(),
             }),
             _ => Err(ConfigError { errors }),
         }
@@ -262,6 +273,10 @@ impl BacktestRequest {
         let strategy = if multi.is_some() { None } else { read_strategy(doc, "", &mut errors) };
 
         let params = strategy.map(|s| s.resolve_params_json(doc.find("params")));
+        let actions = match doc.find("corporate_actions") {
+            None | Some(Json::Null) => Some(Vec::new()),
+            Some(list) => parse_actions(list, &mut errors),
+        };
         let config = match doc.find("config") {
             None | Some(Json::Null) => Ok(crate::config::Preset::Default.config()),
             Some(c) => parse_config(c),
@@ -286,15 +301,20 @@ impl BacktestRequest {
             }
         };
 
-        match (multi, strategy, params, config) {
-            (Some(Some(entries)), _, _, Some(config)) if errors.is_empty() => Ok(Self {
-                strategy: entries[0].strategy,
-                params: entries[0].params.clone(),
-                config,
-                strategies: entries,
-            }),
-            (None, Some(strategy), Some(params), Some(config)) if errors.is_empty() => {
-                Ok(Self { strategy, params, config, strategies: Vec::new() })
+        match (multi, strategy, params, config, actions) {
+            (Some(Some(entries)), _, _, Some(config), Some(corporate_actions)) if errors.is_empty() => {
+                Ok(Self {
+                    strategy: entries[0].strategy,
+                    params: entries[0].params.clone(),
+                    config,
+                    strategies: entries,
+                    corporate_actions,
+                })
+            }
+            (None, Some(strategy), Some(params), Some(config), Some(corporate_actions))
+                if errors.is_empty() =>
+            {
+                Ok(Self { strategy, params, config, strategies: Vec::new(), corporate_actions })
             }
             _ => Err(ConfigError { errors }),
         }
@@ -307,6 +327,14 @@ impl BacktestRequest {
     /// # Errors
     /// If a value is not finite (impossible for a validated request).
     pub fn to_json(&self) -> Result<Json> {
+        let doc = self.to_json_without_actions()?;
+        if self.corporate_actions.is_empty() {
+            return Ok(doc);
+        }
+        Ok(doc.with("corporate_actions", actions_to_json(&self.corporate_actions)?))
+    }
+
+    fn to_json_without_actions(&self) -> Result<Json> {
         if self.is_multi() {
             let mut list = Json::array();
             for a in &self.strategies {
@@ -347,16 +375,35 @@ pub struct BacktestOutput {
     pub symbols: Vec<String>,
 }
 
-/// Builds the strategy and runs it under `ctl`.
+/// Builds the strategy and runs it under `ctl`, on a dataset whose symbols
+/// are unknown (corporate actions must then name instruments by id).
 ///
 /// # Errors
-/// [`RunError`] as from [`run_backtest_controlled`]; strategy construction
-/// problems come back as [`RunError::Engine`].
+/// As [`run_request_on`].
 pub fn run_request(
     bars: &[Bar],
     request: &BacktestRequest,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<BacktestOutput, RunError> {
+    run_request_on(bars, &[], request, ctl)
+}
+
+/// Builds the strategy and runs it under `ctl`. `symbols` (instrument id =
+/// position) resolves corporate actions given by symbol and labels the
+/// per-instrument output.
+///
+/// # Errors
+/// [`RunError`] as from [`spectra_engine::run_backtest_controlled`]; strategy
+/// construction problems and corporate actions naming a symbol the dataset
+/// does not have come back as [`RunError::Engine`].
+pub fn run_request_on(
+    bars: &[Bar],
+    symbols: &[String],
+    request: &BacktestRequest,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestOutput, RunError> {
+    let actions = resolve(&request.corporate_actions, symbols)
+        .map_err(|m| RunError::Engine(spectra_core::Error::InvalidArgument(m)))?;
     let result = if request.is_multi() {
         let mut built = Vec::with_capacity(request.strategies.len());
         for a in &request.strategies {
@@ -367,11 +414,11 @@ pub fn run_request(
             .zip(&request.strategies)
             .map(|(s, a)| Allocation { strategy: s.as_mut(), weight: a.weight })
             .collect();
-        run_multi_backtest(bars, &mut allocations, &request.config, ctl)?
+        run_multi_backtest_with_actions(bars, &actions, &mut allocations, &request.config, ctl)?
     } else {
         let mut strategy = request.strategy.build(&request.params)?;
-        run_backtest_controlled(bars, strategy.as_mut(), &request.config, ctl)?
+        run_backtest_with_actions(bars, &actions, strategy.as_mut(), &request.config, ctl)?
     };
     let benchmark = spectra_research::benchmark_returns(bars);
-    Ok(BacktestOutput { request: request.clone(), result, benchmark, symbols: Vec::new() })
+    Ok(BacktestOutput { request: request.clone(), result, benchmark, symbols: symbols.to_vec() })
 }

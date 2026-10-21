@@ -42,22 +42,37 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 
 function SurvivalCharts({ results }: { results: Record<string, unknown> }) {
   const costs = asRows(asObject(results.costs).levels).map((item) => ({ x: Number(item.extra_bps ?? 0), sharpe: Number(item.sharpe ?? 0), return: Number(item.total_return ?? 0) }));
+  const executionCosts = asRows(asObject(results.costs).execution_levels).map((item, index) => ({
+    x: `S${index + 1}`,
+    scenario: `Borrow ${Number(item.borrow_rate ?? 0) * 100}% · impact ${Number(item.impact_coefficient ?? 0)} · participation ${Number(item.max_participation ?? 0) * 100}%`,
+    sharpe: Number(item.sharpe ?? 0),
+  }));
   const delays = asRows(asObject(results.delay).levels).map((item) => ({ x: Number(item.delay_bars ?? 0), sharpe: Number(item.sharpe ?? 0), return: Number(item.total_return ?? 0) }));
   const neighbours = asRows(asObject(results.stability).neighbours).map((item, index) => ({ x: `N${index + 1}`, label: String(item.params ?? ''), sharpe: Number(item.sharpe ?? 0) }));
   const periods = asRows(asObject(results.time).subperiods).map((item, index) => ({ x: `P${index + 1}`, sharpe: Number(item.sharpe ?? 0), return: Number(item.total_return ?? 0) }));
   const histogram = asRows(asObject(asObject(results.trades).resampling).bootstrap_terminal_histogram).map((item) => ({ x: Number(item.lower ?? 0), count: Number(item.count ?? 0) }));
   const tradePnls = asSeries(results.trade_pnl_sorted).map((pnl, index) => ({ x: index + 1, pnl }));
   const regimes = asRows(asObject(results.regimes).buckets).map((item) => ({ x: String(item.name ?? ''), sharpe: Number(item.sharpe ?? 0), mean: Number(item.mean_return ?? 0) }));
+  const marketStates = asRows(asObject(results.regimes).market_states).map((item) => ({ x: String(item.name ?? ''), sharpe: Number(item.sharpe ?? 0), mean: Number(item.mean_return ?? 0) }));
   const baseline = asSeries(results.baseline_equity);
   const benchmark = asSeries(results.benchmark_equity);
   const benchmarkCurve = Array.from({ length: Math.min(baseline.length, benchmark.length) }, (_, index) => ({ x: index, strategy: baseline[index], benchmark: benchmark[index] }));
   const drawdowns = asSeries(results.drawdown_curve).map((drawdown, index) => ({ x: index, drawdown }));
+  const confidence = asObject(asObject(results.statistical_strength).return_block_bootstrap);
+  const ci = [
+    { x: 'Terminal return', low: Number(asObject(confidence.terminal_return).p05 ?? 0), median: Number(asObject(confidence.terminal_return).p50 ?? 0), high: Number(asObject(confidence.terminal_return).p95 ?? 0) },
+    { x: 'Annualized Sharpe', low: Number(asObject(confidence.annualized_sharpe).p05 ?? 0), median: Number(asObject(confidence.annualized_sharpe).p50 ?? 0), high: Number(asObject(confidence.annualized_sharpe).p95 ?? 0) },
+    { x: 'Maximum drawdown', low: Number(asObject(confidence.max_drawdown).p05 ?? 0), median: Number(asObject(confidence.max_drawdown).p50 ?? 0), high: Number(asObject(confidence.max_drawdown).p95 ?? 0) },
+  ];
   const label = { fill: 'var(--ink-muted, #71717a)', fontSize: 9 };
   const grid = <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,120,140,.16)" />;
   const zero = <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />;
   return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
     <ChartCard title="Costs · Sharpe and total return vs extra slippage">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={costs}>{grid}<XAxis dataKey="x" tick={label} /><YAxis yAxisId="left" tick={label} width={32} /><YAxis yAxisId="right" orientation="right" tick={label} width={32} /><Tooltip /><ReferenceLine x={5} stroke="#f59e0b" strokeDasharray="4 3" /><Line yAxisId="left" dataKey="sharpe" stroke="#8b5cf6" dot={false} /><Line yAxisId="right" dataKey="return" stroke="#14b8a6" dot={false} /></LineChart></ResponsiveContainer>
+    </ChartCard>
+    <ChartCard title="Execution costs · borrow, volume impact and partial fills">
+      <ResponsiveContainer width="100%" height="100%"><BarChart data={executionCosts}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip labelFormatter={(value) => executionCosts.find((item) => item.x === value)?.scenario ?? String(value)} /><Bar dataKey="sharpe" fill="#f97316" /></BarChart></ResponsiveContainer>
     </ChartCard>
     <ChartCard title="Execution delay · Sharpe by bars">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={delays}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip /><Line dataKey="sharpe" stroke="#8b5cf6" dot /></LineChart></ResponsiveContainer>
@@ -77,11 +92,17 @@ function SurvivalCharts({ results }: { results: Record<string, unknown> }) {
     <ChartCard title="Regime sensitivity · Sharpe per bucket">
       <ResponsiveContainer width="100%" height="100%"><BarChart data={regimes}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip /><Bar dataKey="sharpe" fill="#0ea5e9" /></BarChart></ResponsiveContainer>
     </ChartCard>
+    <ChartCard title="Trend, range and crisis · Sharpe by market state">
+      <ResponsiveContainer width="100%" height="100%"><BarChart data={marketStates}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip /><Bar dataKey="sharpe" fill="#0ea5e9" /></BarChart></ResponsiveContainer>
+    </ChartCard>
     <ChartCard title="Benchmark · rebased equity">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={benchmarkCurve}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={42} /><Tooltip /><Line dataKey="strategy" stroke="#8b5cf6" dot={false} /><Line dataKey="benchmark" stroke="#14b8a6" dot={false} /></LineChart></ResponsiveContainer>
     </ChartCard>
     <ChartCard title="Risk · drawdown path">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={drawdowns}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={42} /><ReferenceLine y={0.2} stroke="#f59e0b" strokeDasharray="4 3" /><ReferenceLine y={0.4} stroke="#ef4444" strokeDasharray="4 3" /><Tooltip /><Line dataKey="drawdown" stroke="#ef4444" dot={false} /></LineChart></ResponsiveContainer>
+    </ChartCard>
+    <ChartCard title="Return block bootstrap · empirical 5th/50th/95th percentiles">
+      <ResponsiveContainer width="100%" height="100%"><BarChart data={ci}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={42} /><ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" /><Tooltip /><Bar dataKey="low" fill="#f97316" /><Bar dataKey="median" fill="#0ea5e9" /><Bar dataKey="high" fill="#22c55e" /></BarChart></ResponsiveContainer>
     </ChartCard>
   </div>;
 }

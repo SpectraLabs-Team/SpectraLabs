@@ -64,8 +64,12 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/uploads/sessions/{id}/complete': { method: 'POST', minRole: 'editor', timeoutMs: 300_000 },
   'api/v1/datasets/{id}': { method: ['GET', 'PATCH'], minRole: 'viewer', methodRoles: { PATCH: 'editor' }, timeoutMs: 10_000 },
   'api/v1/datasets/versions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/datasets/versions/{id}/derive': { method: 'POST', minRole: 'editor', timeoutMs: 60_000 },
   'api/v1/datasets/versions/{id}/runs': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/datasets/versions/{id}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
+  // Corporate actions & backward adjustments (M1b)
+  'api/v1/corporate-actions': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/corporate-actions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
   'api/v1/calendars': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
 };
@@ -99,7 +103,8 @@ export function routePolicyKey(path: string): string {
   if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
   const session = /^api\/v1\/uploads\/sessions\/[0-9a-f-]{36}(\/complete)?$/i.exec(path);
   if (session) return `api/v1/uploads/sessions/{id}${session[1] ?? ''}`;
-  const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars)?$/i.exec(path);
+  if (/^api\/v1\/corporate-actions\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/corporate-actions/{id}';
+  const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars|\/derive)?$/i.exec(path);
   if (version) return `api/v1/datasets/versions/{id}${version[1] ?? ''}`;
   if (/^api\/v1\/datasets\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/datasets/{id}';
   return path;

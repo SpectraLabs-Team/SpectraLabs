@@ -114,6 +114,18 @@ Strategies written in Rust can place, besides market and limit orders:
 | `ctx.stop_limit(..)` | on the trigger bar at the stop (or gapped open) if within the limit, otherwise rests as a limit order |
 | `ctx.order(OrderSpec { tif, .. })` | any of the above with a time in force: `GoodTillCancelled` (default), `Day` (one bar, then `Expired`) or `GoodTillDate(ts)` |
 
+With `exchange` set in `config` (`XNYS`, `XCME`, `XLON`, `XTKS`, `XNSE`, `24/7`), orders fill
+only when that market is open:
+- **Intraday bars** (median interval under 20 hours): only bars inside a session, judged by the
+  bar's timestamp.
+- **Daily bars** (20 hours to 4 days): only bars for a trading day, so no fills on weekends or
+  holidays. The trading date is the bar's date in the exchange's timezone; a bar stamped at
+  18:00 local or later counts for the next day, so US daily bars stamped at 00:00 UTC map to
+  the right session.
+- **Weekly or longer bars:** always open.
+
+Orders wait through closed bars. A `Day` order is only used up by a bar it could trade on.
+
 Market impact (off by default) adds `impact_coefficient x volatility x sqrt(qty / bar volume)` to
 market and stop fills, capped at 10%; volatility is measured over the `impact_window` bars before
 the fill bar. Both are `config` fields.
@@ -156,6 +168,55 @@ the starting cash:
   their fingerprints.
 
 Strategies written in Rust can do the same with `spectra_engine::run_multi_backtest`.
+
+## Corporate actions
+
+A dataset of *unadjusted* prices jumps when a split or a dividend goes ex. There are two ways to
+backtest it correctly:
+
+- **Adjusted prices.** Derive an adjusted version of the dataset (Data tab → Derive adjusted, or
+  `POST /api/v1/datasets/versions/{id}/derive`) and run on that. History is rescaled, so
+  indicators see no jump. No corporate actions are passed to the run.
+- **Unadjusted prices with the actions applied during the run.** List them in the request. The
+  run then trades real historical prices and share counts:
+
+```json
+"corporate_actions": [
+  { "symbol": "AAPL", "ex_date": "2020-08-31", "type": "split", "from": 1, "to": 4 },
+  { "symbol": "AAPL", "ex_date": "2020-11-06", "type": "dividend", "amount": 0.205 }
+]
+```
+
+At the first bar at or after the ex-date, before that bar's fills:
+
+| Action | Effect |
+| --- | --- |
+| Split `from:to` | Positions × `to/from` (cost basis unchanged, so no P&L appears). The last mark ÷ the same ratio. Open orders: quantities × `to/from`, limit and stop prices × `from/to`. |
+| Dividend `amount` | Each long is paid `qty × amount`; each short pays it. Open orders are not changed. |
+
+- **Ordering:** on the same ex-date, splits go first, because a dividend is quoted per post-split
+  share.
+- **Multiple strategies:** in a multi-strategy run, each strategy's books are adjusted and paid
+  on its own position.
+- **Journal:** every change is a journal entry (`Split`, `Dividend`), so the books still
+  re-derive from the journal. Trade statistics treat a trade across a split as one trade, with
+  its dividends included.
+- **Strategy notification:** Rust strategies are told through `Strategy::on_corporate_action`,
+  after the books are adjusted.
+
+**Instruments.** `symbol` is resolved against the dataset when the job runs; an unknown symbol
+fails the job and names the action. `instrument` (an id) works too. `ex_date` is an ISO date
+(UTC midnight), a date-time, or nanoseconds.
+
+**Output.** The summary adds:
+- `activity.dividends` and `activity.corporate_actions_applied`;
+- `dividends` per instrument (included in `net_pnl`) and per strategy;
+- `run.corporate_actions`.
+
+**Fingerprints.** The actions' fingerprint is part of `config_sha256`. A run without actions
+keeps its fingerprints.
+
+Don't pass corporate actions for a dataset that is already adjusted: they would be counted twice.
 
 ## Limits
 

@@ -42,6 +42,12 @@ pub struct CreateBacktest {
     #[serde(default)]
     #[schema(value_type = Option<Vec<Object>>)]
     pub strategies: Option<Vec<serde_json::Value>>,
+    /// Splits and dividends to apply during the run, on unadjusted prices:
+    /// `[{"symbol", "ex_date", "type": "split", "from", "to"}]` or
+    /// `[{"symbol", "ex_date", "type": "dividend", "amount"}]`.
+    #[serde(default)]
+    #[schema(value_type = Option<Vec<Object>>)]
+    pub corporate_actions: Option<Vec<serde_json::Value>>,
     /// Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...).
     #[serde(default)]
     #[schema(value_type = Option<Object>)]
@@ -257,6 +263,9 @@ pub(crate) async fn create_backtest(
     }
     if let Some(list) = req.strategies {
         payload["strategies"] = serde_json::Value::Array(list);
+    }
+    if let Some(list) = req.corporate_actions {
+        payload["corporate_actions"] = serde_json::Value::Array(list);
     }
     if let Some(p) = req.params {
         payload["params"] = p;

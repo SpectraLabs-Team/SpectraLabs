@@ -142,11 +142,24 @@ fn survival_lab_handles_a_strategy_that_never_trades() {
     assert_eq!(r.costs.verdict, Verdict::Insufficient);
     assert!(r.costs.finding.contains("closed no trades"));
     assert_eq!(r.worst, Verdict::Insufficient);
+    assert!(r.paper_trading_allowed());
     assert!(format_survival_report(&r).contains("NOT a score"));
     let json = r.to_json().unwrap();
-    assert_eq!(json.at("schema_version").unwrap().as_int().unwrap(), 1);
+    assert_eq!(json.at("schema_version").unwrap().as_int().unwrap(), 2);
     assert!(json.at("config").is_ok());
-    for key in ["costs", "delay", "stability", "time", "trades", "sample", "regimes", "benchmark", "risk"] {
+    assert!(json.at("paper_trading_allowed").unwrap().as_bool().unwrap());
+    for key in [
+        "costs",
+        "delay",
+        "stability",
+        "time",
+        "trades",
+        "sample",
+        "regimes",
+        "benchmark",
+        "risk",
+        "statistical_strength",
+    ] {
         assert!(json.at(key).is_ok(), "missing report component {key}");
     }
     let serialized = format!("{}\n", json.dump());
@@ -212,4 +225,7 @@ fn survival_lab_flags_a_lucky_noise_winner_for_validation_not_stress() {
     };
     let r = run_survival_lab(&bars, &factory, &cfg, &best.params, &sc).unwrap();
     assert!(r.stability.neighbours.len() + r.stability.skipped >= 4);
+    assert_eq!(r.costs.execution_levels.len(), 12);
+    assert_eq!(r.regimes.market_states.len(), 3);
+    assert!(r.statistical_strength.return_bootstrap.valid);
 }

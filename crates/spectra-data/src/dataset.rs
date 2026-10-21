@@ -236,6 +236,10 @@ pub fn compute_dataset_id(bars: &[Bar], symbols: &SymbolTable) -> String {
 
 /// The element at sorted position `len / 2` (the upper median for even sizes),
 /// as `std::nth_element` gives it.
+/// Median bar interval from which bars count as daily (20 hours) and up to which (4 days).
+const DAILY_MIN_NS: f64 = 20.0 * 3_600e9;
+const DAILY_MAX_NS: f64 = 4.0 * 86_400e9;
+
 pub(crate) fn upper_median(mut v: Vec<f64>) -> f64 {
     if v.is_empty() {
         return 0.0;
@@ -283,12 +287,23 @@ pub fn assess_quality(bars: &[Bar], symbols: &SymbolTable, cfg: &CsvOptions) -> 
         let mut deltas = Vec::new();
         let mut returns = Vec::new();
         let mut stale_len = 0usize;
+        // Daily bars are judged by their trading date (their timestamp is rarely inside the
+        // session); weekly or longer bars span several sessions and are not judged.
+        let raw_interval =
+            upper_median(idx.windows(2).map(|w| (bars[w[1]].ts_ns - bars[w[0]].ts_ns) as f64).collect());
+        let daily = (DAILY_MIN_NS..=DAILY_MAX_NS).contains(&raw_interval);
+        let judged = raw_interval <= DAILY_MAX_NS;
         for (k, &bi) in idx.iter().enumerate() {
             let b = &bars[bi];
             if b.volume.is_zero() {
                 st.zero_volume_bars += 1;
             }
-            if let Some(cal) = cfg.exchange {
+            if let Some(cal) = cfg.exchange.filter(|_| daily) {
+                if !cal.is_trading_day_bar(b.ts_ns) {
+                    st.out_of_session_bars += 1;
+                    st.non_trading_day_bars += 1;
+                }
+            } else if let Some(cal) = cfg.exchange.filter(|_| judged) {
                 if !cal.is_session_open(b.ts_ns) {
                     st.out_of_session_bars += 1;
                     let tz = cal.timezone();

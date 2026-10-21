@@ -514,3 +514,39 @@ fn check_fill_answers_like_apply_fill_and_changes_nothing() {
     assert_eq!(l.cash(), m(499.0));
     expect_invariants(&l);
 }
+
+#[test]
+fn splits_and_dividends_are_journaled_and_replay() {
+    let mut l = Ledger::new(LedgerConfig { allow_short: true, ..LedgerConfig::default() });
+    l.deposit(m(10_000.0), 1).unwrap();
+    l.apply_fill(&fill(1, Side::Buy, 10.0, 100.0, 1.0)).unwrap();
+    l.apply_fill(&fill(2, Side::Sell, 4.0, 50.0, 0.0)).unwrap();
+    l.mark(1, p(100.0)).unwrap();
+    l.mark(2, p(50.0)).unwrap();
+    let before = l.equity().unwrap();
+
+    // 2-for-1 on instrument 1: twice the shares at half the mark, same value and cost.
+    l.apply_split(1, 1, 2, q(20.0), 2).unwrap();
+    assert_eq!(l.position(1).qty, q(20.0));
+    assert_eq!(l.position(1).cost, m(1_000.0));
+    assert_eq!(l.position_value(1).unwrap(), m(1_000.0));
+    assert_eq!(l.equity().unwrap(), before);
+
+    // Dividends: a long receives, a short pays (and may go past zero cash like financing).
+    l.apply_dividend(1, m(10.0), 3).unwrap();
+    l.apply_dividend(2, m(-2.0), 3).unwrap();
+    assert_eq!(l.dividends(), m(8.0));
+    assert_eq!(l.equity().unwrap(), before.checked_add(m(8.0)).unwrap());
+    expect_invariants(&l);
+    let r = Ledger::replay(*l.config(), l.journal()).unwrap();
+    assert_eq!((r.cash(), r.dividends(), r.position(1)), (l.cash(), l.dividends(), l.position(1)));
+
+    // Refused: no position, a sign change, zero, a dividend of the wrong sign.
+    assert_eq!(l.apply_split(3, 1, 2, q(1.0), 4), rej(Reject::InvalidFill));
+    assert_eq!(l.apply_split(1, 1, 2, q(-20.0), 4), rej(Reject::InvalidFill));
+    assert_eq!(l.apply_split(1, 0, 2, q(40.0), 4), rej(Reject::InvalidFill));
+    assert_eq!(l.apply_dividend(1, m(-1.0), 4), rej(Reject::InvalidFill));
+    assert_eq!(l.apply_dividend(1, Money::ZERO, 4), rej(Reject::InvalidAmount));
+    assert_eq!(l.apply_dividend(3, m(1.0), 4), rej(Reject::InvalidFill));
+    expect_invariants(&l);
+}

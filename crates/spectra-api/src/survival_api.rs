@@ -224,7 +224,7 @@ pub(crate) async fn list_for_run(
 }
 
 /// Read a saved report.
-#[utoipa::path(get, path = "/api/v1/survival/{id}", tag = "survival", params(("id" = Uuid, Path)), responses((status = 200, body = Value), (status = 404, body = crate::openapi::ErrorDoc)))]
+#[utoipa::path(get, path = "/api/v1/survival/{id}", operation_id = "get_survival_report", tag = "survival", params(("id" = Uuid, Path)), responses((status = 200, body = Value), (status = 404, body = crate::openapi::ErrorDoc)))]
 pub(crate) async fn get(
     State(st): State<AppState>,
     Extension(identity): Extension<Identity>,

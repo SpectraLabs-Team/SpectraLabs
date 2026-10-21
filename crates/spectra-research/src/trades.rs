@@ -66,8 +66,27 @@ pub fn extract_trades(ledger: &Ledger) -> Result<TradeExtraction> {
     let mut out = TradeExtraction::default();
     let mut state: BTreeMap<InstrumentId, Open> = BTreeMap::new();
     for e in ledger.journal() {
-        if e.kind != EntryType::Fill {
-            continue;
+        match e.kind {
+            EntryType::Fill => {}
+            // A split changes the open quantity, not the trade.
+            EntryType::Split => {
+                if let Some(s) = state.get_mut(&e.fill.instrument) {
+                    if !s.qty.is_zero() {
+                        s.qty = e.fill.qty;
+                    }
+                }
+                continue;
+            }
+            // A dividend is part of the open trade's P&L.
+            EntryType::Dividend => {
+                if let Some(s) = state.get_mut(&e.fill.instrument) {
+                    if !s.qty.is_zero() {
+                        s.gross = s.gross.checked_add(e.amount)?;
+                    }
+                }
+                continue;
+            }
+            _ => continue,
         }
         let f = &e.fill;
         let fq = if f.side == Side::Buy { f.qty } else { f.qty.checked_neg()? };
@@ -232,6 +251,103 @@ pub struct TradeResampling {
     pub reshuffle_prob_worse_drawdown: f64,
 }
 
+/// Circular moving-block bootstrap intervals for periodic strategy returns.
+/// Blocks preserve short-range autocorrelation while randomizing the order
+/// of larger return segments.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ReturnBlockBootstrap {
+    /// Whether enough observations and resamples were available.
+    pub valid: bool,
+    /// Number of input return periods.
+    pub periods: usize,
+    /// Number of contiguous observations sampled per block.
+    pub block_length: usize,
+    /// Monte Carlo samples.
+    pub resamples: usize,
+    /// Confidence band for compounded terminal return.
+    pub terminal_return: PercentileBand,
+    /// Confidence band for annualized Sharpe.
+    pub annualized_sharpe: PercentileBand,
+    /// Confidence band for maximum drawdown.
+    pub max_drawdown: PercentileBand,
+    /// Fraction of samples with negative terminal return.
+    pub probability_of_loss: f64,
+}
+
+/// Resamples contiguous circular blocks of periodic returns.
+///
+/// The returned bands are empirical percentile intervals, not formal
+/// posterior probabilities. The caller should label them as such.
+pub fn block_bootstrap_returns(
+    returns: &[f64],
+    initial_equity: f64,
+    periods_per_year: f64,
+    block_length: usize,
+    resamples: usize,
+    seed: u64,
+) -> ReturnBlockBootstrap {
+    let mut out = ReturnBlockBootstrap {
+        periods: returns.len(),
+        block_length,
+        resamples,
+        ..ReturnBlockBootstrap::default()
+    };
+    if returns.len() < 2
+        || block_length == 0
+        || block_length > returns.len()
+        || resamples == 0
+        || !initial_equity.is_finite()
+        || initial_equity <= 0.0
+        || !periods_per_year.is_finite()
+        || periods_per_year <= 0.0
+        || returns.iter().any(|r| !r.is_finite() || *r <= -1.0)
+    {
+        return out;
+    }
+    out.valid = true;
+    let mut rng = Rng::new(seed);
+    let mut sampled = Vec::with_capacity(returns.len());
+    let mut terminal = Vec::with_capacity(resamples);
+    let mut sharpes = Vec::with_capacity(resamples);
+    let mut drawdowns = Vec::with_capacity(resamples);
+    let mut losses = 0usize;
+    let blocks = returns.len().div_ceil(block_length);
+    for _ in 0..resamples {
+        sampled.clear();
+        for _ in 0..blocks {
+            let start = rng.range(0, returns.len() as i64 - 1) as usize;
+            for offset in 0..block_length {
+                if sampled.len() == returns.len() {
+                    break;
+                }
+                sampled.push(returns[(start + offset) % returns.len()]);
+            }
+        }
+        let mut equity = initial_equity;
+        let mut peak = equity;
+        let mut max_dd = 0.0f64;
+        for r in &sampled {
+            equity *= 1.0 + r;
+            peak = peak.max(equity);
+            if peak > 0.0 {
+                max_dd = max_dd.max((peak - equity) / peak);
+            }
+        }
+        let total_return = equity / initial_equity - 1.0;
+        if total_return < 0.0 {
+            losses += 1;
+        }
+        terminal.push(total_return);
+        sharpes.push(crate::stats::sharpe_per_period(&sampled) * periods_per_year.sqrt());
+        drawdowns.push(max_dd);
+    }
+    out.terminal_return = band(terminal);
+    out.annualized_sharpe = band(sharpes);
+    out.max_drawdown = band(drawdowns);
+    out.probability_of_loss = losses as f64 / resamples as f64;
+    out
+}
+
 fn histogram(values: &[f64]) -> Vec<DistributionBin> {
     if values.is_empty() {
         return Vec::new();
@@ -381,5 +497,18 @@ mod tests {
         assert_eq!(a.bootstrap_terminal_histogram.len(), 20);
         assert_eq!(a.bootstrap_terminal_histogram.iter().map(|bin| bin.count).sum::<usize>(), 500);
         assert!(!resample_trades(&pnl[..1], 100.0, 500, 7).valid);
+    }
+
+    #[test]
+    fn block_bootstrap_is_deterministic_and_rejects_invalid_returns() {
+        let returns = [0.02, -0.01, 0.03, -0.02, 0.01, 0.005];
+        let a = block_bootstrap_returns(&returns, 100.0, 252.0, 2, 500, 42);
+        let b = block_bootstrap_returns(&returns, 100.0, 252.0, 2, 500, 42);
+        assert_eq!(a, b);
+        assert!(a.valid);
+        assert_eq!(a.periods, returns.len());
+        assert_eq!(a.resamples, 500);
+        assert!(a.annualized_sharpe.p05 <= a.annualized_sharpe.p95);
+        assert!(!block_bootstrap_returns(&[0.1, -1.0], 100.0, 252.0, 1, 10, 42).valid);
     }
 }

@@ -424,6 +424,10 @@ pub struct VersionEntry {
     pub filename: Option<String>,
     /// Runs that used it.
     pub run_count: i64,
+    /// Version it was derived from, if derived.
+    pub derived_from_id: Option<Uuid>,
+    /// Derivation kind (e.g. "adjusted"), if derived.
+    pub derivation_kind: Option<String>,
 }
 
 /// Every version of a dataset, newest first.
@@ -450,6 +454,8 @@ pub async fn dataset_versions(
         i64,
         Option<String>,
         i64,
+        Option<Uuid>,
+        Option<String>,
     );
     let rows: Vec<Row> = sqlx::query_as(include_str!("../queries/dataset_versions_of.sql"))
         .bind(workspace_id)
@@ -474,6 +480,8 @@ pub async fn dataset_versions(
                 warning_count,
                 filename,
                 run_count,
+                derived_from_id,
+                derivation_kind,
             )| VersionEntry {
                 id,
                 version,
@@ -489,6 +497,8 @@ pub async fn dataset_versions(
                 warning_count,
                 filename,
                 run_count,
+                derived_from_id,
+                derivation_kind,
             },
         )
         .collect())
@@ -523,6 +533,12 @@ pub struct VersionDetail {
     pub created_at: DateTime<Utc>,
     /// Runs that used it.
     pub run_count: i64,
+    /// Version it was derived from, if derived.
+    pub derived_from_id: Option<Uuid>,
+    /// Derivation kind (e.g. "adjusted"), if derived.
+    pub derivation_kind: Option<String>,
+    /// Derivation parameters.
+    pub derivation_params: Option<JsonValue>,
 }
 
 /// The dataset version `id` of `workspace_id`, in full.
@@ -548,6 +564,9 @@ pub async fn get_version(
         Option<Uuid>,
         DateTime<Utc>,
         i64,
+        Option<Uuid>,
+        Option<String>,
+        Option<JsonValue>,
     );
     let row: Option<Row> = sqlx::query_as(include_str!("../queries/dataset_version_get.sql"))
         .bind(workspace_id)
@@ -569,6 +588,9 @@ pub async fn get_version(
             created_by,
             created_at,
             run_count,
+            derived_from_id,
+            derivation_kind,
+            derivation_params,
         )| VersionDetail {
             id,
             dataset_id,
@@ -583,8 +605,67 @@ pub async fn get_version(
             created_by,
             created_at,
             run_count,
+            derived_from_id,
+            derivation_kind,
+            derivation_params,
         },
     ))
+}
+
+/// A derived dataset-store entry to register.
+#[derive(Debug, Clone)]
+pub struct NewDerivedDatasetVersion<'a> {
+    /// Owning workspace.
+    pub workspace_id: Uuid,
+    /// Dataset name.
+    pub dataset_name: &'a str,
+    /// Dataset-store checksum.
+    pub checksum: &'a str,
+    /// Number of bars.
+    pub row_count: i64,
+    /// Size of the stored data, in bytes.
+    pub byte_size: i64,
+    /// The data-quality report.
+    pub quality_report: JsonValue,
+    /// Who registered it.
+    pub created_by: Option<Uuid>,
+    /// SHA-256 of the bars.qfb file in the artifact store.
+    pub blob_sha256: Option<&'a str>,
+    /// Source metadata.
+    pub source: Option<JsonValue>,
+    /// Base version id.
+    pub derived_from_id: Option<Uuid>,
+    /// Kind of derivation ("adjusted").
+    pub derivation_kind: Option<&'a str>,
+    /// Derivation parameters.
+    pub derivation_params: Option<JsonValue>,
+}
+
+/// Registers a derived dataset version with lineage.
+///
+/// # Errors
+/// Any database error.
+pub async fn register_derived_version(
+    pool: &PgPool,
+    v: &NewDerivedDatasetVersion<'_>,
+) -> Result<RegisteredVersion, Error> {
+    let (id, version, existed): (Uuid, i32, bool) =
+        sqlx::query_as(include_str!("../queries/dataset_version_derive.sql"))
+            .bind(v.workspace_id)
+            .bind(v.dataset_name)
+            .bind(v.checksum)
+            .bind(v.row_count)
+            .bind(v.byte_size)
+            .bind(&v.quality_report)
+            .bind(v.created_by)
+            .bind(v.blob_sha256)
+            .bind(&v.source)
+            .bind(v.derived_from_id)
+            .bind(v.derivation_kind)
+            .bind(v.derivation_params.as_ref().unwrap_or(&serde_json::json!({})))
+            .fetch_one(pool)
+            .await?;
+    Ok(RegisteredVersion { id, version, existed })
 }
 
 /// A run that used a dataset version.

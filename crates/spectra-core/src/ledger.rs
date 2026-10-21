@@ -142,6 +142,13 @@ pub enum EntryType {
     /// Borrow fee on a short position (`amount` > 0, paid; `fill.instrument`
     /// names the instrument). Only written when financing is configured.
     BorrowFee,
+    /// A stock split of `fill.instrument`: `fill.qty` is the position's new
+    /// quantity. The cost basis and realized P&L are unchanged; no cash moves.
+    Split,
+    /// A cash dividend on `fill.instrument`: `amount` > 0 received on a long
+    /// position, < 0 paid on a short one; `fill.qty` is the position it was
+    /// paid on.
+    Dividend,
 }
 
 /// One accepted operation.
@@ -210,6 +217,8 @@ pub struct Ledger {
     fees: Money,
     /// Net financing: interest earned minus interest and borrow fees paid.
     financing: Money,
+    /// Net dividends: received on longs minus paid on shorts.
+    dividends: Money,
     positions: BTreeMap<InstrumentId, Position>,
     marks: BTreeMap<InstrumentId, Price>,
     journal: Vec<JournalEntry>,
@@ -311,6 +320,93 @@ impl Ledger {
         });
         self.cash = new_cash;
         self.financing = new_fin;
+        Ok(())
+    }
+
+    /// Apply a stock split to the position in `instrument`: its quantity
+    /// becomes `new_qty` (same sign, not zero), and its mark, if any, is
+    /// scaled by `from / to`. The cost basis is unchanged, so no P&L appears.
+    /// The caller computes `new_qty` (normally `qty * to / from`, rounded).
+    ///
+    /// # Errors
+    /// `InvalidFill` if there is no position, `new_qty` changes sign or is
+    /// zero, or `from`/`to` is zero; overflow.
+    pub fn apply_split(
+        &mut self,
+        instrument: InstrumentId,
+        from: u32,
+        to: u32,
+        new_qty: Qty,
+        ts_ns: i64,
+    ) -> Result<()> {
+        if from == 0 || to == 0 {
+            return Err(Reject::InvalidFill.into());
+        }
+        self.split_quantity(instrument, new_qty, ts_ns)?;
+        self.rescale_mark(instrument, from, to);
+        Ok(())
+    }
+
+    /// Scales the mark of `instrument` by `from / to` (a split); positions are
+    /// untouched. Rounds half away from zero and never below one tick.
+    pub fn rescale_mark(&mut self, instrument: InstrumentId, from: u32, to: u32) {
+        if from == 0 || to == 0 {
+            return;
+        }
+        if let Some(px) = self.marks.get_mut(&instrument) {
+            let raw =
+                crate::fixed::div_round_half_away(i128::from(px.raw()) * i128::from(from), i128::from(to));
+            *px = Price::from_raw(i64::try_from(raw).unwrap_or(i64::MAX).max(1));
+        }
+    }
+
+    /// The journaled part of a split (what replay re-applies; marks are not journaled).
+    fn split_quantity(&mut self, instrument: InstrumentId, new_qty: Qty, ts_ns: i64) -> Result<()> {
+        let cur = self.position(instrument);
+        if cur.qty.is_zero() || new_qty.is_zero() || cur.qty.signum() != new_qty.signum() {
+            return Err(Reject::InvalidFill.into());
+        }
+        self.journal.push(JournalEntry {
+            seq: self.journal.len() as u64,
+            kind: EntryType::Split,
+            ts_ns,
+            amount: Money::ZERO,
+            fill: Fill { instrument, qty: new_qty, ts_ns, ..Fill::default() },
+            realized: Money::ZERO,
+            cash_after: self.cash,
+        });
+        self.positions.insert(instrument, Position { qty: new_qty, ..cur });
+        Ok(())
+    }
+
+    /// Post a cash dividend on the position in `instrument`: `amount` > 0
+    /// credits a long, < 0 debits a short. Like financing, a dividend owed on
+    /// a short is a debt, so it posts even when it takes cash below zero.
+    ///
+    /// # Errors
+    /// `InvalidAmount` if `amount` is zero; `InvalidFill` if there is no
+    /// position or the sign does not match it; overflow.
+    pub fn apply_dividend(&mut self, instrument: InstrumentId, amount: Money, ts_ns: i64) -> Result<()> {
+        if amount.is_zero() {
+            return Err(Reject::InvalidAmount.into());
+        }
+        let qty = self.position(instrument).qty;
+        if qty.is_zero() || qty.signum() != amount.signum() {
+            return Err(Reject::InvalidFill.into());
+        }
+        let new_cash = self.cash.checked_add(amount)?;
+        let new_div = self.dividends.checked_add(amount)?;
+        self.journal.push(JournalEntry {
+            seq: self.journal.len() as u64,
+            kind: EntryType::Dividend,
+            ts_ns,
+            amount,
+            fill: Fill { instrument, qty, ts_ns, ..Fill::default() },
+            realized: Money::ZERO,
+            cash_after: new_cash,
+        });
+        self.cash = new_cash;
+        self.dividends = new_div;
         Ok(())
     }
 
@@ -487,6 +583,10 @@ impl Ledger {
     pub fn financing(&self) -> Money {
         self.financing
     }
+    /// Net dividends: received on long positions minus paid on short ones.
+    pub fn dividends(&self) -> Money {
+        self.dividends
+    }
     /// The policy this ledger enforces.
     pub fn config(&self) -> &LedgerConfig {
         &self.cfg
@@ -552,6 +652,8 @@ impl Ledger {
                 EntryType::Fill => out.apply_fill(&e.fill),
                 EntryType::Interest => out.apply_interest(e.amount, e.ts_ns),
                 EntryType::BorrowFee => out.charge_borrow_fee(e.fill.instrument, e.amount, e.ts_ns),
+                EntryType::Split => out.split_quantity(e.fill.instrument, e.fill.qty, e.ts_ns),
+                EntryType::Dividend => out.apply_dividend(e.fill.instrument, e.amount, e.ts_ns),
             };
             if let Err(err) = r {
                 return Err(format!("replay: journal entry {} rejected: {err}", e.seq));
@@ -612,6 +714,13 @@ impl Ledger {
                     t.cash = t.cash.checked_sub(e.amount)?;
                     t.financing = t.financing.checked_sub(e.amount)?;
                 }
+                EntryType::Split => {
+                    t.qty.insert(e.fill.instrument, e.fill.qty);
+                }
+                EntryType::Dividend => {
+                    t.cash = t.cash.checked_add(e.amount)?;
+                    t.dividends = t.dividends.checked_add(e.amount)?;
+                }
             }
             if e.cash_after != t.cash {
                 return Err(fail(format!("cash_after mismatch at seq {}", e.seq)));
@@ -624,7 +733,7 @@ impl Ledger {
         use InvariantFailure::Violated as fail;
 
         // 1. Independent recomputation from the journal alone.
-        let JournalTotals { cash, net, fees, realized, financing, qty } = self.journal_totals()?;
+        let JournalTotals { cash, net, fees, realized, financing, dividends, qty } = self.journal_totals()?;
         if cash != self.cash {
             return Err(fail(format!("cash {} != journal {cash}", self.cash)));
         }
@@ -639,6 +748,9 @@ impl Ledger {
         }
         if financing != self.financing {
             return Err(fail("financing differs from journal".into()));
+        }
+        if dividends != self.dividends {
+            return Err(fail("dividends differ from journal".into()));
         }
 
         // 2. Quantities from the journal match the positions.
@@ -676,7 +788,8 @@ impl Ledger {
             .checked_sub(self.fees)?
             .checked_sub(total_cost)?
             .checked_add(self.realized)?
-            .checked_add(self.financing)?;
+            .checked_add(self.financing)?
+            .checked_add(self.dividends)?;
         if self.cash != expected_cash {
             return Err(fail("cash does not reconcile with cost basis and realized P&L".into()));
         }
@@ -686,8 +799,12 @@ impl Ledger {
         if pos_fees != self.fees {
             return Err(fail("per-position fees != total".into()));
         }
-        // Financing charges post even past zero cash; nothing else may.
-        if !self.cfg.allow_negative_cash && self.cash.raw() < 0 && self.financing.raw() >= 0 {
+        // Financing charges and dividends owed on shorts post even past zero cash; nothing else may.
+        if !self.cfg.allow_negative_cash
+            && self.cash.raw() < 0
+            && self.financing.raw() >= 0
+            && self.dividends.raw() >= 0
+        {
             return Err(fail("negative cash while disabled".into()));
         }
 
@@ -697,7 +814,8 @@ impl Ledger {
             .checked_sub(self.fees)?
             .checked_add(self.realized)?
             .checked_add(self.unrealized_pnl()?)?
-            .checked_add(self.financing)?;
+            .checked_add(self.financing)?
+            .checked_add(self.dividends)?;
         if self.equity()? != identity {
             return Err(fail("equity identity violated".into()));
         }
@@ -712,6 +830,7 @@ impl Ledger {
             || r.realized != self.realized
             || r.fees != self.fees
             || r.financing != self.financing
+            || r.dividends != self.dividends
         {
             return Err(fail("replayed totals differ".into()));
         }
@@ -729,6 +848,7 @@ struct JournalTotals {
     fees: Money,
     realized: Money,
     financing: Money,
+    dividends: Money,
     qty: BTreeMap<InstrumentId, Qty>,
 }
 

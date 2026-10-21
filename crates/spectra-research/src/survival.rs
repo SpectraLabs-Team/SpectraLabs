@@ -24,7 +24,7 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use spectra_core::cfmt::{fmt_f, pad_left, pad_right};
-use spectra_core::{timestamp_offsets, Bar, Bps, EntryType, Error, Json, Ledger, Result};
+use spectra_core::{timestamp_offsets, Bar, Bps, EntryType, Error, Json, Ledger, Qty, Result};
 use spectra_engine::{
     compute_drawdown_stats, compute_tail_stats, BacktestConfig, BacktestResult, DrawdownStats, Metrics,
     RunRecord, TailStats,
@@ -33,7 +33,10 @@ use spectra_engine::{
 use crate::benchmark::{aligned_returns, benchmark_returns, compute_benchmark_metrics, BenchmarkMetrics};
 use crate::stats::{moments, nearest_rank_index};
 use crate::sweep::{run_one, ParamSet, StrategyFactory};
-use crate::trades::{compute_trade_stats, extract_trades, resample_trades, TradeResampling, TradeStats};
+use crate::trades::{
+    block_bootstrap_returns, compute_trade_stats, extract_trades, resample_trades, ReturnBlockBootstrap,
+    TradeResampling, TradeStats,
+};
 
 /// Component verdict, in increasing severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -136,6 +139,12 @@ pub struct SurvivalConfig {
     pub extra_slippage_bps: Vec<f64>,
     /// The level the cost verdict is judged at.
     pub cost_stress_bps: f64,
+    /// 12. Annual borrow rates used for short-cost stress scenarios.
+    pub borrow_stress_rates: Vec<f64>,
+    /// 12. Volume-impact coefficients used for execution-cost stress.
+    pub impact_stress_coefficients: Vec<f64>,
+    /// 12. Maximum bar-volume participation fractions for partial-fill stress.
+    pub participation_stress_fractions: Vec<f64>,
     /// 2. Delays (bars beyond the baseline). Judged at 1 bar.
     pub delay_bars: Vec<usize>,
     /// 3. Relative changes applied to one parameter at a time.
@@ -156,6 +165,10 @@ pub struct SurvivalConfig {
     pub subperiod_positive_fail: f64,
     /// 5-6. Bootstrap resamples.
     pub bootstrap_resamples: usize,
+    /// 13. Return block-bootstrap resamples.
+    pub return_bootstrap_resamples: usize,
+    /// 13. Contiguous return periods per block.
+    pub return_bootstrap_block_length: usize,
     /// Resampling seed.
     pub seed: u64,
     /// Minimum trades to resample.
@@ -182,6 +195,12 @@ pub struct SurvivalConfig {
     pub regime_min_periods: usize,
     /// Minimum periods per regime bucket.
     pub regime_min_per_bucket: usize,
+    /// 11. Look-back used to classify trend/range market states.
+    pub regime_trend_window: usize,
+    /// 11. Directional efficiency above which a window is a trend.
+    pub regime_trend_efficiency: f64,
+    /// 11. Rolling benchmark return at or below which a period is a crisis.
+    pub regime_crisis_return: f64,
     /// 9. Warn at this max drawdown.
     pub max_drawdown_warn: f64,
     /// Fail at this max drawdown.
@@ -195,6 +214,9 @@ impl Default for SurvivalConfig {
         Self {
             extra_slippage_bps: vec![0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0],
             cost_stress_bps: 5.0,
+            borrow_stress_rates: vec![0.03, 0.10],
+            impact_stress_coefficients: vec![0.5, 1.0, 2.0],
+            participation_stress_fractions: vec![0.10, 0.05],
             delay_bars: vec![0, 1, 2, 5],
             perturbation_fractions: vec![-0.25, -0.10, 0.10, 0.25],
             integer_params: BTreeSet::new(),
@@ -205,6 +227,8 @@ impl Default for SurvivalConfig {
             subperiod_positive_warn: 0.75,
             subperiod_positive_fail: 0.50,
             bootstrap_resamples: 2000,
+            return_bootstrap_resamples: 2000,
+            return_bootstrap_block_length: 5,
             seed: 1,
             min_trades_for_resampling: 10,
             trades_insufficient_below: 10,
@@ -218,6 +242,9 @@ impl Default for SurvivalConfig {
             regime_vol_window: 20,
             regime_min_periods: 60,
             regime_min_per_bucket: 10,
+            regime_trend_window: 20,
+            regime_trend_efficiency: 0.35,
+            regime_crisis_return: -0.10,
             max_drawdown_warn: 0.20,
             max_drawdown_fail: 0.40,
             tail_level: 0.95,
@@ -291,6 +318,17 @@ impl SurvivalConfig {
         if !self.cost_stress_bps.is_finite() || self.cost_stress_bps < 0.0 {
             return Err(invalid("cost stress must be finite and non-negative"));
         }
+        if self.borrow_stress_rates.iter().any(|v| !v.is_finite() || *v < 0.0)
+            || self.impact_stress_coefficients.iter().any(|v| !v.is_finite() || *v < 0.0)
+            || self
+                .participation_stress_fractions
+                .iter()
+                .any(|v| !v.is_finite() || !(0.0..=1.0).contains(v) || *v == 0.0)
+        {
+            return Err(invalid(
+                "execution stress rates and impact must be non-negative; participation must be in (0, 1]",
+            ));
+        }
         if self.delay_bars.is_empty() {
             return Err(invalid("delay grid must be non-empty"));
         }
@@ -322,15 +360,24 @@ impl SurvivalConfig {
         if !self.tail_level.is_finite() || !(0.0..1.0).contains(&self.tail_level) {
             return Err(invalid("tail level must be in (0, 1)"));
         }
+        if !self.regime_trend_efficiency.is_finite() || !(0.0..=1.0).contains(&self.regime_trend_efficiency) {
+            return Err(invalid("trend efficiency must be in [0, 1]"));
+        }
+        if !self.regime_crisis_return.is_finite() || !(-1.0..0.0).contains(&self.regime_crisis_return) {
+            return Err(invalid("crisis return must be in (-1, 0)"));
+        }
         if self.n_subperiods < 2
             || self.min_timestamps_per_subperiod == 0
             || self.bootstrap_resamples == 0
+            || self.return_bootstrap_resamples == 0
+            || self.return_bootstrap_block_length == 0
             || self.min_trades_for_resampling == 0
             || self.trades_insufficient_below == 0
             || self.trades_warn_below < self.trades_insufficient_below
             || self.regime_vol_window == 0
             || self.regime_min_periods == 0
             || self.regime_min_per_bucket == 0
+            || self.regime_trend_window == 0
         {
             return Err(invalid(
                 "counts must be positive and trade warning count must be at least the insufficient count",
@@ -359,6 +406,9 @@ impl SurvivalConfig {
         Ok(Json::object()
             .with("extra_slippage_bps", nums(&self.extra_slippage_bps)?)
             .with("cost_stress_bps", Json::number(self.cost_stress_bps)?)
+            .with("borrow_stress_rates", nums(&self.borrow_stress_rates)?)
+            .with("impact_stress_coefficients", nums(&self.impact_stress_coefficients)?)
+            .with("participation_stress_fractions", nums(&self.participation_stress_fractions)?)
             .with("delay_bars", ints(&self.delay_bars)?)
             .with("perturbation_fractions", nums(&self.perturbation_fractions)?)
             .with("integer_params", integer_params)
@@ -369,6 +419,8 @@ impl SurvivalConfig {
             .with("subperiod_positive_warn", Json::number(self.subperiod_positive_warn)?)
             .with("subperiod_positive_fail", Json::number(self.subperiod_positive_fail)?)
             .with("bootstrap_resamples", Json::integer(self.bootstrap_resamples as i64))
+            .with("return_bootstrap_resamples", Json::integer(self.return_bootstrap_resamples as i64))
+            .with("return_bootstrap_block_length", Json::integer(self.return_bootstrap_block_length as i64))
             .with("seed", Json::integer(self.seed as i64))
             .with("min_trades_for_resampling", Json::integer(self.min_trades_for_resampling as i64))
             .with("trades_insufficient_below", Json::integer(self.trades_insufficient_below as i64))
@@ -382,6 +434,9 @@ impl SurvivalConfig {
             .with("regime_vol_window", Json::integer(self.regime_vol_window as i64))
             .with("regime_min_periods", Json::integer(self.regime_min_periods as i64))
             .with("regime_min_per_bucket", Json::integer(self.regime_min_per_bucket as i64))
+            .with("regime_trend_window", Json::integer(self.regime_trend_window as i64))
+            .with("regime_trend_efficiency", Json::number(self.regime_trend_efficiency)?)
+            .with("regime_crisis_return", Json::number(self.regime_crisis_return)?)
             .with("max_drawdown_warn", Json::number(self.max_drawdown_warn)?)
             .with("max_drawdown_fail", Json::number(self.max_drawdown_fail)?)
             .with("tail_level", Json::number(self.tail_level)?))
@@ -398,6 +453,13 @@ impl SurvivalConfig {
                 .map_err(|_| Error::Json(format!("{key} must be non-negative")))
         };
         let num = |key: &str| -> Result<f64> { value.at(key)?.as_double() };
+        let int_or = |key: &str, default: usize| -> Result<usize> {
+            value.find(key).map_or(Ok(default), |v| {
+                usize::try_from(v.as_int()?).map_err(|_| Error::Json(format!("{key} must be non-negative")))
+            })
+        };
+        let num_or =
+            |key: &str, default: f64| -> Result<f64> { value.find(key).map_or(Ok(default), Json::as_double) };
         let nums =
             |key: &str| -> Result<Vec<f64>> { value.at(key)?.items()?.iter().map(Json::as_double).collect() };
         let delays = value
@@ -418,6 +480,18 @@ impl SurvivalConfig {
         let config = Self {
             extra_slippage_bps: nums("extra_slippage_bps")?,
             cost_stress_bps: num("cost_stress_bps")?,
+            borrow_stress_rates: value.find("borrow_stress_rates").map_or_else(
+                || Ok(Self::default().borrow_stress_rates),
+                |v| v.items()?.iter().map(Json::as_double).collect(),
+            )?,
+            impact_stress_coefficients: value.find("impact_stress_coefficients").map_or_else(
+                || Ok(Self::default().impact_stress_coefficients),
+                |v| v.items()?.iter().map(Json::as_double).collect(),
+            )?,
+            participation_stress_fractions: value.find("participation_stress_fractions").map_or_else(
+                || Ok(Self::default().participation_stress_fractions),
+                |v| v.items()?.iter().map(Json::as_double).collect(),
+            )?,
             delay_bars: delays,
             perturbation_fractions: nums("perturbation_fractions")?,
             integer_params,
@@ -428,6 +502,14 @@ impl SurvivalConfig {
             subperiod_positive_warn: num("subperiod_positive_warn")?,
             subperiod_positive_fail: num("subperiod_positive_fail")?,
             bootstrap_resamples: int("bootstrap_resamples")?,
+            return_bootstrap_resamples: int_or(
+                "return_bootstrap_resamples",
+                Self::default().return_bootstrap_resamples,
+            )?,
+            return_bootstrap_block_length: int_or(
+                "return_bootstrap_block_length",
+                Self::default().return_bootstrap_block_length,
+            )?,
             seed: u64::try_from(value.at("seed")?.as_int()?)
                 .map_err(|_| Error::Json("seed must be non-negative".into()))?,
             min_trades_for_resampling: int("min_trades_for_resampling")?,
@@ -442,6 +524,12 @@ impl SurvivalConfig {
             regime_vol_window: int("regime_vol_window")?,
             regime_min_periods: int("regime_min_periods")?,
             regime_min_per_bucket: int("regime_min_per_bucket")?,
+            regime_trend_window: int_or("regime_trend_window", Self::default().regime_trend_window)?,
+            regime_trend_efficiency: num_or(
+                "regime_trend_efficiency",
+                Self::default().regime_trend_efficiency,
+            )?,
+            regime_crisis_return: num_or("regime_crisis_return", Self::default().regime_crisis_return)?,
             max_drawdown_warn: num("max_drawdown_warn")?,
             max_drawdown_fail: num("max_drawdown_fail")?,
             tail_level: num("tail_level")?,
@@ -462,11 +550,30 @@ pub struct CostLevel {
     pub total_return: f64,
 }
 
+/// One combined borrow, market-impact and participation stress scenario.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ExecutionCostLevel {
+    /// Annual borrow fee assumed for short exposure.
+    pub borrow_rate: f64,
+    /// Square-root market impact coefficient.
+    pub impact_coefficient: f64,
+    /// Maximum share of bar volume available to one order.
+    pub max_participation: f64,
+    /// Annualized Sharpe under this scenario.
+    pub sharpe: f64,
+    /// Total return under this scenario.
+    pub total_return: f64,
+    /// Degradation verdict relative to baseline.
+    pub verdict: Verdict,
+}
+
 /// Component 1.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CostSensitivity {
     /// Tested levels.
     pub levels: Vec<CostLevel>,
+    /// M3-backed borrow fee, impact and partial-fill stresses.
+    pub execution_levels: Vec<ExecutionCostLevel>,
     /// Sharpe at `cost_stress_bps`.
     pub stressed_sharpe: f64,
     /// Sharpe falls to <= 0 within the tested range.
@@ -615,6 +722,8 @@ pub struct RegimeBucket {
 pub struct RegimeSensitivity {
     /// Low, mid, high trailing volatility.
     pub buckets: Vec<RegimeBucket>,
+    /// Trend, range and drawdown-defined crisis states.
+    pub market_states: Vec<RegimeBucket>,
     /// Verdict.
     pub verdict: Verdict,
     /// Finding.
@@ -645,6 +754,13 @@ pub struct RiskProfile {
     pub verdict: Verdict,
     /// Finding.
     pub finding: String,
+}
+
+/// Confidence intervals for return-series statistics using contiguous blocks.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct StatisticalStrength {
+    /// Moving-block bootstrap distribution and empirical intervals.
+    pub return_bootstrap: ReturnBlockBootstrap,
 }
 
 /// The full battery.
@@ -688,6 +804,8 @@ pub struct SurvivalReport {
     pub benchmark: BenchmarkRelative,
     /// 9.
     pub risk: RiskProfile,
+    /// 13. Autocorrelation-aware return confidence intervals.
+    pub statistical_strength: StatisticalStrength,
     /// Most severe component verdict (NOT a score).
     pub worst: Verdict,
     /// What the tests do and ignore.
@@ -726,6 +844,12 @@ fn json_verdict(v: Verdict) -> Json {
 }
 
 impl SurvivalReport {
+    /// Whether the optional M8 fail-only paper-trading gate should allow this
+    /// strategy. `Warn` and `Insufficient` remain a human decision.
+    pub const fn paper_trading_allowed(&self) -> bool {
+        !matches!(self.worst, Verdict::Fail)
+    }
+
     /// Converts every report component to deterministic JSON. Non-finite
     /// analytics are represented as null because RFC 8259 has no infinities.
     ///
@@ -746,6 +870,24 @@ impl SurvivalReport {
                                 .with("extra_bps", json_f(v.extra_bps))
                                 .with("sharpe", json_f(v.sharpe))
                                 .with("total_return", json_f(v.total_return))
+                        })
+                        .collect(),
+                ),
+            )
+            .with(
+                "execution_levels",
+                levels(
+                    self.costs
+                        .execution_levels
+                        .iter()
+                        .map(|v| {
+                            Json::object()
+                                .with("borrow_rate", json_f(v.borrow_rate))
+                                .with("impact_coefficient", json_f(v.impact_coefficient))
+                                .with("max_participation", json_f(v.max_participation))
+                                .with("sharpe", json_f(v.sharpe))
+                                .with("total_return", json_f(v.total_return))
+                                .with("verdict", json_verdict(v.verdict))
                         })
                         .collect(),
                 ),
@@ -897,6 +1039,23 @@ impl SurvivalReport {
                         .collect(),
                 ),
             )
+            .with(
+                "market_states",
+                levels(
+                    self.regimes
+                        .market_states
+                        .iter()
+                        .map(|v| {
+                            Json::object()
+                                .with("name", Json::string(&v.name))
+                                .with("periods", json_usize(v.periods))
+                                .with("share", json_f(v.share))
+                                .with("mean_return", json_f(v.mean_return))
+                                .with("sharpe", json_f(v.sharpe))
+                        })
+                        .collect(),
+                ),
+            )
             .with("verdict", json_verdict(self.regimes.verdict))
             .with("finding", Json::string(&self.regimes.finding));
         let bm = &self.benchmark.metrics;
@@ -939,6 +1098,19 @@ impl SurvivalReport {
             )
             .with("verdict", json_verdict(self.risk.verdict))
             .with("finding", Json::string(&self.risk.finding));
+        let rb = &self.statistical_strength.return_bootstrap;
+        let statistical_strength = Json::object().with(
+            "return_block_bootstrap",
+            Json::object()
+                .with("valid", Json::boolean(rb.valid))
+                .with("periods", json_usize(rb.periods))
+                .with("block_length", json_usize(rb.block_length))
+                .with("resamples", json_usize(rb.resamples))
+                .with("terminal_return", band(&rb.terminal_return))
+                .with("annualized_sharpe", band(&rb.annualized_sharpe))
+                .with("max_drawdown", band(&rb.max_drawdown))
+                .with("probability_of_loss", json_f(rb.probability_of_loss)),
+        );
         let mut params = Json::object();
         for (name, value) in &self.params.values {
             params.set(name, json_f(*value))?;
@@ -972,7 +1144,9 @@ impl SurvivalReport {
             .with("regimes", regimes)
             .with("benchmark", benchmark)
             .with("risk", risk)
+            .with("statistical_strength", statistical_strength)
             .with("worst", json_verdict(self.worst))
+            .with("paper_trading_allowed", Json::boolean(self.paper_trading_allowed()))
             .with("assumptions", json_strings(&self.assumptions)))
     }
 }
@@ -1092,7 +1266,7 @@ pub fn run_survival_lab_controlled<'a>(
     let mut execution = SurvivalExecution { cancel, progress, test_number: 1, step: 0, total_steps: 1 };
     execution.check_cancelled()?;
     let mut rep = SurvivalReport {
-        schema_version: 1,
+        schema_version: 2,
         config: sc.clone(),
         params: params.clone(),
         ..SurvivalReport::default()
@@ -1100,6 +1274,14 @@ pub fn run_survival_lab_controlled<'a>(
     let base = run_one(bars, factory, config, params)?;
     let base_sum = summarize(&base);
     let base_returns = spectra_engine::returns_from_curve(&base.equity_curve);
+    rep.statistical_strength.return_bootstrap = block_bootstrap_returns(
+        &base_returns,
+        config.initial_cash.to_f64(),
+        config.periods_per_year,
+        sc.return_bootstrap_block_length.min(base_returns.len()),
+        sc.return_bootstrap_resamples,
+        sc.seed,
+    );
     rep.baseline_equity = equity_index(&base_returns);
     rep.drawdown_curve = drawdowns(&rep.baseline_equity);
     rep.benchmark_equity = equity_index(&benchmark_returns(bars));
@@ -1118,7 +1300,8 @@ pub fn run_survival_lab_controlled<'a>(
         "Parameter test perturbs one parameter at a time, never several together, so interactions are not explored.",
         "Sub-periods and halves are run from a cold start with fresh capital; long look-backs lose their warm-up.",
         "Trade resampling treats trades as exchangeable fixed dollar amounts and measures drawdown on closed trades only.",
-        "Regimes are terciles of trailing realized volatility of the equal-weight benchmark, labelled with full-sample thresholds (descriptive, not predictive). HMM regimes belong to the risk engine.",
+        "Return confidence intervals use a circular moving-block bootstrap; their coverage depends on the selected block length and is not a formal guarantee.",
+        "Volatility regimes use full-sample terciles and are descriptive, not predictive. Trend/range uses rolling directional efficiency; crisis uses a rolling cumulative benchmark return threshold. These are not HMM states.",
         "The benchmark is an equal-weight buy-and-hold of the dataset's instruments, ignoring costs. A strategy that deploys only a small share of capital will look weak against a fully invested benchmark; weigh alpha and information ratio against the reported exposure.",
         "These tests stress ONE chosen configuration for fragility. They cannot detect that it was the luckiest of many tried; use the Deflated Sharpe Ratio, PBO and walk-forward validation for that.",
         "Verdict thresholds are conservative rules of thumb, not statistical tests, and no aggregate score is produced.",
@@ -1136,8 +1319,12 @@ pub fn run_survival_lab_controlled<'a>(
                 grid.push(0.0);
             }
             grid.sort_by(f64::total_cmp);
-            let total_steps =
-                grid.iter().filter(|&&v| v != 0.0).count() + usize::from(sc.cost_stress_bps != 0.0);
+            let execution_scenarios = sc.borrow_stress_rates.len()
+                * sc.impact_stress_coefficients.len()
+                * sc.participation_stress_fractions.len();
+            let total_steps = grid.iter().filter(|&&v| v != 0.0).count()
+                + usize::from(sc.cost_stress_bps != 0.0)
+                + execution_scenarios;
             execution.begin_test(1, total_steps);
             let mut level_at = |extra: f64| -> Result<CostLevel> {
                 if extra == 0.0 {
@@ -1156,6 +1343,32 @@ pub fn run_survival_lab_controlled<'a>(
                 c.levels.push(level_at(extra)?);
             }
             c.stressed_sharpe = level_at(sc.cost_stress_bps)?.sharpe;
+            for &borrow_rate in &sc.borrow_stress_rates {
+                for &impact_coefficient in &sc.impact_stress_coefficients {
+                    for &participation in &sc.participation_stress_fractions {
+                        let mut cfg = *config;
+                        cfg.financing.borrow_rate = cfg.financing.borrow_rate.max(borrow_rate);
+                        cfg.impact.coefficient = cfg.impact.coefficient.max(impact_coefficient);
+                        cfg.exec.max_participation = if config.exec.max_participation.raw() > 0 {
+                            Qty::from_f64(config.exec.max_participation.to_f64().min(participation))?
+                        } else {
+                            Qty::from_f64(participation)?
+                        };
+                        let result = summarize(&execution.run_one(bars, factory, &cfg, params)?);
+                        let verdict =
+                            degradation_verdict(base_sum.sharpe, result.sharpe, sc.degradation_warn_ratio);
+                        c.verdict = worse(c.verdict, verdict);
+                        c.execution_levels.push(ExecutionCostLevel {
+                            borrow_rate,
+                            impact_coefficient,
+                            max_participation: cfg.exec.max_participation.to_f64(),
+                            sharpe: result.sharpe,
+                            total_return: result.total_return,
+                            verdict,
+                        });
+                    }
+                }
+            }
             if base_sum.sharpe <= 0.0 {
                 c.breakeven_found = true;
                 c.breakeven_extra_bps = 0.0;
@@ -1171,6 +1384,9 @@ pub fn run_survival_lab_controlled<'a>(
                 }
             }
             c.verdict = degradation_verdict(base_sum.sharpe, c.stressed_sharpe, sc.degradation_warn_ratio);
+            for scenario in &c.execution_levels {
+                c.verdict = worse(c.verdict, scenario.verdict);
+            }
             c.finding = format!(
                 "Sharpe {} at baseline costs, {} with +{} bps extra slippage; ",
                 f2(base_sum.sharpe),
@@ -1583,6 +1799,47 @@ pub fn run_survival_lab_controlled<'a>(
                     );
                 }
             }
+
+            // M6c: causal trend/range and rolling-crisis labels. Each label
+            // only uses benchmark returns up through the current period.
+            let trend_window = sc.regime_trend_window;
+            if trend_window <= rb.len() {
+                let names = ["trend", "range", "crisis"];
+                let mut by: [Vec<f64>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+                for end in trend_window..=rb.len() {
+                    let window = &rb[end - trend_window..end];
+                    let direction: f64 = window.iter().sum();
+                    let travel: f64 = window.iter().map(|value| value.abs()).sum();
+                    let cumulative = window.iter().fold(1.0, |equity, value| equity * (1.0 + value)) - 1.0;
+                    let state_index = if cumulative <= sc.regime_crisis_return {
+                        2
+                    } else {
+                        usize::from(!(travel > 0.0 && direction.abs() / travel >= sc.regime_trend_efficiency))
+                    };
+                    by[state_index].push(rs[end - 1]);
+                }
+                let labelled = by.iter().map(Vec::len).sum::<usize>();
+                for (index, values) in by.into_iter().enumerate() {
+                    let mut bucket = RegimeBucket {
+                        name: names[index].into(),
+                        periods: values.len(),
+                        share: if labelled > 0 { values.len() as f64 / labelled as f64 } else { 0.0 },
+                        ..RegimeBucket::default()
+                    };
+                    if !values.is_empty() {
+                        bucket.mean_return = values.iter().sum::<f64>() / values.len() as f64;
+                        if values.len() >= sc.regime_min_per_bucket {
+                            let distribution = moments(&values);
+                            bucket.sharpe = if distribution.stdev > 0.0 {
+                                distribution.mean / distribution.stdev * config.periods_per_year.sqrt()
+                            } else {
+                                0.0
+                            };
+                        }
+                    }
+                    rg.market_states.push(bucket);
+                }
+            }
         }
     }
     execution.complete_test(7);
@@ -1734,5 +1991,41 @@ mod config_tests {
         assert!(config.validate().is_err());
         let config = SurvivalConfig { delay_bars: Vec::new(), ..SurvivalConfig::default() };
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn config_loads_pre_m6c_presets_with_new_fields_defaulted() {
+        let encoded = SurvivalConfig::default().to_json().unwrap();
+        let Json::Object(fields) = encoded else { panic!("config must serialize as an object") };
+        let previous = Json::Object(
+            fields
+                .into_iter()
+                .filter(|(key, _)| {
+                    !matches!(
+                        key.as_str(),
+                        "borrow_stress_rates"
+                            | "impact_stress_coefficients"
+                            | "participation_stress_fractions"
+                            | "return_bootstrap_resamples"
+                            | "return_bootstrap_block_length"
+                            | "regime_trend_window"
+                            | "regime_trend_efficiency"
+                            | "regime_crisis_return"
+                    )
+                })
+                .collect(),
+        );
+        let parsed = SurvivalConfig::from_json(&previous).unwrap();
+        assert_eq!(parsed, SurvivalConfig::default());
+    }
+
+    #[test]
+    fn paper_trading_gate_blocks_only_a_fail_verdict() {
+        let mut report = SurvivalReport { worst: Verdict::Insufficient, ..SurvivalReport::default() };
+        assert!(report.paper_trading_allowed());
+        report.worst = Verdict::Warn;
+        assert!(report.paper_trading_allowed());
+        report.worst = Verdict::Fail;
+        assert!(!report.paper_trading_allowed());
     }
 }

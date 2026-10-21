@@ -42,6 +42,7 @@
 pub mod auth;
 pub mod backtests_api;
 pub mod config;
+pub mod corporate_actions_api;
 pub mod datasets_api;
 pub mod engine;
 pub mod identity;
@@ -743,7 +744,22 @@ fn backtest_routes() -> Router<AppState> {
         )
         .route("/api/v1/datasets/versions/{id}/runs", only(get(datasets_api::version_runs)))
         .route("/api/v1/datasets/versions/{id}/bars", only(get(datasets_api::bars)))
+        .route("/api/v1/datasets/versions/{id}/derive", only(post(datasets_api::derive_version)))
         .route("/api/v1/calendars", only(get(datasets_api::list_calendars)))
+        .route(
+            "/api/v1/corporate-actions",
+            only(
+                get(corporate_actions_api::list_corporate_action_sets)
+                    .post(corporate_actions_api::create_corporate_action_set),
+            ),
+        )
+        .route(
+            "/api/v1/corporate-actions/{id}",
+            only(
+                get(corporate_actions_api::get_corporate_action_set)
+                    .delete(corporate_actions_api::delete_corporate_action_set),
+            ),
+        )
         .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
 }
 

@@ -803,7 +803,14 @@ async fn run_backtest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
             fail_job(&ctx, &job, started, &message, retryable).await;
         }
         BacktestEnd::Panicked => {
-            fail_job(&ctx, &job, started, "The engine crashed while running this backtest.", true).await;
+            fail_job(
+                &ctx,
+                &job,
+                started,
+                "The backtest worker encountered an unexpected panic during execution.",
+                false,
+            )
+            .await;
         }
         BacktestEnd::Overran(t) => {
             let msg = format!("The backtest ran longer than its {} s limit.", t.as_secs());

@@ -231,3 +231,64 @@ fn a_run_from_a_strategy_version_reproduces_the_direct_run() {
     assert_eq!(again.run.result_sha256, a.run.result_sha256);
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn failed_strategy_becomes_failed_job_with_readable_message() {
+    struct PanickingStrategy;
+    impl spectra_engine::Strategy for PanickingStrategy {
+        fn on_bar(&mut self, _ctx: &mut spectra_engine::Context<'_>, _bars: &[spectra_core::Bar]) {
+            panic!("division by zero in custom formula");
+        }
+    }
+
+    static FAILING_STRATEGY: BuiltinStrategy = BuiltinStrategy::custom(
+        "panicking_test_strat",
+        "Panicking Test Strategy",
+        "Panics on bar",
+        &[],
+        "// test strategy",
+        |_| Ok(Box::new(PanickingStrategy)),
+        |_| None,
+    );
+
+    let (root, checksum) = store_with_dataset("panic-test", 50);
+    let job = BacktestJob {
+        dataset_version_id: VERSION.into(),
+        strategy_version_id: None,
+        request: BacktestRequest {
+            strategy: &FAILING_STRATEGY,
+            params: spectra_research::ParamSet::default(),
+            config: spectra_engine::BacktestConfig::default(),
+            strategies: Vec::new(),
+            corporate_actions: Vec::new(),
+        },
+    };
+
+    let mut ctl = RunControl::default();
+    let err = run_job_from_store(&root, &checksum, &job, &mut ctl).unwrap_err();
+    match err {
+        JobFailure::Failed { retryable, message } => {
+            assert!(!retryable, "panicking strategy must not be marked retryable");
+            assert!(
+                message.contains("The strategy panicked: division by zero in custom formula"),
+                "expected readable panic error, got: {message}"
+            );
+        }
+        JobFailure::Cancelled => panic!("expected JobFailure::Failed, got Cancelled"),
+    }
+
+    // Verify worker thread execution (e.g. tokio::task::spawn_blocking):
+    // thread must not crash/unwind, and returns the structured failure.
+    let (root_clone, checksum_clone, job_clone) = (root.clone(), checksum.clone(), job.clone());
+    let handle = std::thread::spawn(move || {
+        let mut ctl = RunControl::default();
+        run_job_from_store(&root_clone, &checksum_clone, &job_clone, &mut ctl)
+    });
+    let thread_res = handle.join().expect("worker thread must not crash from strategy panic");
+    assert!(
+        matches!(thread_res, Err(JobFailure::Failed { retryable: false, ref message }) if message.contains("division by zero")),
+        "expected structured non-retryable failure"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
+}

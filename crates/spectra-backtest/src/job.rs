@@ -274,5 +274,20 @@ pub fn run_job_from_store(
         return Err(JobFailure::Cancelled);
     }
     let d = load_dataset(store_root, dataset_checksum).map_err(|e| JobFailure::from_engine(&e))?;
-    run_job(&d.bars, &d.symbols.symbols, job, dataset_checksum, ctl).map_err(JobFailure::from)
+    let mut ctl = std::panic::AssertUnwindSafe(ctl);
+    let run_res =
+        std::panic::catch_unwind(move || run_job(&d.bars, &d.symbols.symbols, job, dataset_checksum, *ctl));
+    match run_res {
+        Ok(res) => res.map_err(JobFailure::from),
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                s.to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "an unexpected panic occurred".to_string()
+            };
+            Err(JobFailure::Failed { retryable: false, message: format!("The strategy panicked: {msg}") })
+        }
+    }
 }

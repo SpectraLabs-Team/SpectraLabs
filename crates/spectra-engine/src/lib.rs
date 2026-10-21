@@ -18,7 +18,7 @@ pub use backtest::{
     StrategyResult, TimeInForce, MAX_STRATEGIES,
 };
 pub use corporate::{corporate_actions_sha256, CorporateAction, CorporateActionKind, MAX_SPLIT_SHARES};
-pub use costs::{commission_fee, slipped_price, CommissionModel, CostModel};
+pub use costs::{commission_fee, effective_slippage_bps, slipped_price, CommissionModel, CostModel};
 pub use metrics::{
     compute_drawdown_stats, compute_metrics, compute_metrics_from_equity, compute_tail_stats,
     nearest_rank_index, returns_from_curve, returns_from_equity, DrawdownStats, EquityPoint, Metrics,

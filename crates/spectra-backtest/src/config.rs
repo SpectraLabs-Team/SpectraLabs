@@ -117,6 +117,7 @@ impl Preset {
                 costs: CostModel {
                     commission: CommissionModel { bps_of_notional: bps(1), ..CommissionModel::default() },
                     slippage: bps(2),
+                    ..CostModel::default()
                 },
                 ..base
             },
@@ -128,6 +129,7 @@ impl Preset {
                         ..CommissionModel::default()
                     },
                     slippage: bps(10),
+                    ..CostModel::default()
                 },
                 exec: ExecutionConfig {
                     max_participation: Qty::from_raw(spectra_core::SCALE / 10),
@@ -173,7 +175,7 @@ const fn num_positive(max: f64) -> Kind {
 /// strategy can grow it a hundredfold without overflow.
 const MAX_CASH: f64 = 1e9;
 
-const FIELDS: [Field; 20] = [
+const FIELDS: [Field; 22] = [
     Field { name: "preset", kind: Kind::Preset, description: "Starting point for every field not given" },
     Field { name: "initial_cash", kind: num_positive(MAX_CASH), description: "Starting cash" },
     Field { name: "allow_short", kind: Kind::Bool, description: "Allow negative positions" },
@@ -194,6 +196,18 @@ const FIELDS: [Field; 20] = [
         name: "slippage_bps",
         kind: num(0.0, 1000.0),
         description: "Market-order slippage in basis points",
+    },
+    Field {
+        name: "spread_bps",
+        kind: num(0.0, 1000.0),
+        description:
+            "Bid-ask spread in basis points (half is paid as crossing cost on market and stop fills)",
+    },
+    Field {
+        name: "volume_slippage_bps",
+        kind: num(0.0, 10000.0),
+        description:
+            "Volume-based slippage in basis points scaled by bar volume participation (qty / bar volume)",
     },
     Field {
         name: "delay_bars",
@@ -411,6 +425,16 @@ pub fn parse_config(doc: &Json) -> std::result::Result<BacktestConfig, ConfigErr
                             c.costs.slippage = b;
                         }
                     }
+                    "spread_bps" => {
+                        if let Some(b) = fixed(name, x, &mut errs) {
+                            c.costs.spread = b;
+                        }
+                    }
+                    "volume_slippage_bps" => {
+                        if let Some(b) = fixed(name, x, &mut errs) {
+                            c.costs.volume_slippage = b;
+                        }
+                    }
                     "max_participation" => {
                         if let Some(q) = fixed(name, x, &mut errs) {
                             c.exec.max_participation = q;
@@ -457,6 +481,8 @@ pub fn config_to_user_json(c: &BacktestConfig) -> Result<Json> {
         .with("commission_bps", Json::number(c.costs.commission.bps_of_notional.to_f64())?)
         .with("commission_min", Json::number(c.costs.commission.min_fee.to_f64())?)
         .with("slippage_bps", Json::number(c.costs.slippage.to_f64())?)
+        .with("spread_bps", Json::number(c.costs.spread.to_f64())?)
+        .with("volume_slippage_bps", Json::number(c.costs.volume_slippage.to_f64())?)
         .with("delay_bars", Json::integer(c.exec.delay_bars as i64))
         .with("max_participation", Json::number(c.exec.max_participation.to_f64())?)
         .with("seed", seed)

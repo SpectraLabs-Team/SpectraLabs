@@ -231,6 +231,7 @@ fn backtester_matches_cpp_reference() {
                     min_fee: Money::from_raw(if c % 5 == 0 { SCALE } else { 0 }),
                 },
                 slippage: Bps::from_raw(c * 2 * SCALE + 12345),
+                ..CostModel::default()
             },
             exec: ExecutionConfig {
                 delay_bars: (c % 4) as usize,

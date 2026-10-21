@@ -10,7 +10,7 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::Router;
 use http_body_util::BodyExt;
-use spectra_api::auth::{canonical, sha256_hex, sign};
+use spectra_api::auth::{canonical, sign};
 use spectra_api::{router, ApiConfig, Secret};
 use spectra_core::fixed::Price;
 use spectra_core::{Bar, Qty};
@@ -60,8 +60,7 @@ impl Fixture {
         let user = self.user.to_string();
         let ws_str = ws.to_string();
         let req_id = spectra_db::new_id().to_string();
-        let hash = sha256_hex(body.as_bytes());
-        let can = canonical(method, path_and_query, &ts, &user, &ws_str, &req_id, hash.as_bytes());
+        let can = canonical(method, path_and_query, &ts, &user, &ws_str, &req_id, body.as_bytes());
         let sig = sign(SECRET.as_bytes(), &can);
         Request::builder()
             .method(method)

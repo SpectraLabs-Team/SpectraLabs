@@ -33,20 +33,8 @@ pub struct BacktestWorkerEnv {
 
 impl BacktestWorkerEnv {
     #[must_use]
-    pub fn new(
-        pool: PgPool,
-        store: ArtifactBackend,
-        data_dir: PathBuf,
-        quota: i64,
-    ) -> Self {
-        Self {
-            pool,
-            store,
-            data_dir,
-            quota,
-            backtest_max_bars: 50_000_000,
-            backtest_max_instruments: 10_000,
-        }
+    pub fn new(pool: PgPool, store: ArtifactBackend, data_dir: PathBuf, quota: i64) -> Self {
+        Self { pool, store, data_dir, quota, backtest_max_bars: 50_000_000, backtest_max_instruments: 10_000 }
     }
 }
 

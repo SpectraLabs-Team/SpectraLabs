@@ -654,7 +654,6 @@ async fn fail_job(ctx: &Ctx, job: &Job, started: Instant, message: &str, retryab
     }
 }
 
-
 /// A `backtest` job (M3 task 5).
 #[allow(clippy::needless_pass_by_value)] // the spawned task owns its job and permit
 async fn run_backtest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {

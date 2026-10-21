@@ -55,12 +55,7 @@ impl Fixture {
     }
 
     fn worker_env(&self) -> BacktestWorkerEnv {
-        BacktestWorkerEnv::new(
-            self.pool.clone(),
-            self.store.clone(),
-            self.dir.join("data"),
-            1 << 30,
-        )
+        BacktestWorkerEnv::new(self.pool.clone(), self.store.clone(), self.dir.join("data"), 1 << 30)
     }
 
     fn clean_up(&self) {
@@ -438,18 +433,16 @@ async fn parity_between_saved_version_and_direct_builtin_run() {
         .unwrap()
         .expect("job A claimed");
     assert_eq!(job_a.id, job_a_id);
-    let run_a_id = spectra_api::worker::run_backtest_job(&worker_env, &job_a, worker_id)
-        .await
-        .expect("job A succeeds");
+    let run_a_id =
+        spectra_api::worker::run_backtest_job(&worker_env, &job_a, worker_id).await.expect("job A succeeds");
 
     let job_b = spectra_db::jobs::claim(&f.pool, worker_id, &["backtest".to_string()], 10)
         .await
         .unwrap()
         .expect("job B claimed");
     assert_eq!(job_b.id, job_b_id);
-    let run_b_id = spectra_api::worker::run_backtest_job(&worker_env, &job_b, worker_id)
-        .await
-        .expect("job B succeeds");
+    let run_b_id =
+        spectra_api::worker::run_backtest_job(&worker_env, &job_b, worker_id).await.expect("job B succeeds");
 
     // 6. Verify backtests via API: both succeeded and match on all fingerprints and metrics.
     let (status, view_a) = f.call("GET", &format!("/api/v1/backtests/{job_a_id}"), &Value::Null).await;
@@ -464,23 +457,13 @@ async fn parity_between_saved_version_and_direct_builtin_run() {
 
     // Check fingerprints parity:
     assert_eq!(
-        view_a["fingerprints"]["result_sha256"],
-        view_b["fingerprints"]["result_sha256"],
+        view_a["fingerprints"]["result_sha256"], view_b["fingerprints"]["result_sha256"],
         "result hashes must match exactly"
     );
-    assert_eq!(
-        view_a["fingerprints"]["strategy_sha256"],
-        view_b["fingerprints"]["strategy_sha256"]
-    );
+    assert_eq!(view_a["fingerprints"]["strategy_sha256"], view_b["fingerprints"]["strategy_sha256"]);
     assert_eq!(view_a["fingerprints"]["strategy_sha256"], builtin_sha);
-    assert_eq!(
-        view_a["fingerprints"]["dataset_sha256"],
-        view_b["fingerprints"]["dataset_sha256"]
-    );
-    assert_eq!(
-        view_a["fingerprints"]["config_sha256"],
-        view_b["fingerprints"]["config_sha256"]
-    );
+    assert_eq!(view_a["fingerprints"]["dataset_sha256"], view_b["fingerprints"]["dataset_sha256"]);
+    assert_eq!(view_a["fingerprints"]["config_sha256"], view_b["fingerprints"]["config_sha256"]);
 
     // Check summary metrics parity:
     assert_eq!(view_a["summary"], view_b["summary"], "metrics summary must match exactly");
@@ -554,9 +537,8 @@ async fn parity_between_saved_version_and_direct_builtin_run() {
         .unwrap()
         .expect("job C claimed");
     assert_eq!(job_c.id, job_c_id);
-    let _run_c_id = spectra_api::worker::run_backtest_job(&worker_env, &job_c, worker_id)
-        .await
-        .expect("job C succeeds");
+    let _run_c_id =
+        spectra_api::worker::run_backtest_job(&worker_env, &job_c, worker_id).await.expect("job C succeeds");
     let (_, view_c) = f.call("GET", &format!("/api/v1/backtests/{job_c_id}"), &Value::Null).await;
     assert_eq!(
         view_c["fingerprints"]["result_sha256"], view_a["fingerprints"]["result_sha256"],
@@ -565,11 +547,23 @@ async fn parity_between_saved_version_and_direct_builtin_run() {
 
     // Clean up
     sqlx::query("DELETE FROM jobs WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
-    sqlx::query("DELETE FROM run_artifacts WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    sqlx::query("DELETE FROM run_artifacts WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await
+        .unwrap();
     sqlx::query("DELETE FROM runs WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
-    sqlx::query("DELETE FROM dataset_versions WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    sqlx::query("DELETE FROM dataset_versions WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await
+        .unwrap();
     sqlx::query("DELETE FROM datasets WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
-    sqlx::query("DELETE FROM strategy_versions WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    sqlx::query("DELETE FROM strategy_versions WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await
+        .unwrap();
     sqlx::query("DELETE FROM strategies WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
     f.clean_up();
 }

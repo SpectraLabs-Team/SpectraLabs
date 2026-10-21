@@ -633,7 +633,7 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
         )
         .await;
     assert_eq!(status, 201);
-    let strat_id = Uuid::parse_str(strat_resp["id"].as_str().unwrap()).unwrap();
+    let strat_id = Uuid::parse_str(strat_resp["strategy"]["id"].as_str().unwrap()).unwrap();
 
     // 3. Draft Flow (PUT / GET /api/v1/strategies/{id}/draft)
     let (status, draft_save) = f
@@ -669,8 +669,9 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
         )
         .await;
     assert_eq!(status, 201);
-    let v1_id = v1_resp["id"].as_str().unwrap().to_string();
-    assert_eq!(v1_resp["version_num"], 1);
+    assert_eq!(v1_resp["created"], true);
+    let v1_id = v1_resp["version"]["id"].as_str().unwrap().to_string();
+    assert_eq!(v1_resp["version"]["version"], 1);
 
     // Save exact same text & parameters again -> Dedup returns exact same version
     let (status, v1_dup) = f
@@ -685,8 +686,9 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
         )
         .await;
     assert_eq!(status, 200);
-    assert_eq!(v1_dup["id"], v1_id);
-    assert_eq!(v1_dup["version_num"], 1);
+    assert_eq!(v1_dup["created"], false);
+    assert_eq!(v1_dup["version"]["id"], v1_id);
+    assert_eq!(v1_dup["version"]["version"], 1);
 
     // Modify code and save version 2
     let v2_code = valid_code.replace("target_shares(100)", "target_shares(200)");
@@ -702,35 +704,35 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
         )
         .await;
     assert_eq!(status, 201);
-    let _v2_id = v2_resp["id"].as_str().unwrap().to_string();
-    assert_eq!(v2_resp["version_num"], 2);
+    assert_eq!(v2_resp["created"], true);
+    let _v2_id = v2_resp["version"]["id"].as_str().unwrap().to_string();
+    assert_eq!(v2_resp["version"]["version"], 2);
 
     // 5. Version Diff API (GET /api/v1/strategies/{id}/diff)
-    let (status, diff_resp) = f
-        .call("GET", &format!("/api/v1/strategies/{strat_id}/diff?from_version=1&to_version=2"), &Value::Null)
-        .await;
+    let (status, diff_resp) =
+        f.call("GET", &format!("/api/v1/strategies/{strat_id}/diff?from=1&to=2"), &Value::Null).await;
     assert_eq!(status, 200);
     assert_eq!(diff_resp["from_version"], 1);
     assert_eq!(diff_resp["to_version"], 2);
-    let lines = diff_resp["lines"].as_array().unwrap();
+    let lines = diff_resp["code_diff"].as_array().unwrap();
     let has_addition = lines
         .iter()
-        .any(|l| l["change_type"] == "added" && l["text"].as_str().unwrap().contains("target_shares(200)"));
+        .any(|l| l["kind"] == "added" && l["text"].as_str().unwrap().contains("target_shares(200)"));
     let has_deletion = lines
         .iter()
-        .any(|l| l["change_type"] == "deleted" && l["text"].as_str().unwrap().contains("target_shares(100)"));
+        .any(|l| l["kind"] == "deleted" && l["text"].as_str().unwrap().contains("target_shares(100)"));
     assert!(has_addition && has_deletion, "diff accurately reported line changes");
 
-    let params_changed = diff_resp["parameters_changed"].as_array().unwrap();
-    assert_eq!(params_changed.len(), 2); // fast changed 12->15, slow changed 24->30
+    let params_changed = &diff_resp["parameter_diff"]["changed"];
+    assert!(params_changed.get("fast").is_some());
+    assert!(params_changed.get("slow").is_some());
 
     // 6. Parameter Sets API (Task 10)
     let (status, pset_resp) = f
         .call(
             "POST",
-            &format!("/api/v1/strategies/{strat_id}/parameter_sets"),
+            &format!("/api/v1/strategies/{strat_id}/versions/{v1_id}/parameter_sets"),
             &json!({
-                "strategy_version_id": v1_id,
                 "name": "Conservative Preset",
                 "parameters": { "fast": 20, "slow": 50 },
             }),
@@ -739,14 +741,15 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
     assert_eq!(status, 201);
     let pset_id = pset_resp["id"].as_str().unwrap().to_string();
 
-    let (status, pset_list) =
-        f.call("GET", &format!("/api/v1/strategies/{strat_id}/parameter_sets"), &Value::Null).await;
+    let (status, pset_list) = f
+        .call("GET", &format!("/api/v1/strategies/{strat_id}/versions/{v1_id}/parameter_sets"), &Value::Null)
+        .await;
     assert_eq!(status, 200);
-    let psets = pset_list.as_array().unwrap();
+    let psets = pset_list["parameter_sets"].as_array().unwrap();
     assert!(psets.iter().any(|p| p["name"] == "Conservative Preset"));
 
     let (status, pset_single) =
-        f.call("GET", &format!("/api/v1/strategies/{strat_id}/parameter_sets/{pset_id}"), &Value::Null).await;
+        f.call("GET", &format!("/api/v1/strategies/parameter_sets/{pset_id}"), &Value::Null).await;
     assert_eq!(status, 200);
     assert_eq!(pset_single["name"], "Conservative Preset");
     assert_eq!(pset_single["parameters"]["fast"], 20);

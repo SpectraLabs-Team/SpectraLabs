@@ -92,9 +92,12 @@ pub struct SaveVersion {
     #[serde(default)]
     pub code: Option<String>,
     /// Every parameter; missing ones take their defaults.
-    #[serde(default)]
+    #[serde(default, alias = "parameters")]
     #[schema(value_type = Option<Object>)]
     pub params: Option<serde_json::Value>,
+    /// Optional notes for this version.
+    #[serde(default)]
+    pub notes: Option<String>,
 }
 
 /// `PUT /api/v1/strategies/{id}/draft` body.

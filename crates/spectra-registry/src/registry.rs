@@ -103,7 +103,14 @@ pub fn config_to_json(c: &BacktestConfig) -> Result<Json> {
         .with("commission_per_unit", Json::integer(c.costs.commission.per_unit.raw()))
         .with("commission_bps", Json::integer(c.costs.commission.bps_of_notional.raw()))
         .with("commission_min", Json::integer(c.costs.commission.min_fee.raw()))
-        .with("slippage_bps", Json::integer(c.costs.slippage.raw()))
+        .with("slippage_bps", Json::integer(c.costs.slippage.raw()));
+    if c.costs.spread.raw() > 0 {
+        j = j.with("spread_bps", Json::integer(c.costs.spread.raw()));
+    }
+    if c.costs.volume_slippage.raw() > 0 {
+        j = j.with("volume_slippage_bps", Json::integer(c.costs.volume_slippage.raw()));
+    }
+    j = j
         .with("max_participation", Json::integer(c.exec.max_participation.raw()))
         .with("delay_bars", Json::integer(c.exec.delay_bars as i64))
         .with("seed", Json::string(c.seed.to_string())) // u64 may not fit an i64
@@ -164,6 +171,11 @@ pub fn config_from_json(j: &Json) -> Result<BacktestConfig> {
                 min_fee: Money::from_raw(int("commission_min")?),
             },
             slippage: Bps::from_raw(int("slippage_bps")?),
+            spread: j.at("spread_bps").and_then(Json::as_int).map_or(Bps::ZERO, Bps::from_raw),
+            volume_slippage: j
+                .at("volume_slippage_bps")
+                .and_then(Json::as_int)
+                .map_or(Bps::ZERO, Bps::from_raw),
         },
         exec: ExecutionConfig {
             delay_bars: delay as usize,

@@ -191,3 +191,43 @@ fn failures_are_classified_for_the_queue() {
     assert!(matches!(io, JobFailure::Failed { retryable: true, .. }));
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn payload_carries_an_optional_strategy_version() {
+    let j = job(r#""strategy":"sma_cross""#);
+    assert_eq!(j.strategy_version_id, None);
+
+    let sv = "0192F0C4-0000-7000-8000-0000000000AB";
+    let j = job(&format!(r#""strategy":"sma_cross","strategy_version_id":"{sv}""#));
+    assert_eq!(j.strategy_version_id.as_deref(), Some(sv.to_ascii_lowercase().as_str()), "normalized");
+
+    let j = job(r#""strategy":"sma_cross","strategy_version_id":null"#);
+    assert_eq!(j.strategy_version_id, None, "null is the same as absent");
+
+    let err = BacktestJob::from_payload(&payload(&format!(
+        r#"{{"dataset_version_id":"{VERSION}","strategy":"sma_cross","strategy_version_id":"v1"}}"#
+    )))
+    .unwrap_err();
+    assert!(err.errors.iter().any(|e| e.field == "strategy_version_id"), "{err}");
+}
+
+#[test]
+fn a_run_from_a_strategy_version_reproduces_the_direct_run() {
+    // What the API queues for a saved version: the version's built-in and full
+    // parameters plus its id. It must compute exactly what the same built-in and
+    // parameters compute when given directly.
+    let (root, checksum) = store_with_dataset("version-parity", 300);
+    let sv = "0192f0c4-0000-7000-8000-0000000000ab";
+    let from_version = job(&format!(
+        r#""strategy_version_id":"{sv}","strategy":"sma_cross","params":{{"fast":10,"slow":50,"qty":100.0,"allow_short":false}}"#
+    ));
+    let direct = job(r#""strategy":"sma_cross","params":{"fast":10,"slow":50}"#);
+    let a = run_job_from_store(&root, &checksum, &from_version, &mut RunControl::default()).unwrap();
+    let b = run_job_from_store(&root, &checksum, &direct, &mut RunControl::default()).unwrap();
+    assert_eq!(a.run.result_sha256, b.run.result_sha256, "same result");
+    assert_eq!(from_version.request.strategy_sha256(), direct.request.strategy_sha256(), "same code");
+    // Running the version again gives the same result.
+    let again = run_job_from_store(&root, &checksum, &from_version, &mut RunControl::default()).unwrap();
+    assert_eq!(again.run.result_sha256, a.run.result_sha256);
+    let _ = std::fs::remove_dir_all(&root);
+}

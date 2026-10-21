@@ -812,6 +812,16 @@ async fn run_backtest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
     }
 }
 
+/// The strategy name recorded on a run: the built-in's name, or for several
+/// strategies on one account their names joined with `+`.
+fn run_strategy_name(req: &spectra_backtest::BacktestRequest) -> String {
+    if req.is_multi() {
+        req.strategies.iter().map(|a| a.strategy.name).collect::<Vec<_>>().join("+")
+    } else {
+        req.strategy.name.to_string()
+    }
+}
+
 /// Records the run and stores every output file, then completes the job.
 async fn finish_backtest(
     ctx: &Ctx,
@@ -834,6 +844,9 @@ async fn finish_backtest(
             created_by: job.created_by,
             started_at: job.started_at.unwrap_or_else(chrono::Utc::now),
             dataset_version_id: version.id,
+            strategy_version_id: bt.strategy_version_id.as_deref().and_then(|v| Uuid::parse_str(v).ok()),
+            strategy: run_strategy_name(&bt.request),
+            strategy_sha256: bt.request.strategy_sha256(),
         },
     )
     .await?;

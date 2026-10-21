@@ -547,13 +547,13 @@ async fn parity_between_saved_version_and_direct_builtin_run() {
     );
 
     // Clean up
-    sqlx::query("DELETE FROM jobs WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
     sqlx::query("DELETE FROM run_artifacts WHERE workspace_id = $1")
         .bind(f.ws)
         .execute(&f.pool)
         .await
         .unwrap();
     sqlx::query("DELETE FROM runs WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    sqlx::query("DELETE FROM jobs WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
     sqlx::query("DELETE FROM dataset_versions WHERE workspace_id = $1")
         .bind(f.ws)
         .execute(&f.pool)

@@ -70,6 +70,11 @@ pub struct CsvOptions {
     pub outlier_z: f64,
     /// Consecutive frozen bars that count as a stale run.
     pub stale_run: usize,
+    /// When `true`, column names are taken exactly as given: an empty name
+    /// means the file has no such column, and nothing is matched by alias.
+    /// The Studio's ingest settings set it, so a guessed column is never used
+    /// silently; the command line keeps the alias matching (`false`).
+    pub explicit_columns: bool,
 }
 
 impl Default for CsvOptions {
@@ -89,6 +94,7 @@ impl Default for CsvOptions {
             gap_factor: 5.0,
             outlier_z: 10.0,
             stale_run: 5,
+            explicit_columns: false,
         }
     }
 }
@@ -343,16 +349,16 @@ pub fn assess_quality(bars: &[Bar], symbols: &SymbolTable, cfg: &CsvOptions) -> 
 // CSV ingestion
 // ---------------------------------------------------------------------------
 
-struct Record {
-    line: usize,
-    fields: Vec<String>,
+pub(crate) struct Record {
+    pub(crate) line: usize,
+    pub(crate) fields: Vec<String>,
 }
 
 fn to_string_lossy(b: &[u8]) -> String {
     String::from_utf8_lossy(b).into_owned()
 }
 
-fn parse_records(s: &[u8], delim: u8) -> Result<Vec<Record>> {
+pub(crate) fn parse_records(s: &[u8], delim: u8) -> Result<Vec<Record>> {
     let mut out = Vec::new();
     let mut cur = Record { line: 0, fields: Vec::new() };
     let mut field: Vec<u8> = Vec::new();
@@ -422,10 +428,27 @@ fn parse_records(s: &[u8], delim: u8) -> Result<Vec<Record>> {
     Ok(out)
 }
 
-fn find_column(header: &[String], explicit: &str, aliases: &[&str]) -> Option<usize> {
+/// Header names matched when no column name is given (lower case).
+pub(crate) const TIMESTAMP_ALIASES: &[&str] = &["timestamp", "time", "datetime", "date", "ts"];
+pub(crate) const OPEN_ALIASES: &[&str] = &["open", "o"];
+pub(crate) const HIGH_ALIASES: &[&str] = &["high", "h"];
+pub(crate) const LOW_ALIASES: &[&str] = &["low", "l"];
+pub(crate) const CLOSE_ALIASES: &[&str] = &["close", "c"];
+pub(crate) const VOLUME_ALIASES: &[&str] = &["volume", "vol", "v"];
+pub(crate) const SYMBOL_ALIASES: &[&str] = &["symbol", "ticker", "instrument", "sym"];
+
+/// The header normalised the way columns are matched (trimmed, lower case).
+pub(crate) fn normalise_header(name: &str) -> String {
+    to_string_lossy(trim(name.as_bytes())).to_ascii_lowercase()
+}
+
+pub(crate) fn find_column(header: &[String], explicit: &str, aliases: &[&str], exact: bool) -> Option<usize> {
     if !explicit.is_empty() {
-        let want = to_string_lossy(trim(explicit.as_bytes())).to_ascii_lowercase();
+        let want = normalise_header(explicit);
         return header.iter().position(|h| *h == want);
+    }
+    if exact {
+        return None;
     }
     aliases.iter().find_map(|a| header.iter().position(|h| h == a))
 }
@@ -472,26 +495,88 @@ impl Rejections<'_> {
 ///
 /// # Errors
 /// [`Error::Data`] as described.
-#[allow(clippy::too_many_lines)] // one linear pass, kept in the C++ reference's order
 pub fn load_csv(content: &[u8], opt: &CsvOptions) -> Result<Dataset> {
-    let mut ds = Dataset::default();
     let source_hash = spectra_core::sha256_hex(content);
     let content = content.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(content);
-
     let records = parse_records(content, opt.delimiter)?;
+    let mut ds = load_records(&records, opt, false)?;
+    ds.info.source_sha256 = source_hash;
+    Ok(ds)
+}
+
+/// What [`preview_csv`] found in the first rows of a file.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CsvPreview {
+    /// The header as read with the chosen delimiter (trimmed, lower case).
+    pub header: Vec<String>,
+    /// The sampled rows that parsed, as bars (sorted by timestamp, then
+    /// symbol), with every rejected row counted in `quality` whatever the
+    /// bad-row policy. `bars` may be empty.
+    pub dataset: Dataset,
+    /// Data rows after the header that were not looked at (`max_rows` reached).
+    pub rows_not_read: usize,
+    /// Under the chosen policy, the error that would stop ingesting these
+    /// rows: the first rejected row when bad rows abort, or "no valid data
+    /// rows". `None` means these rows would load.
+    pub would_abort: Option<String>,
+}
+
+/// Parses the header and at most `max_rows` data rows of `content` with
+/// `opt`, exactly as [`load_csv`] would, without stopping at bad rows: every
+/// problem in the sample is reported, and [`CsvPreview::would_abort`] says
+/// whether [`load_csv`] would refuse them. Nothing is stored.
+///
+/// # Errors
+/// [`Error::Data`] for problems with the file as a whole: unreadable quoting,
+/// no header, or a required column missing from the header.
+pub fn preview_csv(content: &[u8], opt: &CsvOptions, max_rows: usize) -> Result<CsvPreview> {
+    let content = content.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(content);
+    let mut records = parse_records(content, opt.delimiter)?;
+    let rows_not_read = records.len().saturating_sub(max_rows + 1);
+    records.truncate(max_rows + 1);
+    let lenient = CsvOptions { on_invalid: InvalidRowPolicy::Skip, ..opt.clone() };
+    let dataset = load_records(&records, &lenient, true)?;
+    let header =
+        records.first().map_or_else(Vec::new, |r| r.fields.iter().map(|f| normalise_header(f)).collect());
+    let would_abort = if opt.on_invalid == InvalidRowPolicy::Reject {
+        dataset
+            .quality
+            .sample_issues
+            .first()
+            .map(|i| format!("line {} [{}]: {}", i.line, i.category, i.message))
+    } else {
+        None
+    }
+    .or_else(|| dataset.bars.is_empty().then(|| "no valid data rows".to_string()));
+    Ok(CsvPreview { header, dataset, rows_not_read, would_abort })
+}
+
+/// [`load_csv`] after the records are parsed. `allow_empty` returns a dataset
+/// with no bars (and its quality report) instead of failing when no row is
+/// valid.
+#[allow(clippy::too_many_lines)] // one linear pass, kept in the C++ reference's order
+fn load_records(records: &[Record], opt: &CsvOptions, allow_empty: bool) -> Result<Dataset> {
+    let mut ds = Dataset::default();
     if records.is_empty() {
         return Err(data_err("CSV is empty"));
     }
-    let header: Vec<String> =
-        records[0].fields.iter().map(|f| to_string_lossy(trim(f.as_bytes())).to_ascii_lowercase()).collect();
-    let col_ts =
-        find_column(&header, &opt.timestamp_column, &["timestamp", "time", "datetime", "date", "ts"]);
-    let col_open = find_column(&header, &opt.open_column, &["open", "o"]);
-    let col_high = find_column(&header, &opt.high_column, &["high", "h"]);
-    let col_low = find_column(&header, &opt.low_column, &["low", "l"]);
-    let col_close = find_column(&header, &opt.close_column, &["close", "c"]);
-    let col_volume = find_column(&header, &opt.volume_column, &["volume", "vol", "v"]);
-    let col_symbol = find_column(&header, &opt.symbol_column, &["symbol", "ticker", "instrument", "sym"]);
+    let header: Vec<String> = records[0].fields.iter().map(|f| normalise_header(f)).collect();
+    let exact = opt.explicit_columns;
+    let col_ts = find_column(&header, &opt.timestamp_column, TIMESTAMP_ALIASES, exact);
+    let col_open = find_column(&header, &opt.open_column, OPEN_ALIASES, exact);
+    let col_high = find_column(&header, &opt.high_column, HIGH_ALIASES, exact);
+    let col_low = find_column(&header, &opt.low_column, LOW_ALIASES, exact);
+    let col_close = find_column(&header, &opt.close_column, CLOSE_ALIASES, exact);
+    let col_volume = find_column(&header, &opt.volume_column, VOLUME_ALIASES, exact);
+    let col_symbol = find_column(&header, &opt.symbol_column, SYMBOL_ALIASES, exact);
+    // A named optional column that is not in the header is a mistake, not "no such column".
+    for (name, given, found) in
+        [("volume", &opt.volume_column, col_volume), ("symbol", &opt.symbol_column, col_symbol)]
+    {
+        if exact && !given.is_empty() && found.is_none() {
+            return Err(data_err(format!("missing {name} column: {}", given.trim())));
+        }
+    }
     let require =
         |c: Option<usize>, name: &str| c.ok_or_else(|| data_err(format!("missing required column: {name}")));
     let col_ts = require(col_ts, "timestamp")?;
@@ -571,6 +656,9 @@ pub fn load_csv(content: &[u8], opt: &CsvOptions) -> Result<Dataset> {
         }
     }
     if rows.is_empty() {
+        if allow_empty {
+            return Ok(ds);
+        }
         return Err(data_err("no valid data rows"));
     }
 
@@ -659,7 +747,6 @@ pub fn load_csv(content: &[u8], opt: &CsvOptions) -> Result<Dataset> {
     }
 
     ds.info = identify(&ds.bars, &ds.symbols);
-    ds.info.source_sha256 = source_hash;
     Ok(ds)
 }
 

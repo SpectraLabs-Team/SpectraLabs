@@ -16,6 +16,7 @@
 //! | `GET /api/v1/telemetry/{cpu,workers,gpu}` | signed | host readings |
 //! | `/api/v1/alpaca/*` | signed | 501: not ported yet |
 //! | `POST /api/v1/jobs`, `GET /api/v1/jobs[/{id}]`, `POST /api/v1/jobs/{id}/cancel` | signed | queued work; see [`jobs_api`] |
+//! | `POST /api/v1/datasets/preview` | signed | parse a file's first rows with ingest settings; see [`datasets_api`] |
 //!
 //! Every engine route is also served at its old `/api/...` path (the jobs
 //! routes are `/api/v1` only). Those
@@ -36,6 +37,7 @@
 pub mod auth;
 pub mod backtests_api;
 pub mod config;
+pub mod datasets_api;
 pub mod engine;
 pub mod identity;
 pub mod jobs_api;
@@ -149,6 +151,8 @@ const MIRROR_CACHE_MAX: usize = 100_000;
 struct ErrorBody {
     code: &'static str,
     message: String,
+    /// Structured detail (for example every invalid field); rendered as `null` when absent.
+    details: Option<Json>,
 }
 
 /// The machine-readable `code` for a status.
@@ -178,7 +182,11 @@ fn json_response(status: u16, text: String) -> Response {
 
 fn error_response(status: u16, message: impl Into<String>) -> Response {
     let mut resp = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR).into_response();
-    resp.extensions_mut().insert(ErrorBody { code: error_code(status), message: message.into() });
+    resp.extensions_mut().insert(ErrorBody {
+        code: error_code(status),
+        message: message.into(),
+        details: None,
+    });
     resp
 }
 
@@ -186,7 +194,30 @@ fn error_response(status: u16, message: impl Into<String>) -> Response {
 /// example `no_workspace`).
 fn error_with_code(status: u16, code: &'static str, message: impl Into<String>) -> Response {
     let mut resp = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR).into_response();
-    resp.extensions_mut().insert(ErrorBody { code, message: message.into() });
+    resp.extensions_mut().insert(ErrorBody { code, message: message.into(), details: None });
+    resp
+}
+
+/// A 422 listing every invalid field at once:
+/// `details: {"errors": [{"field": "settings.columns.close", "message": "required"}, ...]}`.
+/// `message` joins them for people reading only that.
+fn invalid_fields(errors: &[(String, String)]) -> Response {
+    let mut list = Json::array();
+    let mut parts = Vec::with_capacity(errors.len());
+    for (field, message) in errors {
+        let _ = list.push(
+            Json::object()
+                .with("field", Json::string(field.clone()))
+                .with("message", Json::string(message.clone())),
+        );
+        parts.push(if field.is_empty() { message.clone() } else { format!("{field}: {message}") });
+    }
+    let mut resp = StatusCode::UNPROCESSABLE_ENTITY.into_response();
+    resp.extensions_mut().insert(ErrorBody {
+        code: error_code(422),
+        message: parts.join("; "),
+        details: Some(Json::object().with("errors", list)),
+    });
     resp
 }
 
@@ -195,7 +226,7 @@ fn render_error(resp: Response, err: ErrorBody, request_id: &str) -> Response {
     let body = Json::object()
         .with("code", Json::string(err.code))
         .with("message", Json::string(err.message.clone()))
-        .with("details", Json::Null)
+        .with("details", err.details.unwrap_or(Json::Null))
         .with("request_id", Json::string(request_id))
         // Deprecated: the old `{"detail"}` shape, kept while the /api/... aliases exist.
         .with("detail", Json::string(err.message));
@@ -408,6 +439,22 @@ async fn compute(st: &AppState, work: impl FnOnce() -> Reply + Send + 'static) -
     }
 }
 
+/// Like [`compute`], for work that builds its own response (success or error).
+async fn compute_with(st: &AppState, work: impl FnOnce() -> Response + Send + 'static) -> Response {
+    let Ok(permit) = Arc::clone(&st.compute).try_acquire_owned() else {
+        return error_response(503, "Server busy; try again.");
+    };
+    let joined = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work()
+    })
+    .await;
+    match joined {
+        Ok(resp) => resp,
+        Err(_) => error_response(500, "The engine failed while handling this request."),
+    }
+}
+
 /// A POST route: parse the JSON body, then run `route` on the blocking pool.
 async fn post_json(
     st: &AppState,
@@ -599,6 +646,7 @@ fn backtest_routes() -> Router<AppState> {
         .route("/api/v1/backtests/{id}/series", only(get(backtests_api::backtest_series)))
         .route("/api/v1/backtests/{id}/artifacts/{kind}", only(get(backtests_api::backtest_artifact)))
         .route("/api/v1/datasets", only(get(backtests_api::list_datasets)))
+        .route("/api/v1/datasets/preview", only(post(datasets_api::preview)))
         .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
 }
 

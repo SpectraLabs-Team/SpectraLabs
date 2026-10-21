@@ -2731,6 +2731,7 @@ dependencies = [
  "serde_json",
  "spectra-backtest",
  "spectra-core",
+ "spectra-data",
  "spectra-db",
  "spectra-engine",
  "spectra-risk",

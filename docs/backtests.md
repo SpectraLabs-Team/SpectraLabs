@@ -5,6 +5,9 @@ content-addressed dataset store (`SPECTRA_DATA_DIR`) and stores its results as a
 
 ## 1. Put a dataset in the store
 
+From the command line (the Studio's upload flow is in [datasets.md](datasets.md); both give the
+same dataset id for the same rows):
+
 ```bash
 cargo run --release -p spectra-cli --bin spectra-ingest -- prices.csv --store "$SPECTRA_DATA_DIR"
 # prints the dataset id (a 64-character checksum) and its quality report

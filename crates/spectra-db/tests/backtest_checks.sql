@@ -26,9 +26,9 @@ SELECT pg_temp.check((SELECT id FROM w2) = '00000000-0000-7000-8000-0000000000c1
 SELECT pg_temp.check((SELECT count(*) FROM w3) = 0, 'unknown workspace');
 
 -- Register: first version is 1; the same checksum again returns it; a new checksum is version 2.
-CREATE TEMP TABLE r1 AS EXECUTE dataset_version_register('00000000-0000-7000-8000-0000000000c1', ' spy daily ', :'sum1', 2400, 9000, '{}', '00000000-0000-7000-8000-000000000011');
-CREATE TEMP TABLE r2 AS EXECUTE dataset_version_register('00000000-0000-7000-8000-0000000000c1', 'spy daily', :'sum1', 2400, 9000, '{}', NULL);
-CREATE TEMP TABLE r3 AS EXECUTE dataset_version_register('00000000-0000-7000-8000-0000000000c1', 'spy daily', :'sum2', 2500, 9100, '{"issues":0}', NULL);
+CREATE TEMP TABLE r1 AS EXECUTE dataset_version_register('00000000-0000-7000-8000-0000000000c1', ' spy daily ', :'sum1', 2400, 9000, '{}', '00000000-0000-7000-8000-000000000011', NULL, NULL);
+CREATE TEMP TABLE r2 AS EXECUTE dataset_version_register('00000000-0000-7000-8000-0000000000c1', 'spy daily', :'sum1', 2400, 9000, '{}', NULL, NULL, NULL);
+CREATE TEMP TABLE r3 AS EXECUTE dataset_version_register('00000000-0000-7000-8000-0000000000c1', 'spy daily', :'sum2', 2500, 9100, '{"issues":0}', NULL, NULL, NULL);
 SELECT pg_temp.check((SELECT version FROM r1) = 1 AND NOT (SELECT existed FROM r1), 'first version');
 SELECT pg_temp.check((SELECT id FROM r2) = (SELECT id FROM r1) AND (SELECT existed FROM r2), 'same checksum reuses the version');
 SELECT pg_temp.check((SELECT version FROM r3) = 2 AND NOT (SELECT existed FROM r3), 'new checksum is the next version');
@@ -36,7 +36,7 @@ SELECT pg_temp.check((SELECT count(*) FROM datasets WHERE workspace_id = '000000
                      'one dataset (name trimmed)');
 
 -- The same checksum in another workspace is a separate dataset and version.
-CREATE TEMP TABLE r4 AS EXECUTE dataset_version_register('00000000-0000-7000-8000-0000000000d1', 'spy daily', :'sum1', 2400, 9000, '{}', NULL);
+CREATE TEMP TABLE r4 AS EXECUTE dataset_version_register('00000000-0000-7000-8000-0000000000d1', 'spy daily', :'sum1', 2400, 9000, '{}', NULL, NULL, NULL);
 SELECT pg_temp.check((SELECT version FROM r4) = 1 AND (SELECT id FROM r4) <> (SELECT id FROM r1), 'per-workspace');
 
 -- Resolve only inside the owning workspace.

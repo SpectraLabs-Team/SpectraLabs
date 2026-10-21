@@ -222,12 +222,22 @@ pub fn validate_job(kind: &str, payload: &Json) -> Result<(), (u16, String)> {
         "benchmark" => benchmark_args(payload).map(|_| ()),
         "risk" => risk_args(payload).map(|_| ()),
         "stress" => stress_args(payload).map(|_| ()),
+        INGEST_JOB_KIND => Err(unprocessable(
+            "Ingest jobs are created with POST /api/v1/datasets/ingest, which checks the upload.",
+        )),
         _ => Err(unprocessable(format!("Unknown job kind {kind:?}; use {}.", JOB_KINDS.join(", ")))),
     }
 }
 
-/// Job kinds supported by the background worker.
+/// Job kinds `POST /api/v1/jobs` accepts.
 pub const JOB_KINDS: [&str; 4] = ["backtest", "benchmark", "risk", "stress"];
+
+/// An upload turned into a dataset version (M1 task 5); queued only by
+/// `POST /api/v1/datasets/ingest`.
+pub const INGEST_JOB_KIND: &str = "ingest";
+
+/// Job kinds the background worker runs.
+pub const WORKER_KINDS: [&str; 5] = ["backtest", "benchmark", "risk", "stress", INGEST_JOB_KIND];
 
 /// A validated `backtest` payload, or a 422 listing every problem.
 ///
@@ -279,7 +289,7 @@ pub fn run_job_with_progress(kind: &str, payload: &Json, mut on_progress: impl F
 /// Maximum duration allowed for a job before its result is discarded.
 pub fn job_timeout(kind: &str) -> std::time::Duration {
     std::time::Duration::from_secs(match kind {
-        "backtest" => 900,
+        "backtest" | INGEST_JOB_KIND => 900,
         "benchmark" => 600,
         _ => 300,
     })

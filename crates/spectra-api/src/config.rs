@@ -44,6 +44,9 @@ impl fmt::Debug for Secret {
     }
 }
 
+/// Storage per workspace when it has no quota of its own (1 GiB).
+pub const DEFAULT_ARTIFACT_QUOTA_BYTES: i64 = 1 << 30;
+
 /// Everything `spectra-api` reads from the environment.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -61,8 +64,11 @@ pub struct Config {
     /// Shared with the Next.js proxy; signs the identity headers.
     pub engine_secret: Secret,
     /// Where the worker stores artifacts (the same `ARTIFACT_STORAGE` settings);
-    /// read for backtest chart series.
+    /// read for backtest chart series, and written by uploads.
     pub artifact_storage: ArtifactStorage,
+    /// Default storage quota per workspace (`SPECTRA_ARTIFACT_QUOTA_BYTES`,
+    /// the worker's setting), applied to uploads.
+    pub artifact_quota_bytes: i64,
 }
 
 /// Everything wrong with the environment, one line per problem.
@@ -166,6 +172,14 @@ impl Config {
         };
 
         let artifact_storage = read_artifact_storage(&val, &mut problems);
+        let artifact_quota_bytes = match val("SPECTRA_ARTIFACT_QUOTA_BYTES").map(|v| v.parse::<i64>()) {
+            None => DEFAULT_ARTIFACT_QUOTA_BYTES,
+            Some(Ok(n)) if n >= 0 => n,
+            Some(_) => {
+                problems.push("SPECTRA_ARTIFACT_QUOTA_BYTES must be a whole number of bytes".into());
+                DEFAULT_ARTIFACT_QUOTA_BYTES
+            }
+        };
         if problems.is_empty() {
             Ok(Self {
                 addr,
@@ -175,6 +189,7 @@ impl Config {
                 migrate_on_start,
                 engine_secret,
                 artifact_storage,
+                artifact_quota_bytes,
             })
         } else {
             Err(ConfigError(problems))
@@ -303,11 +318,12 @@ impl WorkerConfig {
         };
         let concurrency = number("SPECTRA_WORKER_CONCURRENCY", 2, 1..=64) as usize;
         let workspace_max_running = number("SPECTRA_WORKSPACE_MAX_RUNNING", 2, 1..=1000);
-        let artifact_quota_bytes = number("SPECTRA_ARTIFACT_QUOTA_BYTES", 1 << 30, 0..=i64::MAX);
+        let artifact_quota_bytes =
+            number("SPECTRA_ARTIFACT_QUOTA_BYTES", DEFAULT_ARTIFACT_QUOTA_BYTES, 0..=i64::MAX);
         let backtest_max_bars = number("SPECTRA_BACKTEST_MAX_BARS", 20_000_000, 1..=1_000_000_000) as usize;
         let backtest_max_instruments =
             number("SPECTRA_BACKTEST_MAX_INSTRUMENTS", 1000, 1..=1_000_000) as usize;
-        let all: Vec<String> = crate::engine::JOB_KINDS.iter().map(|kind| (*kind).to_string()).collect();
+        let all: Vec<String> = crate::engine::WORKER_KINDS.iter().map(|kind| (*kind).to_string()).collect();
         let kinds = match val("SPECTRA_WORKER_KINDS") {
             None => all,
             Some(value) => {

@@ -57,6 +57,8 @@ export const AUDIT_ACTIONS = [
   'api_token.created',
   'api_token.revoked',
   'api_token.used',
+  // Data Studio (M1): a file uploaded for ingesting (the engine logs what it became)
+  'dataset.uploaded',
   // Trading (M9)
   'order.placed',
   'kill_switch.used',

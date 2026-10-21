@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use spectra_api::config::WorkerConfig;
+use spectra_api::ingest::{self, IngestEnv, IngestOutcome};
 use spectra_api::{engine, observability, shutdown_signal};
 use spectra_backtest::{run_job_from_store, JobFailure, JobProducts};
 use spectra_core::{Json, ENGINE_VERSION};
@@ -46,6 +47,10 @@ const STALE_AFTER: Duration = Duration::from_secs(30);
 const SWEEP_EVERY: Duration = Duration::from_secs(15);
 /// Wait between empty polls.
 const IDLE_POLL: Duration = Duration::from_secs(1);
+/// How often to remove uploads that were never ingested (M1 task 4).
+const EXPIRE_UPLOADS_EVERY: Duration = Duration::from_secs(600);
+/// Uploads removed per sweep.
+const EXPIRE_UPLOADS_BATCH: i32 = 500;
 
 struct Ctx {
     pool: PgPool,
@@ -156,10 +161,12 @@ async fn main() -> ExitCode {
     }
 
     // Housekeeping: this worker's heartbeat, and requeueing jobs of dead workers.
-    let (hk_pool, hk_info, mut hk_stop) = (pool.clone(), info.clone(), stop_rx.clone());
+    let (hk_pool, hk_info, mut hk_stop, hk_store) =
+        (pool.clone(), info.clone(), stop_rx.clone(), store.clone());
     let housekeeping = tokio::spawn(async move {
         let mut beat = tokio::time::interval(HEARTBEAT);
         let mut sweep = tokio::time::interval(SWEEP_EVERY);
+        let mut expire = tokio::time::interval(EXPIRE_UPLOADS_EVERY);
         let mut sample = tokio::time::interval(Duration::from_secs(15));
         loop {
             tokio::select! {
@@ -169,6 +176,7 @@ async fn main() -> ExitCode {
                         error!("heartbeat failed: {e}");
                     }
                 }
+                _ = expire.tick() => expire_uploads(&hk_pool, &hk_store).await,
                 _ = sweep.tick() => match jobs::requeue_stale(&hk_pool, STALE_AFTER).await {
                     Ok(0) => {}
                     Ok(n) => info!("requeued {n} job(s) whose worker stopped responding"),
@@ -259,6 +267,10 @@ enum Outcome {
 async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
     if job.kind == spectra_backtest::JOB_KIND {
         run_backtest_job(ctx, job, permit).await;
+        return;
+    }
+    if job.kind == engine::INGEST_JOB_KIND {
+        run_ingest_job(ctx, job, permit).await;
         return;
     }
     let job_start = Instant::now();
@@ -489,6 +501,15 @@ async fn run_backtest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         }
     };
 
+    // Datasets ingested through the Studio live in the artifact store; copy this one into the
+    // local store the engine reads, unless it is there already.
+    if let Err((msg, retryable)) =
+        ingest::ensure_local(&ctx.store, &ctx.data_dir, &version.checksum, version.blob_sha256.as_deref())
+            .await
+    {
+        return fail_job(&ctx, &job, started, &msg, retryable).await;
+    }
+
     // The engine stops itself shortly before the job's limit; the deadline below is a backstop.
     let timeout = engine::job_timeout(&job.kind);
     let cancel = Arc::new(AtomicBool::new(false));
@@ -660,4 +681,109 @@ async fn finish_backtest(
     }
     info!(job_id = %job.id, run_id = %run_id, result_sha256 = %products.run.result_sha256, "backtest recorded");
     Ok(())
+}
+
+/// Removes uploads that were never ingested within their 24 hours, and the
+/// stored files nothing else uses any more.
+async fn expire_uploads(pool: &PgPool, store: &ArtifactBackend) {
+    match spectra_db::uploads::expire(pool, EXPIRE_UPLOADS_BATCH).await {
+        Ok(orphans) => {
+            for sha256 in &orphans {
+                if let Err(e) = store.delete(sha256).await {
+                    warn!(%sha256, "could not delete an expired upload's file: {e}");
+                }
+            }
+            if !orphans.is_empty() {
+                info!("removed {} expired upload file(s)", orphans.len());
+            }
+        }
+        Err(e) => error!("upload expiry sweep failed: {e}"),
+    }
+}
+
+/// An `ingest` job (M1 task 5): an upload becomes a dataset version. Progress
+/// (rows read) goes out with each heartbeat; a cancel request stops it.
+async fn run_ingest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
+    let started = Instant::now();
+    let env = IngestEnv {
+        pool: ctx.pool.clone(),
+        store: ctx.store.clone(),
+        data_dir: ctx.data_dir.clone(),
+        quota: ctx.quota,
+    };
+    let cancel = Arc::new(AtomicBool::new(false));
+    let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+    let mut work = {
+        let (job, cancel, progress) = (job.clone(), Arc::clone(&cancel), Arc::clone(&progress));
+        tokio::spawn(async move { ingest::run_ingest(&env, &job, cancel, progress).await })
+    };
+    let deadline = tokio::time::Instant::now() + engine::job_timeout(&job.kind);
+    let mut beat = tokio::time::interval(HEARTBEAT);
+    beat.tick().await; // the first tick is immediate; the claim was the first heartbeat
+    let (mut cancel_requested, mut lost) = (false, false);
+    let outcome = loop {
+        tokio::select! {
+            res = &mut work => break res.ok(),
+            _ = beat.tick() => {
+                let p = f32::from_bits(progress.load(Ordering::Relaxed));
+                match jobs::heartbeat(&ctx.pool, job.id, &ctx.worker_id, Some(p)).await {
+                    Ok(Beat::Continue) => {}
+                    Ok(Beat::CancelRequested) => {
+                        cancel_requested = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Ok(Beat::Lost) => {
+                        lost = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Err(e) => error!(job_id = %job.id, "heartbeat failed: {e}"),
+                }
+            },
+            () = tokio::time::sleep_until(deadline) => {
+                cancel.store(true, Ordering::Relaxed);
+                work.abort();
+                break Some(IngestOutcome::Failed {
+                    message: "The ingest ran longer than its limit.".into(),
+                    retryable: false,
+                });
+            }
+        }
+    };
+    drop(permit);
+    if lost {
+        warn!(job_id = %job.id, "job was taken over after a missed heartbeat; dropping it");
+        record_metrics(&job.kind, "lost", started);
+        return;
+    }
+    match outcome {
+        Some(IngestOutcome::Registered(result)) => {
+            match jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await {
+                Ok(Some(_)) => {
+                    record_metrics(&job.kind, "succeeded", started);
+                    info!(job_id = %job.id, version = %result["dataset_version_id"], "dataset version registered");
+                }
+                Ok(None) => warn!(job_id = %job.id, "ingest finished, but another worker had taken it over"),
+                Err(e) => error!(job_id = %job.id, "could not record the ingest: {e}"),
+            }
+        }
+        Some(IngestOutcome::Rejected { message, result }) => {
+            record_metrics(&job.kind, "failed_permanent", started);
+            if let Err(e) = jobs::reject(&ctx.pool, job.id, &ctx.worker_id, &message, &result).await {
+                error!(job_id = %job.id, "could not record the rejection: {e}");
+            }
+        }
+        Some(IngestOutcome::Cancelled) => {
+            if !cancel_requested {
+                warn!(job_id = %job.id, "ingest stopped without a cancel request");
+            }
+            record_metrics(&job.kind, "cancelled", started);
+            if let Err(e) = jobs::mark_cancelled(&ctx.pool, job.id, &ctx.worker_id).await {
+                error!(job_id = %job.id, "could not record the cancellation: {e}");
+            }
+        }
+        Some(IngestOutcome::Failed { message, retryable }) => {
+            fail_job(&ctx, &job, started, &message, retryable).await;
+        }
+        None => fail_job(&ctx, &job, started, "The ingest crashed.", true).await,
+    }
 }

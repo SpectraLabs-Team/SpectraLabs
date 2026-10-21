@@ -77,6 +77,8 @@ async fn a_newly_signed_up_user_can_list_datasets_and_queue_a_backtest() {
             byte_size: 4000,
             quality_report: serde_json::json!({}),
             created_by: Some(user),
+            blob_sha256: None,
+            source: None,
         },
     )
     .await

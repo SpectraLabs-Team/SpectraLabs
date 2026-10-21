@@ -22,6 +22,7 @@ pub mod artifacts;
 pub mod datasets;
 pub mod identity;
 pub mod jobs;
+pub mod uploads;
 
 /// The migrations in `crates/spectra-db/migrations`, embedded at build time.
 pub static MIGRATOR: Migrator = sqlx::migrate!("./migrations");

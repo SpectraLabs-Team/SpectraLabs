@@ -383,6 +383,160 @@
         }
       }
     },
+    "/api/v1/corporate-actions": {
+      "get": {
+        "tags": [
+          "corporate-actions"
+        ],
+        "summary": "List corporate action sets for the active workspace.",
+        "operationId": "list_corporate_action_sets",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorporateActionSetListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "corporate-actions"
+        ],
+        "summary": "Create a corporate action set and its actions.",
+        "operationId": "create_corporate_action_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCorporateActionSetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorporateActionSetDetailView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Name already in use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/corporate-actions/{id}": {
+      "get": {
+        "tags": [
+          "corporate-actions"
+        ],
+        "summary": "Fetch a corporate action set and all its events.",
+        "operationId": "get_corporate_action_set",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Set id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorporateActionSetDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "corporate-actions"
+        ],
+        "summary": "Delete a corporate action set.",
+        "operationId": "delete_corporate_action_set",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Set id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedActionSetView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/datasets": {
       "get": {
         "tags": [
@@ -725,6 +879,69 @@
           },
           "422": {
             "description": "Every invalid parameter (`details.errors`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/versions/{id}/derive": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Derive an adjusted dataset version from an existing version using a corporate action set.",
+        "operationId": "derive_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Source dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeriveDatasetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Source dataset version or action set not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Derivation or adjustment math error",
             "content": {
               "application/json": {
                 "schema": {
@@ -2494,6 +2711,190 @@
           }
         }
       },
+      "CorporateActionItem": {
+        "type": "object",
+        "description": "A corporate action item in an upload or creation request.",
+        "required": [
+          "symbol",
+          "ex_date",
+          "action_kind"
+        ],
+        "properties": {
+          "action_kind": {
+            "type": "string",
+            "description": "\"split\" or \"dividend\"."
+          },
+          "dividend_amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For cash dividends: dividend amount per share (e.g. \"0.205\")."
+          },
+          "ex_date": {
+            "type": "string",
+            "description": "Ex-action timestamp (RFC 3339 or YYYY-MM-DD)."
+          },
+          "split_from": {
+            "type": "integer",
+            "format": "int32",
+            "description": "For splits: original ratio (e.g. 1 in 2:1). Default: 1."
+          },
+          "split_to": {
+            "type": "integer",
+            "format": "int32",
+            "description": "For splits: new ratio (e.g. 2 in 2:1). Default: 1."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Instrument ticker symbol."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CorporateActionSetDetailView": {
+        "type": "object",
+        "description": "Detail view of a corporate action set.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "actions"
+        ],
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CorporateActionView"
+            },
+            "description": "Actions in the set."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Created at."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Set id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          }
+        }
+      },
+      "CorporateActionSetListView": {
+        "type": "object",
+        "description": "List of corporate action sets.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CorporateActionSetSummaryView"
+            },
+            "description": "Items."
+          }
+        }
+      },
+      "CorporateActionSetSummaryView": {
+        "type": "object",
+        "description": "Summary of a corporate action set.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "action_count"
+        ],
+        "properties": {
+          "action_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Action count."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Created at."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Set id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          }
+        }
+      },
+      "CorporateActionView": {
+        "type": "object",
+        "description": "A corporate action view.",
+        "required": [
+          "id",
+          "symbol",
+          "ex_date",
+          "action_kind",
+          "split_from",
+          "split_to",
+          "dividend_amount",
+          "created_at"
+        ],
+        "properties": {
+          "action_kind": {
+            "type": "string",
+            "description": "\"split\" or \"dividend\"."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Recorded at."
+          },
+          "dividend_amount": {
+            "type": "string",
+            "description": "Cash dividend amount per share."
+          },
+          "ex_date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Ex-action date."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Action id."
+          },
+          "split_from": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Split from."
+          },
+          "split_to": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Split to."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Instrument symbol."
+          }
+        }
+      },
       "CreateBacktest": {
         "type": "object",
         "description": "`POST /api/v1/backtests` body: the `backtest` job payload, plus a priority.",
@@ -2541,6 +2942,41 @@
               "null"
             ],
             "description": "A built-in strategy name (see `GET /api/v1/strategies/builtin`).\nGive either `strategy` (with `params`) or `strategies`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateCorporateActionSetRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/corporate-actions` request body.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CorporateActionItem"
+            },
+            "description": "Corporate actions list."
+          },
+          "csv": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional CSV text containing actions with headers:\n`symbol,ex_date,action_kind,split_from,split_to,dividend_amount`."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Description."
+          },
+          "name": {
+            "type": "string",
+            "description": "Action set name."
           }
         },
         "additionalProperties": false
@@ -2886,6 +3322,19 @@
           }
         }
       },
+      "DeletedActionSetView": {
+        "type": "object",
+        "description": "Result of deleting a corporate action set.",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "True when deleted."
+          }
+        }
+      },
       "DeletedVersionView": {
         "type": "object",
         "description": "What deleting a version did.",
@@ -2903,6 +3352,42 @@
             "description": "The version was deleted."
           }
         }
+      },
+      "DeriveDatasetRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/datasets/versions/{id}/derive` body: corporate actions derivation options.",
+        "required": [
+          "corporate_action_set_id"
+        ],
+        "properties": {
+          "adjust_dividends": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether to adjust dividends (default: true)."
+          },
+          "adjust_splits": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether to adjust splits (default: true)."
+          },
+          "corporate_action_set_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Corporate action set id to apply."
+          },
+          "target_dataset_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Target dataset name (defaults to source dataset name if omitted or null)."
+          }
+        },
+        "additionalProperties": false
       },
       "ErrorDoc": {
         "type": "object",
@@ -4016,6 +4501,28 @@
             "type": "string",
             "description": "The dataset's name."
           },
+          "derivation_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Derivation kind (e.g. \"adjusted\") if derived."
+          },
+          "derivation_params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Derivation parameters."
+          },
+          "derived_from_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Base version id if derived."
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -4086,6 +4593,21 @@
             ],
             "format": "uuid",
             "description": "Who registered it."
+          },
+          "derivation_kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Derivation kind (e.g. \"adjusted\") if derived."
+          },
+          "derived_from_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Base version id if derived."
           },
           "filename": {
             "type": [
@@ -4250,6 +4772,10 @@
     {
       "name": "datasets",
       "description": "Data Studio: ingest settings, previews and datasets"
+    },
+    {
+      "name": "corporate-actions",
+      "description": "Corporate action sets and price adjustments"
     }
   ]
 }

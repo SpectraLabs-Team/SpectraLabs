@@ -8,7 +8,8 @@ SELECT v.id, v.version, v.checksum::text AS checksum, v.row_count, v.byte_size, 
        COALESCE((v.quality_report->>'rows_rejected')::bigint, 0) AS rows_rejected,
        jsonb_array_length(COALESCE(v.quality_report->'warnings', '[]'::jsonb))::bigint AS warning_count,
        v.source->>'filename' AS filename,
-       (SELECT count(*) FROM runs r WHERE r.workspace_id = v.workspace_id AND r.dataset_version_id = v.id)::bigint AS run_count
+       (SELECT count(*) FROM runs r WHERE r.workspace_id = v.workspace_id AND r.dataset_version_id = v.id)::bigint AS run_count,
+       v.derived_from_id, v.derivation_kind
   FROM dataset_versions v
  WHERE v.workspace_id = $1 AND v.dataset_id = $2
  ORDER BY v.version DESC

@@ -19,6 +19,7 @@ pub use sqlx::PgPool;
 use uuid::Uuid;
 
 pub mod artifacts;
+pub mod corporate_actions;
 pub mod datasets;
 pub mod identity;
 pub mod jobs;

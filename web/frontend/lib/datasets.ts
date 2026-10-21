@@ -32,6 +32,13 @@ export type Bars = S['BarsView'];
 export type BarPoint = S['BarPoint'];
 export type CalendarView = S['CalendarView'];
 export type CalendarsResponse = S['CalendarsResponse'];
+export type CorporateActionItem = S['CorporateActionItem'];
+export type CorporateActionView = S['CorporateActionView'];
+export type CorporateActionSetSummary = S['CorporateActionSetSummaryView'];
+export type CorporateActionSetList = S['CorporateActionSetListView'];
+export type CorporateActionSetDetail = S['CorporateActionSetDetailView'];
+export type CreateCorporateActionSetRequest = S['CreateCorporateActionSetRequest'];
+export type DeriveDatasetRequest = S['DeriveDatasetRequest'];
 
 /** A version in full. Its quality report has every field for Studio uploads, only some for command-line ones. */
 export type VersionDetail = Omit<S['VersionDetailView'], 'quality_report' | 'source'> & {
@@ -298,6 +305,32 @@ export const getBars = (id: string, q: { symbol?: string; from?: string; to?: st
 
 export const listCalendars = () =>
   request<CalendarsResponse>('/api/v1/calendars', { timeoutMs: 10_000 });
+
+export const listCorporateActionSets = () =>
+  request<CorporateActionSetList>('/api/v1/corporate-actions', { timeoutMs: 20_000 }).then((r) => r.items ?? []);
+
+export const getCorporateActionSet = (id: string) =>
+  request<CorporateActionSetDetail>(`/api/v1/corporate-actions/${id}`, { timeoutMs: 20_000 });
+
+export const createCorporateActionSet = (body: CreateCorporateActionSetRequest) =>
+  request<CorporateActionSetDetail>('/api/v1/corporate-actions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    timeoutMs: 20_000,
+  });
+
+export const deleteCorporateActionSet = (id: string) =>
+  request<void>(`/api/v1/corporate-actions/${id}`, {
+    method: 'DELETE',
+    timeoutMs: 20_000,
+  });
+
+export const deriveDatasetVersion = (versionId: string, body: DeriveDatasetRequest) =>
+  request<VersionDetail>(`/api/v1/datasets/versions/${versionId}/derive`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+    timeoutMs: 60_000,
+  });
 
 /** Settings the person has filled in so far: every required field may still be missing. */
 export type DraftSettings = {

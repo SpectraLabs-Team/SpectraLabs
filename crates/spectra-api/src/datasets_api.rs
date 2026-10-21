@@ -547,6 +547,10 @@ pub struct VersionEntryView {
     pub filename: Option<String>,
     /// Runs that used it (a version with runs can't be deleted).
     pub run_count: i64,
+    /// Base version id if derived.
+    pub derived_from_id: Option<uuid::Uuid>,
+    /// Derivation kind (e.g. "adjusted") if derived.
+    pub derivation_kind: Option<String>,
 }
 
 /// A dataset and its versions.
@@ -600,6 +604,13 @@ pub struct VersionDetailView {
     /// `settings`); null when registered from the command line.
     #[schema(value_type = Option<Object>)]
     pub source: Option<serde_json::Value>,
+    /// Base version id if derived.
+    pub derived_from_id: Option<uuid::Uuid>,
+    /// Derivation kind (e.g. "adjusted") if derived.
+    pub derivation_kind: Option<String>,
+    /// Derivation parameters.
+    #[schema(value_type = Option<Object>)]
+    pub derivation_params: Option<serde_json::Value>,
 }
 
 /// A run that used a dataset version.
@@ -681,6 +692,8 @@ pub(crate) async fn get_dataset(
                     warning_count: v.warning_count,
                     filename: v.filename,
                     run_count: v.run_count,
+                    derived_from_id: v.derived_from_id,
+                    derivation_kind: v.derivation_kind,
                 })
                 .collect(),
         },
@@ -823,6 +836,9 @@ pub(crate) async fn get_version(
             chartable,
             quality_report: v.quality_report,
             source: v.source,
+            derived_from_id: v.derived_from_id,
+            derivation_kind: v.derivation_kind,
+            derivation_params: v.derivation_params,
         },
     )
 }
@@ -1232,4 +1248,205 @@ pub async fn list_calendars() -> Response {
         "Asia/Kolkata".into(),
     ];
     to_json(200, &CalendarsResponse { calendars, timezones })
+}
+
+/// `POST /api/v1/datasets/versions/{id}/derive` body: corporate actions derivation options.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeriveDatasetRequest {
+    /// Target dataset name (defaults to source dataset name if omitted or null).
+    pub target_dataset_name: Option<String>,
+    /// Corporate action set id to apply.
+    pub corporate_action_set_id: uuid::Uuid,
+    /// Whether to adjust splits (default: true).
+    pub adjust_splits: Option<bool>,
+    /// Whether to adjust dividends (default: true).
+    pub adjust_dividends: Option<bool>,
+}
+
+/// Derive an adjusted dataset version from an existing version using a corporate action set.
+#[utoipa::path(post, path = "/api/v1/datasets/versions/{id}/derive", tag = "datasets",
+    params(("id" = uuid::Uuid, Path, description = "Source dataset version id")),
+    request_body = DeriveDatasetRequest,
+    responses(
+        (status = 201, body = VersionDetailView),
+        (status = 404, description = "Source dataset version or action set not found", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "Derivation or adjustment math error", body = crate::openapi::ErrorDoc),
+    ))]
+pub(crate) async fn derive_version(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    path: Result<axum::extract::Path<uuid::Uuid>, axum::extract::rejection::PathRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let Ok(axum::extract::Path(version_id)) = path else { return error_response(404, NO_VERSION) };
+    let Ok(bytes) = body else { return error_response(400, "Could not read the request body.") };
+    let req: DeriveDatasetRequest = match serde_json::from_slice(&bytes) {
+        Ok(r) => r,
+        Err(e) => return error_response(422, format!("Invalid derive request: {e}")),
+    };
+
+    let v = match spectra_db::datasets::get_version(&pool, ws, version_id).await {
+        Ok(Some(v)) => v,
+        Ok(None) => return error_response(404, NO_VERSION),
+        Err(e) => return db_error(&e),
+    };
+
+    let act_set =
+        match spectra_db::corporate_actions::get_action_set(&pool, ws, req.corporate_action_set_id).await {
+            Ok(Some(s)) => s,
+            Ok(None) => return error_response(404, "No such corporate action set."),
+            Err(e) => return db_error(&e),
+        };
+
+    let action_rows = match spectra_db::corporate_actions::list_actions_by_set(&pool, ws, act_set.id).await {
+        Ok(a) => a,
+        Err(e) => return db_error(&e),
+    };
+
+    let d = match load_for_chart(&st, &v.checksum, v.blob_sha256.as_deref()).await {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+
+    let adjust_splits = req.adjust_splits.unwrap_or(true);
+    let adjust_dividends = req.adjust_dividends.unwrap_or(true);
+    let mut actions = Vec::new();
+    for act in action_rows {
+        let kind = match act.action_kind.as_str() {
+            "split" => {
+                if !adjust_splits {
+                    continue;
+                }
+                spectra_data::ActionKind::Split
+            }
+            "dividend" => {
+                if !adjust_dividends {
+                    continue;
+                }
+                spectra_data::ActionKind::Dividend
+            }
+            _ => continue,
+        };
+        let div_price = if kind == spectra_data::ActionKind::Dividend {
+            match spectra_data::parse_fixed(&act.dividend_amount) {
+                Some(raw) => spectra_core::Price::from_raw(raw),
+                None => {
+                    return error_response(
+                        422,
+                        format!("Invalid dividend amount {} for {}", act.dividend_amount, act.symbol),
+                    );
+                }
+            }
+        } else {
+            spectra_core::Price::ZERO
+        };
+        actions.push(spectra_data::CorporateAction {
+            symbol: act.symbol,
+            ex_date_ns: act.ex_date.timestamp_nanos_opt().unwrap_or(0),
+            kind,
+            split_from: act.split_from as u32,
+            split_to: act.split_to as u32,
+            dividend_amount: div_price,
+        });
+    }
+
+    let adjusted = match spectra_data::adjust_dataset(&d, &actions) {
+        Ok(a) => a,
+        Err(e) => return error_response(422, format!("Adjustment error: {e}")),
+    };
+
+    let raw = spectra_data::datastore::encode_dataset(&adjusted);
+    let blob_sha256 = spectra_core::sha256_hex(&raw);
+
+    if let Some(store) = st.cfg.artifacts.as_ref() {
+        if let Err(e) = store.put(raw.clone()).await {
+            tracing::error!(error = %e, "failed to store derived dataset bytes");
+            return error_response(503, "Could not store derived dataset.");
+        }
+    }
+    if let Some(dir) = st.cfg.data_dir.as_ref() {
+        if let Ok(store) = spectra_data::DataStore::new(dir) {
+            let _ = store.put(&adjusted);
+        }
+    }
+
+    let target_name = req
+        .target_dataset_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&v.dataset_name);
+
+    let quality_json = serde_json::from_str(
+        &spectra_data::quality_report_json(&adjusted, &spectra_data::CsvOptions::default()).dump(),
+    )
+    .unwrap_or(serde_json::Value::Null);
+    let source_meta = serde_json::json!({
+        "type": "derived",
+        "derived_from_id": version_id,
+        "action_set_id": req.corporate_action_set_id,
+    });
+    let derivation_params = serde_json::json!({
+        "action_set_id": req.corporate_action_set_id,
+        "adjust_splits": adjust_splits,
+        "adjust_dividends": adjust_dividends,
+    });
+
+    let user_id = uuid::Uuid::parse_str(&id.user).ok();
+    let reg = match spectra_db::datasets::register_derived_version(
+        &pool,
+        &spectra_db::datasets::NewDerivedDatasetVersion {
+            workspace_id: ws,
+            dataset_name: target_name,
+            checksum: &adjusted.info.id,
+            row_count: adjusted.bars.len() as i64,
+            byte_size: raw.len() as i64,
+            quality_report: quality_json.clone(),
+            created_by: user_id,
+            blob_sha256: Some(&blob_sha256),
+            source: Some(source_meta.clone()),
+            derived_from_id: Some(version_id),
+            derivation_kind: Some("adjusted"),
+            derivation_params: Some(derivation_params.clone()),
+        },
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return db_error(&e),
+    };
+
+    // Update chart cache with new dataset
+    if let Ok(mut c) = st.charted.lock() {
+        c.retain(|(k, _)| k != &adjusted.info.id);
+        c.insert(0, (adjusted.info.id.clone(), std::sync::Arc::new(adjusted.clone())));
+        c.truncate(CHART_CACHE);
+    }
+
+    to_json(
+        201,
+        &VersionDetailView {
+            id: reg.id,
+            dataset_id: v.dataset_id,
+            dataset_name: target_name.to_string(),
+            version: reg.version,
+            checksum: adjusted.info.id,
+            row_count: adjusted.bars.len() as i64,
+            byte_size: raw.len() as i64,
+            created_at: chrono::Utc::now(),
+            created_by: user_id,
+            run_count: 0,
+            chartable: true,
+            quality_report: quality_json,
+            source: Some(source_meta),
+            derived_from_id: Some(version_id),
+            derivation_kind: Some("adjusted".to_string()),
+            derivation_params: Some(derivation_params),
+        },
+    )
 }

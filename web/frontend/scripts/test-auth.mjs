@@ -729,6 +729,7 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}`), 'api/v1/datasets/versions/{id}');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/bars`), 'api/v1/datasets/versions/{id}/bars');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/runs`), 'api/v1/datasets/versions/{id}/runs');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/derive`), 'api/v1/datasets/versions/{id}/derive');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/other`), `api/v1/datasets/versions/${ds}/other`, 'unknown sub-routes stay unlisted');
   assert.equal(engineRoutes.routePolicyKey('api/v1/datasets/not-a-uuid'), 'api/v1/datasets/not-a-uuid');
   for (const p of ['api/v1/datasets/{id}', 'api/v1/datasets/versions/{id}', 'api/v1/datasets/versions/{id}/runs', 'api/v1/datasets/versions/{id}/bars']) {
@@ -736,8 +737,17 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   }
   assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/{id}'], 'PATCH'), 'editor', 'renaming needs editor');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/versions/{id}'], 'DELETE'), 'editor', 'deleting needs editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/versions/{id}/derive'], 'POST'), 'editor', 'deriving needs editor');
   assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/{id}'], 'DELETE'), 'datasets are deleted version by version');
   assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/versions/{id}/bars'], 'POST'));
+  // Corporate actions (M1b)
+  const ca = '0192f3a4-0000-7000-8000-00000000000b';
+  assert.equal(engineRoutes.routePolicyKey('api/v1/corporate-actions'), 'api/v1/corporate-actions');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/corporate-actions/${ca}`), 'api/v1/corporate-actions/{id}');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/corporate-actions'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/corporate-actions'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/corporate-actions/{id}'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/corporate-actions/{id}'], 'DELETE'), 'editor');
   // Resumable uploads (M1b): every step needs editor except reading the limits.
   const sid = '0192f3a4-0000-7000-8000-00000000000a';
   assert.equal(engineRoutes.routePolicyKey(`api/v1/uploads/sessions/${sid}`), 'api/v1/uploads/sessions/{id}');

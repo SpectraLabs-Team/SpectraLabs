@@ -3,6 +3,7 @@
 //! (`quantforge` v0.6.0 `data` and `datastore`); dataset ids, quality reports
 //! and the on-disk format are identical.
 
+pub mod adjustment;
 pub mod calendar;
 pub mod chart;
 pub mod dataset;
@@ -13,6 +14,7 @@ pub mod settings;
 pub mod time;
 pub mod timezone;
 
+pub use adjustment::{adjust_dataset, adjust_symbol_bars, ActionKind, CorporateAction};
 pub use calendar::Exchange;
 pub use chart::{chart_points, ChartPoint};
 pub use dataset::{

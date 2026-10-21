@@ -126,9 +126,11 @@ only when that market is open:
 
 Orders wait through closed bars. A `Day` order is only used up by a bar it could trade on.
 
-Market impact (off by default) adds `impact_coefficient x volatility x sqrt(qty / bar volume)` to
-market and stop fills, capped at 10%; volatility is measured over the `impact_window` bars before
-the fill bar. Both are `config` fields.
+Transaction costs on market and stop fills include:
+- Flat slippage via `slippage_bps` (basis points moved against the trader).
+- Bid-ask spread cost via `spread_bps` (half the spread is paid upon crossing on each fill).
+- Volume-based slippage via `volume_slippage_bps` (scaled linearly by participation: `volume_slippage_bps * (qty / bar volume)`).
+- Square-root market impact (off by default) adding `impact_coefficient x volatility x sqrt(qty / bar volume)` to market and stop fills, capped at 10%; volatility is measured over the `impact_window` bars before the fill bar. Both are `config` fields.
 
 ## Several strategies on one account
 

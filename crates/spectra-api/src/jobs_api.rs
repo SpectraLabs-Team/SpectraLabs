@@ -154,6 +154,13 @@ pub(crate) async fn create_job(
         Ok(r) => r,
         Err(e) => return error_response(422, format!("Invalid job request: {e}")),
     };
+<<<<<<< HEAD
+    if req.kind == "backtest" {
+        return error_response(422, "Backtests must be created under an experiment so their run record and job are linked atomically.");
+    }
+    if !(-10..=10).contains(&req.priority) {
+        return error_response(422, "priority must be between -10 and 10.");
+=======
     match submit(&st, &id, req.kind, req.payload, req.priority).await {
         Ok(job) => to_json(202, &JobView::from(job)),
         Err(r) => r,
@@ -176,6 +183,7 @@ pub(crate) async fn submit(
     let (pool, ws) = context(st, id)?;
     if !(-10..=10).contains(&priority) {
         return Err(error_response(422, "priority must be between -10 and 10."));
+>>>>>>> origin/main
     }
     // Validate exactly as the synchronous route would, off the async threads
     // (parsing a large portfolio CSV is real work).

@@ -23,16 +23,30 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+<<<<<<< HEAD
+use spectra_api::config::{artifact_backend, WorkerConfig};
+=======
 use spectra_api::config::WorkerConfig;
 use spectra_api::ingest::{self, IngestEnv, IngestOutcome};
+>>>>>>> origin/main
 use spectra_api::{engine, observability, shutdown_signal};
 use spectra_backtest::{run_job_from_store, JobFailure, JobProducts};
 use spectra_core::{Json, ENGINE_VERSION};
 use spectra_db::artifacts::{store_for_run, ArtifactBackend, NewArtifact};
+<<<<<<< HEAD
+use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
+use spectra_db::{PgPool, PoolConfig};
+use spectra_engine::RunRecord;
+use spectra_registry::{
+    registry::{config_from_json, metrics_from_json, params_from_json, RunInput},
+    PgRegistry, StoredArtifact,
+};
+=======
 use spectra_db::datasets::{self, NewBacktestRun};
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
 use spectra_db::{PgPool, PoolConfig};
 use spectra_engine::{Progress, RunControl, RunLimits};
+>>>>>>> origin/main
 use std::time::Instant;
 use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
@@ -57,11 +71,14 @@ struct Ctx {
     store: ArtifactBackend,
     worker_id: String,
     quota: i64,
+<<<<<<< HEAD
+=======
     /// Dataset store that backtests read.
     data_dir: PathBuf,
     /// Size limits for one backtest.
     backtest_max_bars: usize,
     backtest_max_instruments: usize,
+>>>>>>> origin/main
 }
 
 /// Prometheus text for the worker's own metrics.
@@ -274,6 +291,50 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
         return;
     }
     let job_start = Instant::now();
+    if job.kind == "backtest" {
+        let run_id = job
+            .payload
+            .get("registry_run_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok());
+        let Some(run_id) = run_id else {
+            let _ = jobs::fail(
+                &ctx.pool,
+                job.id,
+                &ctx.worker_id,
+                "Backtest job has no valid registry run id.",
+                false,
+            )
+            .await;
+            return;
+        };
+        let experiment_id = job
+            .payload
+            .get("experiment_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|id| Uuid::parse_str(id).ok());
+        let Some(experiment_id) = experiment_id else {
+            let _ = jobs::fail(
+                &ctx.pool,
+                job.id,
+                &ctx.worker_id,
+                "Backtest job has no valid experiment id.",
+                false,
+            )
+            .await;
+            let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+            let _ = registry.fail_run(run_id, "Backtest job has no valid experiment id.").await;
+            return;
+        };
+        let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+        if let Err(error) = registry.start_run(run_id).await {
+            error!(job_id = %job.id, run_id = %run_id, error = %error, "could not start registry run");
+            let _ = jobs::fail(&ctx.pool, job.id, &ctx.worker_id, "Could not start the registry run.", false)
+                .await;
+            return;
+        }
+        let _ = experiment_id;
+    }
     let (kind, payload_text) = (job.kind.clone(), job.payload.to_string());
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut work = tokio::task::spawn_blocking(move || {
@@ -349,29 +410,69 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
             );
             (
                 if retryable { "failed_retryable" } else { "failed_permanent" },
-                jobs::fail(pool, job.id, wid, &msg, retryable).await.map(|_| ()),
+                async {
+                    let failed = jobs::fail(pool, job.id, wid, &msg, retryable).await?;
+                    if job.kind == "backtest" && failed.as_ref().is_some_and(|j| j.status == "failed") {
+                        if let Some(id) = job.payload.get("registry_run_id").and_then(serde_json::Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+                            let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+                            if let Err(error) = registry.fail_run(id, &msg).await {
+                                error!(job_id = %job.id, run_id = %id, error = %error, "could not fail registry run");
+                            }
+                        }
+                    }
+                    Ok(())
+                }.await,
             )
         }
         Outcome::Panicked => {
             observability::JobMetrics::job_completed(&job.kind, "panicked");
             observability::JobMetrics::job_duration(&job.kind, "panicked", job_duration);
-            (
-                "panicked",
-                jobs::fail(pool, job.id, wid, "The engine crashed while running this job.", true)
-                    .await
-                    .map(|_| ()),
-            )
+            let message = "The engine crashed while running this job.";
+            ("panicked", async {
+                let failed = jobs::fail(pool, job.id, wid, message, true).await?;
+                if job.kind == "backtest" && failed.as_ref().is_some_and(|j| j.status == "failed") {
+                    if let Some(id) = job.payload.get("registry_run_id").and_then(serde_json::Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+                        let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+                        if let Err(error) = registry.fail_run(id, message).await {
+                            error!(job_id = %job.id, run_id = %id, error = %error, "could not fail panicked registry run");
+                        }
+                    }
+                }
+                Ok(())
+            }.await)
         }
         Outcome::Cancelled => {
             observability::JobMetrics::job_completed(&job.kind, "cancelled");
             observability::JobMetrics::job_duration(&job.kind, "cancelled", job_duration);
-            ("cancelled", jobs::mark_cancelled(pool, job.id, wid).await.map(|_| ()))
+            ("cancelled", async {
+                jobs::mark_cancelled(pool, job.id, wid).await?;
+                if job.kind == "backtest" {
+                    if let Some(id) = job.payload.get("registry_run_id").and_then(serde_json::Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+                        let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+                        if let Err(error) = registry.cancel_run(id).await {
+                            error!(job_id = %job.id, run_id = %id, error = %error, "could not cancel registry run");
+                        }
+                    }
+                }
+                Ok(())
+            }.await)
         }
         Outcome::TimedOut(t) => {
             let msg = format!("The job ran longer than its {} s limit.", t.as_secs());
             observability::JobMetrics::job_completed(&job.kind, "timeout");
             observability::JobMetrics::job_duration(&job.kind, "timeout", job_duration);
-            ("timeout", jobs::fail(pool, job.id, wid, &msg, false).await.map(|_| ()))
+            ("timeout", async {
+                jobs::fail(pool, job.id, wid, &msg, false).await?;
+                if job.kind == "backtest" {
+                    if let Some(id) = job.payload.get("registry_run_id").and_then(serde_json::Value::as_str).and_then(|s| Uuid::parse_str(s).ok()) {
+                        let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+                        if let Err(error) = registry.fail_run(id, &msg).await {
+                            error!(job_id = %job.id, run_id = %id, error = %error, "could not fail timed-out registry run");
+                        }
+                    }
+                }
+                Ok(())
+            }.await)
         }
         Outcome::Lost => {
             warn!(job_id = %job.id, "job was taken over after a missed heartbeat; dropping it");
@@ -387,6 +488,11 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
 
 /// Records the run and its report artifact, then completes the job.
 async fn finish(ctx: &Ctx, job: &Job, report: &Json) -> Result<(), spectra_db::Error> {
+    if job.kind == "backtest" {
+        return finish_backtest(ctx, job, report)
+            .await
+            .map_err(|error| sqlx::Error::Protocol(error.to_string()));
+    }
     let report_text = engine::to_text(report);
     let report_value: serde_json::Value =
         serde_json::from_str(&report_text).unwrap_or(serde_json::Value::Null);
@@ -441,6 +547,102 @@ async fn finish(ctx: &Ctx, job: &Job, report: &Json) -> Result<(), spectra_db::E
     Ok(())
 }
 
+<<<<<<< HEAD
+async fn finish_backtest(
+    ctx: &Ctx,
+    job: &Job,
+    report: &Json,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let parse_string =
+        |object: &Json, key: &str| -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+            Ok(object.at(key)?.as_str()?.to_owned())
+        };
+    let run_id = job
+        .payload
+        .get("registry_run_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+        .ok_or("missing registry run id")?;
+    let run = report.at("run")?;
+    let params = params_from_json(report.at("params")?)?;
+    let config = config_from_json(report.at("config")?)?;
+    let metrics = metrics_from_json(report.at("metrics")?)?;
+    let returns = report
+        .at("returns")?
+        .items()?
+        .iter()
+        .map(spectra_core::Json::as_double)
+        .collect::<Result<Vec<_>, _>>()?;
+    let input = RunInput {
+        experiment_id: parse_string(report, "experiment_id")?,
+        kind: "backtest".into(),
+        dataset_id: parse_string(report, "dataset_id")?,
+        strategy: parse_string(report, "strategy")?,
+        strategy_sha256: parse_string(report, "strategy_sha256")?,
+        params,
+        config,
+        run: RunRecord {
+            engine_version: parse_string(run, "engine_version")?,
+            dataset_sha256: parse_string(run, "dataset_sha256")?,
+            config_sha256: parse_string(run, "config_sha256")?,
+            result_sha256: parse_string(run, "result_sha256")?,
+            seed: parse_string(run, "seed")?.parse()?,
+            bar_count: usize::try_from(run.at("bar_count")?.as_int()?)?,
+        },
+        metrics,
+        returns,
+        counts_as_trial: true,
+        note: parse_string(report, "note")?,
+    };
+    let registry = PgRegistry::new(ctx.pool.clone(), job.workspace_id);
+    // The series files are stored on their own; the report keeps the summary only.
+    let files = report.at(engine::BACKTEST_ARTIFACTS_KEY)?;
+    let summary_report = spectra_core::Json::Object(
+        report
+            .entries()?
+            .iter()
+            .filter(|(key, _)| key != engine::BACKTEST_ARTIFACTS_KEY && key != "returns")
+            .cloned()
+            .collect(),
+    );
+    let report_text = engine::to_text(&summary_report);
+    let report_value: serde_json::Value = serde_json::from_str(&report_text)?;
+    let mut uploads: Vec<(&str, &str, Vec<u8>)> =
+        vec![("report", "application/json", report_text.as_bytes().to_vec())];
+    for kind in ["equity_curve", "trades", "returns"] {
+        uploads.push((kind, "text/csv", files.at(kind)?.as_str()?.as_bytes().to_vec()));
+    }
+    let mut stored_artifacts = Vec::with_capacity(uploads.len());
+    let mut report_stored = None;
+    for (kind, content_type, bytes) in &uploads {
+        let artifact = NewArtifact { workspace_id: job.workspace_id, run_id, kind, content_type, bytes };
+        let stored = store_for_run(&ctx.pool, &ctx.store, artifact, ctx.quota).await?;
+        // CSV rows below the header line.
+        let rows = bytes.split(|b| *b == b'\n').filter(|line| !line.is_empty()).count().saturating_sub(1);
+        let summary = if *kind == "report" {
+            spectra_core::Json::object()
+        } else {
+            spectra_core::Json::object().with("rows", spectra_core::Json::integer(i64::try_from(rows)?))
+        };
+        stored_artifacts.push(StoredArtifact {
+            kind: (*kind).to_owned(),
+            sha256: stored.sha256.clone(),
+            uri: stored.path.clone(),
+            size_bytes: stored.size,
+            content_type: (*content_type).to_owned(),
+            summary,
+        });
+        if *kind == "report" {
+            report_stored = Some(stored);
+        }
+    }
+    let stored = report_stored.ok_or("report artifact was not stored")?;
+    let registry_run_id = registry.complete_run_with_artifacts(run_id, &input, &stored_artifacts).await?;
+    let result = serde_json::json!({
+        "run_id": registry_run_id,
+        "report": report_value,
+        "artifact": { "sha256": stored.sha256, "path": stored.path, "size": stored.size },
+=======
 /// Records a job's terminal status in the metrics.
 fn record_metrics(kind: &str, status: &str, started: Instant) {
     observability::JobMetrics::job_completed(kind, status);
@@ -675,10 +877,15 @@ async fn finish_backtest(
         "summary": summary,
         "artifacts": stored,
         "artifact_errors": problems,
+>>>>>>> origin/main
     });
     if jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await?.is_none() {
         warn!(job_id = %job.id, "backtest finished, but another worker had taken it over");
     }
+<<<<<<< HEAD
+    Ok(())
+}
+=======
     info!(job_id = %job.id, run_id = %run_id, result_sha256 = %products.run.result_sha256, "backtest recorded");
     Ok(())
 }
@@ -787,3 +994,4 @@ async fn run_ingest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemap
         None => fail_job(&ctx, &job, started, "The ingest crashed.", true).await,
     }
 }
+>>>>>>> origin/main

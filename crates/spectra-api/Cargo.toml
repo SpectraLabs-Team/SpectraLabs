@@ -14,6 +14,11 @@ spectra-data = { path = "../spectra-data" }
 spectra-engine = { path = "../spectra-engine" }
 spectra-risk = { path = "../spectra-risk" }
 spectra-db = { path = "../spectra-db" }
+spectra-registry = { path = "../spectra-registry", features = ["postgres"] }
+spectra-data = { path = "../spectra-data" }
+spectra-engine = { path = "../spectra-engine" }
+spectra-research = { path = "../spectra-research" }
+sqlx.workspace = true
 axum.workspace = true
 http-body-util.workspace = true
 tokio.workspace = true

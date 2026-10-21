@@ -12,6 +12,14 @@ spectra-core = { path = "../spectra-core" }
 spectra-data = { path = "../spectra-data" }
 spectra-engine = { path = "../spectra-engine" }
 spectra-research = { path = "../spectra-research" }
+spectra-db = { path = "../spectra-db", optional = true }
+sqlx = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+
+[features]
+# The file registry and its parity surface remain std-only by default.
+postgres = ["dep:spectra-db", "dep:sqlx", "dep:tokio", "dep:uuid"]
 
 [lints]
 workspace = true

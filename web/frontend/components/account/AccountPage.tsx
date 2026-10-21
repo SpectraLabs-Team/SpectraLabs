@@ -349,7 +349,7 @@ function DeleteAccount({ profile }: { profile: Profile }) {
   };
 
   return (
-    <Section icon={<Trash2 className="h-4 w-4" />} title="Delete account" tone="danger" desc="Permanently removes your account and signs you out everywhere. This can't be undone.">
+    <Section icon={<Trash2 className="h-4 w-4" />} title="Delete account" tone="danger" desc="Permanently removes your account, your personal workspace with its experiments, runs and their history, and any team workspace where you are the only member. Export research you want to keep first. This can't be undone.">
       {admin ? (
         <p className="text-[12.5px] text-ink/55">The admin account can&apos;t be deleted from here, so the platform always keeps an administrator.</p>
       ) : !open ? (

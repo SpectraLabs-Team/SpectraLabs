@@ -140,7 +140,20 @@ pub fn run_job(
     dataset_checksum: &str,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<JobProducts, RunError> {
-    let out = run_request_on(bars, symbols, &job.request, ctl)?;
+    let resolved_bars;
+    let effective_bars = if let Some(as_of_ns) = job.request.as_of {
+        let mut ds = spectra_data::Dataset {
+            bars: bars.to_vec(),
+            symbols: spectra_data::SymbolTable { symbols: symbols.to_vec() },
+            ..Default::default()
+        };
+        ds = ds.as_of(as_of_ns);
+        resolved_bars = ds.bars;
+        &resolved_bars[..]
+    } else {
+        bars
+    };
+    let out = run_request_on(effective_bars, symbols, &job.request, ctl)?;
     let summary = summary_json(&out)?;
     let params = job
         .request
@@ -257,5 +270,9 @@ pub fn run_job_from_store(
         return Err(JobFailure::Cancelled);
     }
     let d = load_dataset(store_root, dataset_checksum).map_err(|e| JobFailure::from_engine(&e))?;
-    run_job(&d.bars, &d.symbols.symbols, job, dataset_checksum, ctl).map_err(JobFailure::from)
+    let resolved = match job.request.as_of {
+        Some(as_of_ns) => d.as_of(as_of_ns),
+        None => d,
+    };
+    run_job(&resolved.bars, &resolved.symbols.symbols, job, dataset_checksum, ctl).map_err(JobFailure::from)
 }

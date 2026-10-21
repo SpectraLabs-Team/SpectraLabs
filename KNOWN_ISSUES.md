@@ -4,9 +4,7 @@
 
 - **CUDA backend.** Excluded on purpose. Requests for CUDA run on the parallel CPU backend and are
   reported as a fallback.
-- **Alpaca brokerage proxy** (`/api/alpaca/*`). It needs an HTTPS client and TLS, which `spectra-api`
-  does not include yet. The routes answer 501. The dashboard does not call them. Porting them means
-  adding an HTTP client crate such as `reqwest` with `rustls` to `spectra-api`.
+- **Alpaca brokerage proxy** (`/api/alpaca/*`). Live trading order proxy routes answer 501 until the order execution proxy is wired. Market data historical bars and scheduled dataset refreshes from Alpaca are fully supported via `AlpacaConnector` in `spectra-api` (M1b task 13).
 
 ## Verification gaps
 
@@ -39,8 +37,7 @@
 - The risk model treats the portfolio as one aggregate position: zero drift, and volatility equal to
   the simple average of the assets' volatilities. There are no correlations and no per-asset paths, so
   it cannot attribute risk to positions, and it treats the assets as perfectly correlated.
-- Data: CSV only. There is no Parquet, no provider connectors, no corporate actions and no exchange
-  calendars, and datasets are held fully in memory during a backtest (ingest streams since M1b task 9; streaming backtests are M3 task 14).
+- Data: CSV only. There is no Parquet (corporate actions, exchange calendars, point-in-time revisions with symbol changes and delistings, and market data provider connectors with scheduled refreshes were added in tasks 10–13); datasets are held fully in memory during a backtest (ingest streams since M1b task 9; streaming backtests are M3 task 14).
 - Backtester: market and limit orders only, bar data only, flat-bps slippage, a single currency and
   average-cost accounting.
 - PSR and DSR assume serially independent returns and independent trials.

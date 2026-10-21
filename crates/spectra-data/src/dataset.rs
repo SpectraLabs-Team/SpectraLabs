@@ -65,6 +65,9 @@ pub struct CsvOptions {
     pub volume_column: String,
     /// See `timestamp_column`.
     pub symbol_column: String,
+    /// Column for when each bar's values became known (point-in-time data).
+    /// If empty or missing from the file, `known_at_ns == ts_ns`.
+    pub known_at_column: String,
     /// A gap is an interval longer than `gap_factor` times the median interval.
     pub gap_factor: f64,
     /// Robust z-score (median/MAD) of close-to-close returns that counts as an outlier.
@@ -94,6 +97,7 @@ impl Default for CsvOptions {
             close_column: String::new(),
             volume_column: String::new(),
             symbol_column: String::new(),
+            known_at_column: String::new(),
             gap_factor: 5.0,
             outlier_z: 10.0,
             stale_run: 5,
@@ -182,6 +186,13 @@ impl SymbolTable {
     pub fn name(&self, id: InstrumentId) -> Option<&str> {
         self.symbols.get(id as usize).map(String::as_str)
     }
+    /// Constructs a symbol table from symbols, sorting and deduplicating them.
+    pub fn from_symbols(symbols: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let mut list: Vec<String> = symbols.into_iter().map(Into::into).collect();
+        list.sort();
+        list.dedup();
+        Self { symbols: list }
+    }
 }
 
 /// Identity and lineage of a dataset.
@@ -218,6 +229,56 @@ pub struct Dataset {
     pub info: DatasetInfo,
     /// Quality findings.
     pub quality: DataQualityReport,
+}
+
+impl Dataset {
+    /// Returns a point-in-time snapshot of the dataset as of `as_of_ns` (nanoseconds since Unix epoch).
+    ///
+    /// Any bar or revision with `known_at_ns > as_of_ns` is excluded (guaranteeing no look-ahead).
+    /// For each `(ts_ns, instrument)`, the latest revision known on or before `as_of_ns` is selected.
+    /// The resulting bars are strictly unique by `(ts_ns, instrument)` and sorted.
+    #[must_use]
+    pub fn as_of(&self, as_of_ns: i64) -> Self {
+        let mut latest_by_key: BTreeMap<(i64, InstrumentId), Bar> = BTreeMap::new();
+        for b in &self.bars {
+            if b.known_at_ns <= as_of_ns {
+                latest_by_key.insert((b.ts_ns, b.instrument), *b);
+            }
+        }
+        let resolved_bars: Vec<Bar> = latest_by_key.into_values().collect();
+        let mut ds = Self {
+            bars: resolved_bars,
+            symbols: self.symbols.clone(),
+            info: self.info.clone(),
+            quality: self.quality.clone(),
+        };
+        if let Some(first) = ds.bars.first() {
+            ds.info.first_ts = first.ts_ns;
+        }
+        if let Some(last) = ds.bars.last() {
+            ds.info.last_ts = last.ts_ns;
+        }
+        ds.info.bar_count = ds.bars.len();
+        ds.info.bars_sha256 = bars_sha256(&ds.bars);
+        ds.info.id = compute_dataset_id(&ds.bars, &ds.symbols);
+        ds
+    }
+
+    /// Appends new bars into this dataset, returning a new dataset with updated lineage.
+    ///
+    /// See [`append_bars`] for details.
+    ///
+    /// # Errors
+    /// [`Error::Data`] if the resulting dataset has no bars, uses unknown instrument IDs,
+    /// or fails bar validation.
+    pub fn append(
+        &self,
+        new_bars: &[Bar],
+        new_symbols: &SymbolTable,
+        note: impl Into<String>,
+    ) -> Result<Self> {
+        append_bars(self, new_bars, new_symbols, note)
+    }
 }
 
 /// Dataset identity: SHA-256 over a version tag, the bars fingerprint and the
@@ -289,8 +350,12 @@ pub fn assess_quality(bars: &[Bar], symbols: &SymbolTable, cfg: &CsvOptions) -> 
         let mut stale_len = 0usize;
         // Daily bars are judged by their trading date (their timestamp is rarely inside the
         // session); weekly or longer bars span several sessions and are not judged.
-        let raw_interval =
-            upper_median(idx.windows(2).map(|w| (bars[w[1]].ts_ns - bars[w[0]].ts_ns) as f64).collect());
+        let interval_deltas: Vec<f64> = idx
+            .windows(2)
+            .map(|w| (bars[w[1]].ts_ns - bars[w[0]].ts_ns) as f64)
+            .filter(|&d| d > 0.0)
+            .collect();
+        let raw_interval = upper_median(interval_deltas);
         let daily = (DAILY_MIN_NS..=DAILY_MAX_NS).contains(&raw_interval);
         let judged = raw_interval <= DAILY_MAX_NS;
         for (k, &bi) in idx.iter().enumerate() {
@@ -420,6 +485,7 @@ pub(crate) const LOW_ALIASES: &[&str] = &["low", "l"];
 pub(crate) const CLOSE_ALIASES: &[&str] = &["close", "c"];
 pub(crate) const VOLUME_ALIASES: &[&str] = &["volume", "vol", "v"];
 pub(crate) const SYMBOL_ALIASES: &[&str] = &["symbol", "ticker", "instrument", "sym"];
+pub const KNOWN_AT_ALIASES: &[&str] = &["known_at", "knownat", "as_of", "revision_date", "updated_at"];
 
 /// The header normalised the way columns are matched (trimmed, lower case).
 pub(crate) fn normalise_header(name: &str) -> String {
@@ -443,6 +509,7 @@ struct Row {
     line: usize,
     sym: u32,
     ts: i64,
+    known_at: i64,
     o: i64,
     h: i64,
     l: i64,
@@ -657,10 +724,13 @@ fn load_rows(
     let col_close = find_column(&header, &opt.close_column, CLOSE_ALIASES, exact);
     let col_volume = find_column(&header, &opt.volume_column, VOLUME_ALIASES, exact);
     let col_symbol = find_column(&header, &opt.symbol_column, SYMBOL_ALIASES, exact);
+    let col_known_at = find_column(&header, &opt.known_at_column, KNOWN_AT_ALIASES, exact);
     // A named optional column that is not in the header is a mistake, not "no such column".
-    for (name, given, found) in
-        [("volume", &opt.volume_column, col_volume), ("symbol", &opt.symbol_column, col_symbol)]
-    {
+    for (name, given, found) in [
+        ("volume", &opt.volume_column, col_volume),
+        ("symbol", &opt.symbol_column, col_symbol),
+        ("known_at", &opt.known_at_column, col_known_at),
+    ] {
         if exact && !given.is_empty() && found.is_none() {
             return Err(Stop::Row(data_err(format!("missing {name} column: {}", given.trim()))));
         }
@@ -730,6 +800,29 @@ fn load_rows(
                 )?;
                 continue;
             };
+            let known_at_ns = if let Some(ck) = col_known_at {
+                let raw_val = field(ck);
+                if let Some(ts_val) = parse_timestamp(raw_val, &opt.time) {
+                    if ts_val.ts_ns < ts.ts_ns {
+                        reject(
+                            &mut rj,
+                            "known_at_before_timestamp",
+                            format!(
+                                "known_at '{}' cannot be earlier than bar timestamp '{}'",
+                                raw_val,
+                                field(col_ts)
+                            ),
+                        )?;
+                        continue;
+                    }
+                    ts_val.ts_ns
+                } else {
+                    reject(&mut rj, "bad_known_at", format!("cannot parse known_at timestamp '{raw_val}'"))?;
+                    continue;
+                }
+            } else {
+                ts.ts_ns
+            };
             let mut nums = [0i64; 5];
             let mut ok = true;
             let mut cols =
@@ -767,7 +860,18 @@ fn load_rows(
                 continue;
             }
             let sym = intern(symbol);
-            rows.push(Row { line: rec.line, sym, ts: ts.ts_ns, o, h, l, c, v, naive: ts.naive });
+            rows.push(Row {
+                line: rec.line,
+                sym,
+                ts: ts.ts_ns,
+                known_at: known_at_ns,
+                o,
+                h,
+                l,
+                c,
+                v,
+                naive: ts.naive,
+            });
         }
     }
     if rows.is_empty() {
@@ -782,7 +886,7 @@ fn load_rows(
     ds.symbols.symbols = sorted.into_iter().map(str::to_string).collect();
     let id_of: Vec<InstrumentId> = names.iter().map(|n| ds.symbols.id(n).expect("symbol in table")).collect();
     let mut order: Vec<usize> = (0..rows.len()).collect();
-    let key = |i: usize| (rows[i].ts, id_of[rows[i].sym as usize]);
+    let key = |i: usize| (rows[i].ts, id_of[rows[i].sym as usize], rows[i].known_at);
     ds.quality.input_was_sorted = order.windows(2).all(|w| key(w[0]) <= key(w[1]));
     order.sort_by_key(|&i| key(i)); // stable
 
@@ -793,7 +897,7 @@ fn load_rows(
         let r = &rows[ri];
         if let Some(pi) = prev {
             let p = &rows[pi];
-            if p.ts == r.ts && p.sym == r.sym {
+            if p.ts == r.ts && p.sym == r.sym && p.known_at == r.known_at {
                 let identical = p.o == r.o && p.h == r.h && p.l == r.l && p.c == r.c && p.v == r.v;
                 if !identical {
                     conflicting += 1;
@@ -813,6 +917,7 @@ fn load_rows(
         }
         ds.bars.push(Bar {
             ts_ns: r.ts,
+            known_at_ns: r.known_at,
             instrument: id_of[r.sym as usize],
             open: Price::from_raw(r.o),
             high: Price::from_raw(r.h),
@@ -917,6 +1022,165 @@ pub fn derive_dataset(parent: &Dataset, bars: Vec<Bar>, note: impl Into<String>)
     info.parent_id.clone_from(&parent.info.id);
     info.note = note.into();
     Ok(Dataset { bars, symbols, info, quality })
+}
+
+/// Appends new bars into an existing dataset, returning a new dataset with updated lineage.
+///
+/// Merges and sorts bars by `(timestamp, instrument, known_at)`.
+///
+/// If incoming bars match an existing bar's `(ts_ns, instrument, known_at_ns)`, the new bar
+/// replaces the old one (updating duplicate or revised bar in-place).
+/// If incoming bars for an existing `(ts_ns, instrument)` have a later `known_at_ns`, both bars
+/// are preserved as point-in-time revisions, maintaining look-ahead-free historical fidelity.
+///
+/// If `new_symbols` introduces new instruments, the symbol table is expanded and existing
+/// instrument IDs are automatically remapped to preserve alphabetical symbol ordering.
+///
+/// # Errors
+/// [`Error::Data`] if the resulting dataset has no bars, uses unknown instrument IDs,
+/// or fails bar validation.
+pub fn append_bars(
+    parent: &Dataset,
+    new_bars: &[Bar],
+    new_symbols: &SymbolTable,
+    note: impl Into<String>,
+) -> Result<Dataset> {
+    append_bars_with_options(parent, new_bars, new_symbols, &CsvOptions::default(), note)
+}
+
+/// Same as [`append_bars`], but allows providing custom [`CsvOptions`] for quality assessment.
+///
+/// # Errors
+/// [`Error::Data`] if the resulting dataset has no bars, uses unknown instrument IDs,
+/// or fails bar validation.
+pub fn append_bars_with_options(
+    parent: &Dataset,
+    new_bars: &[Bar],
+    new_symbols: &SymbolTable,
+    options: &CsvOptions,
+    note: impl Into<String>,
+) -> Result<Dataset> {
+    if parent.bars.is_empty() && new_bars.is_empty() {
+        return Err(data_err("dataset has no bars"));
+    }
+
+    if parent.bars.iter().any(|b| b.instrument as usize >= parent.symbols.symbols.len()) {
+        return Err(data_err("parent bars use an unknown instrument id"));
+    }
+    if new_bars.iter().any(|b| b.instrument as usize >= new_symbols.symbols.len()) {
+        return Err(data_err("new bars use an unknown instrument id"));
+    }
+
+    // 1. Build merged symbol table
+    let mut all_symbols: Vec<String> =
+        parent.symbols.symbols.iter().chain(new_symbols.symbols.iter()).cloned().collect();
+    all_symbols.sort();
+    all_symbols.dedup();
+    let merged_symbols = SymbolTable { symbols: all_symbols };
+
+    // 2. Instrument remapping lookups
+    let parent_map: Vec<InstrumentId> = parent
+        .symbols
+        .symbols
+        .iter()
+        .map(|s| merged_symbols.id(s).expect("symbol in merged table"))
+        .collect();
+
+    let new_map: Vec<InstrumentId> =
+        new_symbols.symbols.iter().map(|s| merged_symbols.id(s).expect("symbol in merged table")).collect();
+
+    // 3. Remap parent bars
+    let parent_remapped: Vec<Bar> = parent
+        .bars
+        .iter()
+        .map(|b| {
+            let mut bar = *b;
+            bar.instrument = parent_map[bar.instrument as usize];
+            bar
+        })
+        .collect();
+
+    // 4. Remap and sort new bars
+    let mut new_remapped: Vec<Bar> = new_bars
+        .iter()
+        .map(|b| {
+            let mut bar = *b;
+            bar.instrument = new_map[bar.instrument as usize];
+            bar
+        })
+        .collect();
+
+    new_remapped.sort_by(|a, b| {
+        a.ts_ns
+            .cmp(&b.ts_ns)
+            .then_with(|| a.instrument.cmp(&b.instrument))
+            .then_with(|| a.known_at_ns.cmp(&b.known_at_ns))
+    });
+
+    // Deduplicate within new_remapped (latest in slice wins)
+    let mut unique_new: Vec<Bar> = Vec::with_capacity(new_remapped.len());
+    for bar in new_remapped {
+        if let Some(last) = unique_new.last_mut() {
+            if last.ts_ns == bar.ts_ns
+                && last.instrument == bar.instrument
+                && last.known_at_ns == bar.known_at_ns
+            {
+                *last = bar;
+                continue;
+            }
+        }
+        unique_new.push(bar);
+    }
+
+    // 5. 2-way merge of parent_remapped and unique_new
+    let mut merged = Vec::with_capacity(parent_remapped.len() + unique_new.len());
+    let mut i = 0;
+    let mut j = 0;
+
+    while i < parent_remapped.len() && j < unique_new.len() {
+        let p = &parent_remapped[i];
+        let n = &unique_new[j];
+
+        let p_key = (p.ts_ns, p.instrument, p.known_at_ns);
+        let n_key = (n.ts_ns, n.instrument, n.known_at_ns);
+
+        match p_key.cmp(&n_key) {
+            std::cmp::Ordering::Less => {
+                merged.push(*p);
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                merged.push(*n);
+                j += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                // Same timestamp, instrument, and known_at: incoming bar replaces old bar
+                merged.push(*n);
+                i += 1;
+                j += 1;
+            }
+        }
+    }
+
+    if i < parent_remapped.len() {
+        merged.extend_from_slice(&parent_remapped[i..]);
+    }
+    if j < unique_new.len() {
+        merged.extend_from_slice(&unique_new[j..]);
+    }
+
+    // 6. Validation
+    if let Some(err) = validate_bars(&merged) {
+        return Err(data_err(format!("merged bars are invalid: {err}")));
+    }
+
+    // 7. Quality and Metadata
+    let quality = assess_quality(&merged, &merged_symbols, options);
+    let mut info = identify(&merged, &merged_symbols);
+    info.parent_id.clone_from(&parent.info.id);
+    info.note = note.into();
+
+    Ok(Dataset { bars: merged, symbols: merged_symbols, info, quality })
 }
 
 /// Human-readable quality report.

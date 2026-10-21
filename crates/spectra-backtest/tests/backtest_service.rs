@@ -24,6 +24,7 @@ fn demo_bars(n: usize, seed: u64) -> Vec<Bar> {
             px = close;
             Bar {
                 ts_ns: (i as i64 + 1) * 86_400_000_000_000,
+                known_at_ns: (i as i64 + 1) * 86_400_000_000_000,
                 instrument: 1,
                 open: Price::from_raw(open),
                 high: Price::from_raw(high),
@@ -49,6 +50,7 @@ fn multi_bars(n: usize, instruments: u32, seed: u64) -> Vec<Bar> {
             px[k] = close;
             out.push(Bar {
                 ts_ns: (i as i64 + 1) * 3_600_000_000_000,
+                known_at_ns: (i as i64 + 1) * 3_600_000_000_000,
                 instrument: id + 1,
                 open: Price::from_raw(open),
                 high: Price::from_raw(open.max(close) + rng.range(0, SCALE / 4)),
@@ -505,6 +507,7 @@ fn summary_writes_null_for_non_finite_ratios() {
             let px = Price::from_units(100 + i).unwrap();
             Bar {
                 ts_ns: (i + 1) * 1_000,
+                known_at_ns: (i + 1) * 1_000,
                 instrument: 1,
                 open: px,
                 high: px,

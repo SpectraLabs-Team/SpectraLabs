@@ -22,6 +22,7 @@ fn bars(rows: &[(f64, f64, f64, f64, f64)]) -> Vec<Bar> {
         .enumerate()
         .map(|(i, &(o, h, l, c, v))| Bar {
             ts_ns: (i as i64 + 1) * DAY,
+            known_at_ns: (i as i64 + 1) * DAY,
             instrument: 1,
             open: p(o),
             high: p(h),

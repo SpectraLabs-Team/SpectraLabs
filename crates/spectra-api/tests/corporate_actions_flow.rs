@@ -211,6 +211,7 @@ async fn derive_dataset_flow() {
     let bars = vec![
         Bar {
             ts_ns: 1_704_153_600_000_000_000, // 2024-01-02
+            known_at_ns: 1_704_153_600_000_000_000,
             instrument: 0,
             open: p(100),
             high: p(105),
@@ -220,6 +221,7 @@ async fn derive_dataset_flow() {
         },
         Bar {
             ts_ns: 1_704_240_000_000_000_000, // 2024-01-03
+            known_at_ns: 1_704_240_000_000_000_000,
             instrument: 0,
             open: p(50),
             high: p(52),

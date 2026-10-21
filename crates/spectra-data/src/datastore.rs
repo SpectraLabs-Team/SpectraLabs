@@ -26,7 +26,9 @@ use crate::dataset::{assess_quality, compute_dataset_id, CsvOptions, Dataset};
 use crate::time::format_timestamp;
 
 const MAGIC: &[u8; 8] = b"QFBARS01";
+const MAGIC_V2: &[u8; 8] = b"QFBARS02";
 const RECORD: usize = 8 + 4 + 5 * 8;
+const RECORD_V2: usize = 8 + 8 + 4 + 5 * 8;
 
 fn data_err(msg: impl Into<String>) -> Error {
     Error::Data(msg.into())
@@ -172,8 +174,13 @@ fn write_file_atomic(path: &Path, data: &[u8]) -> Result<()> {
 
 /// The binary `bars.qfb` image of a dataset (exposed for parity tests).
 pub fn encode_dataset(d: &Dataset) -> Vec<u8> {
+    let has_pit = d.bars.iter().any(|b| b.known_at_ns != b.ts_ns);
     let mut w = Writer::default();
-    w.0.extend_from_slice(MAGIC);
+    if has_pit {
+        w.0.extend_from_slice(MAGIC_V2);
+    } else {
+        w.0.extend_from_slice(MAGIC);
+    }
     w.u64(d.bars.len() as u64);
     w.u32(d.symbols.symbols.len() as u32);
     for s in &d.symbols.symbols {
@@ -188,6 +195,9 @@ pub fn encode_dataset(d: &Dataset) -> Vec<u8> {
     w.u64(d.quality.rows_rejected as u64);
     for b in &d.bars {
         w.i64(b.ts_ns);
+        if has_pit {
+            w.i64(b.known_at_ns);
+        }
         w.u32(b.instrument);
         w.i64(b.open.raw());
         w.i64(b.high.raw());
@@ -221,9 +231,16 @@ pub fn decode_dataset(raw: &[u8], id: &str) -> Result<Dataset> {
     }
 
     let mut r = Reader { p: &raw[..body], pos: 0 };
-    if r.take(8)? != MAGIC {
+    let magic = r.take(8)?;
+    let is_v2 = if magic == MAGIC_V2 {
+        true
+    } else if magic == MAGIC {
+        false
+    } else {
         return Err(data_err("not a QuantForge dataset file"));
-    }
+    };
+    let record_size = if is_v2 { RECORD_V2 } else { RECORD };
+
     let mut d = Dataset::default();
     let n_bars = r.u64()?;
     let n_symbols = r.u32()?;
@@ -238,13 +255,16 @@ pub fn decode_dataset(raw: &[u8], id: &str) -> Result<Dataset> {
     let rows_total = r.u64()?;
     let rows_rejected = r.u64()?;
 
-    if n_bars > (r.remaining() / RECORD) as u64 || n_bars as usize * RECORD != r.remaining() {
+    if n_bars > (r.remaining() / record_size) as u64 || n_bars as usize * record_size != r.remaining() {
         return Err(data_err("dataset file has an inconsistent record count"));
     }
     d.bars.reserve(n_bars as usize);
     for _ in 0..n_bars {
+        let ts_ns = r.i64()?;
+        let known_at_ns = if is_v2 { r.i64()? } else { ts_ns };
         d.bars.push(Bar {
-            ts_ns: r.i64()?,
+            ts_ns,
+            known_at_ns,
             instrument: r.u32()?,
             open: Price::from_raw(r.i64()?),
             high: Price::from_raw(r.i64()?),

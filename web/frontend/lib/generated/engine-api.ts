@@ -303,6 +303,77 @@ export interface paths {
         patch: operations["update_dataset"];
         trace?: never;
     };
+    "/api/v1/datasets/{id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Trigger a manual refresh for a dataset (editor only). */
+        post: operations["trigger_refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/datasets/{id}/refresh-schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the refresh schedule for a dataset. */
+        get: operations["get_refresh_schedule"];
+        put?: never;
+        /** Create or update a dataset refresh schedule (editor only). */
+        post: operations["upsert_refresh_schedule"];
+        /** Delete a dataset refresh schedule (editor only). */
+        delete: operations["delete_refresh_schedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delistings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all instrument delistings for the active workspace. */
+        get: operations["list_delistings"];
+        put?: never;
+        /** Record an instrument delisting. */
+        post: operations["create_delisting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delistings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a delisting record. */
+        delete: operations["delete_delisting"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/experiments": {
         parameters: {
             query?: never;
@@ -432,6 +503,42 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/providers/configs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List provider configurations for the active workspace. */
+        get: operations["list_provider_configs"];
+        put?: never;
+        /** Create or update a provider configuration (editor only). */
+        post: operations["upsert_provider_config"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/providers/configs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a provider configuration by id. */
+        get: operations["get_provider_config"];
+        put?: never;
+        post?: never;
+        /** Delete a provider configuration (editor only). */
+        delete: operations["delete_provider_config"];
         options?: never;
         head?: never;
         patch?: never;
@@ -619,6 +726,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/symbol-changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List all symbol changes for the active workspace. */
+        get: operations["list_symbol_changes"];
+        put?: never;
+        /** Record a symbol change. */
+        post: operations["create_symbol_change"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/symbol-changes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a symbol change. */
+        delete: operations["delete_symbol_change"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/universes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List universes in the active workspace. */
+        get: operations["list_universes"];
+        put?: never;
+        /** Create a new universe. */
+        post: operations["create_universe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/universes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fetch a universe by id. */
+        get: operations["get_universe"];
+        put?: never;
+        post?: never;
+        /** Delete a universe. */
+        delete: operations["delete_universe"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/universes/{id}/as-of": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Point-in-time resolution of universe members as of date `as_of`. */
+        get: operations["resolve_universe_as_of"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/universes/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List constituent members of a universe. */
+        get: operations["list_universe_members"];
+        put?: never;
+        /** Add a member symbol to a universe. */
+        post: operations["add_universe_member"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/uploads": {
         parameters: {
             query?: never;
@@ -761,6 +974,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description `POST /api/v1/universes/{id}/members` request body. */
+        AddUniverseMemberRequest: {
+            /** @description When added to the universe (RFC 3339 or YYYY-MM-DD; defaults to now). */
+            added_at?: string | null;
+            /** @description Member symbol. */
+            symbol: string;
+        };
         /** @description One backtest in a list: what was asked for, its state and headline numbers. */
         BacktestListItem: {
             /** @description A cancel was asked for while it ran. */
@@ -1038,6 +1258,8 @@ export interface components {
         };
         /** @description `POST /api/v1/backtests` body: the `backtest` job payload, plus a priority. */
         CreateBacktest: {
+            /** @description Optional point-in-time timestamp (RFC 3339 string or integer nanoseconds). */
+            as_of?: string | null;
             /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
             config?: Record<string, never> | null;
             /** @description Splits and dividends to apply during the run, on unadjusted prices:
@@ -1074,6 +1296,15 @@ export interface components {
             description?: string | null;
             /** @description Action set name. */
             name: string;
+        };
+        /** @description `POST /api/v1/delistings` request body. */
+        CreateDelistingRequest: {
+            /** @description Delisted timestamp or date (RFC 3339 or YYYY-MM-DD). */
+            delisted_at: string;
+            /** @description Optional reason or notes. */
+            reason?: string | null;
+            /** @description Instrument ticker symbol. */
+            symbol: string;
         };
         CreateExperiment: {
             hypothesis?: string;
@@ -1130,6 +1361,26 @@ export interface components {
              * @description The file's size in bytes.
              */
             size: number;
+        };
+        /** @description `POST /api/v1/symbol-changes` request body. */
+        CreateSymbolChangeRequest: {
+            /** @description Effective timestamp or date (RFC 3339 or YYYY-MM-DD). */
+            effective_date: string;
+            /** @description New ticker symbol (e.g. "META"). */
+            new_symbol: string;
+            /** @description Optional notes or reason for change. */
+            notes?: string | null;
+            /** @description Previous ticker symbol (e.g. "FB"). */
+            old_symbol: string;
+        };
+        /** @description `POST /api/v1/universes` request body. */
+        CreateUniverseRequest: {
+            /** @description Optional description. */
+            description?: string | null;
+            /** @description Universe name. */
+            name: string;
+            /** @description Optional initial member symbols. */
+            symbols?: string[];
         };
         /** @description A dataset and its versions. */
         DatasetDetailView: {
@@ -1253,12 +1504,44 @@ export interface components {
             /** @description True when deleted. */
             deleted: boolean;
         };
+        /** @description Result of a delete operation. */
+        DeletedItemView: {
+            /** @description True when the item was deleted. */
+            deleted: boolean;
+        };
         /** @description What deleting a version did. */
         DeletedVersionView: {
             /** @description It was the dataset's last version, so the dataset was deleted too. */
             dataset_deleted: boolean;
             /** @description The version was deleted. */
             deleted: boolean;
+        };
+        /** @description List of delistings. */
+        DelistingListView: {
+            /** @description Items. */
+            items: components["schemas"]["DelistingView"][];
+        };
+        /** @description A delisting view. */
+        DelistingView: {
+            /**
+             * Format: date-time
+             * @description When recorded.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Delisted timestamp.
+             */
+            delisted_at: string;
+            /**
+             * Format: uuid
+             * @description Delisting record id.
+             */
+            id: string;
+            /** @description Reason. */
+            reason: string;
+            /** @description Symbol. */
+            symbol: string;
         };
         /** @description `POST /api/v1/datasets/versions/{id}/derive` body: corporate actions derivation options. */
         DeriveDatasetRequest: {
@@ -1455,6 +1738,40 @@ export interface components {
             timestamp: string;
             volume: string;
         };
+        /** @description List of provider configurations. */
+        ProviderConfigListView: {
+            /** @description Config items. */
+            items: components["schemas"]["ProviderConfigView"][];
+        };
+        /** @description Provider configuration view. */
+        ProviderConfigView: {
+            /**
+             * Format: date-time
+             * @description When created.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Config id.
+             */
+            id: string;
+            /** @description Name. */
+            name: string;
+            /** @description Provider kind. */
+            provider: string;
+            /**
+             * Format: uuid
+             * @description Vault secret id, if configured.
+             */
+            secret_id?: string | null;
+            /** @description Settings. */
+            settings: unknown;
+            /**
+             * Format: date-time
+             * @description When last updated.
+             */
+            updated_at: string;
+        };
         /** @description A dataset's quality report (also what a dataset version stores). */
         QualityReport: {
             /** @description Fingerprint of the bars (recorded in backtest results). */
@@ -1528,6 +1845,72 @@ export interface components {
              * @description Frozen bars in a row that count as a stale run (default 5).
              */
             stale_run?: number | null;
+        };
+        /** @description Refresh schedule view. */
+        RefreshScheduleView: {
+            /**
+             * Format: date-time
+             * @description When created.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Target dataset id.
+             */
+            dataset_id: string;
+            /** @description Enabled. */
+            enabled: boolean;
+            /**
+             * Format: uuid
+             * @description Schedule id.
+             */
+            id: string;
+            /**
+             * Format: int64
+             * @description Interval in seconds.
+             */
+            interval_seconds: number;
+            /**
+             * Format: date-time
+             * @description When last run.
+             */
+            last_run_at?: string | null;
+            /**
+             * Format: int32
+             * @description Lookback bars.
+             */
+            lookback_bars: number;
+            /**
+             * Format: date-time
+             * @description When next run is scheduled.
+             */
+            next_run_at: string;
+            /**
+             * Format: uuid
+             * @description Associated provider config id.
+             */
+            provider_config_id: string;
+            /** @description Symbols. */
+            symbols: string[];
+            /**
+             * Format: date-time
+             * @description When last updated.
+             */
+            updated_at: string;
+        };
+        /** @description A resolved universe constituent. */
+        ResolvedUniverseMemberView: {
+            /**
+             * Format: date-time
+             * @description When delisted, if delisted at all.
+             */
+            delisted_at?: string | null;
+            /** @description True if active on date D (not delisted prior to D). */
+            is_active: boolean;
+            /** @description Resolved ticker symbol as of date D. */
+            resolved_symbol: string;
+            /** @description Original constituent symbol. */
+            symbol: string;
         };
         /** @description `POST /api/v1/risk` body. */
         RiskRequest: {
@@ -1649,6 +2032,35 @@ export interface components {
             /** @description Suggested timezone identifier (e.g. `America/New_York`). */
             timezone?: string | null;
         };
+        /** @description List of symbol changes. */
+        SymbolChangeListView: {
+            /** @description Items. */
+            items: components["schemas"]["SymbolChangeView"][];
+        };
+        /** @description A symbol change view. */
+        SymbolChangeView: {
+            /**
+             * Format: date-time
+             * @description When recorded.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description Effective date.
+             */
+            effective_date: string;
+            /**
+             * Format: uuid
+             * @description Change id.
+             */
+            id: string;
+            /** @description New symbol. */
+            new_symbol: string;
+            /** @description Notes. */
+            notes: string;
+            /** @description Previous symbol. */
+            old_symbol: string;
+        };
         /** @description Quality checks for one symbol. */
         SymbolStats: {
             /**
@@ -1703,6 +2115,120 @@ export interface components {
              */
             zero_volume_bars: number;
         };
+        /** @description Request to trigger a manual refresh. */
+        TriggerRefreshRequest: {
+            /**
+             * Format: int32
+             * @description Optional lookback bars override.
+             */
+            lookback_bars?: number | null;
+            /**
+             * Format: uuid
+             * @description Optional provider config id override.
+             */
+            provider_config_id?: string | null;
+            /** @description Optional symbols override. */
+            symbols?: string[] | null;
+        };
+        /** @description Response returned when a refresh job is queued. */
+        TriggerRefreshResponse: {
+            /**
+             * Format: uuid
+             * @description Queued job id.
+             */
+            job_id: string;
+            /** @description Status ("queued"). */
+            status: string;
+        };
+        /** @description Point-in-time resolved universe view. */
+        UniverseAsOfView: {
+            /**
+             * Format: date-time
+             * @description Snapshot timestamp.
+             */
+            as_of: string;
+            /** @description Constituents. */
+            items: components["schemas"]["ResolvedUniverseMemberView"][];
+            /**
+             * Format: uuid
+             * @description Universe id.
+             */
+            universe_id: string;
+        };
+        /** @description Universe detail view. */
+        UniverseDetailView: {
+            /**
+             * Format: date-time
+             * @description When created.
+             */
+            created_at: string;
+            /** @description Description. */
+            description: string;
+            /**
+             * Format: uuid
+             * @description Universe id.
+             */
+            id: string;
+            /** @description Name. */
+            name: string;
+        };
+        /** @description List of universes. */
+        UniverseListView: {
+            /** @description Items. */
+            items: components["schemas"]["UniverseSummaryView"][];
+        };
+        /** @description List of universe members. */
+        UniverseMemberListView: {
+            /** @description Items. */
+            items: components["schemas"]["UniverseMemberView"][];
+        };
+        /** @description Member row view. */
+        UniverseMemberView: {
+            /**
+             * Format: date-time
+             * @description Added at.
+             */
+            added_at: string;
+            /**
+             * Format: date-time
+             * @description When recorded.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Record id.
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description Removed at.
+             */
+            removed_at?: string | null;
+            /** @description Symbol. */
+            symbol: string;
+        };
+        /** @description Universe summary view. */
+        UniverseSummaryView: {
+            /**
+             * Format: date-time
+             * @description When created.
+             */
+            created_at: string;
+            /** @description Description. */
+            description: string;
+            /**
+             * Format: uuid
+             * @description Universe id.
+             */
+            id: string;
+            /**
+             * Format: int64
+             * @description Member count.
+             */
+            member_count: number;
+            /** @description Name. */
+            name: string;
+        };
         /** @description `PATCH /api/v1/datasets/{id}` body: what to change. */
         UpdateDataset: {
             /** @description New description (at most 2000 characters; empty clears it). */
@@ -1749,6 +2275,42 @@ export interface components {
              * @description Bytes.
              */
             size: number;
+        };
+        /** @description Request to create or update a provider configuration. */
+        UpsertProviderConfigRequest: {
+            /** @description Provider configuration name (e.g. "Alpaca Paper Equities"). */
+            name: string;
+            /** @description Provider kind ("fake", "alpaca"). */
+            provider: string;
+            /**
+             * Format: uuid
+             * @description Optional vault secret id for API credentials.
+             */
+            secret_id?: string | null;
+            /** @description Provider settings (feed, endpoints, etc.). */
+            settings?: unknown;
+        };
+        /** @description Request to create or update a dataset refresh schedule. */
+        UpsertRefreshScheduleRequest: {
+            /** @description Whether schedule is enabled (default true). */
+            enabled?: boolean;
+            /**
+             * Format: int64
+             * @description Interval in seconds between refreshes (minimum 60s, default 86400s).
+             */
+            interval_seconds?: number;
+            /**
+             * Format: int32
+             * @description Number of bars to refetch backward for revision overlap detection (default 5).
+             */
+            lookback_bars?: number;
+            /**
+             * Format: uuid
+             * @description Associated provider config id.
+             */
+            provider_config_id: string;
+            /** @description Symbols to refresh. */
+            symbols: string[];
         };
         /** @description A dataset version in full. */
         VersionDetailView: {
@@ -2525,6 +3087,8 @@ export interface operations {
                 to: string | null;
                 /** @description Most points to return, 10 to 5000 (default 1000). */
                 points: number | null;
+                /** @description Point-in-time date or RFC 3339 timestamp (e.g. `2024-01-05`). Revisions after this date are ignored. */
+                as_of: string | null;
             };
             cookie?: never;
         };
@@ -2713,6 +3277,242 @@ export interface operations {
             };
             /** @description Every invalid field (`details.errors`) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    trigger_refresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerRefreshRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerRefreshResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Dataset or schedule not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_refresh_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshScheduleView"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    upsert_refresh_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertRefreshScheduleRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshScheduleView"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_refresh_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedItemView"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_delistings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelistingListView"];
+                };
+            };
+        };
+    };
+    create_delisting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDelistingRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelistingView"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Validation errors */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_delisting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Delisting record id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedItemView"];
+                };
+            };
+            /** @description Not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3000,6 +3800,127 @@ export interface operations {
         responses: {
             /** @description Metric names */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_provider_configs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderConfigListView"];
+                };
+            };
+        };
+    };
+    upsert_provider_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertProviderConfigRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderConfigView"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_provider_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider config id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderConfigView"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_provider_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider config id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedItemView"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3319,6 +4240,336 @@ export interface operations {
                 };
                 content?: never;
             };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_symbol_changes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SymbolChangeListView"];
+                };
+            };
+        };
+    };
+    create_symbol_change: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSymbolChangeRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SymbolChangeView"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Validation errors */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_symbol_change: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Symbol change id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedItemView"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_universes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseListView"];
+                };
+            };
+        };
+    };
+    create_universe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateUniverseRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseDetailView"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Validation errors */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_universe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Universe id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseDetailView"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_universe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Universe id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedItemView"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    resolve_universe_as_of: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Universe id */
+                id: string;
+                /** @description Point-in-time snapshot timestamp or date (RFC 3339 or YYYY-MM-DD). Defaults to now. */
+                as_of: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseAsOfView"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid timestamp */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_universe_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Universe id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseMemberListView"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    add_universe_member: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Universe id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddUniverseMemberRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UniverseMemberView"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Validation errors */
             422: {
                 headers: {
                     [name: string]: unknown;

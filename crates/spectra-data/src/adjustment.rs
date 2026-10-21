@@ -263,6 +263,7 @@ pub fn adjust_symbol_bars(bars: &[Bar], actions: &[CorporateAction]) -> Result<V
 
         adjusted_bars.push(Bar {
             ts_ns: bar.ts_ns,
+            known_at_ns: bar.known_at_ns,
             instrument: bar.instrument,
             open,
             high,
@@ -375,6 +376,7 @@ mod tests {
         let bars = vec![
             Bar {
                 ts_ns: 1_000,
+                known_at_ns: 1_000,
                 instrument: 0,
                 open: p(100),
                 high: p(102),
@@ -384,6 +386,7 @@ mod tests {
             },
             Bar {
                 ts_ns: 2_000,
+                known_at_ns: 2_000,
                 instrument: 0,
                 open: p(100),
                 high: p(105),
@@ -393,6 +396,7 @@ mod tests {
             },
             Bar {
                 ts_ns: 3_000,
+                known_at_ns: 3_000,
                 instrument: 0,
                 open: p(51),
                 high: p(52),
@@ -438,6 +442,7 @@ mod tests {
         let bars = vec![
             Bar {
                 ts_ns: 1_000,
+                known_at_ns: 1_000,
                 instrument: 0,
                 open: p(100),
                 high: p(105),
@@ -447,6 +452,7 @@ mod tests {
             },
             Bar {
                 ts_ns: 2_000,
+                known_at_ns: 2_000,
                 instrument: 0,
                 open: p(98),
                 high: p(100),
@@ -488,6 +494,7 @@ mod tests {
             let offset = (day % 3) - 1; // -1, 0, 1 price oscillation so MAD > 0
             bars.push(Bar {
                 ts_ns: day * 86_400 * 1_000_000_000,
+                known_at_ns: day * 86_400 * 1_000_000_000,
                 instrument: 0,
                 open: p(400 + offset),
                 high: p(405 + offset),
@@ -500,6 +507,7 @@ mod tests {
             let offset = (day % 3) - 1;
             bars.push(Bar {
                 ts_ns: day * 86_400 * 1_000_000_000,
+                known_at_ns: day * 86_400 * 1_000_000_000,
                 instrument: 0,
                 open: p(100 + offset),
                 high: p(102 + offset),

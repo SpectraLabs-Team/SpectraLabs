@@ -748,6 +748,48 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.minimumRole(routes['api/v1/corporate-actions'], 'POST'), 'editor');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/corporate-actions/{id}'], 'GET'), 'viewer');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/corporate-actions/{id}'], 'DELETE'), 'editor');
+  // Symbol changes, delistings & survivorship-free universes (M1b task 12)
+  const scId = '0192f3a4-0000-7000-8000-00000000000c';
+  assert.equal(engineRoutes.routePolicyKey('api/v1/symbol-changes'), 'api/v1/symbol-changes');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/symbol-changes/${scId}`), 'api/v1/symbol-changes/{id}');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/symbol-changes'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/symbol-changes'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/symbol-changes/{id}'], 'DELETE'), 'editor');
+
+  const delId = '0192f3a4-0000-7000-8000-00000000000d';
+  assert.equal(engineRoutes.routePolicyKey('api/v1/delistings'), 'api/v1/delistings');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/delistings/${delId}`), 'api/v1/delistings/{id}');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/delistings'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/delistings'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/delistings/{id}'], 'DELETE'), 'editor');
+
+  const uId = '0192f3a4-0000-7000-8000-00000000000e';
+  assert.equal(engineRoutes.routePolicyKey('api/v1/universes'), 'api/v1/universes');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/universes/${uId}`), 'api/v1/universes/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/universes/${uId}/members`), 'api/v1/universes/{id}/members');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/universes/${uId}/as-of`), 'api/v1/universes/{id}/as-of');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/universes'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/universes'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/universes/{id}'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/universes/{id}'], 'DELETE'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/universes/{id}/members'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/universes/{id}/members'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/universes/{id}/as-of'], 'GET'), 'viewer');
+
+  const cfgId = '0192f3a4-0000-7000-8000-00000000000f';
+  assert.equal(engineRoutes.routePolicyKey('api/v1/providers/configs'), 'api/v1/providers/configs');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/providers/configs/${cfgId}`), 'api/v1/providers/configs/{id}');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/providers/configs'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/providers/configs'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/providers/configs/{id}'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/providers/configs/{id}'], 'DELETE'), 'editor');
+
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/${ds}/refresh-schedule`), 'api/v1/datasets/{id}/refresh-schedule');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/${ds}/refresh`), 'api/v1/datasets/{id}/refresh');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/{id}/refresh-schedule'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/{id}/refresh-schedule'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/{id}/refresh-schedule'], 'DELETE'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/{id}/refresh'], 'POST'), 'editor');
   // Resumable uploads (M1b): every step needs editor except reading the limits.
   const sid = '0192f3a4-0000-7000-8000-00000000000a';
   assert.equal(engineRoutes.routePolicyKey(`api/v1/uploads/sessions/${sid}`), 'api/v1/uploads/sessions/{id}');

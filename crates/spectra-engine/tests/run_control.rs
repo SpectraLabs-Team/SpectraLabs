@@ -24,6 +24,7 @@ fn bars(n: usize, instruments: u32, seed: u64) -> Vec<Bar> {
             px[id as usize] = close;
             out.push(Bar {
                 ts_ns: (i as i64 + 1) * 86_400_000_000_000,
+                known_at_ns: (i as i64 + 1) * 86_400_000_000_000,
                 instrument: id + 1,
                 open: Price::from_raw(open),
                 high: Price::from_raw(high),

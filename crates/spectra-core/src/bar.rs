@@ -9,6 +9,9 @@ use crate::sha256::Sha256;
 pub struct Bar {
     /// Bar start time, nanoseconds since the Unix epoch (UTC).
     pub ts_ns: i64,
+    /// Time when this bar's values became known (nanoseconds since Unix epoch UTC).
+    /// Defaults to `ts_ns` for standard historical bars without revisions.
+    pub known_at_ns: i64,
     /// Instrument id (index into the dataset's symbol table).
     pub instrument: InstrumentId,
     /// Open price.
@@ -23,10 +26,40 @@ pub struct Bar {
     pub volume: Qty,
 }
 
+impl Bar {
+    /// Constructs a standard bar where `known_at_ns == ts_ns`.
+    pub const fn new(
+        ts_ns: i64,
+        instrument: InstrumentId,
+        open: Price,
+        high: Price,
+        low: Price,
+        close: Price,
+        volume: Qty,
+    ) -> Self {
+        Self { ts_ns, known_at_ns: ts_ns, instrument, open, high, low, close, volume }
+    }
+
+    /// Constructs a bar with an explicit `known_at_ns`.
+    pub const fn with_known_at(
+        ts_ns: i64,
+        known_at_ns: i64,
+        instrument: InstrumentId,
+        open: Price,
+        high: Price,
+        low: Price,
+        close: Price,
+        volume: Qty,
+    ) -> Self {
+        Self { ts_ns, known_at_ns, instrument, open, high, low, close, volume }
+    }
+}
+
 /// Checks that bars are usable by the backtester:
-///  * strictly increasing by (timestamp, instrument), so no duplicates
+///  * strictly increasing by (timestamp, instrument), or with increasing `known_at_ns` for revisions
 ///  * all prices > 0 and low <= open, close <= high
 ///  * volume >= 0
+///  * `known_at_ns >= ts_ns` (values cannot be known before the bar occurs)
 ///
 /// Returns `None` when valid, otherwise a description of the first problem.
 pub fn validate_bars(bars: &[Bar]) -> Option<String> {
@@ -41,13 +74,21 @@ pub fn validate_bars(bars: &[Bar]) -> Option<String> {
         if b.volume.raw() < 0 {
             return Some(where_ + "negative volume");
         }
+        if b.known_at_ns < b.ts_ns {
+            return Some(where_ + "known_at cannot be earlier than timestamp");
+        }
         if i > 0 {
             let p = &bars[i - 1];
             if b.ts_ns < p.ts_ns || (b.ts_ns == p.ts_ns && b.instrument < p.instrument) {
                 return Some(where_ + "bars are not sorted by (timestamp, instrument)");
             }
             if b.ts_ns == p.ts_ns && b.instrument == p.instrument {
-                return Some(where_ + "duplicate bar for the same timestamp and instrument");
+                if b.known_at_ns == p.known_at_ns {
+                    return Some(where_ + "duplicate bar for the same timestamp and instrument");
+                }
+                if b.known_at_ns < p.known_at_ns {
+                    return Some(where_ + "bars with revisions must be sorted by known_at");
+                }
             }
         }
     }
@@ -91,6 +132,7 @@ mod tests {
     fn bar(ts: i64, id: InstrumentId, o: i64, h: i64, l: i64, c: i64) -> Bar {
         Bar {
             ts_ns: ts,
+            known_at_ns: ts,
             instrument: id,
             open: Price::from_raw(o),
             high: Price::from_raw(h),
@@ -114,6 +156,44 @@ mod tests {
         let mut neg = bar(1, 0, 10, 12, 9, 11);
         neg.volume = Qty::from_raw(-1);
         assert!(validate_bars(&[neg]).unwrap().contains("negative volume"));
+
+        let mut early_known = bar(100, 0, 10, 12, 9, 11);
+        early_known.known_at_ns = 90;
+        assert!(validate_bars(&[early_known]).unwrap().contains("known_at cannot be earlier"));
+
+        let b1 = Bar::with_known_at(
+            100,
+            100,
+            0,
+            Price::from_raw(10),
+            Price::from_raw(12),
+            Price::from_raw(9),
+            Price::from_raw(11),
+            Qty::from_raw(1),
+        );
+        let b2_rev = Bar::with_known_at(
+            100,
+            200,
+            0,
+            Price::from_raw(10),
+            Price::from_raw(13),
+            Price::from_raw(9),
+            Price::from_raw(12),
+            Qty::from_raw(2),
+        );
+        assert_eq!(validate_bars(&[b1, b2_rev]), None, "valid revision with known_at > ts_ns is accepted");
+
+        let b2_bad_order = Bar::with_known_at(
+            100,
+            50,
+            0,
+            Price::from_raw(10),
+            Price::from_raw(13),
+            Price::from_raw(9),
+            Price::from_raw(12),
+            Qty::from_raw(2),
+        );
+        assert!(validate_bars(&[b1, b2_bad_order]).unwrap().contains("known_at"));
     }
 
     #[test]

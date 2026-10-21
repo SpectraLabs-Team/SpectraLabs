@@ -69,6 +69,20 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   // Corporate actions & backward adjustments (M1b)
   'api/v1/corporate-actions': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/corporate-actions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
+  // Symbol changes, delistings & survivorship-free universes (M1b task 12)
+  'api/v1/symbol-changes': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/symbol-changes/{id}': { method: 'DELETE', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/delistings': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/delistings/{id}': { method: 'DELETE', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/universes': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/universes/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/universes/{id}/members': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/universes/{id}/as-of': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  // Market data providers & automated refresh schedules (M1b task 13)
+  'api/v1/providers/configs': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/providers/configs/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/datasets/{id}/refresh-schedule': { method: ['GET', 'POST', 'DELETE'], minRole: 'viewer', methodRoles: { POST: 'editor', DELETE: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/datasets/{id}/refresh': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/calendars': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/strategies/builtin': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
 };
@@ -108,6 +122,13 @@ export function routePolicyKey(path: string): string {
   const session = /^api\/v1\/uploads\/sessions\/[0-9a-f-]{36}(\/complete)?$/i.exec(path);
   if (session) return `api/v1/uploads/sessions/{id}${session[1] ?? ''}`;
   if (/^api\/v1\/corporate-actions\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/corporate-actions/{id}';
+  if (/^api\/v1\/symbol-changes\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/symbol-changes/{id}';
+  if (/^api\/v1\/delistings\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/delistings/{id}';
+  if (/^api\/v1\/providers\/configs\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/providers/configs/{id}';
+  const refresh = /^api\/v1\/datasets\/[0-9a-f-]{36}(\/refresh-schedule|\/refresh)?$/i.exec(path);
+  if (refresh && refresh[1]) return `api/v1/datasets/{id}${refresh[1]}`;
+  const universe = /^api\/v1\/universes\/[0-9a-f-]{36}(\/members|\/as-of)?$/i.exec(path);
+  if (universe) return `api/v1/universes/{id}${universe[1] ?? ''}`;
   const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars|\/derive)?$/i.exec(path);
   if (version) return `api/v1/datasets/versions/{id}${version[1] ?? ''}`;
   if (/^api\/v1\/datasets\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/datasets/{id}';

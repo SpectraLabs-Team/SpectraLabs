@@ -236,8 +236,12 @@ pub const JOB_KINDS: [&str; 4] = ["backtest", "benchmark", "risk", "stress"];
 /// `POST /api/v1/datasets/ingest`.
 pub const INGEST_JOB_KIND: &str = "ingest";
 
+/// An automated or manual dataset refresh from a market data provider (M1b task 13).
+pub const PROVIDER_REFRESH_JOB_KIND: &str = crate::providers::runner::PROVIDER_REFRESH_JOB_KIND;
+
 /// Job kinds the background worker runs.
-pub const WORKER_KINDS: [&str; 5] = ["backtest", "benchmark", "risk", "stress", INGEST_JOB_KIND];
+pub const WORKER_KINDS: [&str; 6] =
+    ["backtest", "benchmark", "risk", "stress", INGEST_JOB_KIND, PROVIDER_REFRESH_JOB_KIND];
 
 /// A validated `backtest` payload, or a 422 listing every problem.
 ///
@@ -259,6 +263,9 @@ pub fn run_job(kind: &str, payload: &Json) -> Reply {
         // Backtests need the database (dataset version) and report progress; the worker runs
         // them on its own path and never calls this for them.
         "backtest" => Err((500, "backtest jobs run on the worker's backtest path".into())),
+        PROVIDER_REFRESH_JOB_KIND => {
+            Err((500, "provider refresh jobs run on the worker's refresh path".into()))
+        }
         _ => Err(unprocessable(format!("Unknown job kind {kind:?}."))),
     }
 }
@@ -289,7 +296,7 @@ pub fn run_job_with_progress(kind: &str, payload: &Json, mut on_progress: impl F
 /// Maximum duration allowed for a job before its result is discarded.
 pub fn job_timeout(kind: &str) -> std::time::Duration {
     std::time::Duration::from_secs(match kind {
-        "backtest" | INGEST_JOB_KIND => 900,
+        "backtest" | INGEST_JOB_KIND | PROVIDER_REFRESH_JOB_KIND => 900,
         "benchmark" => 600,
         _ => 300,
     })

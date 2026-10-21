@@ -271,7 +271,9 @@ DO $$
 DECLARE t text;
 BEGIN
     FOREACH t IN ARRAY ARRAY['datasets', 'dataset_versions', 'strategies', 'strategy_versions', 'experiments',
-                             'runs', 'run_artifacts', 'registry_events', 'jobs', 'job_events'] LOOP
+                             'runs', 'run_artifacts', 'registry_events', 'jobs', 'job_events',
+                             'symbol_changes', 'instrument_delistings', 'universes', 'universe_members',
+                             'data_provider_configs', 'dataset_refresh_schedules'] LOOP
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                         WHERE table_name = t AND column_name = 'workspace_id' AND is_nullable = 'NO') THEN
             RAISE EXCEPTION '% lacks a NOT NULL workspace_id', t;

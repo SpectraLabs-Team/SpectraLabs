@@ -35,9 +35,13 @@ POST /api/v1/backtests
   "dataset_version_id": "<version id>",
   "strategy": "sma_cross",
   "params": { "fast": 10, "slow": 30 },
-  "config": { "preset": "default", "initial_cash": 100000 }
+  "config": { "preset": "default", "initial_cash": 100000 },
+  "as_of": "2024-01-01T00:00:00Z"
 }
 ```
+
+- `as_of` is optional (ISO 8601 string or epoch nanosecond/millisecond integer). When set, the backtest runs
+  against point-in-time data known on or before that date, ignoring later revisions and bars to prevent look-ahead bias.
 
 - `GET /api/v1/strategies/builtin` returns everything a form needs: the strategies with their
   parameter schemas (`buy_and_hold`, `equal_weight`, `sma_cross`, `zscore_reversion`), the

@@ -53,6 +53,9 @@ pub struct BacktestRequest {
     /// Corporate actions to apply during the run (unadjusted prices); empty
     /// for none. See [`crate::corporate`].
     pub corporate_actions: Vec<RequestAction>,
+    /// Optional point-in-time snapshot timestamp (nanoseconds since Unix epoch).
+    /// When set, bars or revisions known after `as_of` are excluded from the backtest.
+    pub as_of: Option<i64>,
 }
 
 /// One strategy of a multi-strategy request.
@@ -69,7 +72,8 @@ pub struct StrategyAllocation {
 /// Most strategies in one request.
 pub const MAX_REQUEST_STRATEGIES: usize = 10;
 
-const REQUEST_FIELDS: [&str; 5] = ["strategy", "params", "strategies", "config", "corporate_actions"];
+const REQUEST_FIELDS: [&str; 6] =
+    ["strategy", "params", "strategies", "config", "corporate_actions", "as_of"];
 const ENTRY_FIELDS: [&str; 3] = ["strategy", "params", "weight"];
 
 fn field_error(field: impl Into<String>, message: impl Into<String>) -> FieldError {
@@ -182,6 +186,7 @@ impl BacktestRequest {
             config,
             strategies: Vec::new(),
             corporate_actions: Vec::new(),
+            as_of: None,
         })
     }
 
@@ -214,6 +219,7 @@ impl BacktestRequest {
                 config,
                 strategies: entries,
                 corporate_actions: Vec::new(),
+                as_of: None,
             }),
             _ => Err(ConfigError { errors }),
         }
@@ -301,6 +307,48 @@ impl BacktestRequest {
             }
         };
 
+        let as_of = match doc.find("as_of") {
+            None | Some(Json::Null) => None,
+            Some(Json::Int(ts)) => {
+                if *ts < 0 {
+                    errors.push(field_error("as_of", "must be a non-negative timestamp"));
+                    None
+                } else {
+                    Some(*ts)
+                }
+            }
+            Some(Json::String(s)) => {
+                let trimmed = s.trim();
+                if let Some(ts) = spectra_data::parse_timestamp(
+                    trimmed,
+                    &spectra_data::TimeOptions {
+                        format: spectra_data::TimeFormat::Iso8601,
+                        naive_utc_offset_minutes: 0,
+                        timezone: None,
+                    },
+                ) {
+                    Some(ts.ts_ns)
+                } else if let Ok(val) = trimmed.parse::<i64>() {
+                    if val < 0 {
+                        errors.push(field_error("as_of", "must be a non-negative timestamp"));
+                        None
+                    } else {
+                        Some(val)
+                    }
+                } else {
+                    errors.push(field_error(
+                        "as_of",
+                        format!("cannot parse timestamp '{trimmed}'; expected ISO 8601 or epoch integer"),
+                    ));
+                    None
+                }
+            }
+            Some(_) => {
+                errors.push(field_error("as_of", "must be an ISO 8601 string or integer timestamp"));
+                None
+            }
+        };
+
         match (multi, strategy, params, config, actions) {
             (Some(Some(entries)), _, _, Some(config), Some(corporate_actions)) if errors.is_empty() => {
                 Ok(Self {
@@ -309,12 +357,13 @@ impl BacktestRequest {
                     config,
                     strategies: entries,
                     corporate_actions,
+                    as_of,
                 })
             }
             (None, Some(strategy), Some(params), Some(config), Some(corporate_actions))
                 if errors.is_empty() =>
             {
-                Ok(Self { strategy, params, config, strategies: Vec::new(), corporate_actions })
+                Ok(Self { strategy, params, config, strategies: Vec::new(), corporate_actions, as_of })
             }
             _ => Err(ConfigError { errors }),
         }
@@ -327,7 +376,10 @@ impl BacktestRequest {
     /// # Errors
     /// If a value is not finite (impossible for a validated request).
     pub fn to_json(&self) -> Result<Json> {
-        let doc = self.to_json_without_actions()?;
+        let mut doc = self.to_json_without_actions()?;
+        if let Some(ts) = self.as_of {
+            doc = doc.with("as_of", Json::integer(ts));
+        }
         if self.corporate_actions.is_empty() {
             return Ok(doc);
         }

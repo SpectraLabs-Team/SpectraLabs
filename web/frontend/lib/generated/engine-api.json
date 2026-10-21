@@ -1837,6 +1837,76 @@
         }
       }
     },
+    "/api/v1/strategies": {
+      "get": {
+        "tags": [
+          "strategies"
+        ],
+        "summary": "The workspace's saved strategies, newest first.",
+        "operationId": "list_strategies",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "strategies"
+        ],
+        "summary": "Create a saved strategy, and with `builtin` its first version.",
+        "operationId": "create_strategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStrategy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The workspace has a strategy of that name (code `strategy_exists`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the name, built-in or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/strategies/builtin": {
       "get": {
         "tags": [
@@ -1847,6 +1917,165 @@
         "responses": {
           "200": {
             "description": "{strategies, config_schema, presets}"
+          }
+        }
+      }
+    },
+    "/api/v1/strategies/versions/{id}": {
+      "get": {
+        "tags": [
+          "strategies"
+        ],
+        "summary": "One strategy version by id (what a backtest's `strategy_version_id` names).",
+        "operationId": "get_strategy_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Strategy version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/strategies/{id}": {
+      "get": {
+        "tags": [
+          "strategies"
+        ],
+        "summary": "One saved strategy with every version, newest first.",
+        "operationId": "get_strategy",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Strategy id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/strategies/{id}/versions": {
+      "post": {
+        "tags": [
+          "strategies"
+        ],
+        "summary": "Save a version: a built-in with parameters. Saving the same code and\nparameters again returns the existing version (200, `created: false`).",
+        "operationId": "save_strategy_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Strategy id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SaveVersion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved before; the existing version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedVersion"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "A new version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedVersion"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the built-in or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
           }
         }
       }
@@ -2951,7 +3180,15 @@
               "string",
               "null"
             ],
-            "description": "A built-in strategy name (see `GET /api/v1/strategies/builtin`).\nGive either `strategy` (with `params`) or `strategies`."
+            "description": "A built-in strategy name (see `GET /api/v1/strategies/builtin`).\nGive either `strategy` (with `params`), `strategies`, or `strategy_version_id`."
+          },
+          "strategy_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "A saved strategy version (see `/api/v1/strategies`). Give it alone,\nwithout `strategy`, `params` or `strategies`: the run uses the version's\nbuilt-in and parameters and records the version."
           }
         },
         "additionalProperties": false
@@ -3110,6 +3347,41 @@
             "format": "int64",
             "description": "The file's size in bytes.",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateStrategy": {
+        "type": "object",
+        "description": "`POST /api/v1/strategies` body.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "builtin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Save version 1 at once: a built-in strategy name (see\n`GET /api/v1/strategies/builtin`)."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free text; at most 2000 characters."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique in the workspace; at most 200 characters."
+          },
+          "params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Parameters of version 1; missing ones take their defaults."
           }
         },
         "additionalProperties": false
@@ -4086,6 +4358,45 @@
         },
         "additionalProperties": false
       },
+      "SaveVersion": {
+        "type": "object",
+        "description": "`POST /api/v1/strategies/{id}/versions` body.",
+        "required": [
+          "builtin"
+        ],
+        "properties": {
+          "builtin": {
+            "type": "string",
+            "description": "A built-in strategy name."
+          },
+          "params": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Parameters; missing ones take their defaults."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SavedVersion": {
+        "type": "object",
+        "description": "The result of saving a version.",
+        "required": [
+          "created",
+          "version"
+        ],
+        "properties": {
+          "created": {
+            "type": "boolean",
+            "description": "False when this code and these parameters were saved before; the\nexisting version is returned."
+          },
+          "version": {
+            "$ref": "#/components/schemas/StrategyVersionView",
+            "description": "The version."
+          }
+        }
+      },
       "SessionView": {
         "type": "object",
         "description": "A resumable upload.",
@@ -4137,6 +4448,180 @@
             ],
             "format": "uuid",
             "description": "The upload it became, once completed."
+          }
+        }
+      },
+      "StrategyDetail": {
+        "type": "object",
+        "description": "A saved strategy with every version, newest first.",
+        "required": [
+          "strategy",
+          "versions"
+        ],
+        "properties": {
+          "strategy": {
+            "$ref": "#/components/schemas/StrategyView",
+            "description": "The strategy."
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StrategyVersionView"
+            },
+            "description": "Its versions, newest first."
+          }
+        }
+      },
+      "StrategyList": {
+        "type": "object",
+        "description": "The workspace's saved strategies.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StrategyView"
+            },
+            "description": "Newest first, at most 500."
+          }
+        }
+      },
+      "StrategyVersionView": {
+        "type": "object",
+        "description": "One immutable version of a saved strategy.",
+        "required": [
+          "id",
+          "strategy_id",
+          "strategy_name",
+          "version",
+          "builtin",
+          "params",
+          "strategy_sha256",
+          "config_hash",
+          "current",
+          "created_at"
+        ],
+        "properties": {
+          "builtin": {
+            "type": "string",
+            "description": "Built-in strategy name."
+          },
+          "config_hash": {
+            "type": "string",
+            "description": "SHA-256 of the canonical parameter text."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Saved at (UTC)."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who saved it."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "True while the built-in's code is unchanged, so the version can still run."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Version id: a backtest's `strategy_version_id`."
+          },
+          "params": {
+            "type": "object",
+            "description": "Every parameter, defaults filled in."
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The strategy it belongs to."
+          },
+          "strategy_name": {
+            "type": "string",
+            "description": "That strategy's name."
+          },
+          "strategy_sha256": {
+            "type": "string",
+            "description": "SHA-256 of the built-in's source when saved (the runs' `strategy_sha256`)."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1, 2, ... within the strategy."
+          }
+        }
+      },
+      "StrategyView": {
+        "type": "object",
+        "description": "A saved strategy.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "version_count"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Created at (UTC)."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Who created it."
+          },
+          "description": {
+            "type": "string",
+            "description": "Free text."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Strategy id (UUIDv7)."
+          },
+          "latest_builtin": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The newest version's built-in strategy."
+          },
+          "latest_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The newest version's number."
+          },
+          "latest_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The newest version's id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name, unique in the workspace."
+          },
+          "version_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of versions."
           }
         }
       },
@@ -4786,6 +5271,10 @@
     {
       "name": "corporate-actions",
       "description": "Corporate action sets and price adjustments"
+    },
+    {
+      "name": "strategies",
+      "description": "Saved strategies and their immutable versions"
     }
   ]
 }

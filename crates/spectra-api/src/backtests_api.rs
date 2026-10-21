@@ -29,8 +29,13 @@ use crate::{engine, error_response, json_response, AppState, Identity};
 pub struct CreateBacktest {
     /// A dataset version of the caller's workspace.
     pub dataset_version_id: Uuid,
+    /// A saved strategy version (see `/api/v1/strategies`). Give it alone,
+    /// without `strategy`, `params` or `strategies`: the run uses the version's
+    /// built-in and parameters and records the version.
+    #[serde(default)]
+    pub strategy_version_id: Option<Uuid>,
     /// A built-in strategy name (see `GET /api/v1/strategies/builtin`).
-    /// Give either `strategy` (with `params`) or `strategies`.
+    /// Give either `strategy` (with `params`), `strategies`, or `strategy_version_id`.
     #[serde(default)]
     pub strategy: Option<String>,
     /// Strategy parameters; missing ones take their defaults.
@@ -258,6 +263,9 @@ pub(crate) async fn create_backtest(
         Err(e) => return error_response(422, format!("Invalid backtest request: {e}")),
     };
     let mut payload = serde_json::json!({ "dataset_version_id": req.dataset_version_id.to_string() });
+    if let Some(v) = req.strategy_version_id {
+        payload["strategy_version_id"] = serde_json::Value::String(v.to_string());
+    }
     if let Some(s) = req.strategy {
         payload["strategy"] = serde_json::Value::String(s);
     }

@@ -48,6 +48,36 @@ POST /api/v1/backtests
 - The same request also works as a generic job: `POST /api/v1/jobs` with
   `{"kind": "backtest", "payload": {...}}`.
 
+### From a saved strategy version
+
+A saved strategy (M2a) is a named record in the workspace; each version is a built-in with a full
+parameter set, stored once and never changed. Saving the same built-in code and parameters again
+returns the existing version, so a version id always means one computation.
+
+```http
+POST /api/v1/strategies
+{ "name": "Trend", "builtin": "sma_cross", "params": { "fast": 10, "slow": 50 } }
+→ 201 { "strategy": {...}, "versions": [{ "id": "<version id>", "version": 1, "params": {...}, "strategy_sha256": "...", "current": true }] }
+
+POST /api/v1/backtests
+{ "dataset_version_id": "<dataset version id>", "strategy_version_id": "<version id>" }
+```
+
+| Route | |
+| --- | --- |
+| `POST /api/v1/strategies` | create (409 `strategy_exists` for a taken name); with `builtin` and `params`, also version 1 |
+| `GET /api/v1/strategies` | the workspace's saved strategies, newest first, with version count and latest version |
+| `GET /api/v1/strategies/{id}` | one strategy and its versions, newest first |
+| `POST /api/v1/strategies/{id}/versions` | `{builtin, params}`: 201 with a new version, or 200 with `created: false` and the existing one |
+| `GET /api/v1/strategies/versions/{id}` | one version |
+
+- `strategy_version_id` replaces `strategy`, `params` and `strategies`; giving it with any of them
+  is a 422. The job runs the version's built-in and parameters, and the run records
+  `strategy_version_id`, `strategy` and `strategy_sha256`.
+- A version keeps the built-in's source hash from when it was saved. If that built-in's code has
+  changed since, the version shows `current: false` and a backtest from it is a 409
+  `strategy_version_stale`: it would not reproduce. Save a new version to run the new code.
+
 ## 4. Follow it
 
 | Route | Role | |

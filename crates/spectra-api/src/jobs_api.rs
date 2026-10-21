@@ -170,12 +170,16 @@ pub(crate) async fn submit(
     st: &AppState,
     id: &Identity,
     kind: String,
-    payload: serde_json::Value,
+    mut payload: serde_json::Value,
     priority: i32,
 ) -> Result<Job, Response> {
     let (pool, ws) = context(st, id)?;
     if !(-10..=10).contains(&priority) {
         return Err(error_response(422, "priority must be between -10 and 10."));
+    }
+    // A saved strategy version stands for a built-in and its parameters (M2a task 4).
+    if kind == spectra_backtest::JOB_KIND {
+        crate::strategies_api::apply_version(&pool, ws, &mut payload).await?;
     }
     // Validate exactly as the synchronous route would, off the async threads
     // (parsing a large portfolio CSV is real work).

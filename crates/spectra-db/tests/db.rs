@@ -154,6 +154,9 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
             created_by: Some(seeded.admin_id),
             started_at: chrono::Utc::now(),
             dataset_version_id: v1.id,
+            strategy_version_id: None,
+            strategy: "sma_cross".into(),
+            strategy_sha256: String::new(),
         },
     )
     .await
@@ -244,4 +247,51 @@ async fn signed_in_identities_are_mirrored_once() {
     ] {
         sqlx::query(sql).bind(id).execute(&pool).await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn strategy_versions_are_idempotent_and_numbered_under_concurrency() {
+    use spectra_db::strategies::{create, get, get_version, save_version, versions, NewVersion};
+
+    let Some(pool) = pool().await else { return };
+    let ws = spectra_db::new_id();
+    spectra_db::identity::ensure_identity(&pool, None, ws).await.unwrap();
+    let s = create(&pool, ws, "Trend", "", None).await.unwrap().expect("new name");
+    assert!(create(&pool, ws, "Trend", "", None).await.unwrap().is_none(), "name taken");
+
+    let v = |cfg: char| NewVersion {
+        builtin: "sma_cross".into(),
+        source_hash: "1".repeat(64),
+        config_hash: cfg.to_string().repeat(64),
+        parameter_schema: serde_json::json!({}),
+        parameters: serde_json::json!({ "cfg": cfg.to_string() }),
+        created_by: None,
+    };
+
+    // Eight saves at once: four distinct parameter sets, each twice.
+    let saves = ['a', 'b', 'c', 'd', 'a', 'b', 'c', 'd'].map(|c| {
+        let (pool, nv) = (pool.clone(), v(c));
+        tokio::spawn(async move { save_version(&pool, ws, s.id, &nv).await })
+    });
+    let mut created = 0;
+    for h in saves {
+        let (_, was_created) = h.await.unwrap().unwrap().expect("strategy exists");
+        created += usize::from(was_created);
+    }
+    assert_eq!(created, 4, "each parameter set is saved once");
+    let all = versions(&pool, ws, s.id).await.unwrap();
+    assert_eq!(all.iter().map(|x| x.version).collect::<Vec<_>>(), vec![4, 3, 2, 1]);
+
+    // Saving again returns the same row.
+    let (again, was_created) = save_version(&pool, ws, s.id, &v('a')).await.unwrap().unwrap();
+    assert!(!was_created);
+    assert_eq!(Some(&again), all.iter().find(|x| x.config_hash == "a".repeat(64)));
+
+    // Another workspace sees none of it.
+    let other = spectra_db::new_id();
+    spectra_db::identity::ensure_identity(&pool, None, other).await.unwrap();
+    assert!(get(&pool, other, s.id).await.unwrap().is_none());
+    assert!(get_version(&pool, other, again.id).await.unwrap().is_none());
+    assert!(save_version(&pool, other, s.id, &v('e')).await.unwrap().is_none());
+    assert_eq!(get(&pool, ws, s.id).await.unwrap().unwrap().version_count, 4);
 }

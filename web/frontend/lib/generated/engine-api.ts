@@ -583,6 +583,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The workspace's saved strategies, newest first. */
+        get: operations["list_strategies"];
+        put?: never;
+        /** Create a saved strategy, and with `builtin` its first version. */
+        post: operations["create_strategy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/strategies/builtin": {
         parameters: {
             query?: never;
@@ -596,6 +614,58 @@ export interface paths {
         get: operations["builtin_strategies"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategies/versions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One strategy version by id (what a backtest's `strategy_version_id` names). */
+        get: operations["get_strategy_version"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategies/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One saved strategy with every version, newest first. */
+        get: operations["get_strategy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategies/{id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save a version: a built-in with parameters. Saving the same code and
+         *     parameters again returns the existing version (200, `created: false`). */
+        post: operations["save_strategy_version"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1060,8 +1130,15 @@ export interface components {
              *     each `weight` a share of the starting cash (adding up to at most 1). */
             strategies?: Record<string, never>[] | null;
             /** @description A built-in strategy name (see `GET /api/v1/strategies/builtin`).
-             *     Give either `strategy` (with `params`) or `strategies`. */
+             *     Give either `strategy` (with `params`), `strategies`, or `strategy_version_id`. */
             strategy?: string | null;
+            /**
+             * Format: uuid
+             * @description A saved strategy version (see `/api/v1/strategies`). Give it alone,
+             *     without `strategy`, `params` or `strategies`: the run uses the version's
+             *     built-in and parameters and records the version.
+             */
+            strategy_version_id?: string | null;
         };
         /** @description `POST /api/v1/corporate-actions` request body. */
         CreateCorporateActionSetRequest: {
@@ -1130,6 +1207,18 @@ export interface components {
              * @description The file's size in bytes.
              */
             size: number;
+        };
+        /** @description `POST /api/v1/strategies` body. */
+        CreateStrategy: {
+            /** @description Save version 1 at once: a built-in strategy name (see
+             *     `GET /api/v1/strategies/builtin`). */
+            builtin?: string | null;
+            /** @description Free text; at most 2000 characters. */
+            description?: string | null;
+            /** @description Unique in the workspace; at most 200 characters. */
+            name: string;
+            /** @description Parameters of version 1; missing ones take their defaults. */
+            params?: Record<string, never> | null;
         };
         /** @description A dataset and its versions. */
         DatasetDetailView: {
@@ -1570,6 +1659,21 @@ export interface components {
             /** @description What was wrong. */
             message: string;
         };
+        /** @description `POST /api/v1/strategies/{id}/versions` body. */
+        SaveVersion: {
+            /** @description A built-in strategy name. */
+            builtin: string;
+            /** @description Parameters; missing ones take their defaults. */
+            params?: Record<string, never> | null;
+        };
+        /** @description The result of saving a version. */
+        SavedVersion: {
+            /** @description False when this code and these parameters were saved before; the
+             *     existing version is returned. */
+            created: boolean;
+            /** @description The version. */
+            version: components["schemas"]["StrategyVersionView"];
+        };
         /** @description A resumable upload. */
         SessionView: {
             /**
@@ -1604,6 +1708,97 @@ export interface components {
              * @description The upload it became, once completed.
              */
             upload_id?: string | null;
+        };
+        /** @description A saved strategy with every version, newest first. */
+        StrategyDetail: {
+            /** @description The strategy. */
+            strategy: components["schemas"]["StrategyView"];
+            /** @description Its versions, newest first. */
+            versions: components["schemas"]["StrategyVersionView"][];
+        };
+        /** @description The workspace's saved strategies. */
+        StrategyList: {
+            /** @description Newest first, at most 500. */
+            items: components["schemas"]["StrategyView"][];
+        };
+        /** @description One immutable version of a saved strategy. */
+        StrategyVersionView: {
+            /** @description Built-in strategy name. */
+            builtin: string;
+            /** @description SHA-256 of the canonical parameter text. */
+            config_hash: string;
+            /**
+             * Format: date-time
+             * @description Saved at (UTC).
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who saved it.
+             */
+            created_by?: string | null;
+            /** @description True while the built-in's code is unchanged, so the version can still run. */
+            current: boolean;
+            /**
+             * Format: uuid
+             * @description Version id: a backtest's `strategy_version_id`.
+             */
+            id: string;
+            /** @description Every parameter, defaults filled in. */
+            params: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The strategy it belongs to.
+             */
+            strategy_id: string;
+            /** @description That strategy's name. */
+            strategy_name: string;
+            /** @description SHA-256 of the built-in's source when saved (the runs' `strategy_sha256`). */
+            strategy_sha256: string;
+            /**
+             * Format: int32
+             * @description 1, 2, ... within the strategy.
+             */
+            version: number;
+        };
+        /** @description A saved strategy. */
+        StrategyView: {
+            /**
+             * Format: date-time
+             * @description Created at (UTC).
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Who created it.
+             */
+            created_by?: string | null;
+            /** @description Free text. */
+            description: string;
+            /**
+             * Format: uuid
+             * @description Strategy id (UUIDv7).
+             */
+            id: string;
+            /** @description The newest version's built-in strategy. */
+            latest_builtin?: string | null;
+            /**
+             * Format: int32
+             * @description The newest version's number.
+             */
+            latest_version?: number | null;
+            /**
+             * Format: uuid
+             * @description The newest version's id.
+             */
+            latest_version_id?: string | null;
+            /** @description Name, unique in the workspace. */
+            name: string;
+            /**
+             * Format: int64
+             * @description Number of versions.
+             */
+            version_count: number;
         };
         /** @description `POST /api/v1/stress` body (also the `stress` job payload). */
         StressRequest: {
@@ -3281,6 +3476,67 @@ export interface operations {
             };
         };
     };
+    list_strategies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyList"];
+                };
+            };
+        };
+    };
+    create_strategy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateStrategy"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyDetail"];
+                };
+            };
+            /** @description The workspace has a strategy of that name (code `strategy_exists`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every problem with the name, built-in or parameters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     builtin_strategies: {
         parameters: {
             query?: never;
@@ -3296,6 +3552,119 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_strategy_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy version id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_strategy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyDetail"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    save_strategy_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Strategy id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveVersion"];
+            };
+        };
+        responses: {
+            /** @description Saved before; the existing version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedVersion"];
+                };
+            };
+            /** @description A new version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedVersion"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every problem with the built-in or parameters */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
             };
         };
     };

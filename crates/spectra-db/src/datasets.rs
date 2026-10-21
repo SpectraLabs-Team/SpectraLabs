@@ -198,6 +198,12 @@ pub struct NewBacktestRun {
     pub started_at: DateTime<Utc>,
     /// The dataset version it ran on.
     pub dataset_version_id: Uuid,
+    /// The saved strategy version it ran, if it was started from one (M2a).
+    pub strategy_version_id: Option<Uuid>,
+    /// The strategy's name (`""` when not recorded).
+    pub strategy: String,
+    /// The strategy's source hash (`""` when not recorded).
+    pub strategy_sha256: String,
 }
 
 /// Records a backtest run.
@@ -216,6 +222,9 @@ pub async fn insert_backtest_run(pool: &PgPool, r: &NewBacktestRun) -> Result<Uu
         .bind(r.created_by)
         .bind(r.started_at)
         .bind(r.dataset_version_id)
+        .bind(r.strategy_version_id)
+        .bind(&r.strategy)
+        .bind(&r.strategy_sha256)
         .fetch_one(pool)
         .await
 }

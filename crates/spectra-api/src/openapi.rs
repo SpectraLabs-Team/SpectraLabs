@@ -109,6 +109,11 @@ pub struct StressRequest {
         crate::backtests_api::backtest_artifact,
         crate::backtests_api::list_datasets,
         crate::backtests_api::builtin_strategies,
+        crate::strategies_api::create_strategy,
+        crate::strategies_api::list_strategies,
+        crate::strategies_api::get_strategy,
+        crate::strategies_api::save_strategy_version,
+        crate::strategies_api::get_strategy_version,
         crate::datasets_api::preview,
         crate::uploads_api::upload,
         crate::datasets_api::ingest,
@@ -175,6 +180,13 @@ pub struct StressRequest {
         crate::datasets_api::CalendarView,
         crate::datasets_api::CalendarsResponse,
         crate::datasets_api::DeriveDatasetRequest,
+        crate::strategies_api::CreateStrategy,
+        crate::strategies_api::SaveVersion,
+        crate::strategies_api::StrategyView,
+        crate::strategies_api::StrategyVersionView,
+        crate::strategies_api::StrategyDetail,
+        crate::strategies_api::StrategyList,
+        crate::strategies_api::SavedVersion,
         crate::corporate_actions_api::CorporateActionItem,
         crate::corporate_actions_api::CreateCorporateActionSetRequest,
         crate::corporate_actions_api::CorporateActionView,
@@ -194,6 +206,7 @@ pub struct StressRequest {
         (name = "backtests", description = "Backtests: jobs of kind backtest, and the built-in strategies"),
         (name = "datasets", description = "Data Studio: ingest settings, previews and datasets"),
         (name = "corporate-actions", description = "Corporate action sets and price adjustments"),
+        (name = "strategies", description = "Saved strategies and their immutable versions"),
     )
 )]
 pub struct ApiDoc;

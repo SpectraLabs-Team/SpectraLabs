@@ -62,7 +62,7 @@ SELECT pg_temp.check((SELECT count(*) FROM l3) = 1 AND (SELECT id FROM l3) = (SE
 -- A backtest run links its job and dataset version.
 CREATE TEMP TABLE j AS EXECUTE job_enqueue('00000000-0000-7000-8000-0000000000c1', 'backtest', '{}', 0, 3, NULL);
 SELECT id AS job FROM j \gset
-CREATE TEMP TABLE run AS EXECUTE run_insert_backtest('00000000-0000-7000-8000-0000000000e1', '00000000-0000-7000-8000-0000000000c1', :'job', '{"strategy":"sma_cross"}', '{"schema":"spectra.backtest.summary/v1"}', 7, '0.7.0', '00000000-0000-7000-8000-000000000011', now(), :'v1');
+CREATE TEMP TABLE run AS EXECUTE run_insert_backtest('00000000-0000-7000-8000-0000000000e1', '00000000-0000-7000-8000-0000000000c1', :'job', '{"strategy":"sma_cross"}', '{"schema":"spectra.backtest.summary/v1"}', 7, '0.7.0', '00000000-0000-7000-8000-000000000011', now(), :'v1', NULL, 'sma_cross', repeat('b', 64));
 SELECT pg_temp.check((SELECT kind FROM runs WHERE id = '00000000-0000-7000-8000-0000000000e1') = 'backtest', 'run kind');
 SELECT pg_temp.check((SELECT dataset_version_id FROM runs WHERE id = '00000000-0000-7000-8000-0000000000e1') = :'v1', 'run dataset version');
 SELECT pg_temp.check((SELECT status FROM runs WHERE id = '00000000-0000-7000-8000-0000000000e1') = 'succeeded', 'run status');

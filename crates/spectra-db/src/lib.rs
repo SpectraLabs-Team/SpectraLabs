@@ -23,6 +23,7 @@ pub mod corporate_actions;
 pub mod datasets;
 pub mod identity;
 pub mod jobs;
+pub mod strategies;
 pub mod uploads;
 pub mod web_migrations;
 

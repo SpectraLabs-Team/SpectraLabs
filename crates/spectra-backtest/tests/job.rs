@@ -191,3 +191,22 @@ fn failures_are_classified_for_the_queue() {
     assert!(matches!(io, JobFailure::Failed { retryable: true, .. }));
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn payload_carries_an_optional_strategy_version() {
+    let j = job(r#""strategy":"sma_cross""#);
+    assert_eq!(j.strategy_version_id, None);
+
+    let sv = "0192F0C4-0000-7000-8000-0000000000AB";
+    let j = job(&format!(r#""strategy":"sma_cross","strategy_version_id":"{sv}""#));
+    assert_eq!(j.strategy_version_id.as_deref(), Some(sv.to_ascii_lowercase().as_str()), "normalized");
+
+    let j = job(r#""strategy":"sma_cross","strategy_version_id":null"#);
+    assert_eq!(j.strategy_version_id, None, "null is the same as absent");
+
+    let err = BacktestJob::from_payload(&payload(&format!(
+        r#"{{"dataset_version_id":"{VERSION}","strategy":"sma_cross","strategy_version_id":"v1"}}"#
+    )))
+    .unwrap_err();
+    assert!(err.errors.iter().any(|e| e.field == "strategy_version_id"), "{err}");
+}

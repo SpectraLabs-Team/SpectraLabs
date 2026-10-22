@@ -296,6 +296,7 @@ fn failed_strategy_becomes_failed_job_with_readable_message() {
             config: spectra_engine::BacktestConfig::default(),
             strategies: Vec::new(),
             corporate_actions: Vec::new(),
+            as_of: None,
             dsl_code: None,
         },
     };

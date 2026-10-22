@@ -443,6 +443,7 @@ pub async fn run_refresh(
         "dataset_version_id": reg.id,
         "version": reg.version,
         "checksum": new_dataset.info.id,
+        "status": "registered",
         "bars_count": new_dataset.bars.len(),
         "existed": reg.existed,
     }))

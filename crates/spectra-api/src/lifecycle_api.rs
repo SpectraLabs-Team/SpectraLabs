@@ -576,11 +576,11 @@ pub(crate) async fn create_universe(
     };
 
     // Add any initial member symbols
+    let epoch = DateTime::from_timestamp(0, 0).unwrap();
     for sym in &req.symbols {
         let trimmed = sym.trim().to_ascii_uppercase();
         if !trimmed.is_empty() {
-            let _ =
-                spectra_db::lifecycle::add_universe_member(&pool, ws, detail.id, &trimmed, Utc::now()).await;
+            let _ = spectra_db::lifecycle::add_universe_member(&pool, ws, detail.id, &trimmed, epoch).await;
         }
     }
 
@@ -737,10 +737,10 @@ pub(crate) async fn add_universe_member(
                     "added_at".to_string(),
                     "added_at must be an RFC 3339 timestamp or YYYY-MM-DD date.".to_string(),
                 ));
-                Utc::now()
+                DateTime::from_timestamp(0, 0).unwrap()
             }
         }
-        None => Utc::now(),
+        None => DateTime::from_timestamp(0, 0).unwrap(),
     };
 
     if !errors.is_empty() {

@@ -118,7 +118,7 @@ async fn refresh_flow_e2e() {
     // List provider configs
     let (status, list_res) = fix.send(fix.req("GET", "/api/v1/providers/configs", "")).await;
     assert_eq!(status, 200);
-    assert_eq!(list_res["configs"].as_array().unwrap().len(), 1);
+    assert_eq!(list_res["items"].as_array().unwrap().len(), 1);
 
     // Get provider config by id
     let (status, get_res) =

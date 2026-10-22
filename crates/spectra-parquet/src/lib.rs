@@ -5,18 +5,9 @@
 
 #![deny(unsafe_code)]
 
-/// Placeholder to verify crate setup.
-#[must_use]
-pub fn version() -> &'static str {
-    "0.1.0"
-}
+pub mod reader;
+pub mod writer;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub use reader::{load_parquet, preview_parquet, report_parquet};
+pub use writer::export_parquet;
 
-    #[test]
-    fn test_version() {
-        assert_eq!(version(), "0.1.0");
-    }
-}

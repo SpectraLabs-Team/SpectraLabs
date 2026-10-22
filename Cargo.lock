@@ -3146,6 +3146,7 @@ dependencies = [
  "arrow-array",
  "arrow-cast",
  "arrow-schema",
+ "bytes",
  "chrono",
  "parquet",
  "spectra-core",

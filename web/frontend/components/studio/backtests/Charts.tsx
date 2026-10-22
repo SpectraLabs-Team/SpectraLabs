@@ -109,3 +109,6 @@ export function StrategyCurvesChart({ curves, names, height = 240 }: { curves: S
     </div>
   );
 }
+
+export { MonthlyHeatmap } from './MonthlyHeatmap';
+export type { MonthlyHeatmapProps } from './MonthlyHeatmap';

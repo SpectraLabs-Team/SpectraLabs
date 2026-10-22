@@ -1,14 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Copy, Download, Fingerprint, Layers, Pencil, Square } from 'lucide-react';
-import { ApiError } from '@/lib/api';
+import { Beaker, Copy, Download, ExternalLink, Fingerprint, GitFork, Layers, Pencil, Square } from 'lucide-react';
+import { ApiError, request } from '@/lib/api';
 import {
   cancelBacktest,
   describeRequest,
   downloadArtifact,
   getArtifactText,
   getBacktest,
+  getMonthlyReturns,
   getSeries,
   isFinishedStatus,
   money,
@@ -19,6 +20,7 @@ import {
   type Catalog,
   type DatasetVersion,
   type DownloadKind,
+  type MonthlyReturn,
   type Series,
   type StoredRequest,
   type StrategyCurve,
@@ -26,7 +28,7 @@ import {
 } from '@/lib/backtests';
 import { ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
-import { DrawdownChart, EquityChart, StrategyCurvesChart } from './Charts';
+import { DrawdownChart, EquityChart, MonthlyHeatmap, StrategyCurvesChart } from './Charts';
 import { ago, cash, dash, int, pct, ratio, shortHash, signedPct, tone } from './format';
 import { StatusBadge } from './RunList';
 import { SurvivalLabPanel } from '../SurvivalLabPanel';
@@ -66,7 +68,137 @@ function duration(b: Backtest): string {
   return s < 60 ? `${s.toFixed(1)} s` : `${(s / 60).toFixed(1)} min`;
 }
 
-function Results({ b, summary, equity, drawdown, curves, catalog, onDownload, downloading }: { b: Backtest; summary: Summary; equity: Series | null; drawdown: Series | null; curves: StrategyCurve[]; catalog: Catalog | null; onDownload: (k: DownloadKind) => void; downloading: DownloadKind | null }) {
+function ExperimentLineageCard({ runId }: { runId: string }) {
+  const [experiment, setExperiment] = useState<{ id: string; name: string } | null>(null);
+  const [lineage, setLineage] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const [run, exps] = await Promise.all([
+          request<{ id: string; experiment_id: string }>(`/api/v1/runs/${encodeURIComponent(runId)}`),
+          request<{ items: { id: string; name: string }[] }>('/api/v1/experiments').catch(() => ({ items: [] })),
+        ]);
+        if (!active) return;
+        const expId = run.experiment_id;
+        const currentExp = exps.items.find((e) => e.id === expId) ?? { id: expId, name: 'Experiment' };
+        setExperiment(currentExp);
+
+        if (expId) {
+          const lin = await request<{ items: string[] }>(`/api/v1/experiments/${encodeURIComponent(expId)}/lineage`).catch(() => ({ items: [expId] }));
+          if (!active) return;
+          const chain = (lin.items || [expId]).map((id) => {
+            const found = exps.items.find((e) => e.id === id);
+            return { id, name: found ? found.name : id.slice(0, 8) };
+          });
+          setLineage(chain);
+        }
+      } catch {
+        /* run not linked or lineage unavailable */
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [runId]);
+
+  return (
+    <GlassCard as="section" className="p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <Beaker className="h-4 w-4 text-accent" /> M5 Research & Lineage
+          </h3>
+          <p className="mt-0.5 text-xs text-ink/50">
+            Recorded in the experiment registry with lineage tracking.
+          </p>
+        </div>
+        {experiment && (
+          <a
+            href={`/?tab=registry&experiment=${encodeURIComponent(experiment.id)}&run=${encodeURIComponent(runId)}`}
+            className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-accent hover:border-accent/40"
+          >
+            <span>Open in Experiment Registry</span>
+            <ExternalLink className="h-3.5 w-3.5" />
+          </a>
+        )}
+      </div>
+
+      <div className="mt-4 space-y-2.5 text-xs">
+        <div className="grid grid-cols-[110px_1fr] items-center gap-2">
+          <span className="font-mono text-[10.5px] uppercase tracking-wider text-ink/45">Research Run</span>
+          <span className="font-mono text-ink/80">{runId}</span>
+        </div>
+
+        {experiment && (
+          <div className="grid grid-cols-[110px_1fr] items-center gap-2">
+            <span className="font-mono text-[10.5px] uppercase tracking-wider text-ink/45">Experiment</span>
+            <a
+              href={`/?tab=registry&experiment=${encodeURIComponent(experiment.id)}`}
+              className="font-medium text-accent hover:underline"
+            >
+              {experiment.name}
+            </a>
+          </div>
+        )}
+
+        {lineage.length > 0 && (
+          <div className="grid grid-cols-[110px_1fr] items-baseline gap-2">
+            <span className="flex items-center gap-1 font-mono text-[10.5px] uppercase tracking-wider text-ink/45">
+              <GitFork className="h-3 w-3 text-accent" /> Lineage
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5 font-mono text-[11px]">
+              {lineage.map((item, idx) => {
+                const isCurrent = item.id === experiment?.id;
+                return (
+                  <span key={item.id} className="inline-flex items-center gap-1.5">
+                    {idx > 0 && <span className="text-ink/30">→</span>}
+                    {isCurrent ? (
+                      <span className="rounded-md border border-accent/30 bg-accent/10 px-2 py-0.5 font-semibold text-accent">
+                        {item.name} (current)
+                      </span>
+                    ) : (
+                      <a
+                        href={`/?tab=registry&experiment=${encodeURIComponent(item.id)}`}
+                        className="rounded-md bg-ink/5 px-2 py-0.5 text-ink/75 transition hover:bg-ink/10 hover:text-ink"
+                        title={`Ancestor: ${item.id}`}
+                      >
+                        {item.name}
+                      </a>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </GlassCard>
+  );
+}
+
+function Results({
+  b,
+  summary,
+  equity,
+  drawdown,
+  monthly,
+  curves,
+  catalog,
+  onDownload,
+  downloading,
+}: {
+  b: Backtest;
+  summary: Summary;
+  equity: Series | null;
+  drawdown: Series | null;
+  monthly: MonthlyReturn[] | null;
+  curves: StrategyCurve[];
+  catalog: Catalog | null;
+  onDownload: (k: DownloadKind) => void;
+  downloading: DownloadKind | null;
+}) {
   const m = summary.metrics;
   const p = summary.performance;
   const a = summary.activity;
@@ -102,6 +234,12 @@ function Results({ b, summary, equity, drawdown, curves, catalog, onDownload, do
         <h3 className="mt-4 text-xs font-semibold text-ink/70">Drawdown</h3>
         <div className="mt-2">
           <DrawdownChart series={drawdown} />
+        </div>
+        <div className="mt-5 border-t border-ink/[0.06] pt-4">
+          <h3 className="text-xs font-semibold text-ink/70">Monthly returns</h3>
+          <div className="mt-2.5">
+            <MonthlyHeatmap months={monthly} />
+          </div>
         </div>
       </GlassCard>
 
@@ -275,6 +413,8 @@ function Results({ b, summary, equity, drawdown, curves, catalog, onDownload, do
         </GlassCard>
       )}
 
+      {b.run_id && <ExperimentLineageCard runId={b.run_id} />}
+
       <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
         <GlassCard as="section" className="p-5">
           <h3 className="flex items-center gap-2 text-sm font-semibold text-ink">
@@ -291,6 +431,7 @@ function Results({ b, summary, equity, drawdown, curves, catalog, onDownload, do
                 ['Result', b.fingerprints?.result_sha256 ?? summary.run.result_sha256],
                 ['Seed', summary.run.seed],
                 ['Bars', int(summary.run.bar_count)],
+                ...(b.run_id ? ([['Research Run', b.run_id]] as [string, string][]) : []),
               ] as [string, string][]
             ).map(([k, v]) => (
               <div key={k} className="grid grid-cols-[72px_1fr] gap-3">
@@ -339,6 +480,7 @@ export function RunDetail({ backtestId, catalog, datasets, canRun, onRerun, onCh
   const [b, setB] = useState<Backtest | null>(null);
   const [equity, setEquity] = useState<Series | null>(null);
   const [drawdown, setDrawdown] = useState<Series | null>(null);
+  const [monthly, setMonthly] = useState<MonthlyReturn[] | null>(null);
   const [curves, setCurves] = useState<StrategyCurve[]>([]);
   const [error, setError] = useState('');
   const [downloading, setDownloading] = useState<DownloadKind | null>(null);
@@ -349,6 +491,7 @@ export function RunDetail({ backtestId, catalog, datasets, canRun, onRerun, onCh
     setB(null);
     setEquity(null);
     setDrawdown(null);
+    setMonthly(null);
     setCurves([]);
     setError('');
     let lastStatus = '';
@@ -372,10 +515,15 @@ export function RunDetail({ backtestId, catalog, datasets, canRun, onRerun, onCh
           });
         }
         if (ctl.signal.aborted || current.status !== 'succeeded') return;
-        const [eq, dd] = await Promise.all([getSeries(backtestId, 'equity'), getSeries(backtestId, 'drawdown')]);
+        const [eq, dd, monthlyRes] = await Promise.all([
+          getSeries(backtestId, 'equity'),
+          getSeries(backtestId, 'drawdown'),
+          getMonthlyReturns(backtestId).catch(() => null),
+        ]);
         if (ctl.signal.aborted) return;
         setEquity(eq);
         setDrawdown(dd);
+        if (monthlyRes?.months) setMonthly(monthlyRes.months);
         if (current.summary?.strategies && current.artifacts?.some((f) => f.kind === 'strategies_csv')) {
           const text = await getArtifactText(backtestId, 'strategies_csv');
           if (!ctl.signal.aborted) setCurves(parseStrategyCurves(text));
@@ -486,7 +634,7 @@ export function RunDetail({ backtestId, catalog, datasets, canRun, onRerun, onCh
       </GlassCard>
 
       {b.status === 'succeeded' && b.summary && (
-        <Results b={b} summary={b.summary} equity={equity} drawdown={drawdown} curves={curves} catalog={catalog} onDownload={download} downloading={downloading} />
+        <Results b={b} summary={b.summary} equity={equity} drawdown={drawdown} monthly={monthly} curves={curves} catalog={catalog} onDownload={download} downloading={downloading} />
       )}
       {b.status === 'succeeded' && b.run_id && (
         <SurvivalLabPanel

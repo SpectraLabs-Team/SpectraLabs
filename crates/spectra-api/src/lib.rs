@@ -737,6 +737,8 @@ fn backtest_routes() -> Router<AppState> {
         .route("/api/v1/backtests/{id}", only(get(backtests_api::get_backtest)))
         .route("/api/v1/backtests/{id}/cancel", only(post(backtests_api::cancel_backtest)))
         .route("/api/v1/backtests/{id}/series", only(get(backtests_api::backtest_series)))
+        .route("/api/v1/backtests/{id}/monthly-returns", only(get(backtests_api::backtest_monthly_returns)))
+        .route("/api/v1/backtests/{id}/monthly_returns", only(get(backtests_api::backtest_monthly_returns)))
         .route("/api/v1/backtests/{id}/artifacts/{kind}", only(get(backtests_api::backtest_artifact)))
         .route("/api/v1/datasets", only(get(backtests_api::list_datasets)))
         .route("/api/v1/datasets/preview", only(post(datasets_api::preview)))

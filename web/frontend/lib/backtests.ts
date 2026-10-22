@@ -288,6 +288,22 @@ export interface Series {
   points: [number, number | null][];
 }
 
+export interface MonthlyReturn {
+  year: number;
+  month: number;
+  return: number;
+  partial: boolean;
+  start_equity: number;
+  end_equity: number;
+}
+
+export interface MonthlyReturnsResponse {
+  backtest_id: string;
+  run_id?: string | null;
+  months: MonthlyReturn[];
+  returns: MonthlyReturn[];
+}
+
 /** Stored files `/artifacts/{kind}` serves. */
 export const DOWNLOADS = [
   { kind: 'equity_csv', label: 'Equity', file: 'equity.csv' },
@@ -382,6 +398,9 @@ export const listBacktests = (opts: { status?: JobStatus; cursor?: string; limit
 
 export const getSeries = (backtestId: string, kind: SeriesKind) =>
   request<Series>(`/api/v1/backtests/${id(backtestId)}/series?kind=${kind}`, { timeoutMs: 20_000 });
+
+export const getMonthlyReturns = (backtestId: string) =>
+  request<MonthlyReturnsResponse>(`/api/v1/backtests/${id(backtestId)}/monthly-returns`, { timeoutMs: 20_000 });
 
 async function fetchArtifact(backtestId: string, kind: DownloadKind): Promise<Response> {
   let response: Response;

@@ -29,6 +29,8 @@ const {
   getLayoutStorageKey,
   encodeLayoutForSharing,
   decodeLayoutFromSharing,
+  createShareableLayoutUrl,
+  parseLayoutShareParams,
   resetLayout,
 } = require(tempFile);
 
@@ -108,6 +110,22 @@ describe('Dashboard Layout Engine', () => {
   it('decodeLayoutFromSharing handles invalid or corrupted input safely', () => {
     assert.strictEqual(decodeLayoutFromSharing(''), null);
     assert.strictEqual(decodeLayoutFromSharing('unknown_foo:1;bar:0'), null);
+  });
+
+  it('createShareableLayoutUrl generates cross-workspace links with read-only flag (M18 Task 9)', () => {
+    const urlReadOnly = createShareableLayoutUrl('https://spectra.example.com/studio', DEFAULT_LAYOUT, { readOnly: true });
+    assert.ok(urlReadOnly.startsWith('https://spectra.example.com/studio?tab=overview&layout='));
+    assert.ok(urlReadOnly.includes('&readonly=true'));
+
+    const parsedReadOnly = parseLayoutShareParams(new URL(urlReadOnly).search);
+    assert.strictEqual(parsedReadOnly.isReadOnly, true);
+    assert.ok(parsedReadOnly.layout !== null);
+    assert.strictEqual(parsedReadOnly.layout.length, 6);
+
+    const urlEditable = createShareableLayoutUrl('https://spectra.example.com/studio', DEFAULT_LAYOUT, { readOnly: false });
+    assert.ok(!urlEditable.includes('&readonly=true'));
+    const parsedEditable = parseLayoutShareParams(new URL(urlEditable).search);
+    assert.strictEqual(parsedEditable.isReadOnly, false);
   });
 
   it('resetLayout returns a fresh independent copy of DEFAULT_LAYOUT', () => {

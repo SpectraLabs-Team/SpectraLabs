@@ -1,0 +1,23 @@
+[package]
+name = "spectra-parquet"
+description = "Spectra Labs Parquet ingestion and export service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+spectra-core = { path = "../spectra-core" }
+spectra-data = { path = "../spectra-data" }
+parquet = { version = "54", default-features = false, features = ["arrow", "snap"] }
+arrow-schema = { version = "54" }
+arrow-array = { version = "54" }
+arrow-cast = { version = "54" }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -713,7 +713,7 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${bt}/other`), `api/v1/backtests/${bt}/other`, 'unknown sub-routes stay unlisted');
   assert.equal(engineRoutes.routePolicyKey('api/v1/backtests/not-a-uuid'), 'api/v1/backtests/not-a-uuid');
   assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests'], 'POST'), 'editor', 'running a backtest needs editor');
-  for (const p of ['api/v1/backtests/{id}', 'api/v1/backtests/{id}/series', 'api/v1/strategies/builtin']) {
+  for (const p of ['api/v1/backtests/{id}', 'api/v1/backtests/{id}/series', 'api/v1/backtests/{id}/monthly-returns', 'api/v1/strategies/builtin']) {
     assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
   }
   assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests/{id}/cancel'], 'POST'), 'editor');
@@ -2056,6 +2056,8 @@ const ROUTE_RULES = {
   'workspaces/[id]/tokens GET': 'viewer@url', // owners see every token, others their own (apiTokens.listTokens)
   'workspaces/[id]/tokens POST': 'viewer@url', // personal tokens; workspace tokens and "run" checked in createToken
   'workspaces/[id]/tokens/[tokenId] DELETE': 'viewer@url', // your own; owners any (apiTokens.revokeToken)
+  'workspaces/[id]/layout GET': 'viewer@url',
+  'workspaces/[id]/layout PUT': 'editor@url',
 };
 // Workspace routes that change something yet only need viewer: switching your own active
 // workspace, and leaving one. Everything else that changes workspace data needs editor or more.

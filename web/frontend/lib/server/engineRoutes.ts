@@ -54,6 +54,7 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/backtests/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/backtests/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
   'api/v1/backtests/{id}/series': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/backtests/{id}/monthly-returns': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/backtests/{id}/artifacts/{kind}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   'api/v1/datasets': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/datasets/preview': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
@@ -141,7 +142,7 @@ export function routePolicyKey(path: string): string {
   if (/^api\/v1\/backtests\/[0-9a-f-]{36}\/artifacts\/(summary|request|equity_csv|orders_csv|fills_csv|returns_csv|strategies_csv)$/i.test(path)) {
     return 'api/v1/backtests/{id}/artifacts/{kind}';
   }
-  const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series)?$/i.exec(path);
+  const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series|\/monthly-returns)?$/i.exec(path);
   if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
   const session = /^api\/v1\/uploads\/sessions\/[0-9a-f-]{36}(\/complete)?$/i.exec(path);
   if (session) return `api/v1/uploads/sessions/{id}${session[1] ?? ''}`;

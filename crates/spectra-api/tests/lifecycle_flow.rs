@@ -29,7 +29,7 @@ async fn pool() -> Option<PgPool> {
 
 struct Fixture {
     app: Router,
-    _pool: PgPool,
+    pool: PgPool,
     _dir: std::path::PathBuf,
     user: Uuid,
     ws: Uuid,
@@ -43,7 +43,7 @@ impl Fixture {
         cfg.artifacts = Some(store.clone());
         cfg.data_dir = Some(dir.join("data"));
         let app = router(cfg, Some(pool.clone()));
-        Self { app, _pool: pool, _dir: dir, user: spectra_db::new_id(), ws: spectra_db::new_id() }
+        Self { app, pool, _dir: dir, user: spectra_db::new_id(), ws: spectra_db::new_id() }
     }
 
     fn req(&self, method: &str, path_and_query: &str, body: &str) -> Request<Body> {
@@ -176,6 +176,6 @@ async fn lifecycle_api_flow() {
     assert_eq!(fb23["resolved_symbol"], "META", "FB must be resolved to META in 2023");
 
     // Clean up test workspace
-    let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(f.ws).execute(&f._pool).await;
-    let _ = sqlx::query("DELETE FROM users WHERE id = $1").bind(f.user).execute(&f._pool).await;
+    let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(f.ws).execute(&f.pool).await;
+    let _ = sqlx::query("DELETE FROM users WHERE id = $1").bind(f.user).execute(&f.pool).await;
 }

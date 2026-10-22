@@ -123,6 +123,7 @@ export function encodeLayoutForSharing(layout: WidgetLayoutItem[]): string {
 
 /** Decode layout from a URL query string */
 export function decodeLayoutFromSharing(encoded: string): WidgetLayoutItem[] | null {
+  if (!encoded || typeof encoded !== 'string' || !encoded.trim()) return null;
   try {
     const parts = encoded.split(';');
     const result: WidgetLayoutItem[] = [];
@@ -142,6 +143,8 @@ export function decodeLayoutFromSharing(encoded: string): WidgetLayoutItem[] | n
       }
     }
 
+    if (seen.size === 0) return null;
+
     for (const def of DEFAULT_LAYOUT) {
       if (!seen.has(def.id)) {
         result.push({ ...def });
@@ -151,5 +154,46 @@ export function decodeLayoutFromSharing(encoded: string): WidgetLayoutItem[] | n
     return result.length > 0 ? result : null;
   } catch {
     return null;
+  }
+}
+
+/** Fetch layout from the server (PostgreSQL), falling back to null on network or server error */
+export async function fetchServerLayout(
+  workspaceId: string
+): Promise<{ layout: WidgetLayoutItem[]; isWorkspaceDefault: boolean } | null> {
+  if (!workspaceId) return null;
+  try {
+    const res = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/layout`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.ok && Array.isArray(data.layout)) {
+      return { layout: data.layout, isWorkspaceDefault: !!data.isWorkspaceDefault };
+    }
+  } catch {
+    /* server or network unreachable */
+  }
+  return null;
+}
+
+/** Save layout to the server (PostgreSQL) */
+export async function saveServerLayout(
+  workspaceId: string,
+  layout: WidgetLayoutItem[],
+  asWorkspaceDefault = false
+): Promise<boolean> {
+  if (!workspaceId) return false;
+  try {
+    const res = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/layout`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ layout, asWorkspaceDefault }),
+    });
+    return res.ok;
+  } catch {
+    return false;
   }
 }

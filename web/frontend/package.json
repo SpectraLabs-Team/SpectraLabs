@@ -16,6 +16,7 @@
     "secrets:rotate": "node scripts/secrets-rotate.mjs",
     "audit:verify": "node scripts/audit-verify.mjs",
     "test": "node scripts/test-auth.mjs",
+    "test:layout": "node scripts/test-dashboard-layout.mjs",
     "prepare": "node -e \"try{require('child_process').execSync('git -C ../.. config core.hooksPath .githooks',{stdio:'ignore'})}catch{}\"",
     "typecheck": "tsc --noEmit"
   },

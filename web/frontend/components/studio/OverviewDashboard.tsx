@@ -18,6 +18,7 @@ import {
   Eye,
   EyeOff,
   Flame,
+  Globe,
   LineChart,
   Lock,
   Play,
@@ -48,9 +49,11 @@ import {
   DEFAULT_LAYOUT,
   decodeLayoutFromSharing,
   encodeLayoutForSharing,
+  fetchServerLayout,
   loadSavedLayout,
   resetLayout,
   saveLayout,
+  saveServerLayout,
   type WidgetId,
   type WidgetLayoutItem,
 } from '@/lib/dashboardLayout';
@@ -179,6 +182,9 @@ function CustomizeLayoutModal({
   onToggle,
   onMove,
   onReset,
+  canPublishDefault,
+  onPublishDefault,
+  publishingDefault,
 }: {
   layout: WidgetLayoutItem[];
   isOpen: boolean;
@@ -186,6 +192,9 @@ function CustomizeLayoutModal({
   onToggle: (id: WidgetId) => void;
   onMove: (index: number, direction: 'up' | 'down') => void;
   onReset: () => void;
+  canPublishDefault?: boolean;
+  onPublishDefault?: () => void;
+  publishingDefault?: boolean;
 }) {
   if (!isOpen) return null;
 
@@ -286,7 +295,7 @@ function CustomizeLayoutModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-ink/[0.08] bg-ink/[0.02] px-6 py-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-ink/[0.08] bg-ink/[0.02] px-6 py-3.5">
           <button
             type="button"
             onClick={onReset}
@@ -295,13 +304,27 @@ function CustomizeLayoutModal({
             <RotateCcw className="h-3.5 w-3.5" />
             Reset to default
           </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="btn-primary px-4 py-1.5 text-xs font-medium"
-          >
-            Done
-          </button>
+          <div className="flex items-center gap-2">
+            {canPublishDefault && onPublishDefault && (
+              <button
+                type="button"
+                onClick={onPublishDefault}
+                disabled={publishingDefault}
+                className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-accent hover:border-accent/40"
+                title="Save this layout as the workspace-wide default for all members"
+              >
+                <Globe className="h-3.5 w-3.5" />
+                <span>{publishingDefault ? 'Publishing…' : 'Publish as Workspace Default'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn-primary px-4 py-1.5 text-xs font-medium"
+            >
+              Done
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -326,17 +349,31 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
   const [adoptMessage, setAdoptMessage] = useState('');
   const [userRole, setUserRole] = useState<'owner' | 'editor' | 'viewer' | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [isServerDefault, setIsServerDefault] = useState(false);
+  const [publishingDefault, setPublishingDefault] = useState(false);
 
-  // Load user session and M19 role
+  // Load user session, M19 role, and sync server layout
   useEffect(() => {
     fetch('/api/auth/session', { credentials: 'same-origin' })
       .then((r) => r.json())
       .then((s: { workspace?: { role?: 'owner' | 'editor' | 'viewer'; id?: string } | null }) => {
         if (s?.workspace?.role) setUserRole(s.workspace.role);
-        if (s?.workspace?.id) setWorkspaceId(s.workspace.id);
+        if (s?.workspace?.id) {
+          const wsId = s.workspace.id;
+          setWorkspaceId(wsId);
+          if (!sharedLayoutParam) {
+            fetchServerLayout(wsId).then((res) => {
+              if (res && res.layout) {
+                setLayout(res.layout);
+                saveLayout(res.layout, wsId);
+                setIsServerDefault(res.isWorkspaceDefault);
+              }
+            });
+          }
+        }
       })
       .catch(() => undefined);
-  }, []);
+  }, [sharedLayoutParam]);
 
   // Process shared layout parameter from URL
   useEffect(() => {
@@ -366,6 +403,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
     setLayout((prev) => {
       const updated = prev.map((item) => (item.id === id ? { ...item, visible: !item.visible } : item));
       saveLayout(updated, workspaceId);
+      if (workspaceId) void saveServerLayout(workspaceId, updated, false);
       return updated;
     });
   };
@@ -378,6 +416,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
       const [moved] = next.splice(index, 1);
       next.splice(targetIndex, 0, moved);
       saveLayout(next, workspaceId);
+      if (workspaceId) void saveServerLayout(workspaceId, next, false);
       return next;
     });
   };
@@ -385,12 +424,29 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
   const handleResetLayout = () => {
     const def = resetLayout(workspaceId);
     setLayout(def);
+    if (workspaceId) void saveServerLayout(workspaceId, def, false);
   };
 
   const handleAdoptSharedLayout = () => {
     saveLayout(layout, workspaceId);
+    if (workspaceId) void saveServerLayout(workspaceId, layout, false);
     setAdoptMessage('Shared layout successfully saved as your default workspace layout.');
     setTimeout(() => setAdoptMessage(''), 4000);
+  };
+
+  const handlePublishWorkspaceDefault = async () => {
+    if (!workspaceId) return;
+    setPublishingDefault(true);
+    try {
+      const ok = await saveServerLayout(workspaceId, layout, true);
+      if (ok) {
+        setIsServerDefault(true);
+        setAdoptMessage('Published this layout as the workspace-wide default for all members.');
+        setTimeout(() => setAdoptMessage(''), 4000);
+      }
+    } finally {
+      setPublishingDefault(false);
+    }
   };
 
   const handleExitSharedView = () => {
@@ -1000,6 +1056,11 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
                 Shared View
               </span>
             )}
+            {!isSharedView && isServerDefault && (
+              <span className="rounded-full bg-ink/5 px-2 py-0.5 font-mono text-[10px] text-ink/50" title="Viewing the team workspace default layout">
+                Workspace Default
+              </span>
+            )}
           </div>
           <p className="mt-0.5 text-xs text-ink/60">
             Real runs, pre-trade risk verdicts, and live system state at a glance.
@@ -1196,6 +1257,9 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
         onToggle={handleToggleWidget}
         onMove={handleMoveWidget}
         onReset={handleResetLayout}
+        canPublishDefault={userRole === 'owner' || userRole === 'editor'}
+        onPublishDefault={handlePublishWorkspaceDefault}
+        publishingDefault={publishingDefault}
       />
 
       {/* Share View Modal */}

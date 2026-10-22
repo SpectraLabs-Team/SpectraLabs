@@ -9,6 +9,7 @@ import { ExperimentRegistry } from './ExperimentRegistry';
 import { DataLab } from './DataLab';
 import { MarketSettings } from './MarketSettings';
 import { OptimizationLab } from './OptimizationLab';
+import { OverviewDashboard } from './OverviewDashboard';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';
 import { RiskCenter } from './RiskCenter';
@@ -21,15 +22,17 @@ export function StudioApp() {
   const router = useRouter();
   const pathname = usePathname();
   const raw = params.get('tab');
-  const tab: StudioTab = TABS.some((t) => t.id === raw) ? (raw as StudioTab) : 'risk';
+  const tab: StudioTab = TABS.some((t) => t.id === raw) ? (raw as StudioTab) : 'overview';
 
   const setTab = useCallback((t: StudioTab) => router.replace(`${pathname}?tab=${t}`, { scroll: false }), [router, pathname]);
+  const selectRun = useCallback((runId: string) => router.replace(`${pathname}?tab=backtests&run=${encodeURIComponent(runId)}`, { scroll: false }), [router, pathname]);
 
   return (
     <PortfolioProvider>
       <StudioShell tab={tab} onTab={setTab}>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.18 }}>
+            {tab === 'overview' && <OverviewDashboard onTab={setTab} onSelectRun={selectRun} />}
             {tab === 'risk' && <RiskLab />}
             {tab === 'risk-center' && <RiskCenter />}
             {tab === 'portfolio' && <PortfolioStudio />}

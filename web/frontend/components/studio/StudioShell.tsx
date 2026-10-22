@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Briefcase, ChevronsLeft, ChevronsRight, Cpu, Database, FileCode2, LayoutDashboard, LineChart, Lock, LogOut, Menu, PlugZap, ShieldAlert, ShieldCheck, X } from 'lucide-react';
+import { Briefcase, ChevronsLeft, ChevronsRight, Cpu, Database, FileCode2, LayoutDashboard, LineChart, Lock, LogOut, Menu, PlugZap, ShieldAlert, ShieldCheck, Sliders, X } from 'lucide-react';
 import { RolePill } from '@/components/landing/Header';
 import { StatusPills } from '@/components/ui/StatusPills';
 import { Logo } from '@/components/ui/primitives';
@@ -13,16 +13,17 @@ import { cn, formatCompactCurrency, formatCurrency } from '@/lib/utils';
 import { usePortfolio } from './PortfolioContext';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 
-export type StudioTab = 'risk' | 'risk-center' | 'portfolio' | 'data' | 'strategies' | 'backtests' | 'optimization' | 'benchmark' | 'registry' | 'settings';
+export type StudioTab = 'overview' | 'risk' | 'risk-center' | 'portfolio' | 'data' | 'strategies' | 'backtests' | 'optimization' | 'benchmark' | 'registry' | 'settings';
 
 export const TABS: { id: StudioTab; label: string; short: string; icon: typeof Cpu }[] = [
+  { id: 'overview', label: 'Workspace Overview', short: 'Overview', icon: LayoutDashboard },
   { id: 'risk', label: 'Risk & Stress Lab', short: 'Risk', icon: ShieldAlert },
   { id: 'risk-center', label: 'Risk Center & Controls', short: 'Risk Center', icon: ShieldCheck },
   { id: 'portfolio', label: 'Portfolio Studio', short: 'Portfolio', icon: Briefcase },
   { id: 'data', label: 'Data', short: 'Data', icon: Database },
   { id: 'strategies', label: 'Strategy Studio', short: 'Strategies', icon: FileCode2 },
   { id: 'backtests', label: 'Backtests', short: 'Backtests', icon: LineChart },
-  { id: 'optimization', label: 'Optimization Lab', short: 'Optimization', icon: LayoutDashboard },
+  { id: 'optimization', label: 'Optimization Lab', short: 'Optimization', icon: Sliders },
   { id: 'benchmark', label: 'Hardware Benchmarks', short: 'Benchmarks', icon: Cpu },
   { id: 'registry', label: 'Experiment Registry', short: 'Experiments', icon: Database },
   { id: 'settings', label: 'Market Data & Alpaca Settings', short: 'Settings', icon: PlugZap },

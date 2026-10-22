@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, Beaker, CircleAlert, CircleCheck, LoaderCircle, Plus, RefreshCw, Square } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { Activity, Beaker, CircleAlert, CircleCheck, GitFork, LoaderCircle, Plus, RefreshCw, Square } from 'lucide-react';
 import { RunDetail } from './RunDetail';
 import { ApiError, request } from '@/lib/api';
 import { cancelJob, waitForJob, type Job } from '@/lib/jobs';
@@ -45,9 +46,14 @@ type BacktestReport = {
 const pct = (value: number) => `${(value * 100).toFixed(2)}%`;
 
 export function ExperimentRegistry() {
+  const searchParams = useSearchParams();
+  const expParam = searchParams.get('experiment');
+  const runParam = searchParams.get('run');
+
   const [items, setItems] = useState<Experiment[]>([]);
   const [runs, setRuns] = useState<Run[]>([]);
   const [selected, setSelected] = useState('');
+  const [lineage, setLineage] = useState<string[]>([]);
   const [name, setName] = useState('');
   const [hypothesis, setHypothesis] = useState('');
   const [tags, setTags] = useState('');
@@ -57,18 +63,63 @@ export function ExperimentRegistry() {
   const [activeJob, setActiveJob] = useState<Job<BacktestReport> | null>(null);
   const [runId, setRunId] = useState('');
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [openRun, setOpenRun] = useState('');
+  const [openRun, setOpenRun] = useState(runParam ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
   const selectedExperiment = useMemo(() => items.find((item) => item.id === selected) ?? null, [items, selected]);
 
+  const selectExperiment = useCallback((expId: string) => {
+    setSelected(expId);
+    setOpenRun('');
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', 'registry');
+      url.searchParams.set('experiment', expId);
+      url.searchParams.delete('run');
+      window.history.replaceState(null, '', url.toString());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const selectRun = useCallback((rId: string) => {
+    setOpenRun(rId);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', 'registry');
+      if (selected) url.searchParams.set('experiment', selected);
+      url.searchParams.set('run', rId);
+      window.history.replaceState(null, '', url.toString());
+    } catch {
+      /* ignore */
+    }
+  }, [selected]);
+
+  const loadLineage = useCallback(async (experimentId: string) => {
+    if (!experimentId) {
+      setLineage([]);
+      return;
+    }
+    try {
+      const result = await request<{ items: string[] }>(`/api/v1/experiments/${encodeURIComponent(experimentId)}/lineage`);
+      setLineage(result.items || [experimentId]);
+    } catch {
+      setLineage([experimentId]);
+    }
+  }, []);
+
   const loadExperiments = useCallback(async () => {
     const result = await request<{ items: Experiment[] }>('/api/v1/experiments');
     setItems(result.items);
-    setSelected((current) => current && result.items.some((item) => item.id === current) ? current : result.items[0]?.id ?? '');
-  }, []);
+    setSelected((current) => {
+      if (expParam && result.items.some((item) => item.id === expParam)) {
+        return expParam;
+      }
+      return current && result.items.some((item) => item.id === current) ? current : result.items[0]?.id ?? '';
+    });
+  }, [expParam]);
 
   const loadRuns = useCallback(async (experimentId: string, cursor?: string) => {
     if (!experimentId) { setRuns([]); setNextCursor(null); return; }
@@ -83,17 +134,41 @@ export function ExperimentRegistry() {
     setError('');
     try {
       await loadExperiments();
-      if (selected) await loadRuns(selected);
+      if (selected) {
+        await loadRuns(selected);
+        await loadLineage(selected);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load the research registry.');
     }
-  }, [loadExperiments, loadRuns, selected]);
+  }, [loadExperiments, loadRuns, loadLineage, selected]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // Deep-link to a specific run if provided in the URL query (?tab=registry&run=<id>)
   useEffect(() => {
-    setOpenRun('');
-    if (selected) void loadRuns(selected).catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load runs.'));
-  }, [selected, loadRuns]);
+    if (!runParam) return;
+    (async () => {
+      try {
+        const runData = await request<{ id: string; experiment_id: string }>(`/api/v1/runs/${encodeURIComponent(runParam)}`);
+        if (runData.experiment_id) {
+          setSelected(runData.experiment_id);
+          setOpenRun(runParam);
+        }
+      } catch {
+        /* run not found or error */
+      }
+    })();
+  }, [runParam]);
+
+  useEffect(() => {
+    if (selected) {
+      void loadRuns(selected).catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load runs.'));
+      void loadLineage(selected);
+    } else {
+      setLineage([]);
+    }
+  }, [selected, loadRuns, loadLineage]);
 
   const createExperiment = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -175,21 +250,69 @@ export function ExperimentRegistry() {
           <div className="rounded-2xl border border-ink/10 bg-ink/[0.025] p-5">
             <h2 className="text-base font-semibold text-ink">Experiments <span className="font-mono text-xs text-ink/40">{items.length}</span></h2>
             <div className="mt-3 space-y-2">
-              {items.map((item) => <button key={item.id} type="button" onClick={() => setSelected(item.id)} aria-pressed={selected === item.id}
-                className={`w-full rounded-xl border p-3 text-left transition ${selected === item.id ? 'border-accent/40 bg-accent/10' : 'border-ink/[0.08] hover:border-ink/20'}`}>
-                <span className="flex items-baseline justify-between gap-2">
-                  <span className="font-medium text-ink">{item.name}</span>
-                  <span className="shrink-0 font-mono text-[10px] text-ink/45" title={`${item.succeeded_count} succeeded`}>{item.run_count} {item.run_count === 1 ? 'run' : 'runs'}</span>
-                </span>
-                <span className="mt-1 block line-clamp-2 text-xs text-ink/50">{item.hypothesis || 'No hypothesis added.'}</span>
-                <span className="mt-2 flex flex-wrap gap-1">{item.tags.map((tag) => <span key={tag} className="rounded-full bg-ink/5 px-2 py-0.5 font-mono text-[10px] text-ink/55">{tag}</span>)}</span>
-              </button>)}
+              {items.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => selectExperiment(item.id)}
+                  aria-pressed={selected === item.id}
+                  className={`w-full rounded-xl border p-3 text-left transition ${selected === item.id ? 'border-accent/40 bg-accent/10' : 'border-ink/[0.08] hover:border-ink/20'}`}
+                >
+                  <span className="flex items-baseline justify-between gap-2">
+                    <span className="font-medium text-ink">{item.name}</span>
+                    <span className="shrink-0 font-mono text-[10px] text-ink/45" title={`${item.succeeded_count} succeeded`}>{item.run_count} {item.run_count === 1 ? 'run' : 'runs'}</span>
+                  </span>
+                  <span className="mt-1 block line-clamp-2 text-xs text-ink/50">{item.hypothesis || 'No hypothesis added.'}</span>
+                  <span className="mt-2 flex flex-wrap gap-1">{item.tags.map((tag) => <span key={tag} className="rounded-full bg-ink/5 px-2 py-0.5 font-mono text-[10px] text-ink/55">{tag}</span>)}</span>
+                </button>
+              ))}
               {!items.length && <p className="rounded-lg border border-dashed border-ink/15 p-4 text-sm text-ink/45">Create an experiment to start recording research.</p>}
             </div>
           </div>
         </section>
 
         <section className="space-y-5">
+          {selectedExperiment && lineage.length > 0 && (
+            <div className="rounded-2xl border border-ink/10 bg-ink/[0.025] p-4 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-wider text-ink/50">
+                  <GitFork className="h-3.5 w-3.5 text-accent" /> Lineage chain
+                </span>
+                <span className="font-mono text-[10px] text-ink/40">
+                  {lineage.length === 1 ? 'Root experiment' : `${lineage.length} generations (root → leaf)`}
+                </span>
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                {lineage.map((id, idx) => {
+                  const item = items.find((e) => e.id === id);
+                  const label = item ? item.name : id.slice(0, 8);
+                  const isCurrent = id === selected;
+                  return (
+                    <div key={id} className="flex items-center gap-2">
+                      {idx > 0 && <span className="text-ink/30">→</span>}
+                      {isCurrent ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-1 font-semibold text-accent" title={`Current experiment: ${id}`}>
+                          <span>{label}</span>
+                          <span className="rounded bg-accent/20 px-1 py-0.2 text-[9px] uppercase tracking-wider text-accent">current</span>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => selectExperiment(id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-ink/[0.08] bg-ink/[0.03] px-2.5 py-1 text-ink/75 transition hover:border-ink/20 hover:bg-ink/[0.06] hover:text-ink"
+                          title={`Navigate to ancestor experiment: ${id}`}
+                        >
+                          <span>{label}</span>
+                          {idx === 0 && <span className="text-[10px] text-ink/40">(root)</span>}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="rounded-2xl border border-ink/10 bg-ink/[0.025] p-5">
             <h2 className="flex items-center gap-2 text-base font-semibold text-ink"><Beaker className="h-4 w-4 text-accent" />Run SMA crossover backtest</h2>
             <p className="mt-1 text-xs text-ink/50">{selectedExperiment ? `Recorded under ${selectedExperiment.name}.` : 'No experiment selected: the run goes to Unsorted.'} Paste OHLCV CSV, up to 10 MB.</p>
@@ -230,10 +353,10 @@ export function ExperimentRegistry() {
                   {runs.map((run) => {
                     const done = run.status === 'succeeded';
                     return (
-                      <tr key={run.id} onClick={() => setOpenRun(run.id)} aria-selected={openRun === run.id}
+                      <tr key={run.id} onClick={() => selectRun(run.id)} aria-selected={openRun === run.id}
                         className={`cursor-pointer transition hover:bg-ink/[0.03] ${openRun === run.id ? 'bg-accent/[0.06]' : ''}`}>
                         <td className="py-3 pr-3">
-                          <button type="button" onClick={(event) => { event.stopPropagation(); setOpenRun(run.id); }} className="text-left">
+                          <button type="button" onClick={(event) => { event.stopPropagation(); selectRun(run.id); }} className="text-left">
                             <span className={`block font-medium ${run.status === 'failed' ? 'text-loss' : 'text-ink'}`}>{run.status}</span>
                             <span className="font-mono text-[10px] text-ink/40">{run.id.slice(0, 12)}</span>
                           </button>
@@ -262,7 +385,7 @@ export function ExperimentRegistry() {
             <RunDetail
               runId={openRun}
               experimentName={selectedExperiment?.name ?? 'Unsorted'}
-              onClose={() => setOpenRun('')}
+              onClose={() => selectRun('')}
               onChanged={() => { if (selected) void loadRuns(selected).catch(() => undefined); }}
             />
           )}

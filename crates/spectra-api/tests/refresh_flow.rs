@@ -71,12 +71,12 @@ impl Fixture {
         Request::builder()
             .method(method)
             .uri(path_and_query)
-            .header("content-type", "application/json")
-            .header("x-spectra-timestamp", ts)
-            .header("x-spectra-user-id", user)
-            .header("x-spectra-workspace-id", ws_str)
-            .header("x-spectra-request-id", req_id)
-            .header("x-spectra-signature", sig)
+            .header("X-Spectra-User", user)
+            .header("X-Spectra-Workspace", ws_str)
+            .header("X-Request-Id", req_id)
+            .header("X-Spectra-Timestamp", ts)
+            .header("X-Spectra-Signature", sig)
+            .header("Content-Type", "application/json")
             .body(Body::from(body.to_string()))
             .unwrap()
     }
@@ -97,6 +97,7 @@ async fn refresh_flow_e2e() {
         return;
     };
     let fix = Fixture::new(pool);
+    spectra_db::identity::ensure_identity(&fix.pool, Some(fix.user), fix.ws).await.unwrap();
 
     // 1. Create a provider config via REST API
     let create_cfg_body = json!({

@@ -725,3 +725,111 @@ async fn a_stored_upload_that_no_longer_matches_its_hash_is_refused() {
     }
     f.clean_up().await;
 }
+
+#[tokio::test]
+async fn parquet_ingest_and_export_roundtrip() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool.clone(), 1 << 30);
+
+    // 1. Ingest CSV file
+    let csv_upload = f.upload(CSV).await;
+    let csv_outcome = f.ingest(&csv_upload, "bench", SETTINGS, false).await;
+    let csv_reg = registered(csv_outcome);
+    let csv_checksum = csv_reg.get("checksum").unwrap().as_str().unwrap();
+    let version_id = csv_reg.get("dataset_version_id").unwrap().as_str().unwrap();
+
+    // 2. Export as Parquet
+    let (status, resp) = {
+        let req = f.json("GET", &format!("/api/v1/datasets/versions/{version_id}/export?format=parquet"), "");
+        let r = f.app.clone().oneshot(req).await.unwrap();
+        let s = r.status().as_u16();
+        let b = r.into_body().collect().await.unwrap().to_bytes();
+        (s, b)
+    };
+    assert_eq!(status, 200);
+    assert!(resp.starts_with(b"PAR1"));
+
+    // 3. Re-upload exported Parquet and ingest it
+    let pq_hash = sha256_hex(&resp);
+    let (upload_status, upload_j) = f.call(f.upload_request(&resp, &pq_hash, "export.parquet")).await;
+    assert_eq!(upload_status, 201);
+    let pq_upload_id = upload_j.at("id").unwrap().as_str().unwrap();
+
+    let pq_settings = r#"{"delimiter":",","time_format":"iso8601","utc_offset_minutes":0,
+        "columns":{"timestamp":"timestamp","open":"open","high":"high","low":"low","close":"close",
+                   "volume":"volume","symbol":"symbol"}}"#;
+    let pq_outcome = f.ingest(pq_upload_id, "bench-pq", pq_settings, false).await;
+    let pq_reg = registered(pq_outcome);
+    let pq_checksum = pq_reg.get("checksum").unwrap().as_str().unwrap();
+
+    // Identity parity: CSV and Parquet with the same bars give the exact same dataset id
+    assert_eq!(csv_checksum, pq_checksum);
+
+    // 4. Cross-workspace access to export is refused (404)
+    let other = Fixture::new(pool, 1 << 30);
+    let other_req =
+        other.json("GET", &format!("/api/v1/datasets/versions/{version_id}/export?format=parquet"), "");
+    let other_resp = other.app.clone().oneshot(other_req).await.unwrap();
+    assert_eq!(other_resp.status().as_u16(), 404);
+
+    // 5. Bad format query parameter is rejected with 422
+    let bad_fmt_req = f.json("GET", &format!("/api/v1/datasets/versions/{version_id}/export?format=csv"), "");
+    let bad_fmt_resp = f.app.clone().oneshot(bad_fmt_req).await.unwrap();
+    assert_eq!(bad_fmt_resp.status().as_u16(), 422);
+
+    other.clean_up().await;
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn parquet_ingest_rejects_floats_and_excessive_decimals() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool, 1 << 30);
+
+    // Create a Parquet with a Float64 column
+    let schema = std::sync::Arc::new(arrow_schema::Schema::new(vec![
+        arrow_schema::Field::new("Date", arrow_schema::DataType::Utf8, false),
+        arrow_schema::Field::new("Open", arrow_schema::DataType::Float64, false),
+        arrow_schema::Field::new("High", arrow_schema::DataType::Float64, false),
+        arrow_schema::Field::new("Low", arrow_schema::DataType::Float64, false),
+        arrow_schema::Field::new("Close", arrow_schema::DataType::Float64, false),
+        arrow_schema::Field::new("Volume", arrow_schema::DataType::Int64, false),
+        arrow_schema::Field::new("Ticker", arrow_schema::DataType::Utf8, false),
+    ]));
+    let batch = arrow_array::RecordBatch::try_new(
+        schema,
+        vec![
+            std::sync::Arc::new(arrow_array::StringArray::from(vec!["2024-01-02"])),
+            std::sync::Arc::new(arrow_array::Float64Array::from(vec![185.50])),
+            std::sync::Arc::new(arrow_array::Float64Array::from(vec![186.00])),
+            std::sync::Arc::new(arrow_array::Float64Array::from(vec![185.00])),
+            std::sync::Arc::new(arrow_array::Float64Array::from(vec![185.75])),
+            std::sync::Arc::new(arrow_array::Int64Array::from(vec![10000])),
+            std::sync::Arc::new(arrow_array::StringArray::from(vec!["SPY"])),
+        ],
+    )
+    .unwrap();
+
+    let mut buf = Vec::new();
+    let props = parquet::file::properties::WriterProperties::builder().build();
+    let mut writer = parquet::arrow::ArrowWriter::try_new(&mut buf, batch.schema(), Some(props)).unwrap();
+    writer.write(&batch).unwrap();
+    writer.close().unwrap();
+
+    let hash = sha256_hex(&buf);
+    let (status, j) = f.call(f.upload_request(&buf, &hash, "floats.parquet")).await;
+    assert_eq!(status, 201);
+    let upload_id = j.at("id").unwrap().as_str().unwrap();
+
+    match f.ingest(upload_id, "bad-float", SETTINGS, false).await {
+        IngestOutcome::Rejected { message, result } => {
+            assert!(message.contains("floating point numbers are not allowed"), "{message}");
+            assert_eq!(result.get("rejected"), Some(&serde_json::Value::Bool(true)));
+            let qr = result.get("quality_report").unwrap();
+            assert_eq!(qr.get("rows_rejected"), Some(&serde_json::json!(1)));
+        }
+        other => panic!("expected IngestOutcome::Rejected, got {other:?}"),
+    }
+
+    f.clean_up().await;
+}

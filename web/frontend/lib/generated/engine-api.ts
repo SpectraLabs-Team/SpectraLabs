@@ -268,6 +268,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/datasets/versions/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export a dataset version as Apache Parquet. */
+        get: operations["export_version"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets/versions/{id}/runs": {
         parameters: {
             query?: never;
@@ -2049,6 +2066,11 @@ export interface components {
             strategy?: string | null;
             /** Format: uuid */
             strategy_version_id?: string | null;
+        };
+        /** @description `GET /api/v1/datasets/versions/{id}/export` query. */
+        ExportQuery: {
+            /** @description Format to export: currently only `parquet` is supported (default: `parquet`). */
+            format?: string | null;
         };
         HoldoutEvaluationView: {
             /** Format: double */
@@ -4078,6 +4100,48 @@ export interface operations {
                 };
             };
             /** @description Derivation or adjustment math error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    export_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Dataset version id */
+                id: string;
+                /** @description Format to export: currently only `parquet` is supported (default: `parquet`). */
+                format: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Parquet binary payload */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.apache.parquet": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid query parameter */
             422: {
                 headers: {
                     [name: string]: unknown;

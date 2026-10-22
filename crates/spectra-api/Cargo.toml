@@ -13,6 +13,7 @@ spectra-backtest = { path = "../spectra-backtest" }
 spectra-data = { path = "../spectra-data" }
 spectra-engine = { path = "../spectra-engine" }
 spectra-risk = { path = "../spectra-risk" }
+spectra-parquet = { path = "../spectra-parquet" }
 spectra-db = { path = "../spectra-db" }
 spectra-registry = { path = "../spectra-registry", features = ["postgres"] }
 spectra-research = { path = "../spectra-research" }
@@ -41,6 +42,9 @@ s3 = ["spectra-db/s3"]
 [dev-dependencies]
 sqlx.workspace = true
 tower.workspace = true
+parquet = { version = "54", default-features = false, features = ["arrow", "snap"] }
+arrow-schema = { version = "54" }
+arrow-array = { version = "54" }
 
 [lints]
 workspace = true

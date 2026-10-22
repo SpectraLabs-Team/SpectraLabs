@@ -65,6 +65,7 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/datasets/{id}': { method: ['GET', 'PATCH'], minRole: 'viewer', methodRoles: { PATCH: 'editor' }, timeoutMs: 10_000 },
   'api/v1/datasets/versions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },
   'api/v1/datasets/versions/{id}/derive': { method: 'POST', minRole: 'editor', timeoutMs: 60_000 },
+  'api/v1/datasets/versions/{id}/export': { method: 'GET', minRole: 'viewer', timeoutMs: 60_000 },
   'api/v1/datasets/versions/{id}/runs': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/datasets/versions/{id}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   // Corporate actions & backward adjustments (M1b)
@@ -163,7 +164,7 @@ export function routePolicyKey(path: string): string {
   if (/^api\/v1\/optimization\/walkforward\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/optimization/walkforward/{id}';
   const holdout = /^api\/v1\/optimization\/holdout\/[0-9a-f-]{36}(\/evaluate)?$/i.exec(path);
   if (holdout) return `api/v1/optimization/holdout/{id}${holdout[1] ?? ''}`;
-  const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars|\/derive)?$/i.exec(path);
+  const version = /^api\/v1\/datasets\/versions\/[0-9a-f-]{36}(\/runs|\/bars|\/derive|\/export)?$/i.exec(path);
   if (version) return `api/v1/datasets/versions/{id}${version[1] ?? ''}`;
   if (/^api\/v1\/datasets\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/datasets/{id}';
   return path;

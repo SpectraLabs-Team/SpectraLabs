@@ -754,9 +754,10 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/bars`), 'api/v1/datasets/versions/{id}/bars');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/runs`), 'api/v1/datasets/versions/{id}/runs');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/derive`), 'api/v1/datasets/versions/{id}/derive');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/export`), 'api/v1/datasets/versions/{id}/export');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/datasets/versions/${ds}/other`), `api/v1/datasets/versions/${ds}/other`, 'unknown sub-routes stay unlisted');
   assert.equal(engineRoutes.routePolicyKey('api/v1/datasets/not-a-uuid'), 'api/v1/datasets/not-a-uuid');
-  for (const p of ['api/v1/datasets/{id}', 'api/v1/datasets/versions/{id}', 'api/v1/datasets/versions/{id}/runs', 'api/v1/datasets/versions/{id}/bars']) {
+  for (const p of ['api/v1/datasets/{id}', 'api/v1/datasets/versions/{id}', 'api/v1/datasets/versions/{id}/runs', 'api/v1/datasets/versions/{id}/bars', 'api/v1/datasets/versions/{id}/export']) {
     assert.equal(engineRoutes.minimumRole(routes[p], 'GET'), 'viewer', p);
   }
   assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/{id}'], 'PATCH'), 'editor', 'renaming needs editor');
@@ -764,6 +765,7 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.minimumRole(routes['api/v1/datasets/versions/{id}/derive'], 'POST'), 'editor', 'deriving needs editor');
   assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/{id}'], 'DELETE'), 'datasets are deleted version by version');
   assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/versions/{id}/bars'], 'POST'));
+  assert.ok(!engineRoutes.allowsMethod(routes['api/v1/datasets/versions/{id}/export'], 'POST'));
   // Corporate actions (M1b)
   const ca = '0192f3a4-0000-7000-8000-00000000000b';
   assert.equal(engineRoutes.routePolicyKey('api/v1/corporate-actions'), 'api/v1/corporate-actions');

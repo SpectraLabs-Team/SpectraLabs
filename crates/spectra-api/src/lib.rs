@@ -51,6 +51,7 @@ pub mod jobs_api;
 pub mod lifecycle_api;
 pub mod observability;
 pub mod openapi;
+pub mod optimization_api;
 pub mod providers;
 pub mod providers_api;
 pub mod registry_api;
@@ -59,6 +60,7 @@ pub mod strategies_api;
 pub mod survival_api;
 pub mod telemetry;
 pub mod uploads_api;
+pub mod worker;
 
 use std::collections::HashSet;
 use std::future::Future;
@@ -809,9 +811,20 @@ fn backtest_routes() -> Router<AppState> {
             "/api/v1/strategies",
             only(get(strategies_api::list_strategies).post(strategies_api::create_strategy)),
         )
+        .route("/api/v1/strategies/validate", only(post(strategies_api::validate_strategy_code)))
         .route("/api/v1/strategies/{id}", only(get(strategies_api::get_strategy)))
+        .route(
+            "/api/v1/strategies/{id}/draft",
+            only(get(strategies_api::get_strategy_draft).put(strategies_api::save_strategy_draft)),
+        )
+        .route("/api/v1/strategies/{id}/diff", only(get(strategies_api::diff_strategy_versions)))
         .route("/api/v1/strategies/{id}/versions", only(post(strategies_api::save_strategy_version)))
         .route("/api/v1/strategies/versions/{id}", only(get(strategies_api::get_strategy_version)))
+        .route(
+            "/api/v1/strategies/{id}/versions/{version_id}/parameter_sets",
+            only(get(strategies_api::list_parameter_sets).post(strategies_api::create_parameter_set)),
+        )
+        .route("/api/v1/strategies/parameter_sets/{id}", only(get(strategies_api::get_parameter_set)))
 }
 
 /// The upload route streams after validating its declared body hash.
@@ -827,6 +840,24 @@ fn session_routes() -> Router<AppState> {
         .route("/api/v1/uploads/sessions/{id}", only(get(sessions_api::get).delete(sessions_api::abort)))
         .route("/api/v1/uploads/sessions/{id}/chunk", only(put(sessions_api::chunk)))
         .route("/api/v1/uploads/sessions/{id}/complete", only(post(sessions_api::complete)))
+}
+
+/// Module 4: Parameter Sweeps, Walk-Forward Validation, Overfitting Diagnostics, Holdout Vault.
+fn optimization_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/optimization/sweep", only(post(optimization_api::queue_sweep)))
+        .route("/api/v1/optimization/sweeps", only(get(optimization_api::list_sweeps)))
+        .route("/api/v1/optimization/sweep/{id}", only(get(optimization_api::get_sweep)))
+        .route(
+            "/api/v1/optimization/walkforward",
+            only(get(optimization_api::list_walk_forwards).post(optimization_api::queue_walk_forward)),
+        )
+        .route("/api/v1/optimization/walkforward/{id}", only(get(optimization_api::get_walk_forward)))
+        .route("/api/v1/optimization/overfitting", only(post(optimization_api::compute_overfitting)))
+        .route("/api/v1/optimization/holdout", only(get(optimization_api::list_holdouts)))
+        .route("/api/v1/optimization/holdout/seal", only(post(optimization_api::seal_holdout)))
+        .route("/api/v1/optimization/holdout/{id}", only(get(optimization_api::get_holdout)))
+        .route("/api/v1/optimization/holdout/{id}/evaluate", only(post(optimization_api::evaluate_holdout)))
 }
 
 /// The application. `db` is checked by `/ready`; pass `None` where there is
@@ -846,6 +877,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(survival_routes())
         .merge(backtest_routes())
         .merge(session_routes())
+        .merge(optimization_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .merge(upload_routes())

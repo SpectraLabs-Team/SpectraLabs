@@ -163,6 +163,17 @@ pub struct StressRequest {
         crate::survival_api::list_presets,
         crate::survival_api::create_preset,
         crate::survival_api::update_preset,
+        crate::optimization_api::queue_sweep,
+        crate::optimization_api::list_sweeps,
+        crate::optimization_api::get_sweep,
+        crate::optimization_api::queue_walk_forward,
+        crate::optimization_api::list_walk_forwards,
+        crate::optimization_api::get_walk_forward,
+        crate::optimization_api::compute_overfitting,
+        crate::optimization_api::seal_holdout,
+        crate::optimization_api::list_holdouts,
+        crate::optimization_api::get_holdout,
+        crate::optimization_api::evaluate_holdout,
     ),
     components(schemas(
         ErrorDoc,
@@ -250,6 +261,17 @@ pub struct StressRequest {
         crate::providers_api::TriggerRefreshResponse,
         crate::survival_api::StartSurvival,
         crate::survival_api::SavePreset,
+        crate::optimization_api::CreateSweepRequest,
+        crate::optimization_api::OptimizationSweepView,
+        crate::optimization_api::SweepTrialView,
+        crate::optimization_api::CreateWalkForwardRequest,
+        crate::optimization_api::WalkForwardReportView,
+        crate::optimization_api::ComputeOverfittingRequest,
+        crate::optimization_api::OverfittingResponse,
+        crate::optimization_api::SealHoldoutRequest,
+        crate::optimization_api::HoldoutVaultView,
+        crate::optimization_api::EvaluateHoldoutRequest,
+        crate::optimization_api::HoldoutEvaluationView,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
@@ -263,6 +285,7 @@ pub struct StressRequest {
         (name = "lifecycles", description = "Instrument lifecycles, symbol changes, delistings and universes"),
         (name = "providers", description = "Market data providers and automated refresh schedules"),
         (name = "strategies", description = "Saved strategies and their immutable versions"),
+        (name = "optimization", description = "Parameter sweeps, walk-forward validation, overfitting statistics and holdout vault"),
     )
 )]
 pub struct ApiDoc;

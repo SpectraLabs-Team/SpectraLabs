@@ -271,6 +271,16 @@ const BUILTINS: [BuiltinStrategy; 4] = [
     },
 ];
 
+static DSL_STRATEGY: BuiltinStrategy = BuiltinStrategy {
+    name: "dsl",
+    label: "DSL strategy",
+    description: "User-authored strategy written in the Spectra restricted rule language.",
+    params: &[],
+    source: "// Spectra Restricted Strategy DSL",
+    build: |_| Err(spectra_core::Error::Strategy("DSL strategies require dsl_code in request".into())),
+    check: |_| None,
+};
+
 /// Every built-in strategy.
 pub fn builtin_strategies() -> &'static [BuiltinStrategy] {
     &BUILTINS
@@ -278,6 +288,9 @@ pub fn builtin_strategies() -> &'static [BuiltinStrategy] {
 
 /// The built-in strategy called `name`.
 pub fn find_builtin(name: &str) -> Option<&'static BuiltinStrategy> {
+    if name == "dsl" {
+        return Some(&DSL_STRATEGY);
+    }
     BUILTINS.iter().find(|s| s.name == name)
 }
 

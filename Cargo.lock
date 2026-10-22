@@ -2794,6 +2794,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "object_store",
+ "serde",
  "serde_json",
  "spectra-core",
  "spectra-data",

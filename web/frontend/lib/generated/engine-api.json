@@ -1759,6 +1759,408 @@
         }
       }
     },
+    "/api/v1/optimization/holdout": {
+      "get": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "List sealed holdout datasets in workspace.",
+        "operationId": "list_holdouts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HoldoutVaultView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimization/holdout/seal": {
+      "post": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "Seal a dataset version as a holdout with an evaluation budget.",
+        "operationId": "seal_holdout",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SealHoldoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldoutVaultView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimization/holdout/{id}": {
+      "get": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "Get holdout status and evaluations history.",
+        "operationId": "get_holdout",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Holdout id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimization/holdout/{id}/evaluate": {
+      "post": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "Evaluate a strategy against a sealed holdout (metered access, permanently consumes budget).",
+        "operationId": "evaluate_holdout",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Holdout id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvaluateHoldoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HoldoutEvaluationView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimization/overfitting": {
+      "post": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "Computes PSR, DSR, MinTRL, and CSCV PBO on a trial returns matrix.",
+        "operationId": "compute_overfitting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComputeOverfittingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OverfittingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimization/sweep": {
+      "post": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "Queue a parameter sweep (grid or random search).",
+        "operationId": "queue_sweep",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSweepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptimizationSweepView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimization/sweep/{id}": {
+      "get": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "Get parameter sweep details with all trials and 2D sensitivity matrix.",
+        "operationId": "get_sweep",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Sweep id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimization/sweeps": {
+      "get": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "List parameter sweeps in workspace.",
+        "operationId": "list_sweeps",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OptimizationSweepView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimization/walkforward": {
+      "get": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "List walk-forward reports in workspace.",
+        "operationId": "list_walk_forwards",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WalkForwardReportView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "Queue walk-forward validation.",
+        "operationId": "queue_walk_forward",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWalkForwardRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalkForwardReportView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/optimization/walkforward/{id}": {
+      "get": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "Get walk-forward report details.",
+        "operationId": "get_walk_forward",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Report id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalkForwardReportView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/providers/configs": {
       "get": {
         "tags": [
@@ -2366,7 +2768,7 @@
         "tags": [
           "strategies"
         ],
-        "summary": "The workspace's saved strategies, newest first.",
+        "summary": "The workspace's saved strategies.",
         "operationId": "list_strategies",
         "responses": {
           "200": {
@@ -2385,7 +2787,7 @@
         "tags": [
           "strategies"
         ],
-        "summary": "Create a saved strategy, and with `builtin` its first version.",
+        "summary": "Create a saved strategy, and optionally its first version.",
         "operationId": "create_strategy",
         "requestBody": {
           "content": {
@@ -2493,7 +2895,7 @@
         "tags": [
           "strategies"
         ],
-        "summary": "One saved strategy with every version, newest first.",
+        "summary": "The saved strategy with its versions.",
         "operationId": "get_strategy",
         "parameters": [
           {
@@ -2536,7 +2938,7 @@
         "tags": [
           "strategies"
         ],
-        "summary": "Save a version: a built-in with parameters. Saving the same code and\nparameters again returns the existing version (200, `created: false`).",
+        "summary": "Save a version: a built-in or DSL code with parameters. Saving the same code and\nparameters again returns the existing version (200, `created: false`).",
         "operationId": "save_strategy_version",
         "parameters": [
           {
@@ -4105,6 +4507,36 @@
           }
         }
       },
+      "ComputeOverfittingRequest": {
+        "type": "object",
+        "required": [
+          "returns_matrix"
+        ],
+        "properties": {
+          "benchmark_sharpe": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "confidence": {
+            "type": "number",
+            "format": "double"
+          },
+          "returns_matrix": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              }
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "CorporateActionItem": {
         "type": "object",
         "description": "A corporate action item in an upload or creation request.",
@@ -4561,7 +4993,14 @@
               "string",
               "null"
             ],
-            "description": "Save version 1 at once: a built-in strategy name (see\n`GET /api/v1/strategies/builtin`)."
+            "description": "Save version 1 at once: a built-in strategy name."
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Or save version 1 from DSL code."
           },
           "description": {
             "type": [
@@ -4569,6 +5008,13 @@
               "null"
             ],
             "description": "Free text; at most 2000 characters."
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Strategy kind (e.g. \"custom\", \"builtin\")."
           },
           "name": {
             "type": "string",
@@ -4580,6 +5026,61 @@
               "null"
             ],
             "description": "Parameters of version 1; missing ones take their defaults."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateSweepRequest": {
+        "type": "object",
+        "required": [
+          "dataset_version_id",
+          "param_grid"
+        ],
+        "properties": {
+          "dataset_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dsl_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "max_trials": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "method": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "param_grid": {},
+          "seed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "strategy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "strategy_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         },
         "additionalProperties": false
@@ -4639,6 +5140,70 @@
               "type": "string"
             },
             "description": "Optional initial member symbols."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateWalkForwardRequest": {
+        "type": "object",
+        "required": [
+          "dataset_version_id",
+          "train_size",
+          "test_size",
+          "param_grid"
+        ],
+        "properties": {
+          "dataset_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dsl_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "embargo": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "mode": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "param_grid": {},
+          "step_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "strategy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "strategy_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "test_size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "train_size": {
+            "type": "integer",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -5028,6 +5593,141 @@
           }
         }
       },
+      "EvaluateHoldoutRequest": {
+        "type": "object",
+        "properties": {
+          "dsl_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parameters": {},
+          "strategy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "strategy_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "HoldoutEvaluationView": {
+        "type": "object",
+        "required": [
+          "id",
+          "holdout_id",
+          "workspace_id",
+          "evaluation_num",
+          "metrics",
+          "warnings",
+          "evaluated_at"
+        ],
+        "properties": {
+          "dsr": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "evaluated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "evaluated_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "evaluation_num": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "holdout_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metrics": {},
+          "strategy_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "warnings": {},
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "HoldoutVaultView": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "name",
+          "dataset_version_id",
+          "budget",
+          "evaluations_used",
+          "notes",
+          "sealed_at"
+        ],
+        "properties": {
+          "budget": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "dataset_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "evaluations_used": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "sealed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sealed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "IngestColumns": {
         "type": "object",
         "description": "Header names (matched without regard to case).",
@@ -5288,6 +5988,183 @@
           "status": {
             "type": "string",
             "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`."
+          }
+        }
+      },
+      "OptimizationSweepView": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "dataset_version_id",
+          "status",
+          "method",
+          "objective",
+          "param_grid",
+          "trial_count",
+          "created_at"
+        ],
+        "properties": {
+          "best_metrics": {},
+          "best_objective": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "best_params": {},
+          "best_trial_num": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "dataset_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dsr": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "method": {
+            "type": "string"
+          },
+          "min_trl": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "param_grid": {},
+          "pbo": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "psr": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "status": {
+            "type": "string"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "strategy_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "trial_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "OverfittingResponse": {
+        "type": "object",
+        "required": [
+          "psr",
+          "dsr",
+          "min_trl",
+          "pbo",
+          "expected_max_sharpe",
+          "sharpe_variance",
+          "best_sharpe",
+          "num_trials",
+          "num_observations"
+        ],
+        "properties": {
+          "best_sharpe": {
+            "type": "number",
+            "format": "double"
+          },
+          "dsr": {
+            "type": "number",
+            "format": "double"
+          },
+          "expected_max_sharpe": {
+            "type": "number",
+            "format": "double"
+          },
+          "min_trl": {
+            "type": "number",
+            "format": "double"
+          },
+          "num_observations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "num_trials": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pbo": {
+            "type": "number",
+            "format": "double"
+          },
+          "psr": {
+            "type": "number",
+            "format": "double"
+          },
+          "sharpe_variance": {
+            "type": "number",
+            "format": "double"
           }
         }
       },
@@ -5868,41 +6745,81 @@
       "SaveVersion": {
         "type": "object",
         "description": "`POST /api/v1/strategies/{id}/versions` body.",
-        "required": [
-          "builtin"
-        ],
         "properties": {
           "builtin": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "A built-in strategy name."
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Or user-authored DSL strategy code."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional notes for this version."
           },
           "params": {
             "type": [
               "object",
               "null"
             ],
-            "description": "Parameters; missing ones take their defaults."
+            "description": "Every parameter; missing ones take their defaults."
           }
         },
         "additionalProperties": false
       },
       "SavedVersion": {
         "type": "object",
-        "description": "The result of saving a version.",
+        "description": "The outcome of [`save_strategy_version`].",
         "required": [
           "created",
           "version"
         ],
         "properties": {
           "created": {
-            "type": "boolean",
-            "description": "False when this code and these parameters were saved before; the\nexisting version is returned."
+            "type": "boolean"
           },
           "version": {
-            "$ref": "#/components/schemas/StrategyVersionView",
-            "description": "The version."
+            "$ref": "#/components/schemas/StrategyVersionView"
           }
         }
+      },
+      "SealHoldoutRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "dataset_version_id",
+          "budget"
+        ],
+        "properties": {
+          "budget": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "dataset_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "SessionView": {
         "type": "object",
@@ -5980,15 +6897,13 @@
         ],
         "properties": {
           "strategy": {
-            "$ref": "#/components/schemas/StrategyView",
-            "description": "The strategy."
+            "$ref": "#/components/schemas/StrategyView"
           },
           "versions": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/StrategyVersionView"
-            },
-            "description": "Its versions, newest first."
+            }
           }
         }
       },
@@ -6003,8 +6918,7 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/StrategyView"
-            },
-            "description": "Newest first, at most 500."
+            }
           }
         }
       },
@@ -6025,123 +6939,109 @@
         ],
         "properties": {
           "builtin": {
-            "type": "string",
-            "description": "Built-in strategy name."
+            "type": "string"
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "config_hash": {
-            "type": "string",
-            "description": "SHA-256 of the canonical parameter text."
+            "type": "string"
           },
           "created_at": {
             "type": "string",
-            "format": "date-time",
-            "description": "Saved at (UTC)."
+            "format": "date-time"
           },
           "created_by": {
             "type": [
               "string",
               "null"
             ],
-            "format": "uuid",
-            "description": "Who saved it."
+            "format": "uuid"
           },
           "current": {
-            "type": "boolean",
-            "description": "True while the built-in's code is unchanged, so the version can still run."
+            "type": "boolean"
           },
           "id": {
             "type": "string",
-            "format": "uuid",
-            "description": "Version id: a backtest's `strategy_version_id`."
+            "format": "uuid"
           },
           "params": {
-            "type": "object",
-            "description": "Every parameter, defaults filled in."
+            "type": "object"
           },
           "strategy_id": {
             "type": "string",
-            "format": "uuid",
-            "description": "The strategy it belongs to."
+            "format": "uuid"
           },
           "strategy_name": {
-            "type": "string",
-            "description": "That strategy's name."
+            "type": "string"
           },
           "strategy_sha256": {
-            "type": "string",
-            "description": "SHA-256 of the built-in's source when saved (the runs' `strategy_sha256`)."
+            "type": "string"
           },
           "version": {
             "type": "integer",
-            "format": "int32",
-            "description": "1, 2, ... within the strategy."
+            "format": "int32"
           }
         }
       },
       "StrategyView": {
         "type": "object",
-        "description": "A saved strategy.",
+        "description": "A saved strategy summary for lists and cards.",
         "required": [
           "id",
           "name",
           "description",
-          "created_at",
-          "version_count"
+          "version_count",
+          "created_at"
         ],
         "properties": {
           "created_at": {
             "type": "string",
-            "format": "date-time",
-            "description": "Created at (UTC)."
+            "format": "date-time"
           },
           "created_by": {
             "type": [
               "string",
               "null"
             ],
-            "format": "uuid",
-            "description": "Who created it."
+            "format": "uuid"
           },
           "description": {
-            "type": "string",
-            "description": "Free text."
+            "type": "string"
           },
           "id": {
             "type": "string",
-            "format": "uuid",
-            "description": "Strategy id (UUIDv7)."
+            "format": "uuid"
           },
           "latest_builtin": {
             "type": [
               "string",
               "null"
-            ],
-            "description": "The newest version's built-in strategy."
+            ]
           },
           "latest_version": {
             "type": [
               "integer",
               "null"
             ],
-            "format": "int32",
-            "description": "The newest version's number."
+            "format": "int32"
           },
           "latest_version_id": {
             "type": [
               "string",
               "null"
             ],
-            "format": "uuid",
-            "description": "The newest version's id."
+            "format": "uuid"
           },
           "name": {
-            "type": "string",
-            "description": "Name, unique in the workspace."
+            "type": "string"
           },
           "version_count": {
             "type": "integer",
-            "format": "int64",
-            "description": "Number of versions."
+            "format": "int64"
           }
         }
       },
@@ -6288,6 +7188,56 @@
           }
         },
         "additionalProperties": false
+      },
+      "SweepTrialView": {
+        "type": "object",
+        "required": [
+          "id",
+          "sweep_id",
+          "trial_num",
+          "params",
+          "metrics",
+          "objective_value",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metrics": {},
+          "objective_value": {
+            "type": "number",
+            "format": "double"
+          },
+          "params": {},
+          "returns_mean": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "returns_vol": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "sweep_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "trial_num": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
       },
       "SymbolChangeListView": {
         "type": "object",
@@ -7101,6 +8051,125 @@
             "description": "Total return (a fraction) for finished backtests."
           }
         }
+      },
+      "WalkForwardReportView": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "dataset_version_id",
+          "status",
+          "mode",
+          "train_size",
+          "test_size",
+          "step_size",
+          "embargo",
+          "objective",
+          "param_grid",
+          "folds",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "dataset_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "efficiency_ratio": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "embargo": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "folds": {},
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "in_sample_sharpe": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "out_of_sample_sharpe": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "param_grid": {},
+          "status": {
+            "type": "string"
+          },
+          "step_size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "strategy_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "test_size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "train_size": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
       }
     }
   },
@@ -7148,6 +8217,10 @@
     {
       "name": "strategies",
       "description": "Saved strategies and their immutable versions"
+    },
+    {
+      "name": "optimization",
+      "description": "Parameter sweeps, walk-forward validation, overfitting statistics and holdout vault"
     }
   ]
 }

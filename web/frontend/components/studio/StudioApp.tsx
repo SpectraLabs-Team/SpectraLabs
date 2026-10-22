@@ -8,9 +8,11 @@ import { BenchmarkLab } from './BenchmarkLab';
 import { ExperimentRegistry } from './ExperimentRegistry';
 import { DataLab } from './DataLab';
 import { MarketSettings } from './MarketSettings';
+import { OptimizationLab } from './OptimizationLab';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';
 import { RiskLab } from './RiskLab';
+import { StrategyStudio } from './StrategyStudio';
 import { StudioShell, TABS, type StudioTab } from './StudioShell';
 
 export function StudioApp() {
@@ -30,7 +32,9 @@ export function StudioApp() {
             {tab === 'risk' && <RiskLab />}
             {tab === 'portfolio' && <PortfolioStudio />}
             {tab === 'data' && <DataLab />}
+            {tab === 'strategies' && <StrategyStudio />}
             {tab === 'backtests' && <BacktestLab />}
+            {tab === 'optimization' && <OptimizationLab />}
             {tab === 'benchmark' && <BenchmarkLab />}
             {tab === 'registry' && <ExperimentRegistry />}
             {tab === 'settings' && <MarketSettings />}

@@ -262,6 +262,7 @@ async fn strategy_versions_are_idempotent_and_numbered_under_concurrency() {
     let v = |cfg: char| NewVersion {
         builtin: "sma_cross".into(),
         source_hash: "1".repeat(64),
+        code: None,
         config_hash: cfg.to_string().repeat(64),
         parameter_schema: serde_json::json!({}),
         parameters: serde_json::json!({ "cfg": cfg.to_string() }),

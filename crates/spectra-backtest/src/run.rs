@@ -56,6 +56,8 @@ pub struct BacktestRequest {
     /// Optional point-in-time snapshot timestamp (nanoseconds since Unix epoch).
     /// When set, bars or revisions known after `as_of` are excluded from the backtest.
     pub as_of: Option<i64>,
+    /// Optional user-authored DSL script for custom strategies.
+    pub dsl_code: Option<String>,
 }
 
 /// One strategy of a multi-strategy request.
@@ -72,8 +74,8 @@ pub struct StrategyAllocation {
 /// Most strategies in one request.
 pub const MAX_REQUEST_STRATEGIES: usize = 10;
 
-const REQUEST_FIELDS: [&str; 6] =
-    ["strategy", "params", "strategies", "config", "corporate_actions", "as_of"];
+const REQUEST_FIELDS: [&str; 7] =
+    ["strategy", "params", "strategies", "config", "corporate_actions", "as_of", "dsl_code"];
 const ENTRY_FIELDS: [&str; 3] = ["strategy", "params", "weight"];
 
 fn field_error(field: impl Into<String>, message: impl Into<String>) -> FieldError {
@@ -187,6 +189,7 @@ impl BacktestRequest {
             strategies: Vec::new(),
             corporate_actions: Vec::new(),
             as_of: None,
+            dsl_code: None,
         })
     }
 
@@ -220,6 +223,7 @@ impl BacktestRequest {
                 strategies: entries,
                 corporate_actions: Vec::new(),
                 as_of: None,
+                dsl_code: None,
             }),
             _ => Err(ConfigError { errors }),
         }
@@ -233,6 +237,9 @@ impl BacktestRequest {
     /// The strategy's source hash; for a multi-strategy request, the hash of
     /// every strategy's name, source hash and weight, in order.
     pub fn strategy_sha256(&self) -> String {
+        if let Some(code) = &self.dsl_code {
+            return spectra_core::sha256_hex(code.as_bytes());
+        }
         if !self.is_multi() {
             return self.strategy.source_sha256();
         }
@@ -349,6 +356,11 @@ impl BacktestRequest {
             }
         };
 
+        let dsl_code = match doc.find("dsl_code").map(Json::as_str) {
+            Some(Ok(s)) => Some(s.to_string()),
+            _ => None,
+        };
+
         match (multi, strategy, params, config, actions) {
             (Some(Some(entries)), _, _, Some(config), Some(corporate_actions)) if errors.is_empty() => {
                 Ok(Self {
@@ -358,12 +370,21 @@ impl BacktestRequest {
                     strategies: entries,
                     corporate_actions,
                     as_of,
+                    dsl_code,
                 })
             }
             (None, Some(strategy), Some(params), Some(config), Some(corporate_actions))
                 if errors.is_empty() =>
             {
-                Ok(Self { strategy, params, config, strategies: Vec::new(), corporate_actions, as_of })
+                Ok(Self {
+                    strategy,
+                    params,
+                    config,
+                    strategies: Vec::new(),
+                    corporate_actions,
+                    as_of,
+                    dsl_code,
+                })
             }
             _ => Err(ConfigError { errors }),
         }
@@ -404,12 +425,16 @@ impl BacktestRequest {
                 .with("config", config_to_user_json(&self.config)?)
                 .with("config_exact", stored_config_json(&self.config)?));
         }
-        Ok(Json::object()
+        let mut obj = Json::object()
             .with("strategy", Json::string(self.strategy.name))
-            .with("strategy_sha256", Json::string(self.strategy.source_sha256()))
+            .with("strategy_sha256", Json::string(self.strategy_sha256()))
             .with("params", spectra_registry::params_to_json(&self.params)?)
             .with("config", config_to_user_json(&self.config)?)
-            .with("config_exact", stored_config_json(&self.config)?))
+            .with("config_exact", stored_config_json(&self.config)?);
+        if let Some(code) = &self.dsl_code {
+            obj = obj.with("dsl_code", Json::string(code));
+        }
+        Ok(obj)
     }
 }
 
@@ -458,7 +483,16 @@ pub fn run_request_on(
         .map_err(|m| RunError::Engine(spectra_core::Error::InvalidArgument(m)))?;
     let mut ctl = std::panic::AssertUnwindSafe(ctl);
     let run_res = std::panic::catch_unwind(move || {
-        if request.is_multi() {
+        if let Some(code) = &request.dsl_code {
+            let program = spectra_engine::dsl::parse_and_validate(code)
+                .map_err(|e| RunError::Engine(spectra_core::Error::Strategy(format!("{e}"))))?;
+            let mut overrides = std::collections::HashMap::new();
+            for (k, v) in &request.params.values {
+                overrides.insert(k.clone(), *v);
+            }
+            let mut strategy = Box::new(spectra_engine::dsl::DslStrategy::new(program, &overrides));
+            run_backtest_with_actions(bars, &actions, strategy.as_mut(), &request.config, *ctl)
+        } else if request.is_multi() {
             let mut built = Vec::with_capacity(request.strategies.len());
             for a in &request.strategies {
                 built.push(a.strategy.build(&a.params)?);

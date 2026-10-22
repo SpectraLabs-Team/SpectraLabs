@@ -518,6 +518,177 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/optimization/holdout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List sealed holdout datasets in workspace. */
+        get: operations["list_holdouts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimization/holdout/seal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Seal a dataset version as a holdout with an evaluation budget. */
+        post: operations["seal_holdout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimization/holdout/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get holdout status and evaluations history. */
+        get: operations["get_holdout"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimization/holdout/{id}/evaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evaluate a strategy against a sealed holdout (metered access, permanently consumes budget). */
+        post: operations["evaluate_holdout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimization/overfitting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Computes PSR, DSR, MinTRL, and CSCV PBO on a trial returns matrix. */
+        post: operations["compute_overfitting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimization/sweep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a parameter sweep (grid or random search). */
+        post: operations["queue_sweep"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimization/sweep/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get parameter sweep details with all trials and 2D sensitivity matrix. */
+        get: operations["get_sweep"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimization/sweeps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List parameter sweeps in workspace. */
+        get: operations["list_sweeps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimization/walkforward": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List walk-forward reports in workspace. */
+        get: operations["list_walk_forwards"];
+        put?: never;
+        /** Queue walk-forward validation. */
+        post: operations["queue_walk_forward"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/optimization/walkforward/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get walk-forward report details. */
+        get: operations["get_walk_forward"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers/configs": {
         parameters: {
             query?: never;
@@ -725,10 +896,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The workspace's saved strategies, newest first. */
+        /** The workspace's saved strategies. */
         get: operations["list_strategies"];
         put?: never;
-        /** Create a saved strategy, and with `builtin` its first version. */
+        /** Create a saved strategy, and optionally its first version. */
         post: operations["create_strategy"];
         delete?: never;
         options?: never;
@@ -781,7 +952,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One saved strategy with every version, newest first. */
+        /** The saved strategy with its versions. */
         get: operations["get_strategy"];
         put?: never;
         post?: never;
@@ -801,7 +972,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Save a version: a built-in with parameters. Saving the same code and
+         * Save a version: a built-in or DSL code with parameters. Saving the same code and
          *     parameters again returns the existing version (200, `created: false`).
          */
         post: operations["save_strategy_version"];
@@ -1330,6 +1501,13 @@ export interface components {
              */
             received: number;
         };
+        ComputeOverfittingRequest: {
+            /** Format: double */
+            benchmark_sharpe?: number | null;
+            /** Format: double */
+            confidence?: number;
+            returns_matrix: number[][];
+        };
         /** @description A corporate action item in an upload or creation request. */
         CorporateActionItem: {
             /** @description "split" or "dividend". */
@@ -1556,17 +1734,32 @@ export interface components {
         };
         /** @description `POST /api/v1/strategies` body. */
         CreateStrategy: {
-            /**
-             * @description Save version 1 at once: a built-in strategy name (see
-             *     `GET /api/v1/strategies/builtin`).
-             */
+            /** @description Save version 1 at once: a built-in strategy name. */
             builtin?: string | null;
+            /** @description Or save version 1 from DSL code. */
+            code?: string | null;
             /** @description Free text; at most 2000 characters. */
             description?: string | null;
+            /** @description Strategy kind (e.g. "custom", "builtin"). */
+            kind?: string | null;
             /** @description Unique in the workspace; at most 200 characters. */
             name: string;
             /** @description Parameters of version 1; missing ones take their defaults. */
             params?: Record<string, never> | null;
+        };
+        CreateSweepRequest: {
+            /** Format: uuid */
+            dataset_version_id: string;
+            dsl_code?: string | null;
+            max_trials?: number | null;
+            method?: string;
+            objective?: string;
+            param_grid: unknown;
+            /** Format: int64 */
+            seed?: number | null;
+            strategy?: string | null;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
         };
         /** @description `POST /api/v1/symbol-changes` request body. */
         CreateSymbolChangeRequest: {
@@ -1587,6 +1780,21 @@ export interface components {
             name: string;
             /** @description Optional initial member symbols. */
             symbols?: string[];
+        };
+        CreateWalkForwardRequest: {
+            /** Format: uuid */
+            dataset_version_id: string;
+            dsl_code?: string | null;
+            embargo?: number | null;
+            mode?: string;
+            objective?: string;
+            param_grid: unknown;
+            step_size?: number | null;
+            strategy?: string | null;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
+            test_size: number;
+            train_size: number;
         };
         /** @description A dataset and its versions. */
         DatasetDetailView: {
@@ -1778,6 +1986,51 @@ export interface components {
             /** @description Matches the `X-Request-Id` response header. */
             request_id: string;
         };
+        EvaluateHoldoutRequest: {
+            dsl_code?: string | null;
+            parameters?: unknown;
+            strategy?: string | null;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
+        };
+        HoldoutEvaluationView: {
+            /** Format: double */
+            dsr?: number | null;
+            /** Format: date-time */
+            evaluated_at: string;
+            /** Format: uuid */
+            evaluated_by?: string | null;
+            /** Format: int32 */
+            evaluation_num: number;
+            /** Format: uuid */
+            holdout_id: string;
+            /** Format: uuid */
+            id: string;
+            metrics: unknown;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
+            warnings: unknown;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        HoldoutVaultView: {
+            /** Format: int32 */
+            budget: number;
+            /** Format: uuid */
+            dataset_version_id: string;
+            /** Format: int32 */
+            evaluations_used: number;
+            /** Format: uuid */
+            id: string;
+            name: string;
+            notes: string;
+            /** Format: date-time */
+            sealed_at: string;
+            /** Format: uuid */
+            sealed_by?: string | null;
+            /** Format: uuid */
+            workspace_id: string;
+        };
         /** @description Header names (matched without regard to case). */
         IngestColumns: {
             /** @description Close price column. */
@@ -1904,6 +2157,64 @@ export interface components {
             started_at?: string | null;
             /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
             status: string;
+        };
+        OptimizationSweepView: {
+            best_metrics?: unknown;
+            /** Format: double */
+            best_objective?: number | null;
+            best_params?: unknown;
+            /** Format: int32 */
+            best_trial_num?: number | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by?: string | null;
+            /** Format: uuid */
+            dataset_version_id: string;
+            /** Format: double */
+            dsr?: number | null;
+            /** Format: date-time */
+            finished_at?: string | null;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            job_id?: string | null;
+            method: string;
+            /** Format: double */
+            min_trl?: number | null;
+            objective: string;
+            param_grid: unknown;
+            /** Format: double */
+            pbo?: number | null;
+            /** Format: double */
+            psr?: number | null;
+            status: string;
+            /** Format: uuid */
+            strategy_id?: string | null;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
+            /** Format: int32 */
+            trial_count: number;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        OverfittingResponse: {
+            /** Format: double */
+            best_sharpe: number;
+            /** Format: double */
+            dsr: number;
+            /** Format: double */
+            expected_max_sharpe: number;
+            /** Format: double */
+            min_trl: number;
+            num_observations: number;
+            num_trials: number;
+            /** Format: double */
+            pbo: number;
+            /** Format: double */
+            psr: number;
+            /** Format: double */
+            sharpe_variance: number;
         };
         /** @description The sample, parsed. */
         Preview: {
@@ -2178,19 +2489,26 @@ export interface components {
         /** @description `POST /api/v1/strategies/{id}/versions` body. */
         SaveVersion: {
             /** @description A built-in strategy name. */
-            builtin: string;
-            /** @description Parameters; missing ones take their defaults. */
+            builtin?: string | null;
+            /** @description Or user-authored DSL strategy code. */
+            code?: string | null;
+            /** @description Optional notes for this version. */
+            notes?: string | null;
+            /** @description Every parameter; missing ones take their defaults. */
             params?: Record<string, never> | null;
         };
-        /** @description The result of saving a version. */
+        /** @description The outcome of [`save_strategy_version`]. */
         SavedVersion: {
-            /**
-             * @description False when this code and these parameters were saved before; the
-             *     existing version is returned.
-             */
             created: boolean;
-            /** @description The version. */
             version: components["schemas"]["StrategyVersionView"];
+        };
+        SealHoldoutRequest: {
+            /** Format: int32 */
+            budget: number;
+            /** Format: uuid */
+            dataset_version_id: string;
+            name: string;
+            notes?: string | null;
         };
         /** @description A resumable upload. */
         SessionView: {
@@ -2234,93 +2552,49 @@ export interface components {
         };
         /** @description A saved strategy with every version, newest first. */
         StrategyDetail: {
-            /** @description The strategy. */
             strategy: components["schemas"]["StrategyView"];
-            /** @description Its versions, newest first. */
             versions: components["schemas"]["StrategyVersionView"][];
         };
         /** @description The workspace's saved strategies. */
         StrategyList: {
-            /** @description Newest first, at most 500. */
             items: components["schemas"]["StrategyView"][];
         };
         /** @description One immutable version of a saved strategy. */
         StrategyVersionView: {
-            /** @description Built-in strategy name. */
             builtin: string;
-            /** @description SHA-256 of the canonical parameter text. */
+            code?: string | null;
             config_hash: string;
-            /**
-             * Format: date-time
-             * @description Saved at (UTC).
-             */
+            /** Format: date-time */
             created_at: string;
-            /**
-             * Format: uuid
-             * @description Who saved it.
-             */
+            /** Format: uuid */
             created_by?: string | null;
-            /** @description True while the built-in's code is unchanged, so the version can still run. */
             current: boolean;
-            /**
-             * Format: uuid
-             * @description Version id: a backtest's `strategy_version_id`.
-             */
+            /** Format: uuid */
             id: string;
-            /** @description Every parameter, defaults filled in. */
             params: Record<string, never>;
-            /**
-             * Format: uuid
-             * @description The strategy it belongs to.
-             */
+            /** Format: uuid */
             strategy_id: string;
-            /** @description That strategy's name. */
             strategy_name: string;
-            /** @description SHA-256 of the built-in's source when saved (the runs' `strategy_sha256`). */
             strategy_sha256: string;
-            /**
-             * Format: int32
-             * @description 1, 2, ... within the strategy.
-             */
+            /** Format: int32 */
             version: number;
         };
-        /** @description A saved strategy. */
+        /** @description A saved strategy summary for lists and cards. */
         StrategyView: {
-            /**
-             * Format: date-time
-             * @description Created at (UTC).
-             */
+            /** Format: date-time */
             created_at: string;
-            /**
-             * Format: uuid
-             * @description Who created it.
-             */
+            /** Format: uuid */
             created_by?: string | null;
-            /** @description Free text. */
             description: string;
-            /**
-             * Format: uuid
-             * @description Strategy id (UUIDv7).
-             */
+            /** Format: uuid */
             id: string;
-            /** @description The newest version's built-in strategy. */
             latest_builtin?: string | null;
-            /**
-             * Format: int32
-             * @description The newest version's number.
-             */
+            /** Format: int32 */
             latest_version?: number | null;
-            /**
-             * Format: uuid
-             * @description The newest version's id.
-             */
+            /** Format: uuid */
             latest_version_id?: string | null;
-            /** @description Name, unique in the workspace. */
             name: string;
-            /**
-             * Format: int64
-             * @description Number of versions.
-             */
+            /** Format: int64 */
             version_count: number;
         };
         /** @description `POST /api/v1/stress` body (also the `stress` job payload). */
@@ -2366,6 +2640,24 @@ export interface components {
             timestamps_have_zone?: boolean | null;
             /** @description Suggested timezone identifier (e.g. `America/New_York`). */
             timezone?: string | null;
+        };
+        SweepTrialView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            id: string;
+            metrics: unknown;
+            /** Format: double */
+            objective_value: number;
+            params: unknown;
+            /** Format: double */
+            returns_mean?: number | null;
+            /** Format: double */
+            returns_vol?: number | null;
+            /** Format: uuid */
+            sweep_id: string;
+            /** Format: int32 */
+            trial_num: number;
         };
         /** @description List of symbol changes. */
         SymbolChangeListView: {
@@ -2819,6 +3111,45 @@ export interface components {
              * @description Total return (a fraction) for finished backtests.
              */
             total_return?: number | null;
+        };
+        WalkForwardReportView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by?: string | null;
+            /** Format: uuid */
+            dataset_version_id: string;
+            /** Format: double */
+            efficiency_ratio?: number | null;
+            /** Format: int32 */
+            embargo: number;
+            /** Format: date-time */
+            finished_at?: string | null;
+            folds: unknown;
+            /** Format: uuid */
+            id: string;
+            /** Format: double */
+            in_sample_sharpe?: number | null;
+            /** Format: uuid */
+            job_id?: string | null;
+            mode: string;
+            objective: string;
+            /** Format: double */
+            out_of_sample_sharpe?: number | null;
+            param_grid: unknown;
+            status: string;
+            /** Format: int32 */
+            step_size: number;
+            /** Format: uuid */
+            strategy_id?: string | null;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
+            /** Format: int32 */
+            test_size: number;
+            /** Format: int32 */
+            train_size: number;
+            /** Format: uuid */
+            workspace_id: string;
         };
     };
     responses: never;
@@ -4145,6 +4476,303 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_holdouts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldoutVaultView"][];
+                };
+            };
+        };
+    };
+    seal_holdout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SealHoldoutRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldoutVaultView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_holdout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Holdout id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    evaluate_holdout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Holdout id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvaluateHoldoutRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HoldoutEvaluationView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    compute_overfitting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComputeOverfittingRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OverfittingResponse"];
+                };
+            };
+        };
+    };
+    queue_sweep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSweepRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptimizationSweepView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_sweep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sweep id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_sweeps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptimizationSweepView"][];
+                };
+            };
+        };
+    };
+    list_walk_forwards: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalkForwardReportView"][];
+                };
+            };
+        };
+    };
+    queue_walk_forward: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateWalkForwardRequest"];
+            };
+        };
+        responses: {
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalkForwardReportView"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_walk_forward: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WalkForwardReportView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
             };
         };
     };

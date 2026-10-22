@@ -26,14 +26,13 @@ use std::time::Duration;
 use spectra_api::config::WorkerConfig;
 use spectra_api::ingest::{self, IngestEnv, IngestOutcome};
 use spectra_api::{engine, observability, shutdown_signal};
-use spectra_backtest::{run_job_from_store, JobFailure, JobProducts};
 use spectra_core::{Json, ENGINE_VERSION};
 use spectra_db::artifacts::{store_for_run, ArtifactBackend, NewArtifact};
-use spectra_db::datasets::{self, NewBacktestRun};
+use spectra_db::datasets;
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
+use spectra_db::optimization;
 use spectra_db::{PgPool, PoolConfig};
 use spectra_engine::RunRecord;
-use spectra_engine::{Progress, RunControl, RunLimits};
 use spectra_registry::{
     registry::{config_from_json, metrics_from_json, params_from_json, RunInput},
     PgRegistry, StoredArtifact,
@@ -278,6 +277,14 @@ enum Outcome {
 async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
     if job.kind == "survival" {
         run_survival_job(ctx, job, permit).await;
+        return;
+    }
+    if job.kind == "sweep" {
+        run_sweep_job(ctx, job, permit).await;
+        return;
+    }
+    if job.kind == "walk_forward" {
+        run_walk_forward_job(ctx, job, permit).await;
         return;
     }
     if job.kind == spectra_backtest::JOB_KIND {
@@ -664,252 +671,19 @@ async fn fail_job(ctx: &Ctx, job: &Job, started: Instant, message: &str, retryab
     }
 }
 
-/// Converts an engine JSON document to the database's JSON type.
-fn to_db_json(j: &Json) -> serde_json::Value {
-    serde_json::from_str(&engine::to_text(j)).unwrap_or(serde_json::Value::Null)
-}
-
-/// How a backtest's blocking part ended.
-#[allow(clippy::large_enum_variant)] // one value per job, moved once
-enum BacktestEnd {
-    Done(Result<JobProducts, JobFailure>),
-    Panicked,
-    /// The run ignored cancellation past its deadline; its result is discarded.
-    Overran(Duration),
-}
-
-/// A `backtest` job (M3 task 5). Unlike the other kinds, the engine reports
-/// progress (sent with each heartbeat) and stops cleanly when cancelled or out
-/// of time, so the slot is freed as soon as the job ends.
+/// A `backtest` job (M3 task 5).
 #[allow(clippy::needless_pass_by_value)] // the spawned task owns its job and permit
 async fn run_backtest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
-    let started = Instant::now();
-    let pool = &ctx.pool;
-    let wid = ctx.worker_id.as_str();
-
-    // The payload was validated when queued; check again, it may predate a change.
-    let parsed = Json::parse(&job.payload.to_string())
-        .map_err(|e| format!("Invalid payload: {e}"))
-        .and_then(|p| engine::backtest_job(&p).map_err(|(_, m)| m));
-    let bt = match parsed {
-        Ok(j) => j,
-        Err(msg) => return fail_job(&ctx, &job, started, &msg, false).await,
+    let env = spectra_api::worker::BacktestWorkerEnv {
+        pool: ctx.pool.clone(),
+        store: ctx.store.clone(),
+        data_dir: ctx.data_dir.clone(),
+        quota: ctx.quota,
+        backtest_max_bars: ctx.backtest_max_bars,
+        backtest_max_instruments: ctx.backtest_max_instruments,
     };
-    let Ok(version_id) = Uuid::parse_str(&bt.dataset_version_id) else {
-        return fail_job(&ctx, &job, started, "dataset_version_id must be a UUID.", false).await;
-    };
-    let version = match datasets::resolve_version(pool, job.workspace_id, version_id).await {
-        Ok(Some(v)) => v,
-        Ok(None) => {
-            let msg = "The dataset version no longer exists in this workspace.";
-            return fail_job(&ctx, &job, started, msg, false).await;
-        }
-        Err(e) => {
-            let msg = format!("Could not look up the dataset version: {e}");
-            return fail_job(&ctx, &job, started, &msg, true).await;
-        }
-    };
-
-    // Datasets ingested through the Studio live in the artifact store; copy this one into the
-    // local store the engine reads, unless it is there already.
-    if let Err((msg, retryable)) =
-        ingest::ensure_local(&ctx.store, &ctx.data_dir, &version.checksum, version.blob_sha256.as_deref())
-            .await
-    {
-        return fail_job(&ctx, &job, started, &msg, retryable).await;
-    }
-
-    // The engine stops itself shortly before the job's limit; the deadline below is a backstop.
-    let timeout = engine::job_timeout(&job.kind);
-    let cancel = Arc::new(AtomicBool::new(false));
-    let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
-    let mut work = {
-        let (cancel, progress) = (Arc::clone(&cancel), Arc::clone(&progress));
-        let (data_dir, checksum, bt) = (ctx.data_dir.clone(), version.checksum.clone(), bt.clone());
-        let limits = RunLimits {
-            max_bars: Some(ctx.backtest_max_bars),
-            max_instruments: Some(ctx.backtest_max_instruments),
-            max_wall_time: Some(timeout.saturating_sub(Duration::from_secs(15))),
-        };
-        tokio::task::spawn_blocking(move || {
-            let mut report = |p: Progress| progress.store((p.fraction() as f32).to_bits(), Ordering::Relaxed);
-            let mut ctl = RunControl {
-                limits,
-                cancel: Some(&*cancel),
-                progress: Some(&mut report),
-                progress_every: 1000,
-            };
-            run_job_from_store(&data_dir, &checksum, &bt, &mut ctl)
-        })
-    };
-
-    let deadline = tokio::time::Instant::now() + timeout + Duration::from_secs(30);
-    let mut beat = tokio::time::interval(HEARTBEAT);
-    beat.tick().await; // the first tick is immediate; the claim was the first heartbeat
-    let (mut cancel_requested, mut lost) = (false, false);
-    let end = loop {
-        tokio::select! {
-            res = &mut work => break match res {
-                Ok(r) => BacktestEnd::Done(r),
-                Err(_) => BacktestEnd::Panicked,
-            },
-            _ = beat.tick() => {
-                let p = f32::from_bits(progress.load(Ordering::Relaxed));
-                match jobs::heartbeat(pool, job.id, wid, Some(p)).await {
-                    Ok(Beat::Continue) => {}
-                    Ok(Beat::CancelRequested) => {
-                        cancel_requested = true;
-                        cancel.store(true, Ordering::Relaxed);
-                    }
-                    Ok(Beat::Lost) => {
-                        lost = true;
-                        cancel.store(true, Ordering::Relaxed);
-                    }
-                    Err(e) => error!(job_id = %job.id, "heartbeat failed: {e}"),
-                }
-            },
-            () = tokio::time::sleep_until(deadline) => {
-                cancel.store(true, Ordering::Relaxed);
-                break BacktestEnd::Overran(timeout);
-            }
-        }
-    };
-
-    if matches!(end, BacktestEnd::Overran(_)) {
-        // Keep the slot until the computation really returns.
-        tokio::spawn(async move {
-            let _ = work.await;
-            drop(permit);
-        });
-    } else {
-        drop(permit);
-    }
-
-    if lost {
-        warn!(job_id = %job.id, "job was taken over after a missed heartbeat; dropping it");
-        record_metrics(&job.kind, "lost", started);
-        return;
-    }
-    match end {
-        BacktestEnd::Done(Ok(products)) => {
-            match finish_backtest(&ctx, &job, &bt, &version, &products).await {
-                Ok(()) => record_metrics(&job.kind, "succeeded", started),
-                // The job stays running without heartbeats, so the stale sweep requeues it.
-                Err(e) => error!(job_id = %job.id, "could not record the backtest: {e}"),
-            }
-        }
-        BacktestEnd::Done(Err(JobFailure::Cancelled)) => {
-            if !cancel_requested {
-                warn!(job_id = %job.id, "backtest stopped without a cancel request");
-            }
-            record_metrics(&job.kind, "cancelled", started);
-            if let Err(e) = jobs::mark_cancelled(pool, job.id, wid).await {
-                error!(job_id = %job.id, "could not record the cancellation: {e}");
-            }
-        }
-        BacktestEnd::Done(Err(JobFailure::Failed { retryable, message })) => {
-            fail_job(&ctx, &job, started, &message, retryable).await;
-        }
-        BacktestEnd::Panicked => {
-            fail_job(
-                &ctx,
-                &job,
-                started,
-                "The backtest worker encountered an unexpected panic during execution.",
-                false,
-            )
-            .await;
-        }
-        BacktestEnd::Overran(t) => {
-            let msg = format!("The backtest ran longer than its {} s limit.", t.as_secs());
-            fail_job(&ctx, &job, started, &msg, false).await;
-        }
-    }
-}
-
-/// The strategy name recorded on a run: the built-in's name, or for several
-/// strategies on one account their names joined with `+`.
-fn run_strategy_name(req: &spectra_backtest::BacktestRequest) -> String {
-    if req.is_multi() {
-        req.strategies.iter().map(|a| a.strategy.name).collect::<Vec<_>>().join("+")
-    } else {
-        req.strategy.name.to_string()
-    }
-}
-
-/// Records the run and stores every output file, then completes the job.
-async fn finish_backtest(
-    ctx: &Ctx,
-    job: &Job,
-    bt: &spectra_backtest::BacktestJob,
-    version: &datasets::DatasetVersion,
-    products: &JobProducts,
-) -> Result<(), spectra_db::Error> {
-    let summary = to_db_json(&products.summary);
-    let run_id = datasets::insert_backtest_run(
-        &ctx.pool,
-        &NewBacktestRun {
-            id: spectra_db::new_id(),
-            workspace_id: job.workspace_id,
-            job_id: job.id,
-            params: to_db_json(&products.params),
-            metrics: summary.clone(),
-            seed: i64::try_from(bt.request.config.seed).ok(),
-            engine_version: products.run.engine_version.clone(),
-            created_by: job.created_by,
-            started_at: job.started_at.unwrap_or_else(chrono::Utc::now),
-            dataset_version_id: version.id,
-            strategy_version_id: bt.strategy_version_id.as_deref().and_then(|v| Uuid::parse_str(v).ok()),
-            strategy: run_strategy_name(&bt.request),
-            strategy_sha256: bt.request.strategy_sha256(),
-        },
-    )
-    .await?;
-
-    let mut stored = Vec::new();
-    let mut problems = Vec::new();
-    for f in &products.files {
-        let artifact = NewArtifact {
-            workspace_id: job.workspace_id,
-            run_id,
-            kind: f.kind,
-            content_type: f.media_type,
-            bytes: &f.bytes,
-        };
-        match store_for_run(&ctx.pool, &ctx.store, artifact, ctx.quota).await {
-            Ok(s) => stored.push(serde_json::json!({
-                "kind": f.kind,
-                "file_name": f.file_name,
-                "content_type": f.media_type,
-                "sha256": s.sha256,
-                "size": s.size,
-            })),
-            Err(e) => {
-                error!(job_id = %job.id, kind = f.kind, "artifact not stored: {e}");
-                problems.push(serde_json::json!({ "kind": f.kind, "error": e.to_string() }));
-            }
-        }
-    }
-
-    let result = serde_json::json!({
-        "run_id": run_id,
-        "dataset_version_id": version.id,
-        "fingerprints": {
-            "engine_version": products.run.engine_version,
-            "dataset_sha256": products.run.dataset_sha256,
-            "config_sha256": products.run.config_sha256,
-            "result_sha256": products.run.result_sha256,
-            "strategy_sha256": bt.request.strategy_sha256(),
-        },
-        "summary": summary,
-        "artifacts": stored,
-        "artifact_errors": problems,
-    });
-    if jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await?.is_none() {
-        warn!(job_id = %job.id, "backtest finished, but another worker had taken it over");
-    }
-    info!(job_id = %job.id, run_id = %run_id, result_sha256 = %products.run.result_sha256, "backtest recorded");
-    Ok(())
+    let _ = spectra_api::worker::run_backtest_job(&env, &job, &ctx.worker_id).await;
+    drop(permit);
 }
 
 /// Removes uploads that were never ingested within their 24 hours, and the
@@ -1379,6 +1153,604 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
             let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
                 .bind(job.workspace_id).bind(report_id).bind(&message).execute(&ctx.pool).await;
             fail_job(&ctx, &job, started, &message, false).await;
+        }
+    }
+}
+
+fn parse_grid_from_json(val: &serde_json::Value) -> Result<spectra_research::ParamGrid, String> {
+    let mut grid = spectra_research::ParamGrid::new();
+    if let Some(obj) = val.as_object() {
+        for (k, v) in obj {
+            let mut nums = Vec::new();
+            if let Some(arr) = v.as_array() {
+                for item in arr {
+                    if let Some(n) = item.as_f64() {
+                        nums.push(n);
+                    }
+                }
+            } else if let Some(n) = v.as_f64() {
+                nums.push(n);
+            }
+            if !nums.is_empty() {
+                grid = grid.add(k.clone(), nums).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    if grid.size() == 0 {
+        grid = grid.add("fast", vec![5.0, 10.0, 15.0]).map_err(|e| e.to_string())?;
+        grid = grid.add("slow", vec![20.0, 30.0, 40.0]).map_err(|e| e.to_string())?;
+    }
+    Ok(grid)
+}
+
+/// Runs a parameter sweep job.
+#[allow(clippy::needless_pass_by_value)]
+async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
+    let started = Instant::now();
+    let Some(sweep_id) = job
+        .payload
+        .get("sweep_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+    else {
+        fail_job(&ctx, &job, started, "Sweep job missing sweep_id.", false).await;
+        drop(permit);
+        return;
+    };
+    let Some(version_id) = job
+        .payload
+        .get("dataset_version_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+    else {
+        fail_job(&ctx, &job, started, "Sweep job missing dataset_version_id.", false).await;
+        drop(permit);
+        return;
+    };
+
+    let version = match datasets::resolve_version(&ctx.pool, job.workspace_id, version_id).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            fail_job(&ctx, &job, started, "Dataset version no longer exists in workspace.", false).await;
+            drop(permit);
+            return;
+        }
+        Err(e) => {
+            fail_job(&ctx, &job, started, &format!("Could not look up dataset version: {e}"), true).await;
+            drop(permit);
+            return;
+        }
+    };
+
+    if let Err((msg, retryable)) =
+        ingest::ensure_local(&ctx.store, &ctx.data_dir, &version.checksum, version.blob_sha256.as_deref())
+            .await
+    {
+        fail_job(&ctx, &job, started, &msg, retryable).await;
+        drop(permit);
+        return;
+    }
+
+    let bars = match spectra_backtest::load_bars(&ctx.data_dir, &version.checksum) {
+        Ok(b) => b,
+        Err(e) => {
+            fail_job(&ctx, &job, started, &format!("Could not read dataset bars: {e}"), true).await;
+            drop(permit);
+            return;
+        }
+    };
+
+    let _ = sqlx::query(
+        "UPDATE optimization_sweeps SET status='running' WHERE workspace_id=$1 AND id=$2 AND status='queued'",
+    )
+    .bind(job.workspace_id)
+    .bind(sweep_id)
+    .execute(&ctx.pool)
+    .await;
+
+    let param_grid_val = job.payload.get("param_grid").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let method = job.payload.get("method").and_then(serde_json::Value::as_str).unwrap_or("grid");
+    let max_trials = job.payload.get("max_trials").and_then(serde_json::Value::as_u64).map(|n| n as usize);
+    let seed = job.payload.get("seed").and_then(serde_json::Value::as_u64).unwrap_or(42);
+    let objective =
+        job.payload.get("objective").and_then(serde_json::Value::as_str).unwrap_or("sharpe").to_string();
+    let dsl_code = job.payload.get("dsl_code").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
+    let strategy =
+        job.payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("sma_cross").to_string();
+
+    let grid = match parse_grid_from_json(&param_grid_val) {
+        Ok(g) => g,
+        Err(e) => {
+            fail_job(&ctx, &job, started, &format!("Invalid parameter grid: {e}"), false).await;
+            drop(permit);
+            return;
+        }
+    };
+
+    let param_sets = if method == "random" {
+        grid.sample(max_trials.unwrap_or(20), seed)
+    } else if let Some(limit) = max_trials {
+        grid.all().into_iter().take(limit).collect()
+    } else {
+        grid.all()
+    };
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+
+    let mut work = {
+        let (bars, objective, dsl_code, strategy, param_sets) =
+            (bars.clone(), objective.clone(), dsl_code.clone(), strategy.clone(), param_sets.clone());
+        tokio::task::spawn_blocking(move || {
+            let backtest_config = spectra_engine::BacktestConfig::default();
+            let sweep_res = if let Some(code) = dsl_code {
+                let program = spectra_engine::dsl::parse_and_validate(&code).map_err(|e| e.to_string())?;
+                let factory = move |params: &spectra_research::ParamSet| -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error> {
+                    let mut overrides = std::collections::HashMap::new();
+                    for (k, v) in &params.values {
+                        overrides.insert(k.clone(), *v);
+                    }
+                    Ok(Box::new(spectra_engine::dsl::DslStrategy::new(program.clone(), &overrides)))
+                };
+                let obj_fn: Box<spectra_research::Objective<'_>> = if objective == "total_return" {
+                    Box::new(spectra_research::objective_total_return)
+                } else {
+                    Box::new(spectra_research::objective_sharpe)
+                };
+                spectra_research::sweep::run_sweep(
+                    &bars,
+                    &factory,
+                    &backtest_config,
+                    &param_sets,
+                    &*obj_fn,
+                    spectra_research::SweepOptions { threads: 1 },
+                    1,
+                )
+                .map_err(|e| e.to_string())?
+            } else {
+                let factory = spectra_backtest::builtin_factory(&strategy).map_err(|e| e.to_string())?;
+                let obj_fn: Box<spectra_research::Objective<'_>> = if objective == "total_return" {
+                    Box::new(spectra_research::objective_total_return)
+                } else {
+                    Box::new(spectra_research::objective_sharpe)
+                };
+                spectra_research::sweep::run_sweep(
+                    &bars,
+                    &factory,
+                    &backtest_config,
+                    &param_sets,
+                    &*obj_fn,
+                    spectra_research::SweepOptions { threads: 1 },
+                    1,
+                )
+                .map_err(|e| e.to_string())?
+            };
+            Ok::<_, String>(sweep_res)
+        })
+    };
+
+    let mut beat = tokio::time::interval(HEARTBEAT);
+    beat.tick().await;
+    let mut cancel_requested = false;
+    let outcome = loop {
+        tokio::select! {
+            res = &mut work => break match res {
+                Ok(r) => r,
+                Err(e) => Err(format!("Sweep worker panicked: {e}")),
+            },
+            _ = beat.tick() => {
+                let p = f32::from_bits(progress.load(Ordering::Relaxed));
+                match jobs::heartbeat(&ctx.pool, job.id, &ctx.worker_id, Some(p)).await {
+                    Ok(Beat::Continue) => {}
+                    Ok(Beat::CancelRequested) => {
+                        cancel_requested = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Ok(Beat::Lost) => {
+                        cancel.store(true, Ordering::Relaxed);
+                        record_metrics(&job.kind, "lost", started);
+                        drop(permit);
+                        return;
+                    }
+                    Err(e) => warn!(job_id = %job.id, "sweep heartbeat failed: {e}"),
+                }
+            }
+        }
+    };
+    drop(permit);
+
+    match outcome {
+        Ok(sweep_res) => {
+            // Record trials
+            for (idx, trial) in sweep_res.trials.iter().enumerate() {
+                let mut param_map = serde_json::Map::new();
+                for (k, v) in &trial.params.values {
+                    param_map.insert(k.clone(), serde_json::json!(v));
+                }
+                let params_json = serde_json::Value::Object(param_map);
+                let metrics_json = serde_json::json!({
+                    "sharpe": trial.metrics.sharpe,
+                    "total_return": trial.metrics.total_return,
+                    "annualized_return": trial.metrics.annualized_return,
+                    "annualized_volatility": trial.metrics.annualized_volatility,
+                    "max_drawdown": trial.metrics.max_drawdown,
+                });
+                let (ret_mean, ret_vol) = if trial.returns.is_empty() {
+                    (None, None)
+                } else {
+                    let m = spectra_research::moments(&trial.returns);
+                    (Some(m.mean), Some(m.stdev))
+                };
+                let _ = optimization::insert_trial(
+                    &ctx.pool,
+                    sweep_id,
+                    (idx + 1) as i32,
+                    &params_json,
+                    &metrics_json,
+                    trial.objective,
+                    ret_mean,
+                    ret_vol,
+                )
+                .await;
+            }
+
+            // Compute statistical overfitting metrics
+            let returns_matrix: Vec<Vec<f64>> = sweep_res.trials.iter().map(|t| t.returns.clone()).collect();
+            let sharpes: Vec<f64> = sweep_res.trials.iter().map(|t| t.metrics.sharpe).collect();
+            let best_trial = sweep_res.best_trial();
+
+            let (dsr, psr, min_trl, pbo, best_params_json, best_metrics_json) = if let Some(best) = best_trial
+            {
+                let m = spectra_research::moments(&best.returns);
+                let sr_mom = spectra_research::moments(&sharpes);
+                let sr_var = sr_mom.stdev * sr_mom.stdev;
+                let psr =
+                    spectra_research::probabilistic_sharpe(best.metrics.sharpe, 0.0, m.n, m.skew, m.kurt);
+                let dsr = spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var);
+                let min_trl =
+                    spectra_research::min_track_record_length(best.metrics.sharpe, 0.0, m.skew, m.kurt, 0.95);
+                let pbo = if returns_matrix.len() >= 2 && returns_matrix.first().is_some_and(|r| r.len() >= 8)
+                {
+                    spectra_research::cscv_pbo(&returns_matrix, 16).map_or(0.0, |p| p.pbo)
+                } else {
+                    0.0
+                };
+                let mut b_params = serde_json::Map::new();
+                for (k, v) in &best.params.values {
+                    b_params.insert(k.clone(), serde_json::json!(v));
+                }
+                let b_metrics = serde_json::json!({
+                    "sharpe": best.metrics.sharpe,
+                    "total_return": best.metrics.total_return,
+                    "annualized_return": best.metrics.annualized_return,
+                    "annualized_volatility": best.metrics.annualized_volatility,
+                    "max_drawdown": best.metrics.max_drawdown,
+                });
+                (
+                    Some(if dsr.is_nan() { 0.0 } else { dsr }),
+                    Some(if psr.is_nan() { 0.0 } else { psr }),
+                    Some(if min_trl.is_infinite() || min_trl.is_nan() { 0.0 } else { min_trl }),
+                    Some(pbo),
+                    Some(serde_json::Value::Object(b_params)),
+                    Some(b_metrics),
+                )
+            } else {
+                (None, None, None, None, None, None)
+            };
+
+            let _ = optimization::update_sweep(
+                &ctx.pool,
+                sweep_id,
+                "succeeded",
+                sweep_res.trials.len() as i32,
+                Some((sweep_res.best + 1) as i32),
+                best_params_json.as_ref(),
+                best_metrics_json.as_ref(),
+                best_trial.map(|t| t.objective),
+                dsr,
+                psr,
+                min_trl,
+                pbo,
+            )
+            .await;
+
+            let job_result = serde_json::json!({
+                "sweep_id": sweep_id,
+                "trials_count": sweep_res.trials.len(),
+                "best_trial_num": sweep_res.best + 1,
+                "best_objective": best_trial.map(|t| t.objective),
+                "dsr": dsr,
+                "psr": psr,
+                "pbo": pbo,
+            });
+            let _ = jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &job_result).await;
+            record_metrics(&job.kind, "succeeded", started);
+            info!(job_id = %job.id, sweep_id = %sweep_id, "sweep completed successfully");
+        }
+        Err(_msg) if cancel_requested => {
+            let _ = sqlx::query("UPDATE optimization_sweeps SET status='cancelled', finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id)
+                .bind(sweep_id)
+                .execute(&ctx.pool)
+                .await;
+            record_metrics(&job.kind, "cancelled", started);
+            let _ = jobs::mark_cancelled(&ctx.pool, job.id, &ctx.worker_id).await;
+        }
+        Err(msg) => {
+            let _ = sqlx::query("UPDATE optimization_sweeps SET status='failed', finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id)
+                .bind(sweep_id)
+                .execute(&ctx.pool)
+                .await;
+            fail_job(&ctx, &job, started, &msg, false).await;
+        }
+    }
+}
+
+/// Runs a walk-forward validation job.
+#[allow(clippy::needless_pass_by_value)]
+async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
+    let started = Instant::now();
+    let Some(report_id) = job
+        .payload
+        .get("report_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+    else {
+        fail_job(&ctx, &job, started, "Walk-forward job missing report_id.", false).await;
+        drop(permit);
+        return;
+    };
+    let Some(version_id) = job
+        .payload
+        .get("dataset_version_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+    else {
+        fail_job(&ctx, &job, started, "Walk-forward job missing dataset_version_id.", false).await;
+        drop(permit);
+        return;
+    };
+
+    let version = match datasets::resolve_version(&ctx.pool, job.workspace_id, version_id).await {
+        Ok(Some(v)) => v,
+        Ok(None) => {
+            fail_job(&ctx, &job, started, "Dataset version no longer exists in workspace.", false).await;
+            drop(permit);
+            return;
+        }
+        Err(e) => {
+            fail_job(&ctx, &job, started, &format!("Could not look up dataset version: {e}"), true).await;
+            drop(permit);
+            return;
+        }
+    };
+
+    if let Err((msg, retryable)) =
+        ingest::ensure_local(&ctx.store, &ctx.data_dir, &version.checksum, version.blob_sha256.as_deref())
+            .await
+    {
+        fail_job(&ctx, &job, started, &msg, retryable).await;
+        drop(permit);
+        return;
+    }
+
+    let bars = match spectra_backtest::load_bars(&ctx.data_dir, &version.checksum) {
+        Ok(b) => b,
+        Err(e) => {
+            fail_job(&ctx, &job, started, &format!("Could not read dataset bars: {e}"), true).await;
+            drop(permit);
+            return;
+        }
+    };
+
+    let _ = sqlx::query("UPDATE walk_forward_reports SET status='running' WHERE workspace_id=$1 AND id=$2 AND status='queued'")
+        .bind(job.workspace_id)
+        .bind(report_id)
+        .execute(&ctx.pool)
+        .await;
+
+    let param_grid_val = job.payload.get("param_grid").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let mode_str = job.payload.get("mode").and_then(serde_json::Value::as_str).unwrap_or("rolling");
+    let train_size =
+        job.payload.get("train_size").and_then(serde_json::Value::as_u64).unwrap_or(200) as usize;
+    let test_size = job.payload.get("test_size").and_then(serde_json::Value::as_u64).unwrap_or(50) as usize;
+    let step_size =
+        job.payload.get("step_size").and_then(serde_json::Value::as_u64).unwrap_or(test_size as u64) as usize;
+    let embargo = job.payload.get("embargo").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
+    let objective =
+        job.payload.get("objective").and_then(serde_json::Value::as_str).unwrap_or("sharpe").to_string();
+    let dsl_code = job.payload.get("dsl_code").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
+    let strategy =
+        job.payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("sma_cross").to_string();
+
+    let grid = match parse_grid_from_json(&param_grid_val) {
+        Ok(g) => g,
+        Err(e) => {
+            fail_job(&ctx, &job, started, &format!("Invalid parameter grid: {e}"), false).await;
+            drop(permit);
+            return;
+        }
+    };
+    let param_sets = grid.all();
+
+    let wf_mode = if mode_str == "anchored" {
+        spectra_research::WalkForwardMode::Anchored
+    } else {
+        spectra_research::WalkForwardMode::Rolling
+    };
+    let wf_config = spectra_research::WalkForwardConfig {
+        train: train_size,
+        test: test_size,
+        step: step_size,
+        embargo,
+        mode: wf_mode,
+    };
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+
+    let mut work = {
+        let (bars, objective, dsl_code, strategy, param_sets, wf_config) = (
+            bars.clone(),
+            objective.clone(),
+            dsl_code.clone(),
+            strategy.clone(),
+            param_sets.clone(),
+            wf_config,
+        );
+        tokio::task::spawn_blocking(move || {
+            let backtest_config = spectra_engine::BacktestConfig::default();
+            let wf_res = if let Some(code) = dsl_code {
+                let program = spectra_engine::dsl::parse_and_validate(&code).map_err(|e| e.to_string())?;
+                let factory = move |params: &spectra_research::ParamSet| -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error> {
+                    let mut overrides = std::collections::HashMap::new();
+                    for (k, v) in &params.values {
+                        overrides.insert(k.clone(), *v);
+                    }
+                    Ok(Box::new(spectra_engine::dsl::DslStrategy::new(program.clone(), &overrides)))
+                };
+                let obj_fn: Box<spectra_research::Objective<'_>> = if objective == "total_return" {
+                    Box::new(spectra_research::objective_total_return)
+                } else {
+                    Box::new(spectra_research::objective_sharpe)
+                };
+                spectra_research::walkforward::run_walk_forward(
+                    &bars,
+                    &factory,
+                    &backtest_config,
+                    &param_sets,
+                    &wf_config,
+                    &*obj_fn,
+                    spectra_research::SweepOptions { threads: 1 },
+                    None,
+                )
+                .map_err(|e| e.to_string())?
+            } else {
+                let factory = spectra_backtest::builtin_factory(&strategy).map_err(|e| e.to_string())?;
+                let obj_fn: Box<spectra_research::Objective<'_>> = if objective == "total_return" {
+                    Box::new(spectra_research::objective_total_return)
+                } else {
+                    Box::new(spectra_research::objective_sharpe)
+                };
+                spectra_research::walkforward::run_walk_forward(
+                    &bars,
+                    &factory,
+                    &backtest_config,
+                    &param_sets,
+                    &wf_config,
+                    &*obj_fn,
+                    spectra_research::SweepOptions { threads: 1 },
+                    None,
+                )
+                .map_err(|e| e.to_string())?
+            };
+            Ok::<_, String>(wf_res)
+        })
+    };
+
+    let mut beat = tokio::time::interval(HEARTBEAT);
+    beat.tick().await;
+    let mut cancel_requested = false;
+    let outcome = loop {
+        tokio::select! {
+            res = &mut work => break match res {
+                Ok(r) => r,
+                Err(e) => Err(format!("Walk-forward worker panicked: {e}")),
+            },
+            _ = beat.tick() => {
+                let p = f32::from_bits(progress.load(Ordering::Relaxed));
+                match jobs::heartbeat(&ctx.pool, job.id, &ctx.worker_id, Some(p)).await {
+                    Ok(Beat::Continue) => {}
+                    Ok(Beat::CancelRequested) => {
+                        cancel_requested = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Ok(Beat::Lost) => {
+                        cancel.store(true, Ordering::Relaxed);
+                        record_metrics(&job.kind, "lost", started);
+                        drop(permit);
+                        return;
+                    }
+                    Err(e) => warn!(job_id = %job.id, "walk-forward heartbeat failed: {e}"),
+                }
+            }
+        }
+    };
+    drop(permit);
+
+    match outcome {
+        Ok(wf_res) => {
+            let eff_ratio = if wf_res.mean_in_sample_objective.abs() > 1e-9 {
+                wf_res.mean_out_of_sample_objective / wf_res.mean_in_sample_objective
+            } else {
+                0.0
+            };
+
+            let folds_vec: Vec<serde_json::Value> = wf_res
+                .folds
+                .iter()
+                .enumerate()
+                .map(|(idx, f)| {
+                    let mut param_map = serde_json::Map::new();
+                    for (k, v) in &f.best_params.values {
+                        param_map.insert(k.clone(), serde_json::json!(v));
+                    }
+                    serde_json::json!({
+                        "fold": idx + 1,
+                        "train_begin": f.fold.train_begin,
+                        "train_end": f.fold.train_end,
+                        "test_begin": f.fold.test_begin,
+                        "test_end": f.fold.test_end,
+                        "in_sample_objective": f.in_sample_objective,
+                        "out_of_sample_objective": f.out_of_sample_objective,
+                        "best_params": serde_json::Value::Object(param_map),
+                        "oos_sharpe": f.oos_metrics.sharpe,
+                        "oos_return": f.oos_metrics.total_return,
+                        "oos_drawdown": f.oos_metrics.max_drawdown,
+                    })
+                })
+                .collect();
+            let folds_json = serde_json::Value::Array(folds_vec);
+
+            let _ = optimization::update_walk_forward(
+                &ctx.pool,
+                report_id,
+                "succeeded",
+                &folds_json,
+                Some(eff_ratio),
+                Some(wf_res.mean_in_sample_objective),
+                Some(wf_res.mean_out_of_sample_objective),
+            )
+            .await;
+
+            let job_result = serde_json::json!({
+                "report_id": report_id,
+                "folds_count": wf_res.folds.len(),
+                "efficiency_ratio": eff_ratio,
+                "in_sample_sharpe": wf_res.mean_in_sample_objective,
+                "out_of_sample_sharpe": wf_res.mean_out_of_sample_objective,
+            });
+            let _ = jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &job_result).await;
+            record_metrics(&job.kind, "succeeded", started);
+            info!(job_id = %job.id, report_id = %report_id, "walk-forward completed successfully");
+        }
+        Err(_msg) if cancel_requested => {
+            let _ = sqlx::query("UPDATE walk_forward_reports SET status='cancelled', finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id)
+                .bind(report_id)
+                .execute(&ctx.pool)
+                .await;
+            record_metrics(&job.kind, "cancelled", started);
+            let _ = jobs::mark_cancelled(&ctx.pool, job.id, &ctx.worker_id).await;
+        }
+        Err(msg) => {
+            let _ = sqlx::query("UPDATE walk_forward_reports SET status='failed', finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(job.workspace_id)
+                .bind(report_id)
+                .execute(&ctx.pool)
+                .await;
+            fail_job(&ctx, &job, started, &msg, false).await;
         }
     }
 }

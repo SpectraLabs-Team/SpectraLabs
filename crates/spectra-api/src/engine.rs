@@ -223,6 +223,18 @@ pub fn validate_job(kind: &str, payload: &Json) -> Result<(), (u16, String)> {
         "benchmark" => benchmark_args(payload).map(|_| ()),
         "risk" => risk_args(payload).map(|_| ()),
         "stress" => stress_args(payload).map(|_| ()),
+        "sweep" => {
+            if payload.find("dataset_version_id").is_none() {
+                return Err(unprocessable("sweep requires dataset_version_id"));
+            }
+            Ok(())
+        }
+        "walk_forward" => {
+            if payload.find("dataset_version_id").is_none() {
+                return Err(unprocessable("walk_forward requires dataset_version_id"));
+            }
+            Ok(())
+        }
         INGEST_JOB_KIND => Err(unprocessable(
             "Ingest jobs are created with POST /api/v1/datasets/ingest, which checks the upload.",
         )),
@@ -231,7 +243,7 @@ pub fn validate_job(kind: &str, payload: &Json) -> Result<(), (u16, String)> {
 }
 
 /// Job kinds `POST /api/v1/jobs` accepts.
-pub const JOB_KINDS: [&str; 4] = ["backtest", "benchmark", "risk", "stress"];
+pub const JOB_KINDS: [&str; 6] = ["backtest", "benchmark", "risk", "stress", "sweep", "walk_forward"];
 
 /// An upload turned into a dataset version (M1 task 5); queued only by
 /// `POST /api/v1/datasets/ingest`.
@@ -241,8 +253,17 @@ pub const INGEST_JOB_KIND: &str = "ingest";
 pub const PROVIDER_REFRESH_JOB_KIND: &str = crate::providers::runner::PROVIDER_REFRESH_JOB_KIND;
 
 /// Job kinds the background worker runs.
-pub const WORKER_KINDS: [&str; 7] =
-    ["backtest", "benchmark", "risk", "stress", INGEST_JOB_KIND, "survival", PROVIDER_REFRESH_JOB_KIND];
+pub const WORKER_KINDS: [&str; 9] = [
+    "backtest",
+    "benchmark",
+    "risk",
+    "stress",
+    INGEST_JOB_KIND,
+    "survival",
+    PROVIDER_REFRESH_JOB_KIND,
+    "sweep",
+    "walk_forward",
+];
 
 /// A validated `backtest` payload, or a 422 listing every problem.
 ///
@@ -303,7 +324,9 @@ pub const BACKTEST_ARTIFACTS_KEY: &str = "artifacts";
 /// Maximum duration allowed for a job before its result is discarded.
 pub fn job_timeout(kind: &str) -> std::time::Duration {
     std::time::Duration::from_secs(match kind {
-        "backtest" | INGEST_JOB_KIND | "survival" | PROVIDER_REFRESH_JOB_KIND => 900,
+        "backtest" | INGEST_JOB_KIND | "survival" | "sweep" | "walk_forward" | PROVIDER_REFRESH_JOB_KIND => {
+            900
+        }
         "benchmark" => 600,
         _ => 300,
     })

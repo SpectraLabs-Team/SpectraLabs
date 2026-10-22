@@ -1,8 +1,8 @@
-//! Saved strategies and their versions (M2a, Strategy Studio minimal).
+//! Saved strategies and their versions (M2, Strategy Studio).
 //!
 //! A saved strategy is a named record in a workspace. Each of its versions is
-//! an immutable row: a built-in strategy (by name) with a full parameter set,
-//! keyed by `source_hash` (the built-in's source SHA-256) and `config_hash`
+//! an immutable row: a built-in strategy (by name) or DSL script with a full parameter set,
+//! keyed by `source_hash` (the source SHA-256) and `config_hash`
 //! (SHA-256 of the canonical parameters). [`save_version`] returns the existing
 //! version when the same code and parameters were saved before, so a version id
 //! always means one exact computation. Every statement lives in `queries/`,
@@ -49,16 +49,18 @@ pub struct StrategyVersion {
     pub strategy_name: String,
     /// 1, 2, ... within the strategy.
     pub version: i32,
-    /// Built-in strategy name, e.g. `sma_cross`.
+    /// Built-in strategy name, e.g. `sma_cross` or `dsl`.
     pub builtin: String,
-    /// SHA-256 of the built-in's source when saved.
+    /// SHA-256 of the source when saved.
     pub source_hash: String,
     /// SHA-256 of the canonical parameter text.
     pub config_hash: String,
-    /// The built-in's parameter schema when saved.
+    /// The parameter schema when saved.
     pub parameter_schema: JsonValue,
     /// Every parameter, defaults filled in.
     pub parameters: JsonValue,
+    /// User-authored DSL code (None for pure Rust built-ins).
+    pub code: Option<String>,
     /// Who saved it.
     pub created_by: Option<Uuid>,
     /// Saved at.
@@ -68,17 +70,43 @@ pub struct StrategyVersion {
 /// What [`save_version`] stores.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewVersion {
-    /// Built-in strategy name.
+    /// Built-in strategy name, or `dsl`.
     pub builtin: String,
     /// SHA-256 of its source.
     pub source_hash: String,
     /// SHA-256 of the canonical parameters.
     pub config_hash: String,
-    /// The built-in's parameter schema.
+    /// The parameter schema.
     pub parameter_schema: JsonValue,
     /// Every parameter, defaults filled in.
     pub parameters: JsonValue,
+    /// User-authored DSL code (None for pure built-ins).
+    pub code: Option<String>,
     /// Who saves it.
+    pub created_by: Option<Uuid>,
+}
+
+/// A mutable draft of a strategy (autosaved by the editor).
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct StrategyDraft {
+    pub strategy_id: Uuid,
+    pub workspace_id: Uuid,
+    pub code: String,
+    pub parameters: JsonValue,
+    pub updated_at: DateTime<Utc>,
+    pub updated_by: Option<Uuid>,
+}
+
+/// A named parameter set belonging to a strategy version.
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+pub struct ParameterSet {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub strategy_version_id: Uuid,
+    pub name: String,
+    pub description: String,
+    pub parameters: JsonValue,
+    pub created_at: DateTime<Utc>,
     pub created_by: Option<Uuid>,
 }
 
@@ -202,9 +230,106 @@ pub async fn save_version(
         .bind(&v.config_hash)
         .bind(&v.parameter_schema)
         .bind(&v.parameters)
+        .bind(&v.code)
         .bind(v.created_by)
         .fetch_one(&mut *tx)
         .await?;
     tx.commit().await?;
     Ok(Some((created, true)))
+}
+
+/// Fetch the active draft for a strategy.
+///
+/// # Errors
+/// Any database error.
+pub async fn get_draft(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Uuid,
+) -> Result<Option<StrategyDraft>, Error> {
+    sqlx::query_as(include_str!("../queries/strategy_draft_get.sql"))
+        .bind(workspace_id)
+        .bind(strategy_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// Autosave or update a mutable draft for a strategy.
+///
+/// # Errors
+/// Any database error.
+pub async fn save_draft(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Uuid,
+    code: &str,
+    parameters: &JsonValue,
+    updated_by: Option<Uuid>,
+) -> Result<StrategyDraft, Error> {
+    sqlx::query_as(include_str!("../queries/strategy_draft_save.sql"))
+        .bind(workspace_id)
+        .bind(strategy_id)
+        .bind(code)
+        .bind(parameters)
+        .bind(updated_by)
+        .fetch_one(pool)
+        .await
+}
+
+/// Create a named parameter set for a strategy version.
+///
+/// # Errors
+/// Any database error.
+pub async fn create_parameter_set(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_version_id: Uuid,
+    name: &str,
+    description: &str,
+    parameters: &JsonValue,
+    created_by: Option<Uuid>,
+) -> Result<ParameterSet, Error> {
+    let id = crate::new_id();
+    sqlx::query_as(include_str!("../queries/strategy_param_set_create.sql"))
+        .bind(id)
+        .bind(workspace_id)
+        .bind(strategy_version_id)
+        .bind(name)
+        .bind(description)
+        .bind(parameters)
+        .bind(created_by)
+        .fetch_one(pool)
+        .await
+}
+
+/// List parameter sets for a strategy version.
+///
+/// # Errors
+/// Any database error.
+pub async fn list_parameter_sets(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_version_id: Uuid,
+) -> Result<Vec<ParameterSet>, Error> {
+    sqlx::query_as(include_str!("../queries/strategy_param_set_list.sql"))
+        .bind(workspace_id)
+        .bind(strategy_version_id)
+        .fetch_all(pool)
+        .await
+}
+
+/// Get a parameter set by id.
+///
+/// # Errors
+/// Any database error.
+pub async fn get_parameter_set(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<Option<ParameterSet>, Error> {
+    sqlx::query_as(include_str!("../queries/strategy_param_set_get.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(pool)
+        .await
 }

@@ -37,7 +37,7 @@ CREATE TEMP TABLE k2 AS EXECUTE strategy_lock(:'other', :'sid');
 SELECT pg_temp.check((SELECT count(*) FROM k1) = 1 AND (SELECT count(*) FROM k2) = 0, 'lock is workspace scoped');
 
 -- Insert numbers versions 1, 2, ...; find returns a saved (source, config) pair.
-CREATE TEMP TABLE v1 AS EXECUTE strategy_version_insert(:'ws', :'sid', 'sma_cross', :'src1', :'cfg1', '{"params":[]}', '{"fast":10,"slow":50}', :'user');
+CREATE TEMP TABLE v1 AS EXECUTE strategy_version_insert(:'ws', :'sid', 'sma_cross', :'src1', :'cfg1', '{"params":[]}', '{"fast":10,"slow":50}', NULL, :'user');
 CREATE TEMP TABLE f1 AS EXECUTE strategy_version_find(:'ws', :'sid', :'src1', :'cfg1');
 CREATE TEMP TABLE f2 AS EXECUTE strategy_version_find(:'ws', :'sid', :'src1', :'cfg2');
 CREATE TEMP TABLE f3 AS EXECUTE strategy_version_find(:'other', :'sid', :'src1', :'cfg1');
@@ -48,8 +48,8 @@ SELECT pg_temp.check((SELECT id FROM f1) = :'v1id', 'find the saved version');
 SELECT pg_temp.check((SELECT count(*) FROM f2) = 0, 'other parameters are not saved');
 SELECT pg_temp.check((SELECT count(*) FROM f3) = 0, 'find is workspace scoped');
 
-CREATE TEMP TABLE v2 AS EXECUTE strategy_version_insert(:'ws', :'sid', 'sma_cross', :'src1', :'cfg2', '{}', '{"fast":5,"slow":50}', NULL);
-CREATE TEMP TABLE v3 AS EXECUTE strategy_version_insert(:'ws', :'sid', 'sma_cross', :'src2', :'cfg1', '{}', '{"fast":10,"slow":50}', NULL);
+CREATE TEMP TABLE v2 AS EXECUTE strategy_version_insert(:'ws', :'sid', 'sma_cross', :'src1', :'cfg2', '{}', '{"fast":5,"slow":50}', NULL, NULL);
+CREATE TEMP TABLE v3 AS EXECUTE strategy_version_insert(:'ws', :'sid', 'sma_cross', :'src2', :'cfg1', '{}', '{"fast":10,"slow":50}', NULL, NULL);
 SELECT pg_temp.check((SELECT version FROM v2) = 2 AND (SELECT version FROM v3) = 3, 'versions count up');
 
 -- The same code and parameters twice is refused by the unique index (the API finds it first).

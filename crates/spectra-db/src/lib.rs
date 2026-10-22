@@ -24,6 +24,7 @@ pub mod datasets;
 pub mod identity;
 pub mod jobs;
 pub mod lifecycle;
+pub mod optimization;
 pub mod providers;
 pub mod strategies;
 pub mod uploads;

@@ -141,7 +141,7 @@ test('password rules', () => {
 
 test('migrations: tables exist, re-running is a no-op', async () => {
   const tables = (await sql.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY 1`, [schema])).rows.map((r) => r.table_name);
-  assert.deepEqual(tables, ['api_tokens', 'audit_events', 'email_codes', 'known_devices', 'rate_limits', 'recovery_codes', 'schema_migrations', 'secrets', 'sessions', 'user_totp', 'users', 'workspace_invites', 'workspace_keys', 'workspace_members', 'workspaces']);
+  assert.deepEqual(tables, ['api_tokens', 'audit_events', 'email_codes', 'known_devices', 'rate_limits', 'recovery_codes', 'schema_migrations', 'secrets', 'sessions', 'user_totp', 'users', 'workspace_invites', 'workspace_keys', 'workspace_layouts', 'workspace_members', 'workspaces']);
   assert.deepEqual(await migrate(sql), [], 'nothing left to apply');
 });
 

@@ -24,6 +24,10 @@ pub static WEB_MIGRATIONS: &[(&str, &str)] = &[
     ("008_devices.sql", include_str!("../../../web/frontend/db/migrations/008_devices.sql")),
     ("009_invites.sql", include_str!("../../../web/frontend/db/migrations/009_invites.sql")),
     ("010_api_tokens.sql", include_str!("../../../web/frontend/db/migrations/010_api_tokens.sql")),
+    (
+        "011_workspace_layouts.sql",
+        include_str!("../../../web/frontend/db/migrations/011_workspace_layouts.sql"),
+    ),
 ];
 
 fn sha256_hex(text: &str) -> String {

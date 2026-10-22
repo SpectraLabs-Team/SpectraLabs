@@ -876,6 +876,17 @@ fn risk_center_routes() -> Router<AppState> {
         )
         .route("/api/v1/risk/audit", only(get(risk_center_api::list_audit)))
         .route("/api/v1/risk/metrics", only(get(risk_center_api::get_metrics)))
+        .route(
+            "/api/v1/risk/positions",
+            only(get(risk_center_api::get_positions).put(risk_center_api::put_position)),
+        )
+        .route(
+            "/api/v1/risk/balance",
+            only(get(risk_center_api::get_balance).put(risk_center_api::put_balance)),
+        )
+        .route("/api/v1/risk/exposure-history", only(get(risk_center_api::get_exposure_history)))
+        .route("/api/v1/risk/alerts", only(get(risk_center_api::get_alerts)))
+        .route("/api/v1/risk/replay/{decision_id}", only(post(risk_center_api::replay_decision)))
 }
 
 /// The application. `db` is checked by `/ready`; pass `None` where there is

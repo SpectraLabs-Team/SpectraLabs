@@ -201,6 +201,8 @@ pub fn config_from_json(j: &Json) -> Result<BacktestConfig> {
             Some(v) => spectra_data::calendar::Exchange::parse(v.as_str().map_err(wrap)?),
             None => None,
         },
+        risk_limits: None,
+        kill_switch: false,
     })
 }
 

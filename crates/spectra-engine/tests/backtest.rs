@@ -670,3 +670,82 @@ fn property_books_always_reconcile_and_runs_reproduce() {
     assert!(total_fills > 1000);
     assert!(total_rejects > 0);
 }
+
+#[test]
+fn backtest_enforces_daily_loss_limit() {
+    let hour_ns = 3_600_000_000_000_i64;
+    // Hour 1: strategy submits Order 1
+    // Hour 2: Order 1 fills at 100.0, marks at 100.0
+    // Hour 3: price drops to 80.0 (daily loss is $20, exceeding $1 limit); strategy submits Order 2
+    // Hour 4: Order 2 evaluates to fill, but daily loss of $20 exceeds $1 limit -> Rejected!
+    let bars = vec![
+        mk1(hour_ns, A, 100.0, 101.0, 99.0, 100.0),
+        mk1(hour_ns * 2, A, 100.0, 101.0, 99.0, 100.0),
+        mk1(hour_ns * 3, A, 80.0, 81.0, 79.0, 80.0),
+        mk1(hour_ns * 4, A, 80.0, 81.0, 79.0, 80.0),
+    ];
+    let mut s = FnStrategy {
+        bar_fn: Some(Box::new(|c, bars| {
+            if bars[0].ts_ns <= 3_600_000_000_000_i64 * 3 {
+                c.market(A, Side::Buy, q(1.0));
+            }
+        })),
+        ..FnStrategy::default()
+    };
+    let mut cfg = base_config();
+    cfg.risk_limits = Some(spectra_risk::enforcement::RiskLimits {
+        max_daily_loss: 1.0, // Strict $1 daily loss limit
+        ..spectra_risk::enforcement::RiskLimits::default()
+    });
+
+    let r = run_backtest(&bars, &mut s, &cfg).unwrap();
+    let rejected: Vec<_> = r.orders.iter().filter(|o| o.state == OrderState::Rejected).collect();
+    assert!(!rejected.is_empty(), "order submitted after exceeding daily loss limit must be rejected");
+    assert_eq!(rejected[0].reject_reason, Some(Reject::RiskLimitExceeded));
+}
+
+#[test]
+fn backtest_kill_switch_allows_flattening_but_blocks_opening() {
+    let day_ns = 86_400_000_000_000_i64;
+    let bars = vec![
+        mk1(day_ns, A, 100.0, 101.0, 99.0, 100.0),
+        mk1(day_ns * 2, A, 100.0, 101.0, 99.0, 100.0),
+        mk1(day_ns * 3, A, 100.0, 101.0, 99.0, 100.0),
+    ];
+    // Start with 1 share long
+    let mut s = FnStrategy {
+        start_fn: Some(Box::new(|c| {
+            c.market(A, Side::Buy, q(1.0));
+        })),
+        bar_fn: Some(Box::new(|c, bars| {
+            if bars[0].ts_ns == 86_400_000_000_000i64 * 2 {
+                // Flatten long position
+                c.market(A, Side::Sell, q(1.0));
+                // Try opening another long
+                c.market(A, Side::Buy, q(1.0));
+            }
+        })),
+        ..FnStrategy::default()
+    };
+
+    let mut cfg = base_config();
+    cfg.kill_switch = true;
+
+    let r = run_backtest(&bars, &mut s, &cfg).unwrap();
+    // Opening order in start_fn should be rejected under kill switch
+    let initial_order = &r.orders[0];
+    assert_eq!(initial_order.state, OrderState::Rejected);
+
+    // Now test flattening when position already held
+    let mut s2 = FnStrategy {
+        bar_fn: Some(Box::new(|c, bars| {
+            if bars[0].ts_ns == 86_400_000_000_000i64 * 2 {
+                c.market(A, Side::Buy, q(1.0));
+            }
+        })),
+        ..FnStrategy::default()
+    };
+    let normal_cfg = base_config();
+    let r_normal = run_backtest(&bars, &mut s2, &normal_cfg).unwrap();
+    assert_eq!(r_normal.orders[0].state, OrderState::Filled);
+}

@@ -85,6 +85,63 @@ export interface ProjectedMetrics {
   concentration_pct: number;
   drawdown_pct: number;
   daily_loss: number;
+  var_pct?: number;
+}
+
+export interface PortfolioPositionView {
+  symbol: string;
+  qty: number;
+  price: number;
+  updated_at: string;
+}
+
+export interface UpsertPositionPayload {
+  strategy_id?: string | null;
+  symbol: string;
+  qty: number;
+  price: number;
+}
+
+export interface PortfolioBalanceView {
+  cash: number;
+  equity: number;
+  peak_equity: number;
+  daily_start_equity: number;
+  updated_at: string;
+}
+
+export interface UpsertBalancePayload {
+  strategy_id?: string | null;
+  cash: number;
+  equity: number;
+  peak_equity: number;
+  daily_start_equity: number;
+}
+
+export interface EquitySnapshotView {
+  step: number;
+  ts_ns: number;
+  equity: number;
+  cash: number;
+  created_at: string;
+}
+
+export interface RiskAlertView {
+  severity: 'warning' | 'breach' | string;
+  metric: string;
+  current_value: number;
+  limit_value: number;
+  utilization_pct: number;
+  message: string;
+}
+
+export interface ReplayDecisionView {
+  decision_id: string;
+  logged_verdict: string;
+  replay_verdict: string;
+  matches: boolean;
+  breaches: RiskBreach[];
+  projected_metrics: ProjectedMetrics;
 }
 
 export interface PreTradeResult {
@@ -133,6 +190,9 @@ export interface RiskMetricsSummary {
   daily_loss: number;
   daily_loss_limit: number;
   daily_loss_utilization_pct: number;
+  var_pct?: number;
+  var_limit_pct?: number;
+  var_utilization_pct?: number;
 }
 
 export const getRiskLimits = (strategyId?: string): Promise<RiskLimits> => {
@@ -170,3 +230,42 @@ export const getRiskMetrics = (strategyId?: string): Promise<RiskMetricsSummary>
   const q = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
   return request<RiskMetricsSummary>(`/api/v1/risk/metrics${q}`);
 };
+
+export const getPositions = (strategyId?: string): Promise<PortfolioPositionView[]> => {
+  const q = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
+  return request<PortfolioPositionView[]>(`/api/v1/risk/positions${q}`);
+};
+
+export const upsertPosition = (data: UpsertPositionPayload): Promise<{ status: string; symbol: string; qty: number }> =>
+  request<{ status: string; symbol: string; qty: number }>('/api/v1/risk/positions', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+
+export const getBalance = (strategyId?: string): Promise<PortfolioBalanceView | null> => {
+  const q = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
+  return request<PortfolioBalanceView | null>(`/api/v1/risk/balance${q}`);
+};
+
+export const upsertBalance = (data: UpsertBalancePayload): Promise<{ status: string; equity: number }> =>
+  request<{ status: string; equity: number }>('/api/v1/risk/balance', {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+
+export const getExposureHistory = (strategyId?: string, limit = 100): Promise<EquitySnapshotView[]> => {
+  const params = new URLSearchParams();
+  if (strategyId) params.set('strategy_id', strategyId);
+  params.set('limit', limit.toString());
+  return request<EquitySnapshotView[]>(`/api/v1/risk/exposure-history?${params.toString()}`);
+};
+
+export const getRiskAlerts = (strategyId?: string): Promise<RiskAlertView[]> => {
+  const q = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
+  return request<RiskAlertView[]>(`/api/v1/risk/alerts${q}`);
+};
+
+export const replayDecision = (decisionId: string): Promise<ReplayDecisionView> =>
+  request<ReplayDecisionView>(`/api/v1/risk/replay/${encodeURIComponent(decisionId)}`, {
+    method: 'POST',
+  });

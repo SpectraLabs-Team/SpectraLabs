@@ -268,6 +268,10 @@ pub struct BacktestConfig {
     /// Optional exchange calendar: when set, orders only fill when the market is open: inside a
     /// session for intraday bars, on trading days for daily bars (see `SessionRule`).
     pub exchange: Option<spectra_data::calendar::Exchange>,
+    /// Optional pre-trade risk limits (M8). When None, limits enforcement is inactive.
+    pub risk_limits: Option<spectra_risk::enforcement::RiskLimits>,
+    /// Emergency kill switch (M8). Blocks opening orders, allowing closing orders to flatten.
+    pub kill_switch: bool,
 }
 
 impl Default for BacktestConfig {
@@ -283,6 +287,8 @@ impl Default for BacktestConfig {
             financing: FinancingConfig::default(),
             impact: ImpactConfig::default(),
             exchange: None,
+            risk_limits: None,
+            kill_switch: false,
         }
     }
 }
@@ -847,6 +853,7 @@ const fn reject_code(r: Option<Reject>) -> u64 {
         Some(Reject::InsufficientCash) => 3,
         Some(Reject::ShortNotAllowed) => 4,
         Some(Reject::LeverageExceeded) => 5,
+        Some(Reject::RiskLimitExceeded) => 6,
     }
 }
 
@@ -902,6 +909,23 @@ pub fn canonical_config(c: &BacktestConfig) -> String {
     }
     if let Some(ex) = c.exchange {
         s.push_str(&format!("exchange={};", ex.code()));
+    }
+    if let Some(ref r) = c.risk_limits {
+        s.push_str(&format!(
+            "risk_limits={:.2},{:.2},{:.2},{:.4},{:.2},{:.4},{:.2},{:.4},{};",
+            r.max_gross_exposure,
+            r.max_net_exposure,
+            r.max_position_size,
+            r.max_concentration_pct,
+            r.max_leverage,
+            r.max_drawdown_pct,
+            r.max_daily_loss,
+            r.max_var_pct,
+            r.size_reduction_enabled
+        ));
+    }
+    if c.kill_switch {
+        s.push_str("kill_switch=true;");
     }
     s
 }
@@ -1610,6 +1634,10 @@ fn run_inner<'s>(
     let min_wait = 1 + cfg.exec.delay_bars as i64;
     let mut i = 0usize;
     let mut step: i64 = 0;
+    let mut current_equity_val = cfg.initial_cash.to_f64();
+    let mut peak_equity_val = cfg.initial_cash.to_f64();
+    let mut daily_start_equity_val = cfg.initial_cash.to_f64();
+    let mut last_calendar_day: i64 = -1;
     while i < bars.len() {
         // Progress first, so a cancel requested from the callback takes effect at once.
         let done = Progress { bars_done: i, bars_total: bars.len(), timestamps_done: step as usize };
@@ -1634,6 +1662,18 @@ fn run_inner<'s>(
         let ts = bars[i].ts_ns;
         for b in group {
             history.entry(b.instrument).or_default().push(*b);
+        }
+
+        if cfg.risk_limits.is_some() {
+            let current_day = ts / 86_400_000_000_000;
+            if current_day != last_calendar_day {
+                daily_start_equity_val =
+                    ledger.equity().map_or(cfg.initial_cash.to_f64(), spectra_core::Fixed::to_f64);
+                last_calendar_day = current_day;
+            }
+            current_equity_val =
+                ledger.equity().map_or(cfg.initial_cash.to_f64(), spectra_core::Fixed::to_f64);
+            peak_equity_val = peak_equity_val.max(current_equity_val);
         }
 
         // 0. Financing for the period that just ended (none before the first bar).
@@ -1684,8 +1724,87 @@ fn run_inner<'s>(
                     orders[k].triggered = true;
                     open.insert(&orders[k], k);
                 }
-                let Some(a) = ev.fill else { continue };
+                let Some(mut a) = ev.fill else { continue };
                 let o = &mut orders[k];
+
+                if let Some(ref limits) = cfg.risk_limits {
+                    let mut positions = std::collections::HashMap::new();
+                    for (&inst, pos) in ledger.positions() {
+                        if !pos.qty.is_zero() {
+                            let mark_price =
+                                ledger.mark_price(inst).map_or(a.price.to_f64(), spectra_core::Fixed::to_f64);
+                            positions.insert(
+                                format!("INST_{inst}"),
+                                spectra_risk::enforcement::PositionSnapshot {
+                                    qty: pos.qty.to_f64(),
+                                    price: mark_price,
+                                },
+                            );
+                        }
+                    }
+                    let snap = spectra_risk::enforcement::PortfolioSnapshot {
+                        cash: ledger.cash().to_f64(),
+                        equity: current_equity_val,
+                        peak_equity: peak_equity_val,
+                        daily_start_equity: daily_start_equity_val,
+                        positions,
+                    };
+                    let candidate = spectra_risk::enforcement::OrderCandidate {
+                        symbol: format!("INST_{}", o.instrument),
+                        side: match o.side {
+                            Side::Buy => spectra_risk::enforcement::OrderSide::Buy,
+                            Side::Sell => spectra_risk::enforcement::OrderSide::Sell,
+                        },
+                        qty: a.qty.to_f64(),
+                        price: a.price.to_f64(),
+                    };
+                    let res = spectra_risk::enforcement::PreTradeChecker::evaluate(
+                        limits,
+                        &snap,
+                        &candidate,
+                        cfg.kill_switch,
+                    );
+                    match res.verdict {
+                        spectra_risk::enforcement::PreTradeVerdict::Rejected => {
+                            o.state = OrderState::Rejected;
+                            o.reject_reason = Some(Reject::RiskLimitExceeded);
+                            if !orders[k].state.is_open() {
+                                open.remove(&orders[k], k);
+                            }
+                            continue;
+                        }
+                        spectra_risk::enforcement::PreTradeVerdict::Reduced => {
+                            if let Ok(reduced_qty) = Qty::from_f64(res.approved_qty) {
+                                if reduced_qty.is_zero() {
+                                    o.state = OrderState::Rejected;
+                                    o.reject_reason = Some(Reject::RiskLimitExceeded);
+                                    if !orders[k].state.is_open() {
+                                        open.remove(&orders[k], k);
+                                    }
+                                    continue;
+                                }
+                                a.qty = reduced_qty.min(a.qty);
+                            }
+                        }
+                        spectra_risk::enforcement::PreTradeVerdict::Approved => {}
+                    }
+                } else if cfg.kill_switch {
+                    let current_pos_qty =
+                        ledger.positions().get(&o.instrument).map_or(0.0, |p| p.qty.to_f64());
+                    let is_closing = match o.side {
+                        Side::Buy => current_pos_qty < 0.0,
+                        Side::Sell => current_pos_qty > 0.0,
+                    };
+                    if !is_closing || a.qty.to_f64() > current_pos_qty.abs() {
+                        o.state = OrderState::Rejected;
+                        o.reject_reason = Some(Reject::RiskLimitExceeded);
+                        if !orders[k].state.is_open() {
+                            open.remove(&orders[k], k);
+                        }
+                        continue;
+                    }
+                }
+
                 let f = Fill {
                     instrument: o.instrument,
                     side: o.side,

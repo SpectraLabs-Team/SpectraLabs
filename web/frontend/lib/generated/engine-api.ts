@@ -831,6 +831,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/risk/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Check current portfolio metrics against alert thresholds (Task 11). */
+        get: operations["get_alerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/risk/audit": {
         parameters: {
             query?: never;
@@ -841,6 +858,24 @@ export interface paths {
         /** List recent pre-trade decisions audit trail. */
         get: operations["list_audit"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get portfolio balance for workspace/strategy (Task 2). */
+        get: operations["get_balance"];
+        /** Upsert portfolio balances for workspace/strategy (Task 2). */
+        put: operations["put_balance"];
         post?: never;
         delete?: never;
         options?: never;
@@ -865,6 +900,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/risk/exposure-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Retrieve historical equity and exposure snapshots over time (Task 10). */
+        get: operations["get_exposure_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/risk/kill-switch": {
         parameters: {
             query?: never;
@@ -872,10 +924,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get kill switches for workspace or specific strategy. */
+        /** Get kill switches for a workspace or strategy. */
         get: operations["get_kill_switches"];
         put?: never;
-        /** Activate or clear emergency kill switch. */
+        /** Set or disarm emergency kill switch. */
         post: operations["set_kill_switch"];
         delete?: never;
         options?: never;
@@ -912,6 +964,41 @@ export interface paths {
         get: operations["get_metrics"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get positions for workspace/strategy (Task 1). */
+        get: operations["get_positions"];
+        /** Upsert a position for workspace/strategy (Task 1). */
+        put: operations["put_position"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/replay/{decision_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Re-run a logged decision from its stored inputs to verify deterministic replay (Task 12). */
+        post: operations["replay_decision"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2083,6 +2170,18 @@ export interface components {
             /** @description Target dataset name (defaults to source dataset name if omitted or null). */
             target_dataset_name?: string | null;
         };
+        EquitySnapshotView: {
+            /** Format: double */
+            cash: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: double */
+            equity: number;
+            /** Format: int64 */
+            step: number;
+            /** Format: int64 */
+            ts_ns: number;
+        };
         /** @description Every error response. */
         ErrorDoc: {
             /** @description Machine-readable: `invalid_request`, `unauthenticated`, `not_found`, `no_workspace`, ... */
@@ -2394,6 +2493,27 @@ export interface components {
             /** Format: double */
             sharpe_variance: number;
         };
+        PortfolioBalanceView: {
+            /** Format: double */
+            cash: number;
+            /** Format: double */
+            daily_start_equity: number;
+            /** Format: double */
+            equity: number;
+            /** Format: double */
+            peak_equity: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        PortfolioPositionView: {
+            /** Format: double */
+            price: number;
+            /** Format: double */
+            qty: number;
+            symbol: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
         PortfolioSnapshotDto: {
             /** Format: double */
             cash: number;
@@ -2495,6 +2615,8 @@ export interface components {
             net_exposure: number;
             /** Format: double */
             position_size: number;
+            /** Format: double */
+            var_pct: number;
         };
         /** @description List of provider configurations. */
         ProviderConfigListView: {
@@ -2656,6 +2778,15 @@ export interface components {
              */
             updated_at: string;
         };
+        ReplayDecisionView: {
+            breaches: components["schemas"]["RiskBreachView"][];
+            /** Format: uuid */
+            decision_id: string;
+            logged_verdict: string;
+            matches: boolean;
+            projected_metrics: components["schemas"]["ProjectedMetricsView"];
+            replay_verdict: string;
+        };
         /** @description A resolved universe constituent. */
         ResolvedUniverseMemberView: {
             /**
@@ -2669,6 +2800,17 @@ export interface components {
             resolved_symbol: string;
             /** @description Original constituent symbol. */
             symbol: string;
+        };
+        RiskAlertView: {
+            /** Format: double */
+            current_value: number;
+            /** Format: double */
+            limit_value: number;
+            message: string;
+            metric: string;
+            severity: string;
+            /** Format: double */
+            utilization_pct: number;
         };
         RiskBreachView: {
             code: string;
@@ -2766,6 +2908,12 @@ export interface components {
             net_exposure_utilization_pct: number;
             /** Format: uuid */
             strategy_id?: string | null;
+            /** Format: double */
+            var_limit_pct: number;
+            /** Format: double */
+            var_pct: number;
+            /** Format: double */
+            var_utilization_pct: number;
             /** Format: uuid */
             workspace_id: string;
         };
@@ -3237,6 +3385,18 @@ export interface components {
              */
             size: number;
         };
+        UpsertBalanceRequest: {
+            /** Format: double */
+            cash: number;
+            /** Format: double */
+            daily_start_equity: number;
+            /** Format: double */
+            equity: number;
+            /** Format: double */
+            peak_equity: number;
+            /** Format: uuid */
+            strategy_id?: string | null;
+        };
         UpsertLimitsRequest: {
             /** Format: double */
             max_concentration_pct: number;
@@ -3257,6 +3417,15 @@ export interface components {
             size_reduction_enabled: boolean;
             /** Format: uuid */
             strategy_id?: string | null;
+        };
+        UpsertPositionRequest: {
+            /** Format: double */
+            price: number;
+            /** Format: double */
+            qty: number;
+            /** Format: uuid */
+            strategy_id?: string | null;
+            symbol: string;
         };
         /** @description Request to create or update a provider configuration. */
         UpsertProviderConfigRequest: {
@@ -5460,6 +5629,28 @@ export interface operations {
             };
         };
     };
+    get_alerts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active risk alerts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskAlertView"][];
+                };
+            };
+        };
+    };
     list_audit: {
         parameters: {
             query?: never;
@@ -5479,6 +5670,50 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RiskDecisionView"][];
                 };
+            };
+        };
+    };
+    get_balance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current balance */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": null | components["schemas"]["PortfolioBalanceView"];
+                };
+            };
+        };
+    };
+    put_balance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertBalanceRequest"];
+            };
+        };
+        responses: {
+            /** @description Balance upserted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -5506,6 +5741,29 @@ export interface operations {
             };
         };
     };
+    get_exposure_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string | null;
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exposure time series */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EquitySnapshotView"][];
+                };
+            };
+        };
+    };
     get_kill_switches: {
         parameters: {
             query?: never;
@@ -5517,7 +5775,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Kill switch state */
+            /** @description Kill switches */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5541,7 +5799,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Updated kill switch */
+            /** @description Kill switch updated */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5563,7 +5821,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Active limits */
+            /** @description Configured limits */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -5616,6 +5874,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RiskMetricsSummaryView"];
+                };
+            };
+        };
+    };
+    get_positions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current positions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioPositionView"][];
+                };
+            };
+        };
+    };
+    put_position: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertPositionRequest"];
+            };
+        };
+        responses: {
+            /** @description Position upserted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    replay_decision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Decision replay verification */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayDecisionView"];
                 };
             };
         };

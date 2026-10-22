@@ -18,6 +18,16 @@ import {
   Info,
 } from 'lucide-react';
 import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from 'recharts';
+import {
   getRiskLimits,
   upsertRiskLimits,
   getKillSwitches,
@@ -25,11 +35,19 @@ import {
   preTradeCheck,
   listAuditDecisions,
   getRiskMetrics,
+  getPositions,
+  getExposureHistory,
+  getRiskAlerts,
+  replayDecision,
   type RiskLimits,
   type KillSwitch,
   type RiskDecision,
   type RiskMetricsSummary,
   type PreTradeResult,
+  type PortfolioPositionView,
+  type EquitySnapshotView,
+  type RiskAlertView,
+  type ReplayDecisionView,
 } from '@/lib/riskCenter';
 import { cn, formatCurrency } from '@/lib/utils';
 
@@ -44,6 +62,11 @@ export function RiskCenter() {
   const [killSwitches, setKillSwitches] = useState<KillSwitch[]>([]);
   const [limits, setLimits] = useState<RiskLimits | null>(null);
   const [auditLogs, setAuditLogs] = useState<RiskDecision[]>([]);
+  const [alerts, setAlerts] = useState<RiskAlertView[]>([]);
+  const [exposureHistory, setExposureHistory] = useState<EquitySnapshotView[]>([]);
+  const [positions, setPositions] = useState<PortfolioPositionView[]>([]);
+  const [replayingIds, setReplayingIds] = useState<Record<string, boolean>>({});
+  const [replayResults, setReplayResults] = useState<Record<string, ReplayDecisionView>>({});
 
   // Kill Switch Action Modal / Prompt
   const [killReason, setKillReason] = useState('Emergency risk halt triggered by operator.');
@@ -93,11 +116,14 @@ export function RiskCenter() {
     setLoading(true);
     setError(null);
     try {
-      const [m, ks, lims, audit] = await Promise.all([
+      const [m, ks, lims, audit, alts, expo, pos] = await Promise.all([
         getRiskMetrics(),
         getKillSwitches(),
         getRiskLimits(),
         listAuditDecisions(50),
+        getRiskAlerts().catch(() => []),
+        getExposureHistory(undefined, 50).catch(() => []),
+        getPositions().catch(() => []),
       ]);
       setMetrics(m);
       setKillSwitches(ks);
@@ -114,12 +140,27 @@ export function RiskCenter() {
         size_reduction_enabled: lims.size_reduction_enabled,
       });
       setAuditLogs(audit);
+      setAlerts(alts);
+      setExposureHistory(expo);
+      setPositions(pos);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load risk center data.');
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleReplayDecision = async (decisionId: string) => {
+    setReplayingIds((prev) => ({ ...prev, [decisionId]: true }));
+    try {
+      const res = await replayDecision(decisionId);
+      setReplayResults((prev) => ({ ...prev, [decisionId]: res }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Replay decision failed');
+    } finally {
+      setReplayingIds((prev) => ({ ...prev, [decisionId]: false }));
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -361,130 +402,295 @@ export function RiskCenter() {
 
       {/* Tab 1: Live Metrics Gauges */}
       {activeTab === 'overview' && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Gross Exposure Gauge */}
-          <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
-            <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-              <span>Gross Exposure</span>
-              <span className="font-mono text-ink/90">
-                {metrics?.gross_exposure_utilization_pct?.toFixed(1) ?? '0.0'}%
-              </span>
+        <div className="space-y-6">
+          {/* Active Alerts Banner (Task 11) */}
+          {alerts.length > 0 && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 dark:border-amber-500/20 dark:bg-amber-950/20">
+              <div className="flex items-center gap-2 font-semibold text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-5 w-5 shrink-0" />
+                <span>Active Risk Warnings & Threshold Alerts ({alerts.length})</span>
+              </div>
+              <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+                {alerts.map((a, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-start justify-between rounded-lg bg-surface/80 p-3 text-xs border border-ink/5 shadow-xs"
+                  >
+                    <div>
+                      <span className="font-semibold text-ink uppercase tracking-wider">{a.metric}</span>
+                      <p className="text-ink/70 mt-0.5">{a.message}</p>
+                    </div>
+                    <span
+                      className={cn(
+                        'ml-2 shrink-0 rounded-full px-2 py-0.5 font-mono text-[10px] font-bold uppercase',
+                        a.severity === 'breach'
+                          ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400'
+                          : 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+                      )}
+                    >
+                      {a.utilization_pct.toFixed(0)}% limit
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold font-mono text-ink">
-                {formatCurrency(metrics?.gross_exposure ?? 0)}
-              </span>
-              <span className="text-xs font-mono text-ink/40">
-                / {formatCurrency(metrics?.gross_exposure_limit ?? 1_000_000)}
-              </span>
+          )}
+
+          {/* Metric Gauges Grid */}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Gross Exposure Gauge */}
+            <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
+              <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
+                <span>Gross Exposure</span>
+                <span className="font-mono text-ink/90">
+                  {metrics?.gross_exposure_utilization_pct?.toFixed(1) ?? '0.0'}%
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-mono text-ink">
+                  {formatCurrency(metrics?.gross_exposure ?? 0)}
+                </span>
+                <span className="text-xs font-mono text-ink/40">
+                  / {formatCurrency(metrics?.gross_exposure_limit ?? 1_000_000)}
+                </span>
+              </div>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    (metrics?.gross_exposure_utilization_pct ?? 0) > 90
+                      ? 'bg-rose-500'
+                      : (metrics?.gross_exposure_utilization_pct ?? 0) > 70
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  )}
+                  style={{ width: `${Math.min(100, Math.max(0, metrics?.gross_exposure_utilization_pct ?? 0))}%` }}
+                />
+              </div>
             </div>
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
-              <div
-                className={cn(
-                  'h-full transition-all',
-                  (metrics?.gross_exposure_utilization_pct ?? 0) > 90
-                    ? 'bg-rose-500'
-                    : (metrics?.gross_exposure_utilization_pct ?? 0) > 70
-                    ? 'bg-amber-500'
-                    : 'bg-emerald-500'
-                )}
-                style={{ width: `${Math.min(100, Math.max(0, metrics?.gross_exposure_utilization_pct ?? 0))}%` }}
-              />
+
+            {/* Net Exposure Gauge */}
+            <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
+              <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
+                <span>Net Exposure</span>
+                <span className="font-mono text-ink/90">
+                  {metrics?.net_exposure_utilization_pct?.toFixed(1) ?? '0.0'}%
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-mono text-ink">
+                  {formatCurrency(metrics?.net_exposure ?? 0)}
+                </span>
+                <span className="text-xs font-mono text-ink/40">
+                  / {formatCurrency(metrics?.net_exposure_limit ?? 500_000)}
+                </span>
+              </div>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    (metrics?.net_exposure_utilization_pct ?? 0) > 90
+                      ? 'bg-rose-500'
+                      : (metrics?.net_exposure_utilization_pct ?? 0) > 70
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  )}
+                  style={{ width: `${Math.min(100, Math.max(0, metrics?.net_exposure_utilization_pct ?? 0))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Leverage Gauge */}
+            <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
+              <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
+                <span>Leverage</span>
+                <span className="font-mono text-ink/90">
+                  {metrics?.leverage_utilization_pct?.toFixed(1) ?? '0.0'}%
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-mono text-ink">
+                  {metrics?.leverage?.toFixed(2) ?? '0.00'}x
+                </span>
+                <span className="text-xs font-mono text-ink/40">
+                  / {metrics?.leverage_limit?.toFixed(2) ?? '3.00'}x max
+                </span>
+              </div>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    (metrics?.leverage_utilization_pct ?? 0) > 90
+                      ? 'bg-rose-500'
+                      : (metrics?.leverage_utilization_pct ?? 0) > 70
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  )}
+                  style={{ width: `${Math.min(100, Math.max(0, metrics?.leverage_utilization_pct ?? 0))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Drawdown Gauge */}
+            <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
+              <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
+                <span>Drawdown</span>
+                <span className="font-mono text-ink/90">
+                  {metrics?.drawdown_utilization_pct?.toFixed(1) ?? '0.0'}%
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-mono text-ink">
+                  {((metrics?.drawdown_pct ?? 0) * 100).toFixed(2)}%
+                </span>
+                <span className="text-xs font-mono text-ink/40">
+                  / {((metrics?.drawdown_limit_pct ?? 0.15) * 100).toFixed(1)}% limit
+                </span>
+              </div>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    (metrics?.drawdown_utilization_pct ?? 0) > 90
+                      ? 'bg-rose-500'
+                      : (metrics?.drawdown_utilization_pct ?? 0) > 70
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  )}
+                  style={{ width: `${Math.min(100, Math.max(0, metrics?.drawdown_utilization_pct ?? 0))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Daily Loss Gauge */}
+            <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
+              <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
+                <span>Daily Loss</span>
+                <span className="font-mono text-ink/90">
+                  {metrics?.daily_loss_utilization_pct?.toFixed(1) ?? '0.0'}%
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-mono text-ink">
+                  {formatCurrency(metrics?.daily_loss ?? 0)}
+                </span>
+                <span className="text-xs font-mono text-ink/40">
+                  / {formatCurrency(metrics?.daily_loss_limit ?? 25_000)}
+                </span>
+              </div>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    (metrics?.daily_loss_utilization_pct ?? 0) > 90
+                      ? 'bg-rose-500'
+                      : (metrics?.daily_loss_utilization_pct ?? 0) > 70
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  )}
+                  style={{ width: `${Math.min(100, Math.max(0, metrics?.daily_loss_utilization_pct ?? 0))}%` }}
+                />
+              </div>
+            </div>
+
+            {/* VaR Gauge */}
+            <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
+              <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
+                <span>Value at Risk (95% 1-Day)</span>
+                <span className="font-mono text-ink/90">
+                  {metrics?.var_utilization_pct?.toFixed(1) ?? '0.0'}%
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-mono text-ink">
+                  {((metrics?.var_pct ?? 0) * 100).toFixed(2)}%
+                </span>
+                <span className="text-xs font-mono text-ink/40">
+                  / {((metrics?.var_limit_pct ?? 0.05) * 100).toFixed(1)}% limit
+                </span>
+              </div>
+              <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
+                <div
+                  className={cn(
+                    'h-full transition-all',
+                    (metrics?.var_utilization_pct ?? 0) > 90
+                      ? 'bg-rose-500'
+                      : (metrics?.var_utilization_pct ?? 0) > 70
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  )}
+                  style={{ width: `${Math.min(100, Math.max(0, metrics?.var_utilization_pct ?? 0))}%` }}
+                />
+              </div>
             </div>
           </div>
 
-          {/* Net Exposure Gauge */}
+          {/* Exposure & Equity History Chart (Task 10) */}
           <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
-            <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-              <span>Net Exposure</span>
-              <span className="font-mono text-ink/90">
-                {metrics?.net_exposure_utilization_pct?.toFixed(1) ?? '0.0'}%
-              </span>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-ink">Portfolio Exposure & Equity History</h3>
+                <p className="text-xs text-ink/60">Time series of recorded portfolio equity & cash levels</p>
+              </div>
+              <span className="text-xs font-mono text-ink/50">{exposureHistory.length} snapshots</span>
             </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold font-mono text-ink">
-                {formatCurrency(metrics?.net_exposure ?? 0)}
-              </span>
-              <span className="text-xs font-mono text-ink/40">
-                / {formatCurrency(metrics?.net_exposure_limit ?? 500_000)}
-              </span>
-            </div>
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
-              <div
-                className={cn(
-                  'h-full transition-all',
-                  (metrics?.net_exposure_utilization_pct ?? 0) > 90
-                    ? 'bg-rose-500'
-                    : (metrics?.net_exposure_utilization_pct ?? 0) > 70
-                    ? 'bg-amber-500'
-                    : 'bg-emerald-500'
-                )}
-                style={{ width: `${Math.min(100, Math.max(0, metrics?.net_exposure_utilization_pct ?? 0))}%` }}
-              />
+            <div className="mt-4 h-64 w-full">
+              {exposureHistory.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={exposureHistory.map((s) => ({
+                      time: new Date(s.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                      equity: s.equity,
+                      cash: s.cash,
+                    }))}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                    <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#64748B' }} />
+                    <YAxis tick={{ fontSize: 10, fill: '#64748B' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                    <Tooltip formatter={(value: unknown) => formatCurrency(Number(value))} />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    <Line type="monotone" dataKey="equity" stroke="#10b981" strokeWidth={2} dot={false} name="Equity" />
+                    <Line type="monotone" dataKey="cash" stroke="#6366f1" strokeWidth={1.5} dot={false} strokeDasharray="4 4" name="Cash" />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-full items-center justify-center text-xs text-ink/40">
+                  No equity history snapshots recorded yet.
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Leverage Gauge */}
-          <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
-            <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-              <span>Leverage</span>
-              <span className="font-mono text-ink/90">
-                {metrics?.leverage_utilization_pct?.toFixed(1) ?? '0.0'}%
-              </span>
+          {/* Active Positions Table (Task 1) */}
+          {positions.length > 0 && (
+            <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
+              <h3 className="text-sm font-semibold text-ink">Active Server Portfolio Positions</h3>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-ink/10 bg-ink/[0.02] text-ink/60">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Symbol</th>
+                      <th className="px-3 py-2 font-medium">Quantity</th>
+                      <th className="px-3 py-2 font-medium">Mark Price</th>
+                      <th className="px-3 py-2 font-medium">Market Value</th>
+                      <th className="px-3 py-2 font-medium">Last Updated</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink/10 font-mono">
+                    {positions.map((p) => (
+                      <tr key={p.symbol} className="hover:bg-ink/[0.02]">
+                        <td className="px-3 py-2 font-bold text-ink">{p.symbol}</td>
+                        <td className="px-3 py-2 text-ink">{p.qty.toFixed(4)}</td>
+                        <td className="px-3 py-2 text-ink">${p.price.toFixed(2)}</td>
+                        <td className="px-3 py-2 text-ink font-semibold">${(p.qty * p.price).toFixed(2)}</td>
+                        <td className="px-3 py-2 text-ink/50 font-sans">{new Date(p.updated_at).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold font-mono text-ink">
-                {metrics?.leverage?.toFixed(2) ?? '0.00'}x
-              </span>
-              <span className="text-xs font-mono text-ink/40">
-                / {metrics?.leverage_limit?.toFixed(2) ?? '3.00'}x max
-              </span>
-            </div>
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
-              <div
-                className={cn(
-                  'h-full transition-all',
-                  (metrics?.leverage_utilization_pct ?? 0) > 90
-                    ? 'bg-rose-500'
-                    : (metrics?.leverage_utilization_pct ?? 0) > 70
-                    ? 'bg-amber-500'
-                    : 'bg-emerald-500'
-                )}
-                style={{ width: `${Math.min(100, Math.max(0, metrics?.leverage_utilization_pct ?? 0))}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Drawdown Gauge */}
-          <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
-            <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-              <span>Drawdown</span>
-              <span className="font-mono text-ink/90">
-                {metrics?.drawdown_utilization_pct?.toFixed(1) ?? '0.0'}%
-              </span>
-            </div>
-            <div className="mt-3 flex items-baseline gap-2">
-              <span className="text-2xl font-bold font-mono text-ink">
-                {((metrics?.drawdown_pct ?? 0) * 100).toFixed(2)}%
-              </span>
-              <span className="text-xs font-mono text-ink/40">
-                / {((metrics?.drawdown_limit_pct ?? 0.15) * 100).toFixed(1)}% limit
-              </span>
-            </div>
-            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-ink/10">
-              <div
-                className={cn(
-                  'h-full transition-all',
-                  (metrics?.drawdown_utilization_pct ?? 0) > 90
-                    ? 'bg-rose-500'
-                    : (metrics?.drawdown_utilization_pct ?? 0) > 70
-                    ? 'bg-amber-500'
-                    : 'bg-emerald-500'
-                )}
-                style={{ width: `${Math.min(100, Math.max(0, metrics?.drawdown_utilization_pct ?? 0))}%` }}
-              />
-            </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -873,6 +1079,7 @@ export function RiskCenter() {
                   <th className="px-3 py-2.5 font-medium">Price</th>
                   <th className="px-3 py-2.5 font-medium">Verdict</th>
                   <th className="px-3 py-2.5 font-medium">Reasons</th>
+                  <th className="px-3 py-2.5 font-medium">Deterministic Replay</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-ink/10 font-mono">
@@ -904,11 +1111,37 @@ export function RiskCenter() {
                       <td className="px-3 py-2.5 font-sans text-xs text-ink/60 max-w-xs truncate">
                         {log.reasons?.length > 0 ? log.reasons.join('; ') : '—'}
                       </td>
+                      <td className="px-3 py-2.5 font-sans">
+                        {replayResults[log.id] ? (
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={cn(
+                                'rounded px-2 py-0.5 text-[10px] font-semibold font-mono uppercase tracking-wide',
+                                replayResults[log.id].matches
+                                  ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                                  : 'bg-rose-500/20 text-rose-600 dark:text-rose-400'
+                              )}
+                            >
+                              {replayResults[log.id].matches ? '✓ Verified Match' : '⚠ Mismatch'}
+                            </span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleReplayDecision(log.id)}
+                            disabled={replayingIds[log.id]}
+                            className="inline-flex items-center gap-1 rounded bg-ink/5 px-2 py-1 text-[11px] font-medium text-ink hover:bg-ink/10 disabled:opacity-50 transition"
+                          >
+                            <RotateCcw className={cn('h-3 w-3', replayingIds[log.id] && 'animate-spin')} />
+                            {replayingIds[log.id] ? 'Replaying...' : 'Replay'}
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={8} className="px-3 py-8 text-center text-xs font-sans text-ink/40">
+                    <td colSpan={9} className="px-3 py-8 text-center text-xs font-sans text-ink/40">
                       No pre-trade decisions logged yet.
                     </td>
                   </tr>

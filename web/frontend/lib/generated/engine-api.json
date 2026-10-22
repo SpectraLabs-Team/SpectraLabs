@@ -1,4 +1,4 @@
-{
+﻿{
   "openapi": "3.1.0",
   "info": {
     "title": "Spectra Labs engine API",
@@ -2533,6 +2533,44 @@
         }
       }
     },
+    "/api/v1/risk/alerts": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Check current portfolio metrics against alert thresholds (Task 11).",
+        "operationId": "get_alerts",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active risk alerts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RiskAlertView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/risk/audit": {
       "get": {
         "tags": [
@@ -2571,6 +2609,70 @@
         }
       }
     },
+    "/api/v1/risk/balance": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Get portfolio balance for workspace/strategy (Task 2).",
+        "operationId": "get_balance",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current balance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PortfolioBalanceView"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Upsert portfolio balances for workspace/strategy (Task 2).",
+        "operationId": "put_balance",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertBalanceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Balance upserted"
+          }
+        }
+      }
+    },
     "/api/v1/risk/check": {
       "post": {
         "tags": [
@@ -2602,12 +2704,62 @@
         }
       }
     },
+    "/api/v1/risk/exposure-history": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Retrieve historical equity and exposure snapshots over time (Task 10).",
+        "operationId": "get_exposure_history",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exposure time series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EquitySnapshotView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/risk/kill-switch": {
       "get": {
         "tags": [
           "risk"
         ],
-        "summary": "Get kill switches for workspace or specific strategy.",
+        "summary": "Get kill switches for a workspace or strategy.",
         "operationId": "get_kill_switches",
         "parameters": [
           {
@@ -2625,7 +2777,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Kill switch state",
+            "description": "Kill switches",
             "content": {
               "application/json": {
                 "schema": {
@@ -2643,7 +2795,7 @@
         "tags": [
           "risk"
         ],
-        "summary": "Activate or clear emergency kill switch.",
+        "summary": "Set or disarm emergency kill switch.",
         "operationId": "set_kill_switch",
         "requestBody": {
           "content": {
@@ -2657,7 +2809,7 @@
         },
         "responses": {
           "200": {
-            "description": "Updated kill switch",
+            "description": "Kill switch updated",
             "content": {
               "application/json": {
                 "schema": {
@@ -2692,7 +2844,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Active limits",
+            "description": "Configured limits",
             "content": {
               "application/json": {
                 "schema": {
@@ -2761,6 +2913,87 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RiskMetricsSummaryView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/risk/positions": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Get positions for workspace/strategy (Task 1).",
+        "operationId": "get_positions",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current positions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PortfolioPositionView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Upsert a position for workspace/strategy (Task 1).",
+        "operationId": "put_position",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertPositionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Position upserted"
+          }
+        }
+      }
+    },
+    "/api/v1/risk/replay/{decision_id}": {
+      "post": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Re-run a logged decision from its stored inputs to verify deterministic replay (Task 12).",
+        "operationId": "replay_decision",
+        "responses": {
+          "200": {
+            "description": "Decision replay verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplayDecisionView"
                 }
               }
             }
@@ -5950,6 +6183,38 @@
         },
         "additionalProperties": false
       },
+      "EquitySnapshotView": {
+        "type": "object",
+        "required": [
+          "step",
+          "ts_ns",
+          "equity",
+          "cash",
+          "created_at"
+        ],
+        "properties": {
+          "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "step": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ts_ns": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "ErrorDoc": {
         "type": "object",
         "description": "Every error response.",
@@ -6721,6 +6986,64 @@
           }
         }
       },
+      "PortfolioBalanceView": {
+        "type": "object",
+        "required": [
+          "cash",
+          "equity",
+          "peak_equity",
+          "daily_start_equity",
+          "updated_at"
+        ],
+        "properties": {
+          "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "daily_start_equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "peak_equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PortfolioPositionView": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "qty",
+          "price",
+          "updated_at"
+        ],
+        "properties": {
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "PortfolioSnapshotDto": {
         "type": "object",
         "required": [
@@ -7001,7 +7324,8 @@
           "position_size",
           "concentration_pct",
           "drawdown_pct",
-          "daily_loss"
+          "daily_loss",
+          "var_pct"
         ],
         "properties": {
           "concentration_pct": {
@@ -7029,6 +7353,10 @@
             "format": "double"
           },
           "position_size": {
+            "type": "number",
+            "format": "double"
+          },
+          "var_pct": {
             "type": "number",
             "format": "double"
           }
@@ -7341,6 +7669,41 @@
           }
         }
       },
+      "ReplayDecisionView": {
+        "type": "object",
+        "required": [
+          "decision_id",
+          "logged_verdict",
+          "replay_verdict",
+          "matches",
+          "breaches",
+          "projected_metrics"
+        ],
+        "properties": {
+          "breaches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RiskBreachView"
+            }
+          },
+          "decision_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "logged_verdict": {
+            "type": "string"
+          },
+          "matches": {
+            "type": "boolean"
+          },
+          "projected_metrics": {
+            "$ref": "#/components/schemas/ProjectedMetricsView"
+          },
+          "replay_verdict": {
+            "type": "string"
+          }
+        }
+      },
       "ResolvedUniverseMemberView": {
         "type": "object",
         "description": "A resolved universe constituent.",
@@ -7369,6 +7732,40 @@
           "symbol": {
             "type": "string",
             "description": "Original constituent symbol."
+          }
+        }
+      },
+      "RiskAlertView": {
+        "type": "object",
+        "required": [
+          "severity",
+          "metric",
+          "current_value",
+          "limit_value",
+          "utilization_pct",
+          "message"
+        ],
+        "properties": {
+          "current_value": {
+            "type": "number",
+            "format": "double"
+          },
+          "limit_value": {
+            "type": "number",
+            "format": "double"
+          },
+          "message": {
+            "type": "string"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "utilization_pct": {
+            "type": "number",
+            "format": "double"
           }
         }
       },
@@ -7574,7 +7971,10 @@
           "drawdown_utilization_pct",
           "daily_loss",
           "daily_loss_limit",
-          "daily_loss_utilization_pct"
+          "daily_loss_utilization_pct",
+          "var_pct",
+          "var_limit_pct",
+          "var_utilization_pct"
         ],
         "properties": {
           "daily_loss": {
@@ -7652,6 +8052,18 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "var_limit_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "var_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "var_utilization_pct": {
+            "type": "number",
+            "format": "double"
           },
           "workspace_id": {
             "type": "string",
@@ -8729,6 +9141,40 @@
           }
         }
       },
+      "UpsertBalanceRequest": {
+        "type": "object",
+        "required": [
+          "cash",
+          "equity",
+          "peak_equity",
+          "daily_start_equity"
+        ],
+        "properties": {
+          "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "daily_start_equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "peak_equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
       "UpsertLimitsRequest": {
         "type": "object",
         "required": [
@@ -8784,6 +9230,34 @@
               "null"
             ],
             "format": "uuid"
+          }
+        }
+      },
+      "UpsertPositionRequest": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "qty",
+          "price"
+        ],
+        "properties": {
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "symbol": {
+            "type": "string"
           }
         }
       },

@@ -61,13 +61,50 @@ pub struct RiskDecisionRow {
     pub created_at: DateTime<Utc>,
 }
 
+/// A persisted position in a portfolio.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct PortfolioPositionRow {
+    pub symbol: String,
+    pub qty: f64,
+    pub price: f64,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Persisted account balance and equity high-water mark for drawdown / daily loss.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct PortfolioBalanceRow {
+    pub cash: f64,
+    pub equity: f64,
+    pub peak_equity: f64,
+    pub daily_start_equity: f64,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Historical equity step snapshot.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
+pub struct EquitySnapshotRow {
+    pub step: i64,
+    pub ts_ns: i64,
+    pub equity: f64,
+    pub cash: f64,
+    pub created_at: DateTime<Utc>,
+}
+
 const GET_LIMITS_SQL: &str = include_str!("../queries/risk_limits_get.sql");
 const UPSERT_LIMITS_SQL: &str = include_str!("../queries/risk_limits_upsert.sql");
 const GET_KILL_SWITCH_SQL: &str = include_str!("../queries/risk_kill_switch_get.sql");
 const SET_KILL_SWITCH_SQL: &str = include_str!("../queries/risk_kill_switch_set.sql");
 const LIST_KILL_SWITCHES_SQL: &str = include_str!("../queries/risk_kill_switches_list.sql");
 const INSERT_DECISION_SQL: &str = include_str!("../queries/risk_decision_insert.sql");
+const GET_DECISION_SQL: &str = include_str!("../queries/risk_decision_get.sql");
 const LIST_DECISIONS_SQL: &str = include_str!("../queries/risk_decisions_list.sql");
+
+const GET_PORTFOLIO_POSITIONS_SQL: &str = include_str!("../queries/portfolio_positions_get.sql");
+const UPSERT_PORTFOLIO_POSITION_SQL: &str = include_str!("../queries/portfolio_position_upsert.sql");
+const GET_PORTFOLIO_BALANCE_SQL: &str = include_str!("../queries/portfolio_balance_get.sql");
+const UPSERT_PORTFOLIO_BALANCE_SQL: &str = include_str!("../queries/portfolio_balance_upsert.sql");
+const INSERT_EQUITY_SNAPSHOT_SQL: &str = include_str!("../queries/equity_snapshot_insert.sql");
+const LIST_EQUITY_SNAPSHOTS_SQL: &str = include_str!("../queries/equity_snapshots_list.sql");
 
 /// Get risk limits for a workspace and optional strategy.
 pub async fn get_limits(
@@ -185,6 +222,19 @@ pub async fn record_decision(
         .await
 }
 
+/// Fetch a single pre-trade decision by ID.
+pub async fn get_decision(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    id: Uuid,
+) -> Result<Option<RiskDecisionRow>, Error> {
+    sqlx::query_as::<_, RiskDecisionRow>(GET_DECISION_SQL)
+        .bind(workspace_id)
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
 /// List recent decisions in a workspace.
 pub async fn list_decisions(
     pool: &PgPool,
@@ -193,6 +243,113 @@ pub async fn list_decisions(
 ) -> Result<Vec<RiskDecisionRow>, Error> {
     sqlx::query_as::<_, RiskDecisionRow>(LIST_DECISIONS_SQL)
         .bind(workspace_id)
+        .bind(limit as i32)
+        .fetch_all(pool)
+        .await
+}
+
+/// Upsert a position for a workspace and strategy.
+pub async fn upsert_position(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Option<Uuid>,
+    symbol: &str,
+    qty: f64,
+    price: f64,
+) -> Result<(), Error> {
+    sqlx::query(UPSERT_PORTFOLIO_POSITION_SQL)
+        .bind(workspace_id)
+        .bind(strategy_id)
+        .bind(symbol)
+        .bind(qty)
+        .bind(price)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+/// Fetch all positions for a workspace and strategy.
+pub async fn get_positions(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Option<Uuid>,
+) -> Result<Vec<PortfolioPositionRow>, Error> {
+    sqlx::query_as::<_, PortfolioPositionRow>(GET_PORTFOLIO_POSITIONS_SQL)
+        .bind(workspace_id)
+        .bind(strategy_id)
+        .fetch_all(pool)
+        .await
+}
+
+/// Upsert portfolio balances (cash, equity, peak equity, daily start equity).
+pub async fn upsert_balance(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Option<Uuid>,
+    cash: f64,
+    equity: f64,
+    peak_equity: f64,
+    daily_start_equity: f64,
+) -> Result<(), Error> {
+    sqlx::query(UPSERT_PORTFOLIO_BALANCE_SQL)
+        .bind(workspace_id)
+        .bind(strategy_id)
+        .bind(cash)
+        .bind(equity)
+        .bind(peak_equity)
+        .bind(daily_start_equity)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+/// Get portfolio balance for a workspace and strategy.
+pub async fn get_balance(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Option<Uuid>,
+) -> Result<Option<PortfolioBalanceRow>, Error> {
+    sqlx::query_as::<_, PortfolioBalanceRow>(GET_PORTFOLIO_BALANCE_SQL)
+        .bind(workspace_id)
+        .bind(strategy_id)
+        .fetch_optional(pool)
+        .await
+}
+
+/// Record a time-series equity snapshot.
+pub async fn record_equity_snapshot(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Option<Uuid>,
+    run_id: Option<Uuid>,
+    step: i64,
+    ts_ns: i64,
+    equity: f64,
+    cash: f64,
+) -> Result<(), Error> {
+    sqlx::query(INSERT_EQUITY_SNAPSHOT_SQL)
+        .bind(workspace_id)
+        .bind(strategy_id)
+        .bind(run_id)
+        .bind(step)
+        .bind(ts_ns)
+        .bind(equity)
+        .bind(cash)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+/// List recent equity snapshots.
+pub async fn list_equity_snapshots(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<EquitySnapshotRow>, Error> {
+    sqlx::query_as::<_, EquitySnapshotRow>(LIST_EQUITY_SNAPSHOTS_SQL)
+        .bind(workspace_id)
+        .bind(strategy_id)
         .bind(limit as i32)
         .fetch_all(pool)
         .await

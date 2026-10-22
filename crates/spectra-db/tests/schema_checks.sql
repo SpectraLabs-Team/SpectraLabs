@@ -260,7 +260,10 @@ DO $$ BEGIN
        OR EXISTS (SELECT 1 FROM workspace_quotas WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
        OR EXISTS (SELECT 1 FROM risk_limits WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
        OR EXISTS (SELECT 1 FROM risk_kill_switches WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
-       OR EXISTS (SELECT 1 FROM risk_decisions WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1') THEN
+       OR EXISTS (SELECT 1 FROM risk_decisions WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM portfolio_positions WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM portfolio_balances WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM equity_snapshots WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1') THEN
         RAISE EXCEPTION 'workspace deletion left engine rows behind';
     END IF;
     -- Other workspaces' chains are untouched.
@@ -277,7 +280,8 @@ BEGIN
                              'runs', 'run_artifacts', 'registry_events', 'jobs', 'job_events',
                              'symbol_changes', 'instrument_delistings', 'universes', 'universe_members',
                              'data_provider_configs', 'dataset_refresh_schedules',
-                             'risk_limits', 'risk_kill_switches', 'risk_decisions'] LOOP
+                             'risk_limits', 'risk_kill_switches', 'risk_decisions',
+                             'portfolio_positions', 'portfolio_balances', 'equity_snapshots'] LOOP
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                         WHERE table_name = t AND column_name = 'workspace_id' AND is_nullable = 'NO') THEN
             RAISE EXCEPTION '% lacks a NOT NULL workspace_id', t;

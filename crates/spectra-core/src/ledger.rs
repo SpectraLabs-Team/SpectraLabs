@@ -50,6 +50,8 @@ pub enum Reject {
     ShortNotAllowed,
     /// Gross exposure would exceed `max_gross_leverage` times equity.
     LeverageExceeded,
+    /// Pre-trade risk limit exceeded or emergency kill switch active.
+    RiskLimitExceeded,
 }
 
 impl Reject {
@@ -61,6 +63,7 @@ impl Reject {
             Self::InsufficientCash => "InsufficientCash",
             Self::ShortNotAllowed => "ShortNotAllowed",
             Self::LeverageExceeded => "LeverageExceeded",
+            Self::RiskLimitExceeded => "RiskLimitExceeded",
         }
     }
 }
@@ -603,6 +606,11 @@ impl Ledger {
     /// The position, or a zero position if the instrument never traded.
     pub fn position(&self, instrument: InstrumentId) -> Position {
         self.positions.get(&instrument).copied().unwrap_or_default()
+    }
+
+    /// Marked valuation price for an instrument, if any.
+    pub fn mark_price(&self, instrument: InstrumentId) -> Option<Price> {
+        self.marks.get(&instrument).copied()
     }
 
     /// Marked value of one position (cost if unmarked).

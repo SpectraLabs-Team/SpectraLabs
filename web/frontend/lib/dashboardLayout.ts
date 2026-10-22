@@ -121,30 +121,6 @@ export function encodeLayoutForSharing(layout: WidgetLayoutItem[]): string {
   return layout.map((item) => `${item.id}:${item.visible ? '1' : '0'}`).join(';');
 }
 
-/** Generate a full shareable URL with optional read-only mode (M18 Task 9) */
-export function createShareableLayoutUrl(
-  originAndPath: string,
-  layout: WidgetLayoutItem[],
-  options?: { readOnly?: boolean }
-): string {
-  const encoded = encodeLayoutForSharing(layout);
-  const ro = options?.readOnly !== false ? '&readonly=true' : '';
-  const cleanBase = originAndPath.split('?')[0];
-  return `${cleanBase}?tab=overview&layout=${encodeURIComponent(encoded)}${ro}`;
-}
-
-/** Parse sharing parameters from URL query string */
-export function parseLayoutShareParams(search: string | URLSearchParams): {
-  layout: WidgetLayoutItem[] | null;
-  isReadOnly: boolean;
-} {
-  const params = typeof search === 'string' ? new URLSearchParams(search) : search;
-  const layoutParam = params.get('layout');
-  const isReadOnly = params.get('readonly') === 'true' || params.get('mode') === 'view';
-  const layout = layoutParam ? decodeLayoutFromSharing(layoutParam) : null;
-  return { layout, isReadOnly };
-}
-
 /** Decode layout from a URL query string */
 export function decodeLayoutFromSharing(encoded: string): WidgetLayoutItem[] | null {
   if (!encoded || typeof encoded !== 'string' || !encoded.trim()) return null;

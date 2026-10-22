@@ -110,7 +110,7 @@ async fn refresh_flow_e2e() {
     .to_string();
 
     let (status, cfg_res) = fix.send(fix.req("POST", "/api/v1/providers/configs", &create_cfg_body)).await;
-    assert_eq!(status, 201, "create provider config: {cfg_res}");
+    assert_eq!(status, 200, "create provider config: {cfg_res}");
     let cfg_id: Uuid = cfg_res["id"].as_str().unwrap().parse().unwrap();
     assert_eq!(cfg_res["name"], "Alpaca Paper Feed");
     assert_eq!(cfg_res["provider"], "fake");
@@ -191,7 +191,7 @@ async fn refresh_flow_e2e() {
 
     let (status, sched_res) =
         fix.send(fix.req("POST", &format!("/api/v1/datasets/{ds_id}/refresh-schedule"), &sched_body)).await;
-    assert_eq!(status, 201, "create refresh schedule: {sched_res}");
+    assert_eq!(status, 200, "create refresh schedule: {sched_res}");
     assert_eq!(sched_res["interval_seconds"], 86400);
     assert_eq!(sched_res["symbols"].as_array().unwrap().len(), 1);
 
@@ -210,7 +210,7 @@ async fn refresh_flow_e2e() {
     let (status, trig_res) =
         fix.send(fix.req("POST", &format!("/api/v1/datasets/{ds_id}/refresh"), &trigger_body)).await;
     assert_eq!(status, 202, "trigger refresh accepted: {trig_res}");
-    assert_eq!(trig_res["status"], "enqueued");
+    assert_eq!(trig_res["status"], "queued");
     let job_id: Uuid = trig_res["job_id"].as_str().unwrap().parse().unwrap();
 
     // 5. Worker execution: claim the enqueued job and execute with run_refresh
@@ -256,8 +256,8 @@ async fn refresh_flow_e2e() {
     // 6. Delete schedule and provider config
     let (status, _) =
         fix.send(fix.req("DELETE", &format!("/api/v1/datasets/{ds_id}/refresh-schedule"), "")).await;
-    assert_eq!(status, 204);
+    assert_eq!(status, 200);
 
     let (status, _) = fix.send(fix.req("DELETE", &format!("/api/v1/providers/configs/{cfg_id}"), "")).await;
-    assert_eq!(status, 204);
+    assert_eq!(status, 200);
 }

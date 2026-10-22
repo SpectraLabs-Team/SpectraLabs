@@ -47,6 +47,7 @@ import {
 } from '@/lib/riskCenter';
 import {
   DEFAULT_LAYOUT,
+  createShareableLayoutUrl,
   decodeLayoutFromSharing,
   encodeLayoutForSharing,
   fetchServerLayout,
@@ -77,11 +78,11 @@ function ShareLayoutModal({
   layout: WidgetLayoutItem[];
 }) {
   const [copied, setCopied] = useState(false);
+  const [readOnlyMode, setReadOnlyMode] = useState(true);
   if (!isOpen) return null;
 
-  const encoded = encodeLayoutForSharing(layout);
   const shareUrl = typeof window !== 'undefined'
-    ? `${window.location.origin}${window.location.pathname}?tab=overview&layout=${encodeURIComponent(encoded)}`
+    ? createShareableLayoutUrl(window.location.origin + window.location.pathname, layout, { readOnly: readOnlyMode })
     : '';
 
   const copyLink = () => {
@@ -123,13 +124,24 @@ function ShareLayoutModal({
 
         <div className="p-6 space-y-4">
           <p className="text-xs text-ink/65">
-            Share this link with any member of your workspace. They will see the exact widget layout, ordering, and visibility you have customized.
+            Share this view with workspace members or across teams. The recipient will see your exact widget order and visibility arrangement.
           </p>
 
-          <div>
-            <label className="block text-xs font-medium text-ink/60 mb-1.5">
-              Shareable Dashboard URL
-            </label>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-medium text-ink/60">
+                Shareable Dashboard URL
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-ink/70 hover:text-ink">
+                <input
+                  type="checkbox"
+                  checked={readOnlyMode}
+                  onChange={(e) => setReadOnlyMode(e.target.checked)}
+                  className="rounded border-ink/20 text-accent focus:ring-accent/30 h-3.5 w-3.5"
+                />
+                <span>Read-Only mode</span>
+              </label>
+            </div>
             <div className="flex items-center gap-2">
               <input
                 readOnly
@@ -146,17 +158,22 @@ function ShareLayoutModal({
                 {copied ? 'Copied!' : 'Copy Link'}
               </button>
             </div>
+            {readOnlyMode && (
+              <p className="text-[11px] text-accent/90">
+                🔒 Locks layout customization for recipients opening this link.
+              </p>
+            )}
           </div>
 
           <div className="rounded-xl border border-ink/[0.08] bg-ink/[0.02] p-3 text-xs space-y-2">
             <div className="flex items-center gap-2 text-ink/80 font-medium">
               <Users className="h-3.5 w-3.5 text-accent" />
-              <span>Workspace Role Access (M19)</span>
+              <span>Workspace & Role Access</span>
             </div>
             <ul className="list-disc list-inside space-y-1 text-[11px] text-ink/55 pl-1">
-              <li><strong className="text-ink/80">Viewers:</strong> Open in read-only telemetry mode.</li>
-              <li><strong className="text-ink/80">Editors & Owners:</strong> Can adopt layout and run actions.</li>
-              <li>Widget order and custom visibility are preserved across sessions.</li>
+              <li><strong className="text-ink/80">Viewers:</strong> Open in locked read-only telemetry mode.</li>
+              <li><strong className="text-ink/80">Editors & Owners:</strong> Can adopt layout into their workspace.</li>
+              <li>Works across workspaces without altering the sender's saved layout.</li>
             </ul>
           </div>
         </div>
@@ -335,6 +352,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
   const { account } = usePortfolio();
   const searchParams = useSearchParams();
   const sharedLayoutParam = searchParams.get('layout');
+  const readOnlyParam = searchParams.get('readonly') === 'true' || searchParams.get('mode') === 'view';
 
   const [loading, setLoading] = useState(true);
   const [runs, setRuns] = useState<BacktestListItem[]>([]);
@@ -346,6 +364,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
   const [customizing, setCustomizing] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [isSharedView, setIsSharedView] = useState(false);
+  const [isReadOnlyView, setIsReadOnlyView] = useState(false);
   const [adoptMessage, setAdoptMessage] = useState('');
   const [userRole, setUserRole] = useState<'owner' | 'editor' | 'viewer' | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
@@ -382,9 +401,12 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
       if (decoded && decoded.length > 0) {
         setLayout(decoded);
         setIsSharedView(true);
+        setIsReadOnlyView(readOnlyParam || userRole === 'viewer');
       }
+    } else if (userRole === 'viewer') {
+      setIsReadOnlyView(true);
     }
-  }, [sharedLayoutParam]);
+  }, [sharedLayoutParam, readOnlyParam, userRole]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -453,11 +475,14 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
     try {
       const url = new URL(window.location.href);
       url.searchParams.delete('layout');
+      url.searchParams.delete('readonly');
+      url.searchParams.delete('mode');
       window.history.replaceState(null, '', url.toString());
     } catch {
       /* ignore */
     }
     setIsSharedView(false);
+    setIsReadOnlyView(userRole === 'viewer');
     setLayout(loadSavedLayout(workspaceId));
   };
 
@@ -1076,15 +1101,28 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
             <Share2 className="h-3.5 w-3.5 text-accent" />
             Share View
           </button>
-          <button
-            type="button"
-            onClick={() => setCustomizing(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-ink/10 bg-surface px-3 py-1.5 text-xs font-medium text-ink/70 transition hover:bg-ink/5"
-            aria-label="Customize dashboard layout"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5 text-accent" />
-            Customize Layout
-          </button>
+          {isReadOnlyView || userRole === 'viewer' ? (
+            <button
+              type="button"
+              disabled
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ink/10 bg-ink/5 px-3 py-1.5 text-xs font-medium text-ink/40 cursor-not-allowed"
+              title={userRole === 'viewer' ? "Viewers have read-only access (M19)" : "Read-only view active. Exit shared view or save to customize."}
+              aria-label="Layout customization locked in read-only mode"
+            >
+              <Lock className="h-3.5 w-3.5" />
+              Layout Locked
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCustomizing(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ink/10 bg-surface px-3 py-1.5 text-xs font-medium text-ink/70 transition hover:bg-ink/5"
+              aria-label="Customize dashboard layout"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5 text-accent" />
+              Customize Layout
+            </button>
+          )}
           <button
             type="button"
             onClick={loadData}
@@ -1141,26 +1179,35 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
             <div>
               <div className="flex items-center gap-2">
                 <p className="text-xs font-bold uppercase tracking-wider text-accent">
-                  Shared Dashboard View (Read-Only)
+                  Shared Dashboard View {isReadOnlyView ? '(Read-Only)' : ''}
                 </p>
                 <span className="rounded bg-accent/20 px-1.5 py-0.2 font-mono text-[9px] uppercase tracking-wider text-accent">
-                  URL Layout
+                  {isReadOnlyView ? 'Protected' : 'Custom'} URL Layout
                 </span>
               </div>
               <p className="mt-0.5 text-xs text-ink/65">
-                Viewing a layout shared by a teammate. You can adopt this layout as your personal workspace default.
+                {isReadOnlyView
+                  ? 'Viewing a protected layout shared with read-only permissions.'
+                  : 'Viewing a custom layout shared by a teammate.'}
+                {userRole !== 'viewer' ? ' You can adopt this layout as your personal workspace default.' : ''}
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleAdoptSharedLayout}
-              className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
-            >
-              <Check className="h-3.5 w-3.5" />
-              Save as My Layout
-            </button>
+            {userRole !== 'viewer' ? (
+              <button
+                type="button"
+                onClick={handleAdoptSharedLayout}
+                className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
+              >
+                <Check className="h-3.5 w-3.5" />
+                Save as My Layout
+              </button>
+            ) : (
+              <span className="rounded-xl border border-ink/10 bg-ink/5 px-2.5 py-1 text-[11px] font-medium text-ink/40">
+                Viewer Mode
+              </span>
+            )}
             <button
               type="button"
               onClick={handleExitSharedView}

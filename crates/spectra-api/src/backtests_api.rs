@@ -505,11 +505,7 @@ pub fn compute_monthly_returns(points: &[(i64, f64)]) -> Vec<MonthlyReturn> {
             _ => (prev_equity, prev_equity),
         };
 
-        let return_pct = if start_equity > 0.0 {
-            (end_equity - start_equity) / start_equity
-        } else {
-            0.0
-        };
+        let return_pct = if start_equity > 0.0 { (end_equity - start_equity) / start_equity } else { 0.0 };
 
         out.push(MonthlyReturn {
             year: cur_year,
@@ -919,7 +915,7 @@ mod tests {
         let mut points = vec![(utc_ns(2024, 1, 15, 9, 30), 100_000.0)];
         for m in 1..=11 {
             let d = days_in_month(2024, m);
-            points.push((utc_ns(2024, m, d, 23, 59), 100_000.0 + (m as f64 * 1000.0)));
+            points.push((utc_ns(2024, m, d, 23, 59), 100_000.0 + (f64::from(m) * 1000.0)));
         }
         points.push((utc_ns(2024, 12, 10, 16, 0), 115_000.0));
 
@@ -944,7 +940,7 @@ mod tests {
         for y in 2022..=2024 {
             for m in 1..=12 {
                 let d = days_in_month(y, m);
-                points.push((utc_ns(y, m, d, 23, 59), 100_000.0 + 500.0 * (m as f64)));
+                points.push((utc_ns(y, m, d, 23, 59), 100_000.0 + 500.0 * f64::from(m)));
             }
         }
 
@@ -960,10 +956,7 @@ mod tests {
     fn test_compute_monthly_returns_empty_and_single() {
         assert!(compute_monthly_returns(&[]).is_empty());
 
-        let single = vec![
-            (utc_ns(2024, 5, 10, 10, 0), 50_000.0),
-            (utc_ns(2024, 5, 20, 16, 0), 52_000.0),
-        ];
+        let single = vec![(utc_ns(2024, 5, 10, 10, 0), 50_000.0), (utc_ns(2024, 5, 20, 16, 0), 52_000.0)];
         let res = compute_monthly_returns(&single);
         assert_eq!(res.len(), 1);
         assert_eq!(res[0].year, 2024);
@@ -977,13 +970,13 @@ mod tests {
         let json_data = br#"{"kind":"equity","total_points":2,"downsampled":false,"points":[[1704067200000000000,100000.0],[1704153600000000000,105000.0]]}"#;
         let points = parse_points_from_series_json(json_data).unwrap();
         assert_eq!(points.len(), 2);
-        assert_eq!(points[0], (1704067200000000000, 100000.0));
-        assert_eq!(points[1], (1704153600000000000, 105000.0));
+        assert_eq!(points[0], (1_704_067_200_000_000_000, 100_000.0));
+        assert_eq!(points[1], (1_704_153_600_000_000_000, 105_000.0));
 
         let csv_data = b"ts_ns,equity,cash,drawdown\n1704067200000000000,100000.00,100000.00,0.0\n1704153600000000000,105000.00,100000.00,0.0\n";
         let csv_points = parse_points_from_equity_csv(csv_data).unwrap();
         assert_eq!(csv_points.len(), 2);
-        assert_eq!(csv_points[0], (1704067200000000000, 100000.0));
-        assert_eq!(csv_points[1], (1704153600000000000, 105000.0));
+        assert_eq!(csv_points[0], (1_704_067_200_000_000_000, 100_000.0));
+        assert_eq!(csv_points[1], (1_704_153_600_000_000_000, 105_000.0));
     }
 }

@@ -263,6 +263,59 @@
         }
       }
     },
+    "/api/v1/backtests/{id}/monthly-returns": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "A finished backtest's calendar-month returns, computed in the API from its equity series.",
+        "operationId": "backtest_monthly_returns",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest (job) id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Monthly returns",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonthlyReturnsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such backtest, or no stored equity series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The backtest has not succeeded (yet)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests/{id}/series": {
       "get": {
         "tags": [
@@ -6356,6 +6409,88 @@
           "workspace_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "MonthlyReturn": {
+        "type": "object",
+        "description": "A monthly return point for the heatmap and dashboard.",
+        "required": [
+          "year",
+          "month",
+          "return",
+          "partial",
+          "start_equity",
+          "end_equity"
+        ],
+        "properties": {
+          "end_equity": {
+            "type": "number",
+            "format": "double",
+            "description": "Equity at the end of the month."
+          },
+          "month": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Calendar month (1 = January, 12 = December).",
+            "minimum": 0
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "True if this month is partial (the backtest began after the 1st or ended before month-end)."
+          },
+          "return": {
+            "type": "number",
+            "format": "double",
+            "description": "Monthly rate of return (e.g. 0.05 for +5.0%)."
+          },
+          "start_equity": {
+            "type": "number",
+            "format": "double",
+            "description": "Equity at the start of the month (or start of the run)."
+          },
+          "year": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Calendar year (e.g. 2024)."
+          }
+        }
+      },
+      "MonthlyReturnsResponse": {
+        "type": "object",
+        "description": "Monthly returns response for `/api/v1/backtests/{id}/monthly-returns`.",
+        "required": [
+          "backtest_id",
+          "months",
+          "returns"
+        ],
+        "properties": {
+          "backtest_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The backtest (job) ID."
+          },
+          "months": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MonthlyReturn"
+            },
+            "description": "Chronological list of monthly returns."
+          },
+          "returns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MonthlyReturn"
+            },
+            "description": "Alias to `months` for API compatibility."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The run ID if recorded."
           }
         }
       },

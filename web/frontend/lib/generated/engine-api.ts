@@ -76,6 +76,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/{id}/monthly-returns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A finished backtest's calendar-month returns, computed in the API from its equity series. */
+        get: operations["backtest_monthly_returns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/{id}/series": {
         parameters: {
             query?: never;
@@ -2251,6 +2268,53 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        /** @description A monthly return point for the heatmap and dashboard. */
+        MonthlyReturn: {
+            /**
+             * Format: double
+             * @description Equity at the end of the month.
+             */
+            end_equity: number;
+            /**
+             * Format: int32
+             * @description Calendar month (1 = January, 12 = December).
+             */
+            month: number;
+            /** @description True if this month is partial (the backtest began after the 1st or ended before month-end). */
+            partial: boolean;
+            /**
+             * Format: double
+             * @description Monthly rate of return (e.g. 0.05 for +5.0%).
+             */
+            return: number;
+            /**
+             * Format: double
+             * @description Equity at the start of the month (or start of the run).
+             */
+            start_equity: number;
+            /**
+             * Format: int32
+             * @description Calendar year (e.g. 2024).
+             */
+            year: number;
+        };
+        /** @description Monthly returns response for `/api/v1/backtests/{id}/monthly-returns`. */
+        MonthlyReturnsResponse: {
+            /**
+             * Format: uuid
+             * @description The backtest (job) ID.
+             */
+            backtest_id: string;
+            /** @description Chronological list of monthly returns. */
+            months: components["schemas"]["MonthlyReturn"][];
+            /** @description Alias to `months` for API compatibility. */
+            returns: components["schemas"]["MonthlyReturn"][];
+            /**
+             * Format: uuid
+             * @description The run ID if recorded.
+             */
+            run_id?: string | null;
+        };
         OptimizationSweepView: {
             best_metrics?: unknown;
             /** Format: double */
@@ -3594,6 +3658,47 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    backtest_monthly_returns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest (job) id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Monthly returns */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MonthlyReturnsResponse"];
+                };
+            };
+            /** @description No such backtest, or no stored equity series */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The backtest has not succeeded (yet) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

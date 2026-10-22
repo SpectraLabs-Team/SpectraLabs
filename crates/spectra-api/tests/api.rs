@@ -440,7 +440,10 @@ async fn backtest_routes_report_503_without_a_database() {
     let (status, j) = call(post("/api/v1/backtests", &body)).await;
     assert_eq!(status, 503, "{}", j.dump());
     assert_eq!(call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002")).await.0, 503);
-    assert_eq!(call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/monthly-returns")).await.0, 503);
+    assert_eq!(
+        call(get("/api/v1/backtests/0192f3a4-0000-7000-8000-000000000002/monthly-returns")).await.0,
+        503
+    );
     assert_eq!(call(get("/api/v1/backtests")).await.0, 503);
     assert_eq!(call(get("/api/v1/datasets")).await.0, 503);
     assert_eq!(

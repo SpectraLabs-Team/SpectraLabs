@@ -93,4 +93,5 @@ SELECT pg_temp.check((SELECT id FROM sec_by_kind) = :'sec_id', 'retrieved secret
 EXECUTE vault_secret_mark_used(:'ws', :'sec_id');
 SELECT pg_temp.check((SELECT last_used_at IS NOT NULL FROM secrets WHERE id = :'sec_id'), 'marked secret used');
 
+\echo provider checks passed
 ROLLBACK;

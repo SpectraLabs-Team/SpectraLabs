@@ -80,4 +80,5 @@ EXECUTE corporate_action_set_delete(:'ws', :'s1');
 SELECT pg_temp.check((SELECT count(*) FROM corporate_action_sets WHERE id = :'s1') = 0, 'set deleted');
 SELECT pg_temp.check((SELECT count(*) FROM corporate_actions WHERE set_id = :'s1') = 0, 'actions cascaded');
 
+\echo corporate action checks passed
 ROLLBACK;

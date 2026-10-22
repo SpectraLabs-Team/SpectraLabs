@@ -83,4 +83,5 @@ EXECUTE universe_delete(:'ws', :'u_id');
 SELECT pg_temp.check((SELECT count(*) FROM universes WHERE id = :'u_id') = 0, 'universe deleted');
 SELECT pg_temp.check((SELECT count(*) FROM universe_members WHERE universe_id = :'u_id') = 0, 'members cascade deleted');
 
+\echo instrument lifecycle checks passed
 ROLLBACK;

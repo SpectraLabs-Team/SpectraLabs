@@ -31,6 +31,7 @@ fn random_walk(n: usize, seed: u64, drift: f64, instruments: usize) -> Vec<Bar> 
             let close = (open * (1.0 + drift + 0.01 * rng.normal())).max(1.0);
             bars.push(Bar {
                 ts_ns: i as i64 + 1,
+                known_at_ns: i as i64 + 1,
                 instrument: k as InstrumentId,
                 open: Price::from_f64(open).unwrap(),
                 close: Price::from_f64(close).unwrap(),

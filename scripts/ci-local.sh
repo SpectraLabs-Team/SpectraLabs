@@ -69,6 +69,12 @@ if changed "${rust_paths[@]}"; then
       psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f crates/spectra-db/tests/schema_checks.sql
       { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/queue_checks.sql; } \
         | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
+      { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/corporate_action_checks.sql; } \
+        | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
+      { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/instrument_lifecycle_checks.sql; } \
+        | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
+      { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/provider_checks.sql; } \
+        | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
     else
       echo "(DATABASE_URL not set: skipping the Postgres checks; CI runs them)"
     fi

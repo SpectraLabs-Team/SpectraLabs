@@ -844,6 +844,18 @@
               ],
               "minimum": 0
             }
+          },
+          {
+            "name": "as_of",
+            "in": "path",
+            "description": "Point-in-time date or RFC 3339 timestamp (e.g. `2024-01-05`). Revisions after this date are ignored.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -1099,6 +1111,288 @@
           },
           "422": {
             "description": "Every invalid field (`details.errors`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{id}/refresh": {
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Trigger a manual refresh for a dataset (editor only).",
+        "operationId": "trigger_refresh",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerRefreshResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Dataset or schedule not found"
+          }
+        }
+      }
+    },
+    "/api/v1/datasets/{id}/refresh-schedule": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Get the refresh schedule for a dataset.",
+        "operationId": "get_refresh_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshScheduleView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Create or update a dataset refresh schedule (editor only).",
+        "operationId": "upsert_refresh_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertRefreshScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshScheduleView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "Validation error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Delete a dataset refresh schedule (editor only).",
+        "operationId": "delete_refresh_schedule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedItemView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/v1/delistings": {
+      "get": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "List all instrument delistings for the active workspace.",
+        "operationId": "list_delistings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelistingListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "Record an instrument delisting.",
+        "operationId": "create_delisting",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDelistingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelistingView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/delistings/{id}": {
+      "delete": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "Delete a delisting record.",
+        "operationId": "delete_delisting",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Delisting record id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedItemView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -1863,6 +2157,135 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/configs": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "List provider configurations for the active workspace.",
+        "operationId": "list_provider_configs",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfigListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Create or update a provider configuration (editor only).",
+        "operationId": "upsert_provider_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertProviderConfigRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfigView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "422": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/v1/providers/configs/{id}": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Get a provider configuration by id.",
+        "operationId": "get_provider_config",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider config id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfigView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Delete a provider configuration (editor only).",
+        "operationId": "delete_provider_config",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider config id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedItemView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }
@@ -2801,6 +3224,442 @@
         }
       }
     },
+    "/api/v1/symbol-changes": {
+      "get": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "List all symbol changes for the active workspace.",
+        "operationId": "list_symbol_changes",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SymbolChangeListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "Record a symbol change.",
+        "operationId": "create_symbol_change",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSymbolChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SymbolChangeView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/symbol-changes/{id}": {
+      "delete": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "Delete a symbol change.",
+        "operationId": "delete_symbol_change",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Symbol change id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedItemView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/universes": {
+      "get": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "List universes in the active workspace.",
+        "operationId": "list_universes",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniverseListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "Create a new universe.",
+        "operationId": "create_universe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUniverseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniverseDetailView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/universes/{id}": {
+      "get": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "Fetch a universe by id.",
+        "operationId": "get_universe",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Universe id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniverseDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "Delete a universe.",
+        "operationId": "delete_universe",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Universe id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedItemView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/universes/{id}/as-of": {
+      "get": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "Point-in-time resolution of universe members as of date `as_of`.",
+        "operationId": "resolve_universe_as_of",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Universe id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "as_of",
+            "in": "path",
+            "description": "Point-in-time snapshot timestamp or date (RFC 3339 or YYYY-MM-DD). Defaults to now.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniverseAsOfView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid timestamp",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/universes/{id}/members": {
+      "get": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "List constituent members of a universe.",
+        "operationId": "list_universe_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Universe id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniverseMemberListView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "lifecycles"
+        ],
+        "summary": "Add a member symbol to a universe.",
+        "operationId": "add_universe_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Universe id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddUniverseMemberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UniverseMemberView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/uploads": {
       "post": {
         "tags": [
@@ -3255,6 +4114,27 @@
   },
   "components": {
     "schemas": {
+      "AddUniverseMemberRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/universes/{id}/members` request body.",
+        "required": [
+          "symbol"
+        ],
+        "properties": {
+          "added_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When added to the universe (RFC 3339 or YYYY-MM-DD; defaults to now)."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Member symbol."
+          }
+        },
+        "additionalProperties": false
+      },
       "BacktestListItem": {
         "type": "object",
         "description": "One backtest in a list: what was asked for, its state and headline numbers.",
@@ -3848,6 +4728,13 @@
           "dataset_version_id"
         ],
         "properties": {
+          "as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional point-in-time timestamp (RFC 3339 string or integer nanoseconds)."
+          },
           "config": {
             "type": [
               "object",
@@ -3941,6 +4828,32 @@
           "name": {
             "type": "string",
             "description": "Action set name."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateDelistingRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/delistings` request body.",
+        "required": [
+          "symbol",
+          "delisted_at"
+        ],
+        "properties": {
+          "delisted_at": {
+            "type": "string",
+            "description": "Delisted timestamp or date (RFC 3339 or YYYY-MM-DD)."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional reason or notes."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Instrument ticker symbol."
           }
         },
         "additionalProperties": false
@@ -4168,6 +5081,65 @@
               "null"
             ],
             "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateSymbolChangeRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/symbol-changes` request body.",
+        "required": [
+          "old_symbol",
+          "new_symbol",
+          "effective_date"
+        ],
+        "properties": {
+          "effective_date": {
+            "type": "string",
+            "description": "Effective timestamp or date (RFC 3339 or YYYY-MM-DD)."
+          },
+          "new_symbol": {
+            "type": "string",
+            "description": "New ticker symbol (e.g. \"META\")."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional notes or reason for change."
+          },
+          "old_symbol": {
+            "type": "string",
+            "description": "Previous ticker symbol (e.g. \"FB\")."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateUniverseRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/universes` request body.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional description."
+          },
+          "name": {
+            "type": "string",
+            "description": "Universe name."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional initial member symbols."
           }
         },
         "additionalProperties": false
@@ -4467,6 +5439,19 @@
           }
         }
       },
+      "DeletedItemView": {
+        "type": "object",
+        "description": "Result of a delete operation.",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "True when the item was deleted."
+          }
+        }
+      },
       "DeletedVersionView": {
         "type": "object",
         "description": "What deleting a version did.",
@@ -4482,6 +5467,58 @@
           "deleted": {
             "type": "boolean",
             "description": "The version was deleted."
+          }
+        }
+      },
+      "DelistingListView": {
+        "type": "object",
+        "description": "List of delistings.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DelistingView"
+            },
+            "description": "Items."
+          }
+        }
+      },
+      "DelistingView": {
+        "type": "object",
+        "description": "A delisting view.",
+        "required": [
+          "id",
+          "symbol",
+          "delisted_at",
+          "reason",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When recorded."
+          },
+          "delisted_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Delisted timestamp."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Delisting record id."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol."
           }
         }
       },
@@ -5267,6 +6304,70 @@
         },
         "additionalProperties": false
       },
+      "ProviderConfigListView": {
+        "type": "object",
+        "description": "List of provider configurations.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProviderConfigView"
+            },
+            "description": "Config items."
+          }
+        }
+      },
+      "ProviderConfigView": {
+        "type": "object",
+        "description": "Provider configuration view.",
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "settings",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When created."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Config id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Provider kind."
+          },
+          "secret_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Vault secret id, if configured."
+          },
+          "settings": {
+            "description": "Settings."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When last updated."
+          }
+        }
+      },
       "QualityReport": {
         "type": "object",
         "description": "A dataset's quality report (also what a dataset version stores).",
@@ -5432,6 +6533,114 @@
           }
         },
         "additionalProperties": false
+      },
+      "RefreshScheduleView": {
+        "type": "object",
+        "description": "Refresh schedule view.",
+        "required": [
+          "id",
+          "dataset_id",
+          "provider_config_id",
+          "symbols",
+          "interval_seconds",
+          "lookback_bars",
+          "enabled",
+          "next_run_at",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When created."
+          },
+          "dataset_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Target dataset id."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Enabled."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Schedule id."
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Interval in seconds."
+          },
+          "last_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When last run."
+          },
+          "lookback_bars": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Lookback bars."
+          },
+          "next_run_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When next run is scheduled."
+          },
+          "provider_config_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Associated provider config id."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbols."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When last updated."
+          }
+        }
+      },
+      "ResolvedUniverseMemberView": {
+        "type": "object",
+        "description": "A resolved universe constituent.",
+        "required": [
+          "symbol",
+          "resolved_symbol",
+          "is_active"
+        ],
+        "properties": {
+          "delisted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When delisted, if delisted at all."
+          },
+          "is_active": {
+            "type": "boolean",
+            "description": "True if active on date D (not delisted prior to D)."
+          },
+          "resolved_symbol": {
+            "type": "string",
+            "description": "Resolved ticker symbol as of date D."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Original constituent symbol."
+          }
+        }
       },
       "RiskRequest": {
         "type": "object",
@@ -6030,6 +7239,63 @@
           }
         }
       },
+      "SymbolChangeListView": {
+        "type": "object",
+        "description": "List of symbol changes.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SymbolChangeView"
+            },
+            "description": "Items."
+          }
+        }
+      },
+      "SymbolChangeView": {
+        "type": "object",
+        "description": "A symbol change view.",
+        "required": [
+          "id",
+          "old_symbol",
+          "new_symbol",
+          "effective_date",
+          "notes",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When recorded."
+          },
+          "effective_date": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Effective date."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Change id."
+          },
+          "new_symbol": {
+            "type": "string",
+            "description": "New symbol."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Notes."
+          },
+          "old_symbol": {
+            "type": "string",
+            "description": "Previous symbol."
+          }
+        }
+      },
       "SymbolStats": {
         "type": "object",
         "description": "Quality checks for one symbol.",
@@ -6119,6 +7385,223 @@
         },
         "additionalProperties": false
       },
+      "TriggerRefreshRequest": {
+        "type": "object",
+        "description": "Request to trigger a manual refresh.",
+        "properties": {
+          "lookback_bars": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Optional lookback bars override."
+          },
+          "provider_config_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional provider config id override."
+          },
+          "symbols": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional symbols override."
+          }
+        },
+        "additionalProperties": false
+      },
+      "TriggerRefreshResponse": {
+        "type": "object",
+        "description": "Response returned when a refresh job is queued.",
+        "required": [
+          "job_id",
+          "status"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Queued job id."
+          },
+          "status": {
+            "type": "string",
+            "description": "Status (\"queued\")."
+          }
+        }
+      },
+      "UniverseAsOfView": {
+        "type": "object",
+        "description": "Point-in-time resolved universe view.",
+        "required": [
+          "universe_id",
+          "as_of",
+          "items"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Snapshot timestamp."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResolvedUniverseMemberView"
+            },
+            "description": "Constituents."
+          },
+          "universe_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Universe id."
+          }
+        }
+      },
+      "UniverseDetailView": {
+        "type": "object",
+        "description": "Universe detail view.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When created."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Universe id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          }
+        }
+      },
+      "UniverseListView": {
+        "type": "object",
+        "description": "List of universes.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UniverseSummaryView"
+            },
+            "description": "Items."
+          }
+        }
+      },
+      "UniverseMemberListView": {
+        "type": "object",
+        "description": "List of universe members.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UniverseMemberView"
+            },
+            "description": "Items."
+          }
+        }
+      },
+      "UniverseMemberView": {
+        "type": "object",
+        "description": "Member row view.",
+        "required": [
+          "id",
+          "symbol",
+          "added_at",
+          "created_at"
+        ],
+        "properties": {
+          "added_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Added at."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When recorded."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Record id."
+          },
+          "removed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Removed at."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol."
+          }
+        }
+      },
+      "UniverseSummaryView": {
+        "type": "object",
+        "description": "Universe summary view.",
+        "required": [
+          "id",
+          "name",
+          "description",
+          "created_at",
+          "member_count"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When created."
+          },
+          "description": {
+            "type": "string",
+            "description": "Description."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Universe id."
+          },
+          "member_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Member count."
+          },
+          "name": {
+            "type": "string",
+            "description": "Name."
+          }
+        }
+      },
       "UpdateDataset": {
         "type": "object",
         "description": "`PATCH /api/v1/datasets/{id}` body: what to change.",
@@ -6204,6 +7687,73 @@
             "minimum": 0
           }
         }
+      },
+      "UpsertProviderConfigRequest": {
+        "type": "object",
+        "description": "Request to create or update a provider configuration.",
+        "required": [
+          "name",
+          "provider"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Provider configuration name (e.g. \"Alpaca Paper Equities\")."
+          },
+          "provider": {
+            "type": "string",
+            "description": "Provider kind (\"fake\", \"alpaca\")."
+          },
+          "secret_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional vault secret id for API credentials."
+          },
+          "settings": {
+            "description": "Provider settings (feed, endpoints, etc.)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpsertRefreshScheduleRequest": {
+        "type": "object",
+        "description": "Request to create or update a dataset refresh schedule.",
+        "required": [
+          "provider_config_id",
+          "symbols"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether schedule is enabled (default true)."
+          },
+          "interval_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Interval in seconds between refreshes (minimum 60s, default 86400s)."
+          },
+          "lookback_bars": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of bars to refetch backward for revision overlap detection (default 5)."
+          },
+          "provider_config_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Associated provider config id."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Symbols to refresh."
+          }
+        },
+        "additionalProperties": false
       },
       "VersionDetailView": {
         "type": "object",
@@ -6655,6 +8205,14 @@
     {
       "name": "corporate-actions",
       "description": "Corporate action sets and price adjustments"
+    },
+    {
+      "name": "lifecycles",
+      "description": "Instrument lifecycles, symbol changes, delistings and universes"
+    },
+    {
+      "name": "providers",
+      "description": "Market data providers and automated refresh schedules"
     },
     {
       "name": "strategies",

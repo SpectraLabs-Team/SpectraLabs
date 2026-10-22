@@ -31,6 +31,7 @@ fn bars(n: usize, instruments: u32, seed: u64) -> Vec<Bar> {
             px[k] = close;
             out.push(Bar {
                 ts_ns: (i as i64 + 1) * 60_000_000_000,
+                known_at_ns: (i as i64 + 1) * 60_000_000_000,
                 instrument: id + 1,
                 open: Price::from_raw(open),
                 high: Price::from_raw(open.max(close) + rng.range(0, SCALE / 4)),

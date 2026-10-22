@@ -32,8 +32,8 @@ use spectra_core::Json;
 
 use crate::calendar::Exchange;
 use crate::dataset::{
-    find_column, normalise_header, CsvOptions, InvalidRowPolicy, CLOSE_ALIASES, HIGH_ALIASES, LOW_ALIASES,
-    OPEN_ALIASES, SYMBOL_ALIASES, TIMESTAMP_ALIASES, VOLUME_ALIASES,
+    find_column, normalise_header, CsvOptions, InvalidRowPolicy, CLOSE_ALIASES, HIGH_ALIASES,
+    KNOWN_AT_ALIASES, LOW_ALIASES, OPEN_ALIASES, SYMBOL_ALIASES, TIMESTAMP_ALIASES, VOLUME_ALIASES,
 };
 use crate::records::{parse_records, Record};
 use crate::time::{parse_timestamp, TimeFormat, TimeOptions};
@@ -457,6 +457,7 @@ pub fn suggest(sample: &[u8]) -> Suggestions {
         CLOSE_ALIASES,
         VOLUME_ALIASES,
         SYMBOL_ALIASES,
+        KNOWN_AT_ALIASES,
     ];
     let columns: Vec<(&'static str, Option<String>)> = COLUMNS
         .iter()

@@ -57,6 +57,10 @@ pub struct CreateBacktest {
     #[serde(default)]
     #[schema(value_type = Option<Object>)]
     pub config: Option<serde_json::Value>,
+    /// Optional point-in-time timestamp (RFC 3339 string or integer nanoseconds).
+    #[serde(default)]
+    #[schema(value_type = Option<String>)]
+    pub as_of: Option<serde_json::Value>,
     /// -10..10; higher runs first. Default 0.
     #[serde(default)]
     pub priority: i32,
@@ -280,6 +284,9 @@ pub(crate) async fn create_backtest(
     }
     if let Some(c) = req.config {
         payload["config"] = c;
+    }
+    if let Some(a) = req.as_of {
+        payload["as_of"] = a;
     }
     match submit(&st, &id, spectra_backtest::JOB_KIND.to_string(), payload, req.priority).await {
         Ok(job) => to_json(202, &BacktestView::from(job)),

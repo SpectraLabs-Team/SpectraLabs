@@ -174,6 +174,7 @@ async fn main() -> ExitCode {
         let mut sweep = tokio::time::interval(SWEEP_EVERY);
         let mut expire = tokio::time::interval(EXPIRE_UPLOADS_EVERY);
         let mut sample = tokio::time::interval(Duration::from_secs(15));
+        let mut refresh_sweep = tokio::time::interval(Duration::from_secs(30));
         loop {
             tokio::select! {
                 _ = hk_stop.changed() => break,
@@ -183,6 +184,9 @@ async fn main() -> ExitCode {
                     }
                 }
                 _ = expire.tick() => expire_uploads(&hk_pool, &hk_store).await,
+                _ = refresh_sweep.tick() => {
+                    spectra_api::providers::runner::sweep_due_refresh_schedules(&hk_pool).await;
+                }
                 _ = sweep.tick() => match jobs::requeue_stale(&hk_pool, STALE_AFTER).await {
                     Ok(0) => {}
                     Ok(n) => info!("requeued {n} job(s) whose worker stopped responding"),
@@ -289,6 +293,10 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
     }
     if job.kind == engine::INGEST_JOB_KIND {
         run_ingest_job(ctx, job, permit).await;
+        return;
+    }
+    if job.kind == spectra_api::providers::runner::PROVIDER_REFRESH_JOB_KIND {
+        run_refresh_job(ctx, job, permit).await;
         return;
     }
     let job_start = Instant::now();
@@ -782,6 +790,91 @@ async fn run_ingest_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemap
         None => fail_job(&ctx, &job, started, "The ingest crashed.", true).await,
     }
 }
+async fn run_refresh_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
+    let started = Instant::now();
+    let env = spectra_api::providers::runner::RefreshEnv {
+        pool: ctx.pool.clone(),
+        store: ctx.store.clone(),
+        data_dir: ctx.data_dir.clone(),
+        quota: ctx.quota,
+    };
+    let cancel = Arc::new(AtomicBool::new(false));
+    let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+    let mut work = {
+        let (job, cancel, progress) = (job.clone(), Arc::clone(&cancel), Arc::clone(&progress));
+        tokio::spawn(async move {
+            spectra_api::providers::runner::run_refresh(&env, &job, cancel, progress).await
+        })
+    };
+    let deadline = tokio::time::Instant::now() + engine::job_timeout(&job.kind);
+    let mut beat = tokio::time::interval(HEARTBEAT);
+    beat.tick().await;
+    let (mut cancel_requested, mut lost) = (false, false);
+    let outcome = loop {
+        tokio::select! {
+            res = &mut work => break res.ok(),
+            _ = beat.tick() => {
+                let p = f32::from_bits(progress.load(Ordering::Relaxed));
+                match jobs::heartbeat(&ctx.pool, job.id, &ctx.worker_id, Some(p)).await {
+                    Ok(Beat::Continue) => {}
+                    Ok(Beat::CancelRequested) => {
+                        cancel_requested = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Ok(Beat::Lost) => {
+                        lost = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Err(e) => error!(job_id = %job.id, "heartbeat failed: {e}"),
+                }
+            },
+            () = tokio::time::sleep_until(deadline) => {
+                cancel.store(true, Ordering::Relaxed);
+                work.abort();
+                break Some(spectra_api::providers::runner::RefreshOutcome::Failed {
+                    message: "The refresh job ran longer than its limit.".into(),
+                    retryable: false,
+                });
+            }
+        }
+    };
+    drop(permit);
+    if lost {
+        warn!(job_id = %job.id, "job was taken over after a missed heartbeat; dropping it");
+        record_metrics(&job.kind, "lost", started);
+        return;
+    }
+    match outcome {
+        Some(spectra_api::providers::runner::RefreshOutcome::Registered(result)) => {
+            match jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await {
+                Ok(Some(_)) => {
+                    record_metrics(&job.kind, "succeeded", started);
+                    info!(
+                        job_id = %job.id,
+                        version = %result.get("dataset_version_id").unwrap_or(&serde_json::Value::Null),
+                        "dataset refresh version registered"
+                    );
+                }
+                Ok(None) => warn!(job_id = %job.id, "refresh finished, but another worker had taken it over"),
+                Err(e) => error!(job_id = %job.id, "could not record the refresh: {e}"),
+            }
+        }
+        Some(spectra_api::providers::runner::RefreshOutcome::Cancelled) => {
+            if !cancel_requested {
+                warn!(job_id = %job.id, "refresh stopped without a cancel request");
+            }
+            record_metrics(&job.kind, "cancelled", started);
+            if let Err(e) = jobs::mark_cancelled(&ctx.pool, job.id, &ctx.worker_id).await {
+                error!(job_id = %job.id, "could not record the cancellation: {e}");
+            }
+        }
+        Some(spectra_api::providers::runner::RefreshOutcome::Failed { message, retryable }) => {
+            fail_job(&ctx, &job, started, &message, retryable).await;
+        }
+        None => fail_job(&ctx, &job, started, "The refresh job crashed.", true).await,
+    }
+}
+
 /// Runs a Strategy Survival Lab report against the immutable inputs of a successful run.
 #[allow(clippy::needless_pass_by_value)]
 async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {

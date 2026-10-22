@@ -61,11 +61,34 @@ dataset derivation lineage (tasks 9–11). Research-grade data (Parquet, point-i
 | `DELETE /api/v1/datasets/versions/{id}` | editor | 409 `in_use` while a run or a queued/running backtest uses it; also removes its file when nothing else uses it, and releases its upload |
 | `POST /api/v1/datasets/versions/{id}/derive` | editor | derives a new adjusted dataset version applying a corporate action set |
 | `GET /api/v1/datasets/versions/{id}/runs` | viewer | runs that used it, newest first |
-| `GET /api/v1/datasets/versions/{id}/bars?symbol=&from=&to=&points=` | viewer | one symbol's bars, reduced to at most `points` (10–5000, default 1000) for a chart: each point groups consecutive bars (first open, highest high, lowest low, last close, summed volume); `t` in ms |
+| `GET /api/v1/datasets/versions/{id}/bars?symbol=&from=&to=&points=&as_of=` | viewer | one symbol's bars, reduced to at most `points` (10–5000, default 1000) for a chart: each point groups consecutive bars (first open, highest high, lowest low, last close, summed volume); `t` in ms; `as_of` filters out revisions known after date |
 | `GET /api/v1/corporate-actions` | viewer | list corporate action sets for the active workspace |
 | `POST /api/v1/corporate-actions` | editor | create a corporate action set and its actions (`split` from:to, `dividend` amount) |
 | `GET /api/v1/corporate-actions/{id}` | viewer | get corporate action set detail and all its constituent events |
 | `DELETE /api/v1/corporate-actions/{id}` | editor | delete a corporate action set |
+| `GET /api/v1/symbol-changes` | viewer | list symbol ticker changes for the active workspace |
+| `POST /api/v1/symbol-changes` | editor | record a symbol ticker change (`old_symbol`, `new_symbol`, `effective_date`) |
+| `DELETE /api/v1/symbol-changes/{id}` | editor | delete a symbol change |
+| `GET /api/v1/delistings` | viewer | list instrument delistings for the active workspace |
+| `POST /api/v1/delistings` | editor | record an instrument delisting (`symbol`, `delisted_at`, `reason`) |
+| `DELETE /api/v1/delistings/{id}` | editor | delete a delisting record |
+| `GET /api/v1/universes` | viewer | list universes in the active workspace with member counts |
+| `POST /api/v1/universes` | editor | create a universe (`name`, `description`, optional initial `symbols`) |
+| `GET /api/v1/universes/{id}` | viewer | get universe detail |
+| `DELETE /api/v1/universes/{id}` | editor | delete a universe |
+| `GET /api/v1/universes/{id}/members` | viewer | list member symbols of a universe |
+| `POST /api/v1/universes/{id}/members` | editor | add a member symbol to a universe (`symbol`, optional `added_at`) |
+| `GET /api/v1/universes/{id}/as-of?as_of=` | viewer | resolve active constituents as of point-in-time date `as_of` (survivorship-bias free) |
+| `GET /api/v1/providers/configs` | viewer | list market data provider configurations in the active workspace |
+| `POST /api/v1/providers/configs` | editor | create or update a provider config (`name`, `provider`, optional `secret_id`, `settings`) |
+| `GET /api/v1/providers/configs/{id}` | viewer | get provider configuration detail |
+| `PUT /api/v1/providers/configs/{id}` | editor | update provider configuration |
+| `DELETE /api/v1/providers/configs/{id}` | editor | delete a provider configuration |
+| `GET /api/v1/datasets/{id}/refresh-schedule` | viewer | get refresh schedule for a dataset |
+| `POST /api/v1/datasets/{id}/refresh-schedule` | editor | configure refresh schedule (`provider_config_id`, `symbols`, `interval_seconds`, `lookback_bars`) |
+| `DELETE /api/v1/datasets/{id}/refresh-schedule` | editor | delete a dataset refresh schedule |
+| `GET /api/v1/refresh-schedules` | viewer | list all refresh schedules across the active workspace |
+| `POST /api/v1/datasets/{id}/refresh` | editor | manually trigger an immediate background refresh job (`provider_refresh`) |
 
 Every route is scoped to the caller's workspace: another workspace's ids are a 404. The bars are
 read from the artifact store; versions registered from the command line are read from the API's
@@ -83,6 +106,39 @@ memory.
   by category in the quality report.
 - **Content-addressed.** A dataset's id is a hash of its bars and symbol names. The same rows give
   the same id whatever the file's order, formatting or route (command line or Studio).
+
+## Point-in-time data and survivorship-free universes
+
+- **`known_at` timestamps.** When market data undergoes restatements, revisions, or late reporting,
+  each bar retains an explicit `known_at` timestamp next to its trading timestamp `ts_ns` (`known_at >= ts_ns`).
+  Ingest supports an opt-in `known_at` column in CSV settings.
+- **Point-in-time queries (`as_of`).** Backtest jobs (`POST /api/v1/backtests`) and bar queries accept
+  an optional `as_of` parameter (ISO 8601 or integer timestamp). When specified, bars or revisions
+  known after `as_of` are excluded, and the latest revision known on or before `as_of` is used. A
+  backtest never sees values revised after date $D$, preventing look-ahead bias.
+- **Symbol changes and delistings.** Instrument renames (`POST /api/v1/symbol-changes`) and delistings
+  (`POST /api/v1/delistings`) are tracked in the database. Resolving a universe as of date $D$
+  (`GET /api/v1/universes/{id}/as-of?as_of=D`) includes symbols that were active as of $D$ (even if delisted
+  later), and maps tickers through effective renames, eliminating survivorship bias.
+
+## Market data providers and scheduled refresh
+
+Automated historical data ingestion and scheduled refreshes from market data providers (M1b task 13).
+
+- **Connector architecture (`MarketDataConnector`).** Provides standard methods:
+  - `validate_credentials`: verifies API credentials and connectivity.
+  - `fetch_bars`: fetches historical OHLCV bars for given symbols, time range, and resolution (`Day`, `Hour`, `Minute`).
+  - Supported connectors:
+    - `fake`: deterministic mock connector for tests and offline development with configurable error injection (`with_auth_failure`, `with_rate_limit`, `with_missing_symbol`, `with_custom_bars`).
+    - `alpaca`: live connector for Alpaca Market Data API v2 with automatic pagination (`next_page_token`), rate limit backoff (`429 Too Many Requests`), feed selection (`iex` / `sip`), and fixed-point price/volume conversion.
+- **M19 Vault envelope encryption & credentials.**
+  - Live API keys are stored in `secrets` table (`kind = 'alpaca_paper'`) and encrypted using per-workspace data keys (`workspace_keys`) wrapped with `SECRETS_MASTER_KEY` (AES-256-GCM).
+  - Plaintext keys exist only for the duration of the external HTTP request, are redacted in `Debug` implementations (`"[REDACTED]"`), and are never logged, serialized, or returned over the API.
+  - Development fallback: environment variables `ALPACA_API_KEY_ID` and `ALPACA_API_SECRET_KEY` or direct settings on `data_provider_configs`.
+- **Scheduled and manual refreshes.**
+  - Datasets can be bound to automated refresh schedules (`dataset_refresh_schedules`) with configurable `interval_seconds` and `lookback_bars`.
+  - The background worker sweeps due schedules, enqueues `provider_refresh` jobs, claims them, fetches incremental bars, merges them into the base dataset using chronological two-pointer merge with point-in-time revision support (`known_at_ns`), and registers a new dataset version with derivation lineage (`derivation_kind = "refresh"`).
+  - If refreshed bars match existing data, deduplication skips creating duplicate versions.
 
 ## Ingest settings
 

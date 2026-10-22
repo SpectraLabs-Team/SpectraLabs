@@ -48,9 +48,12 @@ pub mod engine;
 pub mod identity;
 pub mod ingest;
 pub mod jobs_api;
+pub mod lifecycle_api;
 pub mod observability;
 pub mod openapi;
 pub mod optimization_api;
+pub mod providers;
+pub mod providers_api;
 pub mod registry_api;
 pub mod sessions_api;
 pub mod strategies_api;
@@ -70,7 +73,7 @@ use axum::extract::{DefaultBodyLimit, MatchedPath, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, patch, post, put, MethodRouter};
+use axum::routing::{any, delete, get, patch, post, put, MethodRouter};
 use axum::Router;
 use spectra_core::{Json, ENGINE_VERSION};
 use spectra_db::PgPool;
@@ -763,6 +766,46 @@ fn backtest_routes() -> Router<AppState> {
                     .delete(corporate_actions_api::delete_corporate_action_set),
             ),
         )
+        .route(
+            "/api/v1/symbol-changes",
+            only(get(lifecycle_api::list_symbol_changes).post(lifecycle_api::create_symbol_change)),
+        )
+        .route("/api/v1/symbol-changes/{id}", only(delete(lifecycle_api::delete_symbol_change)))
+        .route(
+            "/api/v1/delistings",
+            only(get(lifecycle_api::list_delistings).post(lifecycle_api::create_delisting)),
+        )
+        .route("/api/v1/delistings/{id}", only(delete(lifecycle_api::delete_delisting)))
+        .route(
+            "/api/v1/universes",
+            only(get(lifecycle_api::list_universes).post(lifecycle_api::create_universe)),
+        )
+        .route(
+            "/api/v1/universes/{id}",
+            only(get(lifecycle_api::get_universe).delete(lifecycle_api::delete_universe)),
+        )
+        .route(
+            "/api/v1/universes/{id}/members",
+            only(get(lifecycle_api::list_universe_members).post(lifecycle_api::add_universe_member)),
+        )
+        .route("/api/v1/universes/{id}/as-of", only(get(lifecycle_api::resolve_universe_as_of)))
+        .route(
+            "/api/v1/providers/configs",
+            only(get(providers_api::list_provider_configs).post(providers_api::upsert_provider_config)),
+        )
+        .route(
+            "/api/v1/providers/configs/{id}",
+            only(get(providers_api::get_provider_config).delete(providers_api::delete_provider_config)),
+        )
+        .route(
+            "/api/v1/datasets/{id}/refresh-schedule",
+            only(
+                get(providers_api::get_refresh_schedule)
+                    .post(providers_api::upsert_refresh_schedule)
+                    .delete(providers_api::delete_refresh_schedule),
+            ),
+        )
+        .route("/api/v1/datasets/{id}/refresh", only(post(providers_api::trigger_refresh)))
         .route("/api/v1/strategies/builtin", only(get(backtests_api::builtin_strategies)))
         .route(
             "/api/v1/strategies",

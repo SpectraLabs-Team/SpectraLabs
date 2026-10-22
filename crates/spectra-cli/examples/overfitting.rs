@@ -29,6 +29,7 @@ fn random_walk(n: usize, seed: u64, drift: f64) -> Vec<Bar> {
             let p = |v: f64| Price::from_f64(v).expect("finite price");
             Bar {
                 ts_ns: i as i64 + 1,
+                known_at_ns: i as i64 + 1,
                 instrument: 1,
                 open: p(open),
                 close: p(close),

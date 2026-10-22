@@ -932,6 +932,7 @@ pub(crate) async fn evaluate_holdout(
                     low: spectra_core::fixed::Price::from_f64(99.0).unwrap(),
                     close: spectra_core::fixed::Price::from_f64(102.0).unwrap(),
                     volume: spectra_core::Qty::from_f64(1000.0).unwrap(),
+                    known_at_ns: 1_700_000_000_000_000_000,
                 },
                 spectra_core::Bar {
                     ts_ns: 1_700_000_086_400_000_000,
@@ -941,6 +942,7 @@ pub(crate) async fn evaluate_holdout(
                     low: spectra_core::fixed::Price::from_f64(101.0).unwrap(),
                     close: spectra_core::fixed::Price::from_f64(107.0).unwrap(),
                     volume: spectra_core::Qty::from_f64(1200.0).unwrap(),
+                    known_at_ns: 1_700_000_086_400_000_000,
                 },
             ]
         }

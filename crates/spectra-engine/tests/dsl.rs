@@ -18,14 +18,16 @@ fn generate_market(seed: u64, bars_count: usize) -> Vec<Bar> {
         let high = open.max(close) + rng.range(0, SCALE);
         let low = (open.min(close) - rng.range(0, SCALE)).max(1);
         let volume = rng.range(100, 1000) * SCALE;
+        let ts_ns = (t as i64) * 60_000_000_000;
         bars.push(Bar {
-            ts_ns: (t as i64) * 60_000_000_000,
+            ts_ns,
             instrument: 1,
             open: Price::from_raw(open),
             high: Price::from_raw(high),
             low: Price::from_raw(low),
             close: Price::from_raw(close),
             volume: Qty::from_raw(volume),
+            known_at_ns: ts_ns,
         });
         last = close;
     }

@@ -15,6 +15,7 @@ fn bars(n: usize, px: impl Fn(usize, InstrumentId) -> f64) -> Vec<Bar> {
             let p = Price::from_f64(px(i, id)).unwrap();
             out.push(Bar {
                 ts_ns: (i as i64 + 1) * 86_400_000_000_000,
+                known_at_ns: (i as i64 + 1) * 86_400_000_000_000,
                 instrument: id,
                 open: p,
                 high: p,

@@ -23,9 +23,12 @@ pub mod corporate_actions;
 pub mod datasets;
 pub mod identity;
 pub mod jobs;
+pub mod lifecycle;
 pub mod optimization;
+pub mod providers;
 pub mod strategies;
 pub mod uploads;
+pub mod vault;
 pub mod web_migrations;
 
 /// The migrations in `crates/spectra-db/migrations`, embedded at build time.

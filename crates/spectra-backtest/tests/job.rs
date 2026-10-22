@@ -193,6 +193,41 @@ fn failures_are_classified_for_the_queue() {
 }
 
 #[test]
+fn job_runs_with_as_of_point_in_time_filter() {
+    let root = temp_dir("as-of");
+    let csv = "\
+timestamp,symbol,open,high,low,close,volume,known_at
+2024-01-02T00:00:00Z,AAA,100,105,95,100,1000,2024-01-02T00:00:00Z
+2024-01-03T00:00:00Z,AAA,100,105,95,100,1000,2024-01-03T00:00:00Z
+2024-01-02T00:00:00Z,AAA,120,125,115,120,1000,2024-01-05T00:00:00Z
+2024-01-04T00:00:00Z,AAA,100,105,95,100,1000,2024-01-04T00:00:00Z
+";
+    let opts = CsvOptions { known_at_column: "known_at".into(), ..Default::default() };
+    let d = load_csv(csv.as_bytes(), &opts).unwrap();
+    let checksum = DataStore::new(root.clone()).unwrap().put(&d).unwrap();
+
+    // 1. As of 2024-01-03: should only see unrevised bar for 2024-01-02 (price 100), and 2024-01-03 (2 bars).
+    let j_early = BacktestJob::from_payload(&payload(&format!(
+        r#"{{"dataset_version_id":"{VERSION}","strategy":"buy_and_hold","as_of":"2024-01-03T00:00:00Z"}}"#
+    )))
+    .unwrap();
+    let mut ctl = RunControl::default();
+    let prod_early = run_job_from_store(&root, &checksum, &j_early, &mut ctl).unwrap();
+    assert_eq!(prod_early.run.bar_count, 2);
+
+    // 2. As of 2024-01-06 (after revision): sees revised bar for 2024-01-02 (price 120), 2024-01-03, and 2024-01-04 (3 bars).
+    let j_late = BacktestJob::from_payload(&payload(&format!(
+        r#"{{"dataset_version_id":"{VERSION}","strategy":"buy_and_hold","as_of":"2024-01-06T00:00:00Z"}}"#
+    )))
+    .unwrap();
+    let mut ctl = RunControl::default();
+    let prod_late = run_job_from_store(&root, &checksum, &j_late, &mut ctl).unwrap();
+    assert_eq!(prod_late.run.bar_count, 3);
+    assert_ne!(prod_early.run.result_sha256, prod_late.run.result_sha256);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn payload_carries_an_optional_strategy_version() {
     let j = job(r#""strategy":"sma_cross""#);
     assert_eq!(j.strategy_version_id, None);
@@ -261,6 +296,7 @@ fn failed_strategy_becomes_failed_job_with_readable_message() {
             config: spectra_engine::BacktestConfig::default(),
             strategies: Vec::new(),
             corporate_actions: Vec::new(),
+            as_of: None,
             dsl_code: None,
         },
     };

@@ -26,7 +26,16 @@ fn days(y: i64, m: i64, d: i64) -> i64 {
 
 fn bar(ts_ns: i64, px: f64) -> Bar {
     let p = Price::from_f64(px).unwrap();
-    Bar { ts_ns, instrument: 1, open: p, high: p, low: p, close: p, volume: Qty::from_raw(1_000_000 * SCALE) }
+    Bar {
+        ts_ns,
+        known_at_ns: ts_ns,
+        instrument: 1,
+        open: p,
+        high: p,
+        low: p,
+        close: p,
+        volume: Qty::from_raw(1_000_000 * SCALE),
+    }
 }
 
 /// One bar per timestamp; the price is the bar's index + 100, so fills show which bar they hit.

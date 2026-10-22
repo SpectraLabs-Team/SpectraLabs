@@ -17,7 +17,16 @@ fn q(v: f64) -> Qty {
 }
 
 fn mk(ts: i64, id: InstrumentId, o: f64, h: f64, l: f64, c: f64, vol: f64) -> Bar {
-    Bar { ts_ns: ts, instrument: id, open: p(o), high: p(h), low: p(l), close: p(c), volume: q(vol) }
+    Bar {
+        ts_ns: ts,
+        known_at_ns: ts,
+        instrument: id,
+        open: p(o),
+        high: p(h),
+        low: p(l),
+        close: p(c),
+        volume: q(vol),
+    }
 }
 fn mk1(ts: i64, id: InstrumentId, o: f64, h: f64, l: f64, c: f64) -> Bar {
     mk(ts, id, o, h, l, c, 1_000_000.0)
@@ -592,6 +601,7 @@ fn random_market(seed: u64) -> Vec<Bar> {
             let volume = if rng.range(0, 9) == 0 { 0 } else { rng.range(1, 1000) * SCALE };
             bars.push(Bar {
                 ts_ns: t,
+                known_at_ns: t,
                 instrument: k as InstrumentId,
                 open: Price::from_raw(open),
                 high: Price::from_raw(high),

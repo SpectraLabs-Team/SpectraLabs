@@ -18,9 +18,10 @@ pub use adjustment::{adjust_dataset, adjust_symbol_bars, ActionKind, CorporateAc
 pub use calendar::Exchange;
 pub use chart::{chart_points, ChartPoint};
 pub use dataset::{
-    assess_quality, compute_dataset_id, derive_dataset, format_quality_report, load_csv, load_csv_file,
-    load_csv_reader, preview_csv, report_csv_reader, CsvOptions, CsvPreview, DataQualityReport, Dataset,
-    DatasetInfo, InvalidRowPolicy, RowIssue, SymbolStats, SymbolTable,
+    append_bars, append_bars_with_options, assess_quality, compute_dataset_id, derive_dataset,
+    format_quality_report, load_csv, load_csv_file, load_csv_reader, preview_csv, report_csv_reader,
+    CsvOptions, CsvPreview, DataQualityReport, Dataset, DatasetInfo, InvalidRowPolicy, RowIssue, SymbolStats,
+    SymbolTable,
 };
 pub use datastore::DataStore;
 pub use report::{preview_json, quality_report_json};

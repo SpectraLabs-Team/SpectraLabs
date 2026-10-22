@@ -102,6 +102,10 @@ jobs:
             | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
           { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/corporate_action_checks.sql; } \
             | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
+          { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/instrument_lifecycle_checks.sql; } \
+            | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
+          { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/provider_checks.sql; } \
+            | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
           { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/strategy_checks.sql; } \
             | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
           scripts/backup-postgres.sh "$RUNNER_TEMP/backups"

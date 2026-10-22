@@ -16,6 +16,7 @@ fn bars(aaa: &[f64]) -> Vec<Bar> {
             let px = Price::from_f64(px).unwrap();
             out.push(Bar {
                 ts_ns: (i as i64 + 1) * DAY,
+                known_at_ns: (i as i64 + 1) * DAY,
                 instrument: id,
                 open: px,
                 high: px,

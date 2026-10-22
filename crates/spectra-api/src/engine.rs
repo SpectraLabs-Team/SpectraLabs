@@ -249,9 +249,21 @@ pub const JOB_KINDS: [&str; 6] = ["backtest", "benchmark", "risk", "stress", "sw
 /// `POST /api/v1/datasets/ingest`.
 pub const INGEST_JOB_KIND: &str = "ingest";
 
+/// An automated or manual dataset refresh from a market data provider (M1b task 13).
+pub const PROVIDER_REFRESH_JOB_KIND: &str = crate::providers::runner::PROVIDER_REFRESH_JOB_KIND;
+
 /// Job kinds the background worker runs.
-pub const WORKER_KINDS: [&str; 8] =
-    ["backtest", "benchmark", "risk", "stress", INGEST_JOB_KIND, "survival", "sweep", "walk_forward"];
+pub const WORKER_KINDS: [&str; 9] = [
+    "backtest",
+    "benchmark",
+    "risk",
+    "stress",
+    INGEST_JOB_KIND,
+    "survival",
+    PROVIDER_REFRESH_JOB_KIND,
+    "sweep",
+    "walk_forward",
+];
 
 /// A validated `backtest` payload, or a 422 listing every problem.
 ///
@@ -273,6 +285,9 @@ pub fn run_job(kind: &str, payload: &Json) -> Reply {
         // Backtests need the database (dataset version) and report progress; the worker runs
         // them on its own path and never calls this for them.
         "backtest" => Err((409, "backtest jobs run on the worker's backtest path".into())),
+        PROVIDER_REFRESH_JOB_KIND => {
+            Err((409, "provider refresh jobs run on the worker's refresh path".into()))
+        }
         _ => Err(unprocessable(format!("Unknown job kind {kind:?}."))),
     }
 }
@@ -309,7 +324,9 @@ pub const BACKTEST_ARTIFACTS_KEY: &str = "artifacts";
 /// Maximum duration allowed for a job before its result is discarded.
 pub fn job_timeout(kind: &str) -> std::time::Duration {
     std::time::Duration::from_secs(match kind {
-        "backtest" | INGEST_JOB_KIND | "survival" | "sweep" | "walk_forward" => 900,
+        "backtest" | INGEST_JOB_KIND | "survival" | "sweep" | "walk_forward" | PROVIDER_REFRESH_JOB_KIND => {
+            900
+        }
         "benchmark" => 600,
         _ => 300,
     })

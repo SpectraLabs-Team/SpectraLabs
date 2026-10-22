@@ -980,6 +980,8 @@ pub struct BarsQuery {
     pub to: Option<String>,
     /// Most points to return, 10 to 5000 (default 1000).
     pub points: Option<usize>,
+    /// Point-in-time date or RFC 3339 timestamp (e.g. `2024-01-05`). Revisions after this date are ignored.
+    pub as_of: Option<String>,
 }
 
 /// A symbol's bars for a chart.
@@ -1112,6 +1114,14 @@ pub(crate) async fn bars(
             0
         }
     };
+    let as_of = match q.as_of.as_deref().map(|t| parse_time(t, true)) {
+        None => None,
+        Some(Some(t)) => Some(t),
+        Some(None) => {
+            errors.push(("as_of".to_string(), "use RFC 3339 or YYYY-MM-DD".to_string()));
+            None
+        }
+    };
     let points = q.points.unwrap_or(1000);
     if !(10..=5000).contains(&points) {
         errors.push(("points".into(), "must be from 10 to 5000".into()));
@@ -1131,17 +1141,21 @@ pub(crate) async fn bars(
         Ok(d) => d,
         Err(r) => return r,
     };
+    let resolved = match as_of {
+        Some(as_of_ns) => d.as_of(as_of_ns),
+        None => (*d).clone(),
+    };
     let symbol = match q.symbol {
         Some(s) => s,
-        None => d.symbols.symbols.first().cloned().unwrap_or_default(),
+        None => resolved.symbols.symbols.first().cloned().unwrap_or_default(),
     };
-    let Some(instrument) = d.symbols.id(&symbol) else {
+    let Some(instrument) = resolved.symbols.id(&symbol) else {
         return invalid_fields(&[(
             "symbol".into(),
-            format!("not in this version (it has {})", d.symbols.symbols.join(", ")),
+            format!("not in this version (it has {})", resolved.symbols.symbols.join(", ")),
         )]);
     };
-    let (pts, total) = spectra_data::chart_points(&d, instrument, from, to, points);
+    let (pts, total) = spectra_data::chart_points(&resolved, instrument, from, to, points);
     let num = |raw: i64| raw as f64 / spectra_core::fixed::SCALE as f64;
     to_json(
         200,

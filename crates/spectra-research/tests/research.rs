@@ -18,6 +18,7 @@ fn walk(n: usize, seed: u64, drift: f64) -> Vec<Bar> {
             px = close;
             Bar {
                 ts_ns: i as i64 + 1,
+                known_at_ns: i as i64 + 1,
                 instrument: 1,
                 open: Price::from_f64(open).unwrap(),
                 close: Price::from_f64(close).unwrap(),

@@ -31,6 +31,8 @@ tracing-subscriber.workspace = true
 metrics.workspace = true
 metrics-exporter-prometheus.workspace = true
 sentry.workspace = true
+reqwest.workspace = true
+ring.workspace = true
 
 [features]
 # S3-compatible artifact storage for spectra-worker (ARTIFACT_STORAGE=s3).

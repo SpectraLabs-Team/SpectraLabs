@@ -30,6 +30,7 @@ fn random_market(seed: u64, instruments: usize, timestamps: i64) -> Vec<Bar> {
             let volume = if rng.range(0, 9) == 0 { 0 } else { rng.range(1, 1000) * SCALE };
             bars.push(Bar {
                 ts_ns: t * 60_000_000_000,
+                known_at_ns: t * 60_000_000_000,
                 instrument: k as InstrumentId,
                 open: Price::from_raw(open),
                 high: Price::from_raw(high),
@@ -197,6 +198,7 @@ fn backtester_matches_cpp_reference() {
         let volume = rng.range(100_000, 1_000_000) * SCALE;
         bars.push(Bar {
             ts_ns: (i + 1) * 86_400_000_000_000,
+            known_at_ns: (i + 1) * 86_400_000_000_000,
             instrument: 1,
             open: Price::from_raw(open),
             high: Price::from_raw(high),

@@ -20,6 +20,7 @@ fn synthetic_bars(n: usize, seed: u64) -> Vec<Bar> {
             px = close;
             Bar {
                 ts_ns: (i as i64 + 1) * 86_400_000_000_000,
+                known_at_ns: (i as i64 + 1) * 86_400_000_000_000,
                 instrument: 1,
                 open: Price::from_raw(open),
                 high: Price::from_raw(high),

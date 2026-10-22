@@ -351,8 +351,10 @@ async fn parity_between_saved_version_and_direct_builtin_run() {
         let drift = if (i / 20) % 2 == 0 { 0.5 } else { -0.5 };
         price += drift;
         let p = Price::from_raw((price * spectra_core::fixed::SCALE as f64).round() as i64);
+        let ts_ns = (1_700_000_000 + i * 86_400) * 1_000_000_000;
         bars.push(Bar {
-            ts_ns: (1_700_000_000 + i * 86_400) * 1_000_000_000,
+            ts_ns,
+            known_at_ns: ts_ns,
             instrument: 0,
             open: p,
             high: Price::from_raw(p.raw() + 50 * spectra_core::fixed::SCALE),

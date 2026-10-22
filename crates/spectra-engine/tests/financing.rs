@@ -10,6 +10,7 @@ fn flat(n: usize, price: i64) -> Vec<Bar> {
     (0..n)
         .map(|i| Bar {
             ts_ns: (i as i64 + 1) * 86_400_000_000_000,
+            known_at_ns: (i as i64 + 1) * 86_400_000_000_000,
             instrument: 1,
             open: Price::from_raw(price * SCALE),
             high: Price::from_raw(price * SCALE),

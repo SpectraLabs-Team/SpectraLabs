@@ -18,8 +18,8 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::file::reader::ChunkReader;
 use spectra_core::{bars_sha256, Bar, Error, InstrumentId, Price, Qty, Result};
 use spectra_data::{
-    assess_quality, compute_dataset_id, format_timestamp, parse_fixed, parse_timestamp,
-    CsvOptions, CsvPreview, DataQualityReport, Dataset, InvalidRowPolicy, RowIssue, TimeFormat,
+    assess_quality, compute_dataset_id, format_timestamp, parse_fixed, parse_timestamp, CsvOptions,
+    CsvPreview, DataQualityReport, Dataset, InvalidRowPolicy, RowIssue, TimeFormat,
 };
 
 fn data_err(msg: impl Into<String>) -> Error {
@@ -147,9 +147,7 @@ fn parse_arrow_timestamp(
                 TimeUnit::Millisecond => {
                     array.as_primitive::<TimestampMillisecondType>().value(row) * 1_000_000
                 }
-                TimeUnit::Microsecond => {
-                    array.as_primitive::<TimestampMicrosecondType>().value(row) * 1_000
-                }
+                TimeUnit::Microsecond => array.as_primitive::<TimestampMicrosecondType>().value(row) * 1_000,
                 TimeUnit::Nanosecond => array.as_primitive::<TimestampNanosecondType>().value(row),
             };
             let naive = tz.is_none();
@@ -175,10 +173,9 @@ fn parse_arrow_timestamp(
             };
             match raw {
                 Some(ns) => Ok((ns, false)),
-                None => Err(format!(
-                    "cannot parse timestamp integer '{val}' under format {:?}",
-                    opt.time.format
-                )),
+                None => {
+                    Err(format!("cannot parse timestamp integer '{val}' under format {:?}", opt.time.format))
+                }
             }
         }
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => {
@@ -186,15 +183,10 @@ fn parse_arrow_timestamp(
             if let Some(parsed) = parse_timestamp(&s, &opt.time) {
                 Ok((parsed.ts_ns, parsed.naive))
             } else {
-                Err(format!(
-                    "cannot parse timestamp '{s}' (formats must be explicit; see TimeFormat)"
-                ))
+                Err(format!("cannot parse timestamp '{s}' (formats must be explicit; see TimeFormat)"))
             }
         }
-        _ => Err(format!(
-            "unsupported timestamp column type {:?}",
-            array.data_type()
-        )),
+        _ => Err(format!("unsupported timestamp column type {:?}", array.data_type())),
     }
 }
 
@@ -293,15 +285,42 @@ pub fn load_parquet<R: ChunkReader + 'static>(
     load_parquet_internal(reader, opt, false, progress)
 }
 
+/// Loads a Parquet dataset from a file on disk.
+///
+/// # Errors
+/// Returns an error if the file cannot be opened or if data validation fails.
+pub fn load_parquet_file<P: AsRef<std::path::Path>>(
+    path: P,
+    opt: &CsvOptions,
+    progress: Option<&mut dyn FnMut(u64) -> bool>,
+) -> Result<Dataset> {
+    let file = std::fs::File::open(path).map_err(|e| data_err(format!("cannot open file: {e}")))?;
+    load_parquet(file, opt, progress)
+}
+
+/// Lenient report reader that continues past rejected rows to count every problem.
+///
+/// # Errors
+/// Returns an error if the file cannot be opened or if the schema is unparseable.
+pub fn report_parquet_file<P: AsRef<std::path::Path>>(path: P, opt: &CsvOptions) -> Result<Dataset> {
+    let file = std::fs::File::open(path).map_err(|e| data_err(format!("cannot open file: {e}")))?;
+    report_parquet(file, opt)
+}
+
+/// Returns the total number of data rows in a Parquet file, if valid.
+#[must_use]
+pub fn parquet_total_rows<P: AsRef<std::path::Path>>(path: P) -> Option<u64> {
+    let file = std::fs::File::open(path).ok()?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file).ok()?;
+    Some(builder.metadata().file_metadata().num_rows() as u64)
+}
+
 /// Lenient report reader that continues past rejected rows to count every problem.
 ///
 /// # Errors
 /// Returns an error if the Parquet file cannot be opened or the schema is unparseable.
 pub fn report_parquet<R: ChunkReader + 'static>(reader: R, opt: &CsvOptions) -> Result<Dataset> {
-    let lenient = CsvOptions {
-        on_invalid: InvalidRowPolicy::Skip,
-        ..opt.clone()
-    };
+    let lenient = CsvOptions { on_invalid: InvalidRowPolicy::Skip, ..opt.clone() };
     load_parquet_internal(reader, &lenient, true, None)
 }
 
@@ -309,53 +328,28 @@ pub fn report_parquet<R: ChunkReader + 'static>(reader: R, opt: &CsvOptions) -> 
 ///
 /// # Errors
 /// Returns an error if the Parquet file cannot be read or metadata is corrupted.
-pub fn preview_parquet(
-    content: &[u8],
-    opt: &CsvOptions,
-    max_rows: usize,
-) -> Result<CsvPreview> {
+pub fn preview_parquet(content: &[u8], opt: &CsvOptions, max_rows: usize) -> Result<CsvPreview> {
     let bytes = Bytes::copy_from_slice(content);
-    let lenient = CsvOptions {
-        on_invalid: InvalidRowPolicy::Skip,
-        ..opt.clone()
-    };
+    let lenient = CsvOptions { on_invalid: InvalidRowPolicy::Skip, ..opt.clone() };
     let builder = ParquetRecordBatchReaderBuilder::try_new(bytes)
         .map_err(|e| data_err(format!("cannot open Parquet file: {e}")))?;
 
     let file_meta = builder.metadata().file_metadata();
     let total_rows = file_meta.num_rows() as usize;
     let schema = builder.schema();
-    let header: Vec<String> = schema
-        .fields()
-        .iter()
-        .map(|f| normalise_header(f.name()))
-        .collect();
+    let header: Vec<String> = schema.fields().iter().map(|f| normalise_header(f.name())).collect();
 
-    let ds = load_parquet_internal_batch(
-        builder,
-        &lenient,
-        true,
-        Some(max_rows),
-        None,
-    )?;
+    let ds = load_parquet_internal_batch(builder, &lenient, true, Some(max_rows), None)?;
 
     let rows_not_read = total_rows.saturating_sub(max_rows);
     let would_abort = if opt.on_invalid == InvalidRowPolicy::Reject {
-        ds.quality
-            .sample_issues
-            .first()
-            .map(|i| format!("line {} [{}]: {}", i.line, i.category, i.message))
+        ds.quality.sample_issues.first().map(|i| format!("line {} [{}]: {}", i.line, i.category, i.message))
     } else {
         None
     }
     .or_else(|| ds.bars.is_empty().then(|| "no valid data rows".to_string()));
 
-    Ok(CsvPreview {
-        header,
-        dataset: ds,
-        rows_not_read,
-        would_abort,
-    })
+    Ok(CsvPreview { header, dataset: ds, rows_not_read, would_abort })
 }
 
 fn load_parquet_internal<R: ChunkReader + 'static>(
@@ -379,11 +373,7 @@ fn load_parquet_internal_batch<R: ChunkReader + 'static>(
     let file_meta = builder.metadata().file_metadata();
     let total_file_rows = file_meta.num_rows();
     let schema = Arc::clone(builder.schema());
-    let headers: Vec<String> = schema
-        .fields()
-        .iter()
-        .map(|f| normalise_header(f.name()))
-        .collect();
+    let headers: Vec<String> = schema.fields().iter().map(|f| normalise_header(f.name())).collect();
 
     let exact = opt.explicit_columns;
     let col_ts = find_column(&headers, &opt.timestamp_column, TIMESTAMP_ALIASES, exact);
@@ -405,9 +395,8 @@ fn load_parquet_internal_batch<R: ChunkReader + 'static>(
         }
     }
 
-    let require = |c: Option<usize>, name: &str| {
-        c.ok_or_else(|| data_err(format!("missing required column: {name}")))
-    };
+    let require =
+        |c: Option<usize>, name: &str| c.ok_or_else(|| data_err(format!("missing required column: {name}")));
     let col_ts = require(col_ts, "timestamp")?;
     let col_open = require(col_open, "open")?;
     let col_high = require(col_high, "high")?;
@@ -438,10 +427,7 @@ fn load_parquet_internal_batch<R: ChunkReader + 'static>(
     let mut current_row_index = 0usize;
 
     {
-        let mut rj = Rejections {
-            policy: opt.on_invalid,
-            rep: &mut ds.quality,
-        };
+        let mut rj = Rejections { policy: opt.on_invalid, rep: &mut ds.quality };
 
         for maybe_batch in reader {
             let batch = maybe_batch.map_err(|e| data_err(format!("Parquet read error: {e}")))?;
@@ -469,11 +455,7 @@ fn load_parquet_internal_batch<R: ChunkReader + 'static>(
 
                 if current_row_index.is_multiple_of(10_000) {
                     if let Some(ref mut rep) = progress {
-                        let frac = if total_file_rows > 0 {
-                            current_row_index as u64
-                        } else {
-                            0
-                        };
+                        let frac = if total_file_rows > 0 { current_row_index as u64 } else { 0 };
                         if !rep(frac) {
                             return Err(data_err("cancelled"));
                         }
@@ -572,19 +554,11 @@ fn load_parquet_internal_batch<R: ChunkReader + 'static>(
                 };
 
                 if o <= 0 || h <= 0 || l <= 0 || c <= 0 {
-                    rj.reject(
-                        line_num,
-                        "non_positive_price",
-                        "prices must be greater than zero",
-                    )?;
+                    rj.reject(line_num, "non_positive_price", "prices must be greater than zero")?;
                     continue;
                 }
                 if l > o.min(c) || h < o.max(c) {
-                    rj.reject(
-                        line_num,
-                        "ohlc_inconsistent",
-                        "low/high do not bracket open and close",
-                    )?;
+                    rj.reject(line_num, "ohlc_inconsistent", "low/high do not bracket open and close")?;
                     continue;
                 }
                 if v < 0 {
@@ -625,10 +599,7 @@ fn load_parquet_internal_batch<R: ChunkReader + 'static>(
     // Symbol table
     let sorted: BTreeSet<&str> = names.iter().map(String::as_str).collect();
     ds.symbols.symbols = sorted.into_iter().map(str::to_string).collect();
-    let id_of: Vec<InstrumentId> = names
-        .iter()
-        .map(|n| ds.symbols.id(n).expect("symbol in table"))
-        .collect();
+    let id_of: Vec<InstrumentId> = names.iter().map(|n| ds.symbols.id(n).expect("symbol in table")).collect();
 
     let mut order: Vec<usize> = (0..rows.len()).collect();
     let key = |i: usize| (rows[i].ts, id_of[rows[i].sym as usize], rows[i].known_at);
@@ -649,28 +620,13 @@ fn load_parquet_internal_batch<R: ChunkReader + 'static>(
                 }
                 let msg = format!(
                     "{} the {} bar at {} (first seen on line {})",
-                    if identical {
-                        "exact duplicate of"
-                    } else {
-                        "CONFLICTS with"
-                    },
+                    if identical { "exact duplicate of" } else { "CONFLICTS with" },
                     names[r.sym as usize],
                     format_timestamp(r.ts),
                     p.line
                 );
-                let mut rj = Rejections {
-                    policy: opt.on_invalid,
-                    rep: &mut ds.quality,
-                };
-                rj.reject(
-                    r.line,
-                    if identical {
-                        "duplicate"
-                    } else {
-                        "duplicate_conflict"
-                    },
-                    &msg,
-                )?;
+                let mut rj = Rejections { policy: opt.on_invalid, rep: &mut ds.quality };
+                rj.reject(r.line, if identical { "duplicate" } else { "duplicate_conflict" }, &msg)?;
                 continue;
             }
         }
@@ -699,13 +655,8 @@ fn load_parquet_internal_batch<R: ChunkReader + 'static>(
     rep.warnings = analysis.warnings;
     rep.notes = analysis.notes;
     if rep.rows_rejected > 0 {
-        rep.warnings.insert(
-            0,
-            format!(
-                "{} row(s) were rejected and skipped (see categories).",
-                rep.rows_rejected
-            ),
-        );
+        rep.warnings
+            .insert(0, format!("{} row(s) were rejected and skipped (see categories).", rep.rows_rejected));
     }
     if conflicting > 0 {
         rep.warnings.push(format!(
@@ -715,14 +666,12 @@ fn load_parquet_internal_batch<R: ChunkReader + 'static>(
         ));
     }
     if !rep.input_was_sorted {
-        rep.warnings.push(
-            "Input rows were not sorted by (timestamp, symbol); they were sorted on load.".into(),
-        );
+        rep.warnings
+            .push("Input rows were not sorted by (timestamp, symbol); they were sorted on load.".into());
     }
     if col_volume.is_none() {
         rep.warnings.push(
-            "No volume column: volume was set to zero (participation caps would block all fills)."
-                .into(),
+            "No volume column: volume was set to zero (participation caps would block all fills).".into(),
         );
     }
     if naive_count > 0 {

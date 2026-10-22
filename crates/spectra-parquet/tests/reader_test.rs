@@ -158,10 +158,7 @@ fn test_parquet_point_in_time_known_at() {
     let batch = RecordBatch::try_new(
         schema,
         vec![
-            Arc::new(StringArray::from(vec![
-                "2024-01-02 09:30:00Z",
-                "2024-01-02 09:31:00Z",
-            ])),
+            Arc::new(StringArray::from(vec!["2024-01-02 09:30:00Z", "2024-01-02 09:31:00Z"])),
             Arc::new(StringArray::from(vec![
                 "2024-01-02 09:35:00Z",
                 "2024-01-02 09:30:00Z", // before 09:31!
@@ -177,10 +174,7 @@ fn test_parquet_point_in_time_known_at() {
     .unwrap();
 
     let pq_bytes = make_parquet_bytes(&batch);
-    let opt = CsvOptions {
-        known_at_column: "known_at".to_string(),
-        ..CsvOptions::default()
-    };
+    let opt = CsvOptions { known_at_column: "known_at".to_string(), ..CsvOptions::default() };
 
     let err = load_parquet(bytes::Bytes::from(pq_bytes.clone()), &opt, None).unwrap_err();
     assert!(err.to_string().contains("[known_at_before_timestamp]"));
@@ -188,14 +182,7 @@ fn test_parquet_point_in_time_known_at() {
     let rep_ds = report_parquet(bytes::Bytes::from(pq_bytes), &opt).unwrap();
     assert_eq!(rep_ds.quality.rows_accepted, 1);
     assert_eq!(rep_ds.quality.rows_rejected, 1);
-    assert_eq!(
-        *rep_ds
-            .quality
-            .rejected_by_category
-            .get("known_at_before_timestamp")
-            .unwrap(),
-        1
-    );
+    assert_eq!(*rep_ds.quality.rejected_by_category.get("known_at_before_timestamp").unwrap(), 1);
 }
 
 #[test]
@@ -235,4 +222,34 @@ fn test_parquet_preview() {
     assert_eq!(preview.dataset.bars.len(), 2);
     assert_eq!(preview.rows_not_read, 1);
     assert!(preview.would_abort.is_none());
+}
+
+#[test]
+fn test_parquet_export_roundtrip() {
+    let csv_content = b"timestamp,open,high,low,close,volume,symbol\n\
+2024-01-02 09:30:00Z,185.50,186.00,185.00,185.75,10000,AAPL\n\
+2024-01-02 09:31:00Z,185.75,186.25,185.50,186.00,15000,AAPL\n\
+2024-01-02 09:30:00Z,375.00,376.50,374.50,376.00,8000,MSFT\n";
+
+    let opt = CsvOptions::default();
+    let csv_ds = load_csv(csv_content, &opt).unwrap();
+
+    let mut pq_buf = Vec::new();
+    spectra_parquet::export_parquet(&csv_ds, &mut pq_buf).unwrap();
+
+    let pq_ds = load_parquet(bytes::Bytes::from(pq_buf), &opt, None).unwrap();
+
+    assert_eq!(csv_ds.info.id, pq_ds.info.id);
+    assert_eq!(csv_ds.bars.len(), pq_ds.bars.len());
+    for (b1, b2) in csv_ds.bars.iter().zip(pq_ds.bars.iter()) {
+        assert_eq!(b1.ts_ns, b2.ts_ns);
+        assert_eq!(b1.instrument, b2.instrument);
+        assert_eq!(b1.open, b2.open);
+        assert_eq!(b1.high, b2.high);
+        assert_eq!(b1.low, b2.low);
+        assert_eq!(b1.close, b2.close);
+        assert_eq!(b1.volume, b2.volume);
+        assert_eq!(b1.known_at_ns, b2.known_at_ns);
+    }
+    assert_eq!(csv_ds.symbols.symbols, pq_ds.symbols.symbols);
 }

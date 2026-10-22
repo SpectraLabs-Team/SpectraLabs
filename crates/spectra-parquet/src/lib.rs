@@ -8,6 +8,7 @@
 pub mod reader;
 pub mod writer;
 
-pub use reader::{load_parquet, preview_parquet, report_parquet};
+pub use reader::{
+    load_parquet, load_parquet_file, parquet_total_rows, preview_parquet, report_parquet, report_parquet_file,
+};
 pub use writer::export_parquet;
-

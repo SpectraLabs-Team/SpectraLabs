@@ -315,20 +315,39 @@ pub(crate) async fn preview(State(st): State<AppState>, body: Result<Bytes, Byte
         },
     };
     let mut sample = req.sample.into_bytes();
-    if req.truncated {
+    let is_parquet = sample.starts_with(b"PAR1");
+    if req.truncated && !is_parquet {
         // Keep whole lines: the cut may have split the last one.
         let keep = sample.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
         sample.truncate(keep);
     }
     crate::compute_with(&st, move || {
-        let suggestions = spectra_data::suggest(&sample).to_json();
+        let suggestions = if is_parquet {
+            Json::object()
+                .with("delimiter", Json::Null)
+                .with("header", Json::array())
+                .with("columns", Json::object())
+                .with("time_format", Json::Null)
+                .with("timestamps_have_zone", Json::Null)
+        } else {
+            spectra_data::suggest(&sample).to_json()
+        };
         let preview = match &opt {
             None => Json::Null,
             // Check every row of the sample (it is at most 1 MB); send back the first PREVIEW_ROWS.
-            Some(opt) => match spectra_data::preview_csv(&sample, opt, usize::MAX - 1) {
-                Ok(p) => spectra_data::preview_json(&p, opt, PREVIEW_ROWS),
-                Err(e) => return invalid_fields(&[("sample".into(), file_problem(&e))]),
-            },
+            Some(opt) => {
+                if is_parquet {
+                    match spectra_parquet::preview_parquet(&sample, opt, usize::MAX - 1) {
+                        Ok(p) => spectra_data::preview_json(&p, opt, PREVIEW_ROWS),
+                        Err(e) => return invalid_fields(&[("sample".into(), file_problem(&e))]),
+                    }
+                } else {
+                    match spectra_data::preview_csv(&sample, opt, usize::MAX - 1) {
+                        Ok(p) => spectra_data::preview_json(&p, opt, PREVIEW_ROWS),
+                        Err(e) => return invalid_fields(&[("sample".into(), file_problem(&e))]),
+                    }
+                }
+            }
         };
         let body = Json::object().with("suggestions", suggestions).with("preview", preview);
         json_response(200, body.dump())
@@ -1463,4 +1482,62 @@ pub(crate) async fn derive_version(
             derivation_params: Some(derivation_params),
         },
     )
+}
+
+/// `GET /api/v1/datasets/versions/{id}/export` query.
+#[derive(Debug, Deserialize, utoipa::IntoParams, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExportQuery {
+    /// Format to export: currently only `parquet` is supported (default: `parquet`).
+    pub format: Option<String>,
+}
+
+/// Export a dataset version as Apache Parquet.
+#[utoipa::path(get, path = "/api/v1/datasets/versions/{id}/export", tag = "datasets",
+    params(("id" = uuid::Uuid, Path, description = "Dataset version id"), ExportQuery),
+    responses(
+        (status = 200, description = "Parquet binary payload", content_type = "application/vnd.apache.parquet"),
+        (status = 404, body = crate::openapi::ErrorDoc),
+        (status = 422, description = "Invalid query parameter", body = crate::openapi::ErrorDoc),
+    ))]
+pub(crate) async fn export_version(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    path: Result<axum::extract::Path<uuid::Uuid>, axum::extract::rejection::PathRejection>,
+    query: Result<axum::extract::Query<ExportQuery>, axum::extract::rejection::QueryRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let Ok(axum::extract::Path(version_id)) = path else { return error_response(404, NO_VERSION) };
+    let Ok(axum::extract::Query(q)) = query else {
+        return error_response(422, "Invalid query parameters.");
+    };
+    if let Some(ref fmt) = q.format {
+        if fmt != "parquet" {
+            return invalid_fields(&[("format".into(), "only 'parquet' format is supported".into())]);
+        }
+    }
+    let v = match spectra_db::datasets::get_version(&pool, ws, version_id).await {
+        Ok(Some(v)) => v,
+        Ok(None) => return error_response(404, NO_VERSION),
+        Err(e) => return db_error(&e),
+    };
+    let d = match load_for_chart(&st, &v.checksum, v.blob_sha256.as_deref()).await {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let mut buf = Vec::new();
+    if let Err(e) = spectra_parquet::export_parquet(&d, &mut buf) {
+        tracing::error!(error = %e, "parquet export failed");
+        return error_response(500, format!("Could not export Parquet: {e}"));
+    }
+    let filename = format!("{}-v{}.parquet", v.dataset_name, v.version);
+    Response::builder()
+        .status(200)
+        .header("content-type", "application/vnd.apache.parquet")
+        .header("content-disposition", format!("attachment; filename=\"{filename}\""))
+        .body(axum::body::Body::from(buf))
+        .unwrap_or_else(|_| error_response(500, "Could not build response."))
 }

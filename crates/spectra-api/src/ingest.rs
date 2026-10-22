@@ -158,38 +158,80 @@ pub async fn run_ingest(
     let (path, size, expected) = (file.path.clone(), upload.size_bytes.max(1) as f32, upload.sha256.clone());
     let parsed = tokio::task::spawn_blocking(move || {
         let open = || std::fs::File::open(&path).map(|f| std::io::BufReader::with_capacity(1 << 20, f));
-        let file = open().map_err(|e| (format!("cannot open the uploaded file: {e}"), None))?;
-        // Every byte is hashed on its way to the parser, and the rest of the file after it
-        // stops, so a corrupt upload is reported as such whatever the parser made of it.
-        let mut reader = Hashing { inner: file, hash: spectra_core::Sha256::new() };
-        let loaded = spectra_data::load_csv_reader(
-            &mut reader,
-            &opt,
-            Some(&mut |read| {
-                let frac = 0.05 + 0.80 * (read as f32 / size).min(1.0);
-                progress_atomic.store(frac.to_bits(), Ordering::Relaxed);
-                !cancel_flag.load(Ordering::Relaxed)
-            }),
-        );
-        let cancelled = matches!(&loaded, Err(e) if e.to_string() == "cancelled");
-        if !cancelled {
+        let is_parquet = {
+            let mut magic = [0u8; 4];
+            let mut f = open().map_err(|e| (format!("cannot open the uploaded file: {e}"), None))?;
+            use std::io::Read;
+            f.read_exact(&mut magic).is_ok() && &magic == b"PAR1"
+        };
+        if is_parquet {
+            let raw = std::fs::File::open(&path)
+                .map_err(|e| (format!("cannot open the uploaded file: {e}"), None))?;
+            let mut reader = Hashing { inner: raw, hash: spectra_core::Sha256::new() };
             let intact = std::io::copy(&mut reader, &mut std::io::sink()).is_ok()
                 && reader.hash.clone().hex_digest() == expected;
             if !intact {
                 return Err(("the stored upload does not match its SHA-256".to_string(), None));
             }
-        }
-        match loaded {
-            Ok(d) => Ok(d),
-            Err(e) if e.to_string() == "cancelled" => Err((e.to_string(), None)),
-            Err(e) => {
-                // Refused: read the whole file once more without stopping, so the report
-                // lists every bad row, not just the first. Also streamed.
-                let report = open()
-                    .ok()
-                    .and_then(|r| spectra_data::report_csv_reader(r, &opt).ok())
-                    .map(|d| spectra_data::quality_report_json(&d, &opt));
-                Err((e.to_string(), report))
+
+            let total_rows = spectra_parquet::parquet_total_rows(&path).unwrap_or(0);
+            let loaded = spectra_parquet::load_parquet_file(
+                &path,
+                &opt,
+                Some(&mut |rows_read| {
+                    let frac = if total_rows > 0 {
+                        0.05 + 0.80 * (rows_read as f32 / total_rows as f32).min(1.0)
+                    } else {
+                        0.5
+                    };
+                    progress_atomic.store(frac.to_bits(), Ordering::Relaxed);
+                    !cancel_flag.load(Ordering::Relaxed)
+                }),
+            );
+            match loaded {
+                Ok(d) => Ok(d),
+                Err(e) if e.to_string() == "cancelled" => Err((e.to_string(), None)),
+                Err(e) => {
+                    let report = spectra_parquet::report_parquet_file(&path, &opt)
+                        .ok()
+                        .map(|d| spectra_data::quality_report_json(&d, &opt));
+                    Err((e.to_string(), report))
+                }
+            }
+        } else {
+            let file = open().map_err(|e| (format!("cannot open the uploaded file: {e}"), None))?;
+            // Every byte is hashed on its way to the parser, and the rest of the file after it
+            // stops, so a corrupt upload is reported as such whatever the parser made of it.
+            let mut reader = Hashing { inner: file, hash: spectra_core::Sha256::new() };
+            let loaded = spectra_data::load_csv_reader(
+                &mut reader,
+                &opt,
+                Some(&mut |read| {
+                    let frac = 0.05 + 0.80 * (read as f32 / size).min(1.0);
+                    progress_atomic.store(frac.to_bits(), Ordering::Relaxed);
+                    !cancel_flag.load(Ordering::Relaxed)
+                }),
+            );
+            let cancelled = matches!(&loaded, Err(e) if e.to_string() == "cancelled");
+            if !cancelled {
+                let intact = std::io::copy(&mut reader, &mut std::io::sink()).is_ok()
+                    && reader.hash.clone().hex_digest() == expected;
+                if !intact {
+                    return Err(("the stored upload does not match its SHA-256".to_string(), None));
+                }
+            }
+            match loaded {
+                Ok(d) => Ok(d),
+                Err(e) if e.to_string() == "cancelled" => Err((e.to_string(), None)),
+                Err(e) => {
+                    // Refused: read the whole file once more without stopping, so the report
+                    // lists every bad row, not just the first. Also streamed.
+                    let report = open()
+                        .ok()
+                        .and_then(|r| spectra_data::report_csv_reader(r, &opt).ok())
+                        .map(|d| spectra_data::quality_report_json(&d, &opt));
+                    Err((e.to_string(), report))
+                }
             }
         }
     })

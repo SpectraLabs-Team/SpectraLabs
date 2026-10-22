@@ -965,6 +965,67 @@
         }
       }
     },
+    "/api/v1/datasets/versions/{id}/export": {
+      "get": {
+        "tags": [
+          "datasets"
+        ],
+        "summary": "Export a dataset version as Apache Parquet.",
+        "operationId": "export_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Dataset version id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "format",
+            "in": "path",
+            "description": "Format to export: currently only `parquet` is supported (default: `parquet`).",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Parquet binary payload",
+            "content": {
+              "application/vnd.apache.parquet": {}
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/datasets/versions/{id}/runs": {
       "get": {
         "tags": [
@@ -5850,6 +5911,20 @@
               "null"
             ],
             "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExportQuery": {
+        "type": "object",
+        "description": "`GET /api/v1/datasets/versions/{id}/export` query.",
+        "properties": {
+          "format": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Format to export: currently only `parquet` is supported (default: `parquet`)."
           }
         },
         "additionalProperties": false

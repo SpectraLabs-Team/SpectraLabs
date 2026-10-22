@@ -3050,11 +3050,14 @@ dependencies = [
 name = "spectra-api"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
+ "arrow-schema",
  "axum",
  "chrono",
  "http-body-util",
  "metrics",
  "metrics-exporter-prometheus",
+ "parquet",
  "reqwest",
  "ring",
  "sentry",
@@ -3065,6 +3068,7 @@ dependencies = [
  "spectra-data",
  "spectra-db",
  "spectra-engine",
+ "spectra-parquet",
  "spectra-registry",
  "spectra-research",
  "spectra-risk",

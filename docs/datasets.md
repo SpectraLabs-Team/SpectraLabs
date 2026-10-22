@@ -58,6 +58,7 @@ dataset derivation lineage (tasks 9–11). Research-grade data (Parquet, point-i
 | `GET /api/v1/datasets/{id}` | viewer | the dataset and its versions (newest first), with each version's run count |
 | `PATCH /api/v1/datasets/{id}` | editor | `{name?, description?}`; 409 if another dataset has the name |
 | `GET /api/v1/datasets/versions/{id}` | viewer | metadata, the full quality report, its source, derivation lineage (`derived_from_id`, `derivation_kind`, `derivation_params`), and `chartable` |
+| `GET /api/v1/datasets/versions/{id}/export?format=parquet` | viewer | export a dataset version as Apache Parquet (default and only format: `parquet`) |
 | `DELETE /api/v1/datasets/versions/{id}` | editor | 409 `in_use` while a run or a queued/running backtest uses it; also removes its file when nothing else uses it, and releases its upload |
 | `POST /api/v1/datasets/versions/{id}/derive` | editor | derives a new adjusted dataset version applying a corporate action set |
 | `GET /api/v1/datasets/versions/{id}/runs` | viewer | runs that used it, newest first |
@@ -379,6 +380,17 @@ Spectra provides research-grade **backward adjustment** for historical datasets:
 Corporate actions are grouped into reusable **corporate action sets** (`corporate_action_sets` and
 `corporate_actions`), manageable via `GET/POST/DELETE /api/v1/corporate-actions` or directly in the
 Studio Data tab.
+
+## Parquet input and export (M1b Task 9 Part B)
+
+Spectra supports Apache Parquet for market data uploads, streaming ingestion, and dataset exports:
+
+- **Exact-decimal enforcement:** Parquet data must obey the same exact-decimal rules as CSV. Floating-point columns (`Float32`, `Float64`) are strictly rejected (`"floating point numbers are not allowed"`). Values with more than 8 decimal places are rejected (`"max 8 decimal places, no rounding"`). Values must fit within 64-bit integer fixed-point scale ($10^8$).
+- **Streaming row-group ingestion:** Parquet files are read in streaming record batches (row groups) without buffering entire files in memory. Ingestion reports progress by rows read and supports cancellation identically to CSV ingest.
+- **Dataset ID parity:** A Parquet file and a CSV file containing the same OHLCV bars and symbols produce the exact same `dataset_id`.
+- **Underlying storage:** Datasets remain stored as `bars.qfb` in the content-addressed artifact store and local datastore, preserving bit-exact C++ engine parity and std-only constraints for engine crates.
+- **Parquet export:** `GET /api/v1/datasets/versions/{id}/export?format=parquet` exports any dataset version as a standard Parquet binary file with typed columns (`timestamp` in UTC, `symbol`, `open`, `high`, `low`, `close`, `volume`, and optional `known_at`). Exported Parquet files round-trip back to the identical `dataset_id`.
+- **Workspace scoping:** Export is workspace-scoped (viewers can read; requests from other workspaces return 404).
 
 ## Limits for now
 

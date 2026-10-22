@@ -28,7 +28,7 @@ SELECT id AS j3 FROM j3 \gset
 CREATE TEMP TABLE j4 AS EXECUTE job_enqueue('00000000-0000-7000-8000-0000000000b1', 'benchmark', '{"n":4}', 0, 1, NULL);
 SELECT id AS j4 FROM j4 \gset
 SELECT pg_temp.check((SELECT status = 'queued' AND attempts = 0 AND progress = 0 FROM j1), 'enqueue defaults');
-SELECT pg_temp.check((SELECT count(*) = 4 FROM job_events WHERE kind = 'queued'), 'queued events');
+SELECT pg_temp.check((SELECT count(*) = 4 FROM job_events WHERE workspace_id IN ('00000000-0000-7000-8000-0000000000a1', '00000000-0000-7000-8000-0000000000b1') AND kind = 'queued'), 'queued events');
 
 -- Claim: only kinds the worker runs; highest priority first; attempts counted.
 CREATE TEMP TABLE c1 AS EXECUTE job_claim('w1', '{benchmark}', 1);

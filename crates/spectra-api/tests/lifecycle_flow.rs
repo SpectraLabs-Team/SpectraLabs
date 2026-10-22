@@ -174,4 +174,8 @@ async fn lifecycle_api_flow() {
     assert_eq!(enron23["is_active"], false, "ENRON must be inactive in 2023");
     let fb23 = items23.iter().find(|i| i["symbol"] == "FB").unwrap();
     assert_eq!(fb23["resolved_symbol"], "META", "FB must be resolved to META in 2023");
+
+    // Clean up test workspace
+    let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(f.ws).execute(&f._pool).await;
+    let _ = sqlx::query("DELETE FROM users WHERE id = $1").bind(f.user).execute(&f._pool).await;
 }

@@ -260,4 +260,8 @@ async fn refresh_flow_e2e() {
 
     let (status, _) = fix.send(fix.req("DELETE", &format!("/api/v1/providers/configs/{cfg_id}"), "")).await;
     assert_eq!(status, 200);
+
+    // Clean up test workspace so no leftover jobs or events affect subsequent tests
+    let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(fix.ws).execute(&fix.pool).await;
+    let _ = sqlx::query("DELETE FROM users WHERE id = $1").bind(fix.user).execute(&fix.pool).await;
 }

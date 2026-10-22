@@ -71,5 +71,6 @@ jobs:
       # workspace enables only PostgreSQL. `cargo tree -i rsa` confirms rsa is not compiled.
       # RustSec has no fixed rsa release; keep auditing everything else and re-evaluate this
       # exception when SQLx drops that optional lockfile dependency or rsa is fixed.
+      # Parquet depends on paste (RUSTSEC-2024-0436 unmaintained).
       - name: Audit Cargo.lock
-        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071
+        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0436

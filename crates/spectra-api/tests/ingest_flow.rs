@@ -755,7 +755,10 @@ async fn parquet_ingest_and_export_roundtrip() {
     assert_eq!(upload_status, 201);
     let pq_upload_id = upload_j.at("id").unwrap().as_str().unwrap();
 
-    let pq_outcome = f.ingest(pq_upload_id, "bench-pq", SETTINGS, false).await;
+    let pq_settings = r#"{"delimiter":",","time_format":"iso8601","utc_offset_minutes":0,
+        "columns":{"timestamp":"timestamp","open":"open","high":"high","low":"low","close":"close",
+                   "volume":"volume","symbol":"symbol"}}"#;
+    let pq_outcome = f.ingest(pq_upload_id, "bench-pq", pq_settings, false).await;
     let pq_reg = registered(pq_outcome);
     let pq_checksum = pq_reg.get("checksum").unwrap().as_str().unwrap();
 

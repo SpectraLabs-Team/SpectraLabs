@@ -46,11 +46,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * A stored file of a finished backtest, as stored (CSV or JSON), with a
+        /** A stored file of a finished backtest, as stored (CSV or JSON), with a
          *     download file name. `kind` is one of `summary`, `request`, `equity_csv`,
-         *     `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`.
-         */
+         *     `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`. */
         get: operations["backtest_artifact"];
         put?: never;
         post?: never;
@@ -69,10 +67,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Cancel a backtest: a queued one stops at once, a running one at its next
-         *     bar group (the worker checks within a few seconds).
-         */
+        /** Cancel a backtest: a queued one stops at once, a running one at its next
+         *     bar group (the worker checks within a few seconds). */
         post: operations["cancel_backtest"];
         delete?: never;
         options?: never;
@@ -87,10 +83,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * A finished backtest's equity or drawdown series, downsampled for charts:
-         *     `{kind, total_points, downsampled, points: [[ts_ns, value], ...]}`.
-         */
+        /** A finished backtest's equity or drawdown series, downsampled for charts:
+         *     `{kind, total_points, downsampled, points: [[ts_ns, value], ...]}`. */
         get: operations["backtest_series"];
         put?: never;
         post?: never;
@@ -177,10 +171,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * The dataset versions of the caller's workspace, newest first (for the
-         *     backtest form); with `?view=grouped`, also one entry per dataset.
-         */
+        /** The dataset versions of the caller's workspace, newest first (for the
+         *     backtest form); with `?view=grouped`, also one entry per dataset. */
         get: operations["list_datasets"];
         put?: never;
         post?: never;
@@ -490,10 +482,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Cancel a job: queued jobs stop at once, running jobs at the worker's next
-         *     check (within a few seconds). Finished jobs are returned unchanged.
-         */
+        /** Cancel a job: queued jobs stop at once, running jobs at the worker's next
+         *     check (within a few seconds). Finished jobs are returned unchanged. */
         post: operations["cancel_job"];
         delete?: never;
         options?: never;
@@ -914,11 +904,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Built-in strategies with their parameter schemas, the configuration form's
+        /** Built-in strategies with their parameter schemas, the configuration form's
          *     JSON Schema, and the configuration presets: everything the Studio needs to
-         *     build the backtest form.
-         */
+         *     build the backtest form. */
         get: operations["builtin_strategies"];
         put?: never;
         post?: never;
@@ -971,10 +959,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Save a version: a built-in or DSL code with parameters. Saving the same code and
-         *     parameters again returns the existing version (200, `created: false`).
-         */
+        /** Save a version: a built-in or DSL code with parameters. Saving the same code and
+         *     parameters again returns the existing version (200, `created: false`). */
         post: operations["save_strategy_version"];
         delete?: never;
         options?: never;
@@ -1301,10 +1287,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Readiness: 200 when both the database and at least one worker answer,
-         *     otherwise 503. Compose starts the API and worker together after migrations.
-         */
+        /** Readiness: 200 when both the database and at least one worker answer,
+         *     otherwise 503. Compose starts the API and worker together after migrations. */
         get: operations["ready"];
         put?: never;
         post?: never;
@@ -1440,10 +1424,8 @@ export interface components {
         };
         /** @description A symbol's bars for a chart. */
         BarsView: {
-            /**
-             * @description At most `points` points; each groups consecutive bars (first open,
-             *     highest high, lowest low, last close, summed volume).
-             */
+            /** @description At most `points` points; each groups consecutive bars (first open,
+             *     highest high, lowest low, last close, summed volume). */
             points: components["schemas"]["BarPoint"][];
             /** @description The symbol charted. */
             symbol: string;
@@ -1615,11 +1597,9 @@ export interface components {
             as_of?: string | null;
             /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
             config?: Record<string, never> | null;
-            /**
-             * @description Splits and dividends to apply during the run, on unadjusted prices:
+            /** @description Splits and dividends to apply during the run, on unadjusted prices:
              *     `[{"symbol", "ex_date", "type": "split", "from", "to"}]` or
-             *     `[{"symbol", "ex_date", "type": "dividend", "amount"}]`.
-             */
+             *     `[{"symbol", "ex_date", "type": "dividend", "amount"}]`. */
             corporate_actions?: Record<string, never>[] | null;
             /**
              * Format: uuid
@@ -1633,15 +1613,11 @@ export interface components {
              * @description -10..10; higher runs first. Default 0.
              */
             priority?: number;
-            /**
-             * @description Several strategies on one account: `[{"strategy", "params", "weight"}]`,
-             *     each `weight` a share of the starting cash (adding up to at most 1).
-             */
+            /** @description Several strategies on one account: `[{"strategy", "params", "weight"}]`,
+             *     each `weight` a share of the starting cash (adding up to at most 1). */
             strategies?: Record<string, never>[] | null;
-            /**
-             * @description A built-in strategy name (see `GET /api/v1/strategies/builtin`).
-             *     Give either `strategy` (with `params`), `strategies`, or `strategy_version_id`.
-             */
+            /** @description A built-in strategy name (see `GET /api/v1/strategies/builtin`).
+             *     Give either `strategy` (with `params`), `strategies`, or `strategy_version_id`. */
             strategy?: string | null;
             /**
              * Format: uuid
@@ -1655,10 +1631,8 @@ export interface components {
         CreateCorporateActionSetRequest: {
             /** @description Corporate actions list. */
             actions?: components["schemas"]["CorporateActionItem"][];
-            /**
-             * @description Optional CSV text containing actions with headers:
-             *     `symbol,ex_date,action_kind,split_from,split_to,dividend_amount`.
-             */
+            /** @description Optional CSV text containing actions with headers:
+             *     `symbol,ex_date,action_kind,split_from,split_to,dividend_amount`. */
             csv?: string | null;
             /** @description Description. */
             description?: string | null;
@@ -1699,10 +1673,8 @@ export interface components {
         CreateRegistryRun: {
             /** @description OHLCV CSV with timestamp, symbol, open, high, low, close and volume columns. */
             csv: string;
-            /**
-             * @description `POST /api/v1/runs` only: the experiment to record the run under.
-             *     Omitted: the workspace's default "Unsorted" experiment.
-             */
+            /** @description `POST /api/v1/runs` only: the experiment to record the run under.
+             *     Omitted: the workspace's default "Unsorted" experiment. */
             experiment_id?: string | null;
             /**
              * Format: int32
@@ -1822,10 +1794,8 @@ export interface components {
         };
         /** @description The workspace's dataset versions, newest first. */
         DatasetList: {
-            /**
-             * @description Only with `?view=grouped`: the same versions' datasets, most recently
-             *     updated first, each with its latest version (the Studio's Data tab).
-             */
+            /** @description Only with `?view=grouped`: the same versions' datasets, most recently
+             *     updated first, each with its latest version (the Studio's Data tab). */
             datasets?: components["schemas"]["DatasetSummaryView"][] | null;
             /** @description At most 500. */
             items: components["schemas"]["DatasetVersionView"][];
@@ -2050,10 +2020,8 @@ export interface components {
         };
         /** @description `POST /api/v1/datasets/ingest` body. */
         IngestRequest: {
-            /**
-             * @description The dataset to add a version to (created if new). Different content
-             *     becomes its next version; the same content changes nothing.
-             */
+            /** @description The dataset to add a version to (created if new). Different content
+             *     becomes its next version; the same content changes nothing. */
             dataset_name: string;
             /** @description How to read the file (as previewed). */
             settings: components["schemas"]["IngestSettings"];
@@ -2063,10 +2031,8 @@ export interface components {
              */
             upload_id: string;
         };
-        /**
-         * @description Ingest settings (the JSON form of the engine's CSV options). Every field
-         *     below without "optional" must be given: nothing is guessed.
-         */
+        /** @description Ingest settings (the JSON form of the engine's CSV options). Every field
+         *     below without "optional" must be given: nothing is guessed. */
         IngestSettings: {
             /** @description Which header name holds each field. */
             columns: components["schemas"]["IngestColumns"];
@@ -2220,10 +2186,8 @@ export interface components {
         Preview: {
             /** @description The header, trimmed and lower-cased (how columns are matched). */
             header: string[];
-            /**
-             * @description The quality report of the parsed rows. Every bad row in the sample is
-             *     counted here, whatever `skip_bad_rows` says.
-             */
+            /** @description The quality report of the parsed rows. Every bad row in the sample is
+             *     counted here, whatever `skip_bad_rows` says. */
             quality: components["schemas"]["QualityReport"];
             /** @description The first 200 parsed rows, sorted by timestamp then symbol. Prices are exact decimal text. */
             rows: components["schemas"]["PreviewRow"][];
@@ -2233,10 +2197,8 @@ export interface components {
              *     sample (at most 1 MB) is checked, so this is 0.
              */
             rows_not_read: number;
-            /**
-             * @description Why ingesting would stop with these settings (the first bad row when
-             *     bad rows abort, or "no valid data rows"); null if these rows would load.
-             */
+            /** @description Why ingesting would stop with these settings (the first bad row when
+             *     bad rows abort, or "no valid data rows"); null if these rows would load. */
             would_abort?: string | null;
         };
         /** @description `POST /api/v1/datasets/preview` body. */
@@ -2244,10 +2206,8 @@ export interface components {
             /** @description The start of the file as UTF-8 text, header included (at most 1 MB). */
             sample: string;
             settings?: null | components["schemas"]["IngestSettings"];
-            /**
-             * @description `true` when `sample` was cut from a longer file: its last line may be
-             *     incomplete, so it is ignored.
-             */
+            /** @description `true` when `sample` was cut from a longer file: its last line may be
+             *     incomplete, so it is ignored. */
             truncated?: boolean;
         };
         /** @description `POST /api/v1/datasets/preview` response. */
@@ -2981,11 +2941,9 @@ export interface components {
              * @description Version id.
              */
             id: string;
-            /**
-             * @description The quality report. Versions ingested through the Studio have every
+            /** @description The quality report. Versions ingested through the Studio have every
              *     field of `QualityReport`; command-line versions only some
-             *     (`rows_total`, `rows_accepted`, `rows_rejected`, `warnings`, `symbols`, ...).
-             */
+             *     (`rows_total`, `rows_accepted`, `rows_rejected`, `warnings`, `symbols`, ...). */
             quality_report: Record<string, never>;
             /**
              * Format: int64
@@ -2997,10 +2955,8 @@ export interface components {
              * @description Runs that used it.
              */
             run_count: number;
-            /**
-             * @description How it was made from an upload (`upload_id`, `file_sha256`, `filename`,
-             *     `settings`); null when registered from the command line.
-             */
+            /** @description How it was made from an upload (`upload_id`, `file_sha256`, `filename`,
+             *     `settings`); null when registered from the command line. */
             source?: Record<string, never> | null;
             /**
              * Format: int32
@@ -3563,10 +3519,8 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /**
-                 * @description `grouped` adds `datasets` (one entry per dataset). Without it the
-                 *     response is exactly the version list the backtest form reads.
-                 */
+                /** @description `grouped` adds `datasets` (one entry per dataset). Without it the
+                 *     response is exactly the version list the backtest form reads. */
                 view: string | null;
             };
             cookie?: never;

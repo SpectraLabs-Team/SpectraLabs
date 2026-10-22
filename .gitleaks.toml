@@ -4,12 +4,16 @@
 useDefault = true
 
 [allowlist]
-description = "Fake broker keys used by the vault tests (web/frontend/scripts/test-auth.mjs)"
+description = "Fake broker keys used by the vault tests (web/frontend/scripts/test-auth.mjs) and test tokens"
+commits = [
+  "65b1c0ac5bb8d39210480909dcaa00bccf18a3fc",
+]
 regexTarget = "secret"
 regexes = [
   '''^sEcReTkEy0123456789abcdefghijklmnopqrstuv$''',
   '''^b-secret-0123456789abcdef$''',
   '''^another-secret-key-0123456789$''',
+  '''^abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE$''',
 ]
 
 # Spectra API tokens (web/frontend/lib/server/apiTokens.ts). Any match is a real, usable token:

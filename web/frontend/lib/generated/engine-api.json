@@ -2383,6 +2383,241 @@
         }
       }
     },
+    "/api/v1/risk/audit": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "List recent pre-trade decisions audit trail.",
+        "operationId": "list_audit",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent pre-trade decisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RiskDecisionView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/risk/check": {
+      "post": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Run pre-trade risk check on candidate order and log decision.",
+        "operationId": "pre_trade_check",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreTradeCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Pre-trade verdict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreTradeResultView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/risk/kill-switch": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Get kill switches for workspace or specific strategy.",
+        "operationId": "get_kill_switches",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Kill switch state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KillSwitchView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Activate or clear emergency kill switch.",
+        "operationId": "set_kill_switch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetKillSwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated kill switch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/risk/limits": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Get risk limits for a workspace or strategy.",
+        "operationId": "get_limits",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskLimitsView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Upsert risk limits for a workspace or strategy.",
+        "operationId": "put_limits",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertLimitsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Limits updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskLimitsView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/risk/metrics": {
+      "get": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Retrieve live risk metrics vs active limits for workspace or strategy.",
+        "operationId": "get_metrics",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Risk metrics vs limits summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskMetricsSummaryView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/runs": {
       "get": {
         "tags": [
@@ -5991,6 +6226,64 @@
           }
         }
       },
+      "KillSwitchView": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "active",
+          "reason",
+          "triggered_at"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "cleared_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "cleared_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "triggered_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "triggered_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "OptimizationSweepView": {
         "type": "object",
         "required": [
@@ -6168,6 +6461,141 @@
           }
         }
       },
+      "PortfolioSnapshotDto": {
+        "type": "object",
+        "required": [
+          "cash",
+          "equity",
+          "peak_equity",
+          "daily_start_equity",
+          "positions"
+        ],
+        "properties": {
+          "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "daily_start_equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "peak_equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "positions": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PositionSnapshotDto"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "PositionSnapshotDto": {
+        "type": "object",
+        "required": [
+          "qty",
+          "price"
+        ],
+        "properties": {
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "PreTradeCheckRequest": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "side",
+          "qty",
+          "price"
+        ],
+        "properties": {
+          "portfolio": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioSnapshotDto"
+              }
+            ]
+          },
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "side": {
+            "type": "string"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
+      "PreTradeResultView": {
+        "type": "object",
+        "required": [
+          "verdict",
+          "requested_qty",
+          "approved_qty",
+          "breaches",
+          "projected_metrics"
+        ],
+        "properties": {
+          "approved_qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "breaches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RiskBreachView"
+            }
+          },
+          "decision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "projected_metrics": {
+            "$ref": "#/components/schemas/ProjectedMetricsView"
+          },
+          "requested_qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "verdict": {
+            "type": "string"
+          }
+        }
+      },
       "Preview": {
         "type": "object",
         "description": "The sample, parsed.",
@@ -6303,6 +6731,48 @@
           }
         },
         "additionalProperties": false
+      },
+      "ProjectedMetricsView": {
+        "type": "object",
+        "required": [
+          "gross_exposure",
+          "net_exposure",
+          "leverage",
+          "position_size",
+          "concentration_pct",
+          "drawdown_pct",
+          "daily_loss"
+        ],
+        "properties": {
+          "concentration_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "daily_loss": {
+            "type": "number",
+            "format": "double"
+          },
+          "drawdown_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "gross_exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "leverage": {
+            "type": "number",
+            "format": "double"
+          },
+          "net_exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "position_size": {
+            "type": "number",
+            "format": "double"
+          }
+        }
       },
       "ProviderConfigListView": {
         "type": "object",
@@ -6642,6 +7112,293 @@
           }
         }
       },
+      "RiskBreachView": {
+        "type": "object",
+        "required": [
+          "code",
+          "limit",
+          "projected",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number",
+            "format": "double"
+          },
+          "message": {
+            "type": "string"
+          },
+          "projected": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "RiskDecisionView": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "symbol",
+          "side",
+          "requested_qty",
+          "price",
+          "approved_qty",
+          "verdict",
+          "breaches",
+          "reasons",
+          "metrics",
+          "created_at"
+        ],
+        "properties": {
+          "actor_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "approved_qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "breaches": {},
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "metrics": {},
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requested_qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "side": {
+            "type": "string"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "verdict": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "RiskLimitsView": {
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "max_gross_exposure",
+          "max_net_exposure",
+          "max_position_size",
+          "max_concentration_pct",
+          "max_leverage",
+          "max_drawdown_pct",
+          "max_daily_loss",
+          "max_var_pct",
+          "size_reduction_enabled"
+        ],
+        "properties": {
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "max_concentration_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_daily_loss": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_drawdown_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_gross_exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_leverage": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_net_exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_position_size": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_var_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "size_reduction_enabled": {
+            "type": "boolean"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "RiskMetricsSummaryView": {
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "kill_switch_active",
+          "gross_exposure",
+          "gross_exposure_limit",
+          "gross_exposure_utilization_pct",
+          "net_exposure",
+          "net_exposure_limit",
+          "net_exposure_utilization_pct",
+          "leverage",
+          "leverage_limit",
+          "leverage_utilization_pct",
+          "drawdown_pct",
+          "drawdown_limit_pct",
+          "drawdown_utilization_pct",
+          "daily_loss",
+          "daily_loss_limit",
+          "daily_loss_utilization_pct"
+        ],
+        "properties": {
+          "daily_loss": {
+            "type": "number",
+            "format": "double"
+          },
+          "daily_loss_limit": {
+            "type": "number",
+            "format": "double"
+          },
+          "daily_loss_utilization_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "drawdown_limit_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "drawdown_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "drawdown_utilization_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "gross_exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "gross_exposure_limit": {
+            "type": "number",
+            "format": "double"
+          },
+          "gross_exposure_utilization_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "kill_switch_active": {
+            "type": "boolean"
+          },
+          "kill_switch_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "leverage": {
+            "type": "number",
+            "format": "double"
+          },
+          "leverage_limit": {
+            "type": "number",
+            "format": "double"
+          },
+          "leverage_utilization_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "net_exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "net_exposure_limit": {
+            "type": "number",
+            "format": "double"
+          },
+          "net_exposure_utilization_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "RiskRequest": {
         "type": "object",
         "description": "`POST /api/v1/risk` body.",
@@ -6872,6 +7629,30 @@
             ],
             "format": "uuid",
             "description": "The upload it became, once completed."
+          }
+        }
+      },
+      "SetKillSwitchRequest": {
+        "type": "object",
+        "required": [
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -7688,6 +8469,64 @@
           }
         }
       },
+      "UpsertLimitsRequest": {
+        "type": "object",
+        "required": [
+          "max_gross_exposure",
+          "max_net_exposure",
+          "max_position_size",
+          "max_concentration_pct",
+          "max_leverage",
+          "max_drawdown_pct",
+          "max_daily_loss",
+          "max_var_pct",
+          "size_reduction_enabled"
+        ],
+        "properties": {
+          "max_concentration_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_daily_loss": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_drawdown_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_gross_exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_leverage": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_net_exposure": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_position_size": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_var_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "size_reduction_enabled": {
+            "type": "boolean"
+          },
+          "strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
       "UpsertProviderConfigRequest": {
         "type": "object",
         "description": "Request to create or update a provider configuration.",
@@ -8221,6 +9060,10 @@
     {
       "name": "optimization",
       "description": "Parameter sweeps, walk-forward validation, overfitting statistics and holdout vault"
+    },
+    {
+      "name": "risk",
+      "description": "Risk Center: limits, pre-trade enforcement, kill switches, and decision audit logs"
     }
   ]
 }

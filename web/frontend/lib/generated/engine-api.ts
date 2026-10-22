@@ -780,6 +780,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/risk/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List recent pre-trade decisions audit trail. */
+        get: operations["list_audit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run pre-trade risk check on candidate order and log decision. */
+        post: operations["pre_trade_check"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/kill-switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get kill switches for workspace or specific strategy. */
+        get: operations["get_kill_switches"];
+        put?: never;
+        /** Activate or clear emergency kill switch. */
+        post: operations["set_kill_switch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/limits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get risk limits for a workspace or strategy. */
+        get: operations["get_limits"];
+        /** Upsert risk limits for a workspace or strategy. */
+        put: operations["put_limits"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Retrieve live risk metrics vs active limits for workspace or strategy. */
+        get: operations["get_metrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -2124,6 +2211,24 @@ export interface components {
             /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
             status: string;
         };
+        KillSwitchView: {
+            active: boolean;
+            /** Format: date-time */
+            cleared_at?: string | null;
+            /** Format: uuid */
+            cleared_by?: string | null;
+            /** Format: uuid */
+            id: string;
+            reason: string;
+            /** Format: uuid */
+            strategy_id?: string | null;
+            /** Format: date-time */
+            triggered_at: string;
+            /** Format: uuid */
+            triggered_by?: string | null;
+            /** Format: uuid */
+            workspace_id: string;
+        };
         OptimizationSweepView: {
             best_metrics?: unknown;
             /** Format: double */
@@ -2182,6 +2287,47 @@ export interface components {
             /** Format: double */
             sharpe_variance: number;
         };
+        PortfolioSnapshotDto: {
+            /** Format: double */
+            cash: number;
+            /** Format: double */
+            daily_start_equity: number;
+            /** Format: double */
+            equity: number;
+            /** Format: double */
+            peak_equity: number;
+            positions: {
+                [key: string]: components["schemas"]["PositionSnapshotDto"];
+            };
+        };
+        PositionSnapshotDto: {
+            /** Format: double */
+            price: number;
+            /** Format: double */
+            qty: number;
+        };
+        PreTradeCheckRequest: {
+            portfolio?: null | components["schemas"]["PortfolioSnapshotDto"];
+            /** Format: double */
+            price: number;
+            /** Format: double */
+            qty: number;
+            side: string;
+            /** Format: uuid */
+            strategy_id?: string | null;
+            symbol: string;
+        };
+        PreTradeResultView: {
+            /** Format: double */
+            approved_qty: number;
+            breaches: components["schemas"]["RiskBreachView"][];
+            /** Format: uuid */
+            decision_id?: string | null;
+            projected_metrics: components["schemas"]["ProjectedMetricsView"];
+            /** Format: double */
+            requested_qty: number;
+            verdict: string;
+        };
         /** @description The sample, parsed. */
         Preview: {
             /** @description The header, trimmed and lower-cased (how columns are matched). */
@@ -2226,6 +2372,22 @@ export interface components {
             /** @description UTC, RFC 3339. */
             timestamp: string;
             volume: string;
+        };
+        ProjectedMetricsView: {
+            /** Format: double */
+            concentration_pct: number;
+            /** Format: double */
+            daily_loss: number;
+            /** Format: double */
+            drawdown_pct: number;
+            /** Format: double */
+            gross_exposure: number;
+            /** Format: double */
+            leverage: number;
+            /** Format: double */
+            net_exposure: number;
+            /** Format: double */
+            position_size: number;
         };
         /** @description List of provider configurations. */
         ProviderConfigListView: {
@@ -2401,6 +2563,105 @@ export interface components {
             /** @description Original constituent symbol. */
             symbol: string;
         };
+        RiskBreachView: {
+            code: string;
+            /** Format: double */
+            limit: number;
+            message: string;
+            /** Format: double */
+            projected: number;
+        };
+        RiskDecisionView: {
+            /** Format: uuid */
+            actor_id?: string | null;
+            /** Format: double */
+            approved_qty: number;
+            breaches: unknown;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            id: string;
+            metrics: unknown;
+            /** Format: double */
+            price: number;
+            reasons: string[];
+            /** Format: double */
+            requested_qty: number;
+            side: string;
+            /** Format: uuid */
+            strategy_id?: string | null;
+            symbol: string;
+            verdict: string;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        RiskLimitsView: {
+            /** Format: uuid */
+            id?: string | null;
+            /** Format: double */
+            max_concentration_pct: number;
+            /** Format: double */
+            max_daily_loss: number;
+            /** Format: double */
+            max_drawdown_pct: number;
+            /** Format: double */
+            max_gross_exposure: number;
+            /** Format: double */
+            max_leverage: number;
+            /** Format: double */
+            max_net_exposure: number;
+            /** Format: double */
+            max_position_size: number;
+            /** Format: double */
+            max_var_pct: number;
+            size_reduction_enabled: boolean;
+            /** Format: uuid */
+            strategy_id?: string | null;
+            /** Format: date-time */
+            updated_at?: string | null;
+            /** Format: uuid */
+            updated_by?: string | null;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        RiskMetricsSummaryView: {
+            /** Format: double */
+            daily_loss: number;
+            /** Format: double */
+            daily_loss_limit: number;
+            /** Format: double */
+            daily_loss_utilization_pct: number;
+            /** Format: double */
+            drawdown_limit_pct: number;
+            /** Format: double */
+            drawdown_pct: number;
+            /** Format: double */
+            drawdown_utilization_pct: number;
+            /** Format: double */
+            gross_exposure: number;
+            /** Format: double */
+            gross_exposure_limit: number;
+            /** Format: double */
+            gross_exposure_utilization_pct: number;
+            kill_switch_active: boolean;
+            kill_switch_reason?: string | null;
+            /** Format: double */
+            leverage: number;
+            /** Format: double */
+            leverage_limit: number;
+            /** Format: double */
+            leverage_utilization_pct: number;
+            /** Format: double */
+            net_exposure: number;
+            /** Format: double */
+            net_exposure_limit: number;
+            /** Format: double */
+            net_exposure_utilization_pct: number;
+            /** Format: uuid */
+            strategy_id?: string | null;
+            /** Format: uuid */
+            workspace_id: string;
+        };
         /** @description `POST /api/v1/risk` body. */
         RiskRequest: {
             /** @description `auto`, `cpu` or `parallel`. */
@@ -2504,6 +2765,12 @@ export interface components {
              * @description The upload it became, once completed.
              */
             upload_id?: string | null;
+        };
+        SetKillSwitchRequest: {
+            active: boolean;
+            reason?: string | null;
+            /** Format: uuid */
+            strategy_id?: string | null;
         };
         StartSurvival: {
             config?: unknown;
@@ -2862,6 +3129,27 @@ export interface components {
              * @description Bytes.
              */
             size: number;
+        };
+        UpsertLimitsRequest: {
+            /** Format: double */
+            max_concentration_pct: number;
+            /** Format: double */
+            max_daily_loss: number;
+            /** Format: double */
+            max_drawdown_pct: number;
+            /** Format: double */
+            max_gross_exposure: number;
+            /** Format: double */
+            max_leverage: number;
+            /** Format: double */
+            max_net_exposure: number;
+            /** Format: double */
+            max_position_size: number;
+            /** Format: double */
+            max_var_pct: number;
+            size_reduction_enabled: boolean;
+            /** Format: uuid */
+            strategy_id?: string | null;
         };
         /** @description Request to create or update a provider configuration. */
         UpsertProviderConfigRequest: {
@@ -4949,6 +5237,166 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_audit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent pre-trade decisions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskDecisionView"][];
+                };
+            };
+        };
+    };
+    pre_trade_check: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PreTradeCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Pre-trade verdict */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreTradeResultView"];
+                };
+            };
+        };
+    };
+    get_kill_switches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Kill switch state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchView"][];
+                };
+            };
+        };
+    };
+    set_kill_switch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetKillSwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated kill switch */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KillSwitchView"];
+                };
+            };
+        };
+    };
+    get_limits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active limits */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskLimitsView"];
+                };
+            };
+        };
+    };
+    put_limits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertLimitsRequest"];
+            };
+        };
+        responses: {
+            /** @description Limits updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskLimitsView"];
+                };
+            };
+        };
+    };
+    get_metrics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Risk metrics vs limits summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskMetricsSummaryView"];
                 };
             };
         };

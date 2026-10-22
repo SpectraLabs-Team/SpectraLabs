@@ -55,6 +55,7 @@ pub mod optimization_api;
 pub mod providers;
 pub mod providers_api;
 pub mod registry_api;
+pub mod risk_center_api;
 pub mod sessions_api;
 pub mod strategies_api;
 pub mod survival_api;
@@ -213,7 +214,7 @@ pub fn error_code(status: u16) -> &'static str {
     }
 }
 
-fn json_response(status: u16, text: String) -> Response {
+pub(crate) fn json_response(status: u16, text: String) -> Response {
     let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     (status, [(header::CONTENT_TYPE, "application/json")], text).into_response()
 }
@@ -860,6 +861,19 @@ fn optimization_routes() -> Router<AppState> {
         .route("/api/v1/optimization/holdout/{id}/evaluate", only(post(optimization_api::evaluate_holdout)))
 }
 
+/// Module 8: Risk Center and Enforcement.
+fn risk_center_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/risk/limits", only(get(risk_center_api::get_limits).put(risk_center_api::put_limits)))
+        .route("/api/v1/risk/check", only(post(risk_center_api::pre_trade_check)))
+        .route(
+            "/api/v1/risk/kill-switch",
+            only(get(risk_center_api::get_kill_switches).post(risk_center_api::set_kill_switch)),
+        )
+        .route("/api/v1/risk/audit", only(get(risk_center_api::list_audit)))
+        .route("/api/v1/risk/metrics", only(get(risk_center_api::get_metrics)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -878,6 +892,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(backtest_routes())
         .merge(session_routes())
         .merge(optimization_routes())
+        .merge(risk_center_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .merge(upload_routes())

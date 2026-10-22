@@ -18,11 +18,17 @@
 //! assert!(var.value > 0.0);
 //! ```
 
+pub mod enforcement;
 pub mod engine;
 pub mod metrics;
 pub mod portfolio;
 pub mod rng;
 pub mod simulation;
+
+pub use enforcement::{
+    OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeResult,
+    PreTradeVerdict, ProjectedMetrics, RiskBreach, RiskLimits,
+};
 
 pub use engine::{
     aggregate_volatility, benchmark, benchmark_with_progress, check_convergence, quantile, scenario,

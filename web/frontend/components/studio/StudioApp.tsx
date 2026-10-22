@@ -11,6 +11,7 @@ import { MarketSettings } from './MarketSettings';
 import { OptimizationLab } from './OptimizationLab';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';
+import { RiskCenter } from './RiskCenter';
 import { RiskLab } from './RiskLab';
 import { StrategyStudio } from './StrategyStudio';
 import { StudioShell, TABS, type StudioTab } from './StudioShell';
@@ -30,6 +31,7 @@ export function StudioApp() {
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.18 }}>
             {tab === 'risk' && <RiskLab />}
+            {tab === 'risk-center' && <RiskCenter />}
             {tab === 'portfolio' && <PortfolioStudio />}
             {tab === 'data' && <DataLab />}
             {tab === 'strategies' && <StrategyStudio />}

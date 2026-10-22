@@ -257,7 +257,10 @@ DO $$ BEGIN
        OR EXISTS (SELECT 1 FROM run_notes WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
        OR EXISTS (SELECT 1 FROM experiment_notes WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
        OR EXISTS (SELECT 1 FROM experiments WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
-       OR EXISTS (SELECT 1 FROM workspace_quotas WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1') THEN
+       OR EXISTS (SELECT 1 FROM workspace_quotas WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM risk_limits WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM risk_kill_switches WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1')
+       OR EXISTS (SELECT 1 FROM risk_decisions WHERE workspace_id = '00000000-0000-7000-8000-0000000000c1') THEN
         RAISE EXCEPTION 'workspace deletion left engine rows behind';
     END IF;
     -- Other workspaces' chains are untouched.
@@ -273,7 +276,8 @@ BEGIN
     FOREACH t IN ARRAY ARRAY['datasets', 'dataset_versions', 'strategies', 'strategy_versions', 'experiments',
                              'runs', 'run_artifacts', 'registry_events', 'jobs', 'job_events',
                              'symbol_changes', 'instrument_delistings', 'universes', 'universe_members',
-                             'data_provider_configs', 'dataset_refresh_schedules'] LOOP
+                             'data_provider_configs', 'dataset_refresh_schedules',
+                             'risk_limits', 'risk_kill_switches', 'risk_decisions'] LOOP
         IF NOT EXISTS (SELECT 1 FROM information_schema.columns
                         WHERE table_name = t AND column_name = 'workspace_id' AND is_nullable = 'NO') THEN
             RAISE EXCEPTION '% lacks a NOT NULL workspace_id', t;

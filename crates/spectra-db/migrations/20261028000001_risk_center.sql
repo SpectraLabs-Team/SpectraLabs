@@ -15,7 +15,7 @@ CREATE TABLE risk_limits (
     size_reduction_enabled boolean NOT NULL DEFAULT true,
     updated_by             uuid REFERENCES users (id) ON DELETE SET NULL,
     updated_at             timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (workspace_id, strategy_id)
+    UNIQUE NULLS NOT DISTINCT (workspace_id, strategy_id)
 );
 
 CREATE INDEX idx_risk_limits_workspace ON risk_limits (workspace_id);
@@ -31,7 +31,7 @@ CREATE TABLE risk_kill_switches (
     triggered_at timestamptz NOT NULL DEFAULT now(),
     cleared_at   timestamptz,
     cleared_by   uuid REFERENCES users (id) ON DELETE SET NULL,
-    UNIQUE (workspace_id, strategy_id)
+    UNIQUE NULLS NOT DISTINCT (workspace_id, strategy_id)
 );
 
 CREATE INDEX idx_risk_kill_switches_workspace ON risk_kill_switches (workspace_id);

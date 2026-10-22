@@ -174,6 +174,13 @@ pub struct StressRequest {
         crate::optimization_api::list_holdouts,
         crate::optimization_api::get_holdout,
         crate::optimization_api::evaluate_holdout,
+        crate::risk_center_api::get_limits,
+        crate::risk_center_api::put_limits,
+        crate::risk_center_api::pre_trade_check,
+        crate::risk_center_api::get_kill_switches,
+        crate::risk_center_api::set_kill_switch,
+        crate::risk_center_api::list_audit,
+        crate::risk_center_api::get_metrics,
     ),
     components(schemas(
         ErrorDoc,
@@ -272,6 +279,18 @@ pub struct StressRequest {
         crate::optimization_api::HoldoutVaultView,
         crate::optimization_api::EvaluateHoldoutRequest,
         crate::optimization_api::HoldoutEvaluationView,
+        crate::risk_center_api::RiskLimitsView,
+        crate::risk_center_api::UpsertLimitsRequest,
+        crate::risk_center_api::KillSwitchView,
+        crate::risk_center_api::SetKillSwitchRequest,
+        crate::risk_center_api::PositionSnapshotDto,
+        crate::risk_center_api::PortfolioSnapshotDto,
+        crate::risk_center_api::PreTradeCheckRequest,
+        crate::risk_center_api::RiskBreachView,
+        crate::risk_center_api::ProjectedMetricsView,
+        crate::risk_center_api::PreTradeResultView,
+        crate::risk_center_api::RiskDecisionView,
+        crate::risk_center_api::RiskMetricsSummaryView,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
@@ -286,6 +305,7 @@ pub struct StressRequest {
         (name = "providers", description = "Market data providers and automated refresh schedules"),
         (name = "strategies", description = "Saved strategies and their immutable versions"),
         (name = "optimization", description = "Parameter sweeps, walk-forward validation, overfitting statistics and holdout vault"),
+        (name = "risk", description = "Risk Center: limits, pre-trade enforcement, kill switches, and decision audit logs"),
     )
 )]
 pub struct ApiDoc;
@@ -350,6 +370,11 @@ mod tests {
             "/api/v1/universes/{id}",
             "/api/v1/universes/{id}/members",
             "/api/v1/universes/{id}/as-of",
+            "/api/v1/risk/limits",
+            "/api/v1/risk/check",
+            "/api/v1/risk/kill-switch",
+            "/api/v1/risk/audit",
+            "/api/v1/risk/metrics",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

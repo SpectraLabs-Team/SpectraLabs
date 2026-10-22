@@ -107,6 +107,12 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/optimization/holdout/seal': { method: 'POST', minRole: 'editor', timeoutMs: 15_000 },
   'api/v1/optimization/holdout/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/optimization/holdout/{id}/evaluate': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  // Module 8: Risk Center and Enforcement
+  'api/v1/risk/limits': { method: ['GET', 'PUT'], minRole: 'viewer', methodRoles: { PUT: 'editor' }, timeoutMs: 15_000 },
+  'api/v1/risk/check': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/risk/kill-switch': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 15_000 },
+  'api/v1/risk/audit': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/risk/metrics': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
 };
 
 export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };

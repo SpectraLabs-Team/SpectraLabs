@@ -26,6 +26,7 @@ pub mod jobs;
 pub mod lifecycle;
 pub mod optimization;
 pub mod providers;
+pub mod risk_center;
 pub mod strategies;
 pub mod uploads;
 pub mod vault;

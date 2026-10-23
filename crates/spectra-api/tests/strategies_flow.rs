@@ -837,18 +837,13 @@ async fn strategy_sharing_viewer_can_run_and_cannot_edit() {
 
     // 2. Add second user as read-only viewer in the same workspace
     let viewer_id = spectra_db::new_id();
-    let _ = sqlx::query("INSERT INTO users (id, email) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-        .bind(viewer_id)
-        .bind(format!("viewer-{}@example.com", viewer_id.simple()))
-        .execute(&f.pool)
-        .await;
-    let _ = sqlx::query(
-        "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'viewer') ON CONFLICT DO NOTHING",
-    )
-    .bind(f.ws)
-    .bind(viewer_id)
-    .execute(&f.pool)
-    .await;
+    spectra_db::identity::ensure_identity(&f.pool, Some(viewer_id), f.ws).await.unwrap();
+    let _ =
+        sqlx::query("UPDATE workspace_members SET role = 'viewer' WHERE workspace_id = $1 AND user_id = $2")
+            .bind(f.ws)
+            .bind(viewer_id)
+            .execute(&f.pool)
+            .await;
 
     // 3. Viewer can READ the shared strategy and its version
     let (status, strat_view) =

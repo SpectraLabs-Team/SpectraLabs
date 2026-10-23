@@ -2322,6 +2322,239 @@
         }
       }
     },
+    "/api/v1/paper/account": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Get the paper account (balance and open positions) for a strategy.",
+        "operationId": "get_account",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "initial_cash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paper account balance and positions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperAccountView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/account/reset": {
+      "post": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Reset a strategy's paper account (clears positions, resets cash to initial capital).",
+        "operationId": "reset_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPaperAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Paper account reset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperAccountView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/orders": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "List paper orders for a workspace.",
+        "operationId": "list_orders",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of paper orders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PaperOrderView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Place a paper order. Evaluates pre-trade risk checks (M8) before acceptance.",
+        "operationId": "create_order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaperOrderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Order accepted and/or filled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperOrderView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Order rejected by risk check or invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperOrderView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/orders/{id}": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Get a specific paper order by ID with its fills.",
+        "operationId": "get_order",
+        "responses": {
+          "200": {
+            "description": "Paper order details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperOrderView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/step": {
+      "post": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Step a saved strategy version on incoming bars against the paper account.",
+        "operationId": "step_strategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepPaperRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Strategy stepped on bars",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepPaperResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Strategy or version not found"
+          },
+          "422": {
+            "description": "Invalid request or bar input"
+          }
+        }
+      }
+    },
     "/api/v1/providers/configs": {
       "get": {
         "tags": [
@@ -5684,6 +5917,68 @@
         },
         "additionalProperties": false
       },
+      "CreatePaperOrderRequest": {
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "symbol",
+          "side",
+          "order_type",
+          "qty"
+        ],
+        "properties": {
+          "fill_now": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "fill_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "limit_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "order_type": {
+            "type": "string"
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "side": {
+            "type": "string"
+          },
+          "stop_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "tif": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "CreateRegistryRun": {
         "type": "object",
         "required": [
@@ -7133,6 +7428,256 @@
           }
         }
       },
+      "PaperAccountView": {
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "strategy_id",
+          "cash",
+          "equity",
+          "peak_equity",
+          "daily_start_equity",
+          "positions",
+          "updated_at"
+        ],
+        "properties": {
+          "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "daily_start_equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "peak_equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortfolioPositionView"
+            }
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "PaperBarInput": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "ts_ns",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "properties": {
+          "close": {
+            "type": "number",
+            "format": "double"
+          },
+          "high": {
+            "type": "number",
+            "format": "double"
+          },
+          "low": {
+            "type": "number",
+            "format": "double"
+          },
+          "open": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "ts_ns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "volume": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "PaperFillView": {
+        "type": "object",
+        "required": [
+          "id",
+          "order_id",
+          "workspace_id",
+          "strategy_id",
+          "symbol",
+          "side",
+          "qty",
+          "price",
+          "fee",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fee": {
+            "type": "number",
+            "format": "double"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "order_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "side": {
+            "type": "string"
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "PaperOrderView": {
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "strategy_id",
+          "symbol",
+          "side",
+          "order_type",
+          "qty",
+          "tif",
+          "status",
+          "filled_qty",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "filled_avg_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "filled_qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "fills": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/PaperFillView"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "limit_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "order_type": {
+            "type": "string"
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "reject_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "side": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stop_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "tif": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "PortfolioBalanceView": {
         "type": "object",
         "required": [
@@ -7849,6 +8394,25 @@
           },
           "replay_verdict": {
             "type": "string"
+          }
+        }
+      },
+      "ResetPaperAccountRequest": {
+        "type": "object",
+        "required": [
+          "strategy_id"
+        ],
+        "properties": {
+          "initial_cash": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },
@@ -8621,6 +9185,75 @@
         "properties": {
           "config": {},
           "preset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "StepPaperRequest": {
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "bars"
+        ],
+        "properties": {
+          "bars": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaperBarInput"
+            }
+          },
+          "config_preset": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "strategy_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "StepPaperResponse": {
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "orders",
+          "fills",
+          "account"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/PaperAccountView"
+          },
+          "fills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaperFillView"
+            }
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaperOrderView"
+            }
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "strategy_version_id": {
             "type": [
               "string",
               "null"
@@ -10086,6 +10719,10 @@
     {
       "name": "risk",
       "description": "Risk Center: limits, pre-trade enforcement, kill switches, and decision audit logs"
+    },
+    {
+      "name": "paper",
+      "description": "Simulated paper trading accounts, orders and fills"
     }
   ]
 }

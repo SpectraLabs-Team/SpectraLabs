@@ -241,6 +241,12 @@ pub struct StressRequest {
         crate::risk_center_api::get_exposure_history,
         crate::risk_center_api::get_alerts,
         crate::risk_center_api::replay_decision,
+        crate::paper_api::get_account,
+        crate::paper_api::reset_account,
+        crate::paper_api::list_orders,
+        crate::paper_api::get_order,
+        crate::paper_api::create_order,
+        crate::paper_api::step_strategy,
     ),
     components(schemas(
         ErrorDoc,
@@ -365,6 +371,14 @@ pub struct StressRequest {
         crate::risk_center_api::EquitySnapshotView,
         crate::risk_center_api::RiskAlertView,
         crate::risk_center_api::ReplayDecisionView,
+        crate::paper_api::ResetPaperAccountRequest,
+        crate::paper_api::PaperAccountView,
+        crate::paper_api::CreatePaperOrderRequest,
+        crate::paper_api::PaperOrderView,
+        crate::paper_api::PaperFillView,
+        crate::paper_api::StepPaperRequest,
+        crate::paper_api::PaperBarInput,
+        crate::paper_api::StepPaperResponse,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
@@ -380,6 +394,7 @@ pub struct StressRequest {
         (name = "strategies", description = "Saved strategies and their immutable versions"),
         (name = "optimization", description = "Parameter sweeps, walk-forward validation, overfitting statistics and holdout vault"),
         (name = "risk", description = "Risk Center: limits, pre-trade enforcement, kill switches, and decision audit logs"),
+        (name = "paper", description = "Simulated paper trading accounts, orders and fills"),
     )
 )]
 pub struct ApiDoc;

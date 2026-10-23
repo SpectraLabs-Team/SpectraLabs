@@ -730,6 +730,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the paper account (balance and open positions) for a strategy. */
+        get: operations["get_account"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/account/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset a strategy's paper account (clears positions, resets cash to initial capital). */
+        post: operations["reset_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List paper orders for a workspace. */
+        get: operations["list_orders"];
+        put?: never;
+        /** Place a paper order. Evaluates pre-trade risk checks (M8) before acceptance. */
+        post: operations["create_order"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a specific paper order by ID with its fills. */
+        get: operations["get_order"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/step": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Step a saved strategy version on incoming bars against the paper account. */
+        post: operations["step_strategy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers/configs": {
         parameters: {
             query?: never;
@@ -1963,6 +2049,23 @@ export interface components {
             /** @description The note, 1 through 2,000 characters. */
             text: string;
         };
+        CreatePaperOrderRequest: {
+            fill_now?: boolean | null;
+            /** Format: double */
+            fill_price?: number | null;
+            /** Format: double */
+            limit_price?: number | null;
+            order_type: string;
+            /** Format: double */
+            qty: number;
+            side: string;
+            /** Format: double */
+            stop_price?: number | null;
+            /** Format: uuid */
+            strategy_id: string;
+            symbol: string;
+            tif?: string | null;
+        };
         CreateRegistryRun: {
             /** @description OHLCV CSV with timestamp, symbol, open, high, low, close and volume columns. */
             csv: string;
@@ -2561,6 +2664,89 @@ export interface components {
             /** Format: double */
             sharpe_variance: number;
         };
+        PaperAccountView: {
+            /** Format: double */
+            cash: number;
+            /** Format: double */
+            daily_start_equity: number;
+            /** Format: double */
+            equity: number;
+            /** Format: double */
+            peak_equity: number;
+            positions: components["schemas"]["PortfolioPositionView"][];
+            /** Format: uuid */
+            strategy_id: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        PaperBarInput: {
+            /** Format: double */
+            close: number;
+            /** Format: double */
+            high: number;
+            /** Format: double */
+            low: number;
+            /** Format: double */
+            open: number;
+            symbol: string;
+            /** Format: int64 */
+            ts_ns: number;
+            /** Format: double */
+            volume: number;
+        };
+        PaperFillView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: double */
+            fee: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            order_id: string;
+            /** Format: double */
+            price: number;
+            /** Format: double */
+            qty: number;
+            side: string;
+            /** Format: uuid */
+            strategy_id: string;
+            symbol: string;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        PaperOrderView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by?: string | null;
+            /** Format: double */
+            filled_avg_price?: number | null;
+            /** Format: double */
+            filled_qty: number;
+            fills?: components["schemas"]["PaperFillView"][] | null;
+            /** Format: uuid */
+            id: string;
+            /** Format: double */
+            limit_price?: number | null;
+            order_type: string;
+            /** Format: double */
+            qty: number;
+            reject_reason?: string | null;
+            side: string;
+            status: string;
+            /** Format: double */
+            stop_price?: number | null;
+            /** Format: uuid */
+            strategy_id: string;
+            symbol: string;
+            tif: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: uuid */
+            workspace_id: string;
+        };
         PortfolioBalanceView: {
             /** Format: double */
             cash: number;
@@ -2854,6 +3040,12 @@ export interface components {
             matches: boolean;
             projected_metrics: components["schemas"]["ProjectedMetricsView"];
             replay_verdict: string;
+        };
+        ResetPaperAccountRequest: {
+            /** Format: double */
+            initial_cash?: number | null;
+            /** Format: uuid */
+            strategy_id: string;
         };
         /** @description A resolved universe constituent. */
         ResolvedUniverseMemberView: {
@@ -3158,6 +3350,23 @@ export interface components {
             config?: unknown;
             /** Format: uuid */
             preset_id?: string | null;
+        };
+        StepPaperRequest: {
+            bars: components["schemas"]["PaperBarInput"][];
+            config_preset?: string | null;
+            /** Format: uuid */
+            strategy_id: string;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
+        };
+        StepPaperResponse: {
+            account: components["schemas"]["PaperAccountView"];
+            fills: components["schemas"]["PaperFillView"][];
+            orders: components["schemas"]["PaperOrderView"][];
+            /** Format: uuid */
+            strategy_id: string;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
         };
         /** @description A saved strategy with every version, newest first. */
         StrategyDetail: {
@@ -5531,6 +5740,168 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorDoc"];
                 };
+            };
+        };
+    };
+    get_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string;
+                initial_cash: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paper account balance and positions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaperAccountView"];
+                };
+            };
+        };
+    };
+    reset_account: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPaperAccountRequest"];
+            };
+        };
+        responses: {
+            /** @description Paper account reset */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaperAccountView"];
+                };
+            };
+        };
+    };
+    list_orders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string | null;
+                status: string | null;
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of paper orders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaperOrderView"][];
+                };
+            };
+        };
+    };
+    create_order: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePaperOrderRequest"];
+            };
+        };
+        responses: {
+            /** @description Order accepted and/or filled */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaperOrderView"];
+                };
+            };
+            /** @description Order rejected by risk check or invalid input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaperOrderView"];
+                };
+            };
+        };
+    };
+    get_order: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paper order details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaperOrderView"];
+                };
+            };
+        };
+    };
+    step_strategy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StepPaperRequest"];
+            };
+        };
+        responses: {
+            /** @description Strategy stepped on bars */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StepPaperResponse"];
+                };
+            };
+            /** @description Strategy or version not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request or bar input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

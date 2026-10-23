@@ -235,7 +235,7 @@ async fn runs_page_by_cursor_and_filters_by_status() {
 
     let counts = registry.run_counts().await.unwrap();
     assert_eq!(counts[&experiment], (6, 5));
-    assert_eq!(registry.trial_count(None).await.unwrap(), 5, "failed runs are not trials");
+    assert_eq!(registry.trial_count(None).await.unwrap(), 6, "failed runs count as trials for honest DSR");
 }
 
 #[tokio::test]

@@ -283,3 +283,54 @@ fn report_json_keeps_the_cpp_fields_with_full_precision() {
     }
     assert_eq!(j.at("value").unwrap().as_double().unwrap(), r.value, "round-trips exactly");
 }
+
+#[test]
+fn historical_scenarios_run_from_library() {
+    let e = RiskEngine::new();
+    let cfg = RiskConfig { simulations: 5_000, ..RiskConfig::default() };
+    for name in ["covid-crash-2020", "gfc-2008", "tech-bubble-2000", "black-monday-1987"] {
+        let res = stress_test(&e, &sample(), name, &cfg).unwrap();
+        assert_eq!(res.scenario.name, name);
+        assert!(res.scenario_loss > 0.0);
+        assert!(res.report.value > 0.0);
+    }
+}
+
+#[test]
+fn stress_on_paths_matches_single_factor_for_one_asset() {
+    let mut p = Portfolio::new();
+    p.add_asset("SYN", 10.0, 100.0);
+
+    let e = RiskEngine::new();
+    let cfg = RiskConfig { simulations: 5_000, ..RiskConfig::default() };
+
+    let res_crash = stress_test(&e, &p, "market-crash", &cfg).unwrap();
+    assert!((res_crash.scenario_loss - 300.0).abs() < 1e-9);
+
+    let res_mild = stress_test(&e, &p, "mild-correction", &cfg).unwrap();
+    assert!((res_mild.scenario_loss - 100.0).abs() < 1e-9);
+}
+
+#[test]
+fn correlated_copula_modes_produce_contributions_and_evt() {
+    let e = RiskEngine::new();
+    let p = sample();
+    for dep in [DependenceModel::GaussianCopula, DependenceModel::TCopula { degrees_of_freedom: 4 }] {
+        let cfg = RiskConfig {
+            simulations: 10_000,
+            dependence: dep,
+            seed: 777,
+            horizon_years: 1.0 / 252.0,
+            ..RiskConfig::default()
+        };
+        let rep = e.calculate(Metric::VaR, &p, &cfg).unwrap();
+        assert_eq!(rep.dependence_model, dep);
+        assert_eq!(rep.position_contributions.len(), 3);
+        assert!(rep.evt_var.is_some());
+        assert!(rep.evt_cvar.is_some());
+
+        let j = rep.to_json_value();
+        assert!(j.find("position_contributions").is_some());
+        assert!(j.find("evt_var").is_some());
+    }
+}

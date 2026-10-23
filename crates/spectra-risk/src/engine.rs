@@ -6,6 +6,8 @@ use std::time::Instant;
 
 use spectra_core::{Error, Json, Result, ENGINE_VERSION};
 
+use crate::copula::{simulate_correlated, DependenceModel, PositionRiskContribution};
+use crate::evt::EvtTailModel;
 use crate::metrics::{compute, quantile_sorted, Metric};
 use crate::portfolio::Portfolio;
 use crate::simulation::{
@@ -44,6 +46,8 @@ pub struct RiskConfig {
     pub horizon_years: f64,
     /// Worker threads for the parallel backend; 0 = all cores. Never changes results.
     pub threads: usize,
+    /// Cross-asset dependence model (defaults to Aggregate for parity).
+    pub dependence: DependenceModel,
 }
 
 impl Default for RiskConfig {
@@ -59,6 +63,7 @@ impl Default for RiskConfig {
             verify_tolerance: 1e-6,
             horizon_years: 1.0,
             threads: 0,
+            dependence: DependenceModel::Aggregate,
         }
     }
 }
@@ -265,6 +270,14 @@ pub struct RiskReport {
     pub model_volatility: f64,
     /// Convergence of an adaptive run.
     pub convergence: Option<Convergence>,
+    /// Dependence model used.
+    pub dependence_model: DependenceModel,
+    /// Per-position risk contributions (Euler component CVaR and component VaR).
+    pub position_contributions: Vec<PositionRiskContribution>,
+    /// Extreme Value Theory (EVT) VaR estimate, if computable.
+    pub evt_var: Option<f64>,
+    /// Extreme Value Theory (EVT) CVaR estimate, if computable.
+    pub evt_cvar: Option<f64>,
 }
 
 fn num(v: f64) -> Json {
@@ -276,29 +289,61 @@ fn uint(v: u64) -> Json {
 }
 
 impl RiskReport {
-    fn new(metric: &str, value: f64, sim: &Simulation, config: &RiskConfig) -> Self {
+    fn new(
+        metric: &str,
+        value: f64,
+        losses: &[f64],
+        sim_run: u64,
+        req_backend: Backend,
+        used_backend: Backend,
+        total_ms: f64,
+        compute_ms: f64,
+        portfolio_val: f64,
+        model_vol: f64,
+        convergence: Option<Convergence>,
+        dependence_model: DependenceModel,
+        position_contributions: Vec<PositionRiskContribution>,
+        config: &RiskConfig,
+    ) -> Self {
+        let (evt_var, evt_cvar) = if losses.len() >= 50 {
+            EvtTailModel::fit(losses, 0.95)
+                .map(|e| (Some(e.var(config.confidence)), Some(e.cvar(config.confidence))))
+                .unwrap_or((None, None))
+        } else {
+            (None, None)
+        };
+
         Self {
             metric_name: metric.into(),
             value,
             confidence: config.confidence,
-            simulations_run: sim.simulations_run,
+            simulations_run: sim_run,
             seed: config.seed,
-            requested_backend: sim.requested_backend,
-            backend_used: sim.backend_used,
+            requested_backend: req_backend,
+            backend_used: used_backend,
             horizon_years: config.horizon_years,
             library_version: ENGINE_VERSION.into(),
             git_commit: GIT_COMMIT.into(),
-            total_ms: sim.total_ms,
-            compute_ms: sim.compute_ms,
-            portfolio_value: sim.first_task.initial_value,
-            model_volatility: sim.first_task.volatility,
-            convergence: sim.convergence,
+            total_ms,
+            compute_ms,
+            portfolio_value: portfolio_val,
+            model_volatility: model_vol,
+            convergence,
+            dependence_model,
+            position_contributions,
+            evt_var,
+            evt_cvar,
         }
     }
 
     /// JSON with the C++ report's fields first (same names), then the
     /// additions. Numbers are printed exactly (%.17g), not to 6 digits.
     pub fn to_json_value(&self) -> Json {
+        let model_str = match self.dependence_model {
+            DependenceModel::Aggregate => "MonteCarlo/GBM aggregate position",
+            DependenceModel::GaussianCopula => "MonteCarlo/Gaussian copula correlated paths",
+            DependenceModel::TCopula { .. } => "MonteCarlo/t-copula correlated paths",
+        };
         let mut j = Json::object()
             .with("metric", Json::string(self.metric_name.clone()))
             .with("value", num(self.value))
@@ -313,7 +358,7 @@ impl RiskReport {
             .with("requested_backend", Json::string(self.requested_backend.as_str()))
             .with("horizon_years", num(self.horizon_years))
             .with("portfolio_value", num(self.portfolio_value))
-            .with("model", Json::string("MonteCarlo/GBM aggregate position"))
+            .with("model", Json::string(model_str))
             .with("model_volatility", num(self.model_volatility));
         if let Some(c) = self.convergence {
             j = j.with(
@@ -322,6 +367,31 @@ impl RiskReport {
                     .with("converged", Json::boolean(c.converged))
                     .with("relative_std_error", num(c.relative_std_error)),
             );
+        }
+        if self.dependence_model != DependenceModel::Aggregate {
+            j = j.with("dependence_model", Json::string(self.dependence_model.as_str()));
+        }
+        if !self.position_contributions.is_empty() {
+            let contribs: Vec<Json> = self
+                .position_contributions
+                .iter()
+                .map(|c| {
+                    Json::object()
+                        .with("symbol", Json::string(c.symbol.clone()))
+                        .with("position_value", num(c.position_value))
+                        .with("weight", num(c.weight))
+                        .with("component_var", num(c.component_var))
+                        .with("component_cvar", num(c.component_cvar))
+                        .with("cvar_contribution_pct", num(c.cvar_contribution_pct))
+                })
+                .collect();
+            j = j.with("position_contributions", Json::Array(contribs));
+        }
+        if let Some(v) = self.evt_var {
+            j = j.with("evt_var", num(v));
+        }
+        if let Some(v) = self.evt_cvar {
+            j = j.with("evt_cvar", num(v));
         }
         j
     }
@@ -509,17 +579,80 @@ impl RiskEngine {
                 }
             }
         }
-        let sim = simulate(portfolio, config)?;
+        let (
+            losses,
+            sim_run,
+            req_backend,
+            used_backend,
+            total_ms,
+            compute_ms,
+            port_val,
+            model_vol,
+            convergence,
+            contributions,
+        ) = if config.dependence == DependenceModel::Aggregate {
+            let sim = simulate(portfolio, config)?;
+            (
+                sim.losses,
+                sim.simulations_run,
+                sim.requested_backend,
+                sim.backend_used,
+                sim.total_ms,
+                sim.compute_ms,
+                sim.first_task.initial_value,
+                sim.first_task.volatility,
+                sim.convergence,
+                Vec::new(),
+            )
+        } else {
+            let corr = simulate_correlated(
+                portfolio,
+                None,
+                config.dependence,
+                config.simulations,
+                config.seed,
+                config.horizon_years,
+                config.confidence,
+            )?;
+            (
+                corr.portfolio_losses,
+                corr.simulations_run,
+                config.backend,
+                Backend::Parallel,
+                corr.elapsed_ms,
+                corr.elapsed_ms,
+                portfolio.total_value(),
+                aggregate_volatility(portfolio),
+                None,
+                corr.contributions,
+            )
+        };
+
         resolved
             .iter()
             .map(|w| {
                 let (name, value) = match w {
                     Which::Builtin(m) => {
-                        (m.name().to_string(), compute(*m, &sim.losses, config.confidence, portfolio)?)
+                        (m.name().to_string(), compute(*m, &losses, config.confidence, portfolio)?)
                     }
-                    Which::Plugin(p) => (p.name().to_string(), p.compute(&sim.losses, config.confidence)?),
+                    Which::Plugin(p) => (p.name().to_string(), p.compute(&losses, config.confidence)?),
                 };
-                Ok(RiskReport::new(&name, value, &sim, config))
+                Ok(RiskReport::new(
+                    &name,
+                    value,
+                    &losses,
+                    sim_run,
+                    req_backend,
+                    used_backend,
+                    total_ms,
+                    compute_ms,
+                    port_val,
+                    model_vol,
+                    convergence,
+                    config.dependence,
+                    contributions.clone(),
+                    config,
+                ))
             })
             .collect()
     }
@@ -536,10 +669,30 @@ pub struct Scenario {
     pub description: &'static str,
 }
 
-/// The built-in scenario library (the C++ engine's two scenarios).
-pub const SCENARIOS: [Scenario; 2] = [
+/// The scenario library (including historical stress scenarios for Task 11).
+pub const SCENARIOS: [Scenario; 6] = [
     Scenario { name: "market-crash", shock_factor: 0.70, description: "every price falls 30%" },
     Scenario { name: "mild-correction", shock_factor: 0.90, description: "every price falls 10%" },
+    Scenario {
+        name: "covid-crash-2020",
+        shock_factor: 0.66,
+        description: "March 2020 pandemic market shock (-34%)",
+    },
+    Scenario {
+        name: "gfc-2008",
+        shock_factor: 0.52,
+        description: "2008 Global Financial Crisis equity shock (-48%)",
+    },
+    Scenario {
+        name: "tech-bubble-2000",
+        shock_factor: 0.51,
+        description: "2000 Dot-com crash tech-heavy shock (-49%)",
+    },
+    Scenario {
+        name: "black-monday-1987",
+        shock_factor: 0.77,
+        description: "October 1987 single-day market crash (-23%)",
+    },
 ];
 
 /// Looks up a scenario.
@@ -548,7 +701,9 @@ pub const SCENARIOS: [Scenario; 2] = [
 /// [`Error::InvalidArgument`] for an unknown name.
 pub fn scenario(name: &str) -> Result<Scenario> {
     SCENARIOS.iter().copied().find(|s| s.name == name).ok_or_else(|| {
-        Error::InvalidArgument(format!("Unknown scenario: {name} (known: market-crash, mild-correction)"))
+        Error::InvalidArgument(format!(
+            "Unknown scenario: {name} (known: market-crash, mild-correction, covid-crash-2020, gfc-2008, tech-bubble-2000, black-monday-1987)"
+        ))
     })
 }
 

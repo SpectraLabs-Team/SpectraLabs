@@ -18,16 +18,48 @@
 //! assert!(var.value > 0.0);
 //! ```
 
+#![allow(
+    clippy::unreadable_literal,
+    clippy::similar_names,
+    clippy::cast_lossless,
+    clippy::approx_constant,
+    clippy::needless_range_loop,
+    clippy::doc_markdown,
+    clippy::suboptimal_flops,
+    clippy::manual_midpoint,
+    clippy::missing_errors_doc,
+    clippy::bool_to_int_with_if,
+    clippy::manual_range_contains,
+    clippy::map_unwrap_or
+)]
+
+pub mod backtest;
+pub mod copula;
 pub mod enforcement;
 pub mod engine;
+pub mod evt;
+pub mod garch;
 pub mod metrics;
 pub mod portfolio;
+pub mod regime;
+pub mod returns;
 pub mod rng;
 pub mod simulation;
 
+pub use backtest::{backtest_var, BaselZone, VarBacktestResult};
+pub use copula::{
+    compute_risk_contributions, simulate_correlated, CorrelatedSimulationResult, DependenceModel,
+    PositionRiskContribution,
+};
 pub use enforcement::{
     OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeResult,
     PreTradeVerdict, ProjectedMetrics, RiskBreach, RiskLimits,
+};
+pub use evt::EvtTailModel;
+pub use garch::Garch11;
+pub use regime::{MarketRegime, RegimeModel, RegimeState};
+pub use returns::{
+    cholesky, correlation, correlation_matrix, covariance, fit_asset_returns, AssetReturnStats,
 };
 
 pub use engine::{

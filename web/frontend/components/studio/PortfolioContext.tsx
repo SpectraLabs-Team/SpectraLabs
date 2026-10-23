@@ -17,6 +17,7 @@ export interface RiskLabParams {
   simulations: number;
   horizon: number;
   auto: boolean;
+  dependence?: 'aggregate' | 'gaussian_copula' | 't_copula';
 }
 
 /** The last Risk Lab run plus the exact inputs it was made with (for the freshness check). */

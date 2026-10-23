@@ -95,11 +95,12 @@ export function RiskLab() {
   const online = engine.status === 'online';
   // Inputs and the last run live in PortfolioContext, so they survive switching Studio tabs.
   // `auto` (Live mode) is off by default: the engine only runs on an explicit click.
-  const { confidence, simulations, horizon, auto } = riskParams;
+  const { confidence, simulations, horizon, auto, dependence = 'aggregate' } = riskParams;
   const backend = BACKEND;
   const setConfidence = (confidence: number) => setRiskParams({ confidence });
   const setSimulations = (simulations: number) => setRiskParams({ simulations });
   const setHorizon = (horizon: number) => setRiskParams({ horizon });
+  const setDependence = (dep: 'aggregate' | 'gaussian_copula' | 't_copula') => setRiskParams({ dependence: dep });
   const setAuto = (f: (a: boolean) => boolean) => setRiskParams((p) => ({ auto: f(p.auto) }));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -110,7 +111,14 @@ export function RiskLab() {
     setLoading(true);
     setError('');
     try {
-      const base = { portfolio_csv: csv, confidence, simulations, horizon_days: horizon, backend };
+      const base = {
+        portfolio_csv: csv,
+        confidence,
+        simulations,
+        horizon_days: horizon,
+        backend,
+        dependence: dependence !== 'aggregate' ? dependence : undefined,
+      };
       const [v, c, vol] = await Promise.all([
         calculateRisk({ ...base, metric: 'var' }),
         calculateRisk({ ...base, metric: 'cvar' }),
@@ -122,7 +130,7 @@ export function RiskLab() {
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [csv, confidence, simulations, horizon, backend, revision, setResults]);
+  }, [csv, confidence, simulations, horizon, backend, dependence, revision, setResults]);
 
   // Live mode (opt-in): re-run (debounced) whenever an input or the portfolio changes.
   // Nothing runs on mount; the first run is always an explicit click or switching Live on.
@@ -196,6 +204,25 @@ export function RiskLab() {
               {HORIZON_PRESETS.map((h) => (
                 <button key={h.value} type="button" onClick={() => setHorizon(h.value)} className={cn('rounded px-2 py-0.5 font-mono text-[10.5px] transition', horizon === h.value ? 'bg-ink/10 text-ink' : 'text-ink/50 hover:text-ink/90')}>
                   {h.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-ink/60">Cross-Asset Dependence</label>
+            <div className="grid grid-cols-3 gap-1 rounded-lg border border-ink/[0.08] bg-ink/[0.03] p-1 text-[11px]">
+              {(['aggregate', 'gaussian_copula', 't_copula'] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setDependence(d)}
+                  className={cn(
+                    'rounded px-2 py-1 text-center font-mono capitalize transition',
+                    dependence === d ? 'bg-accent/15 font-semibold text-accent shadow-sm' : 'text-ink/60 hover:text-ink'
+                  )}
+                >
+                  {d === 'gaussian_copula' ? 'Gaussian' : d === 't_copula' ? 't-Copula' : 'Aggregate'}
                 </button>
               ))}
             </div>
@@ -282,6 +309,47 @@ export function RiskLab() {
             Bars are exact bin probabilities of the engine&apos;s model: one aggregate GBM position, zero drift, σ = average asset volatility. The markers are the engine&apos;s Monte Carlo estimates.
           </p>
         </GlassCard>
+
+        {/* M7: Euler Risk Attribution */}
+        {results?.var.position_contributions && results.var.position_contributions.length > 0 && (
+          <GlassCard as="section" className="p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-semibold text-ink">Euler Component Risk Attribution</h2>
+                <p className="mt-0.5 text-xs text-ink/50">
+                  Marginal risk contribution per position (Euler allocation property: sum of component CVaR equals portfolio CVaR)
+                </p>
+              </div>
+              <Badge tone="accent">{results.var.dependence_model ?? 'Correlated Copula'}</Badge>
+            </div>
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left font-mono text-[11.5px]">
+                <thead>
+                  <tr className="border-b border-ink/10 text-[10.5px] uppercase text-ink/50">
+                    <th className="pb-2">Asset</th>
+                    <th className="pb-2">Position Value</th>
+                    <th className="pb-2">Weight</th>
+                    <th className="pb-2">Component VaR</th>
+                    <th className="pb-2">Component CVaR</th>
+                    <th className="pb-2 text-right">CVaR Contribution</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-ink/[0.06]">
+                  {results.var.position_contributions.map((pos) => (
+                    <tr key={pos.symbol} className="hover:bg-ink/[0.02]">
+                      <td className="py-2 font-semibold text-ink">{pos.symbol}</td>
+                      <td className="py-2 text-ink/75">{formatCurrency(pos.position_value)}</td>
+                      <td className="py-2 text-ink/60">{formatPercent(pos.weight, 1)}</td>
+                      <td className="py-2 text-loss">{formatCurrency(pos.component_var)}</td>
+                      <td className="py-2 text-loss">{formatCurrency(pos.component_cvar)}</td>
+                      <td className="py-2 text-right font-semibold text-accent">{formatPercent(pos.cvar_contribution_pct / 100, 1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </GlassCard>
+        )}
 
         <StressPanel simulations={simulations} horizonDays={horizon} backend={backend} />
 

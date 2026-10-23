@@ -81,6 +81,10 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
             "--horizon-years" => o.config.horizon_years = parse(flag, next)?,
             "--horizon-days" => o.config.horizon_years = parse::<f64>(flag, next)? / 252.0,
             "--threads" => o.config.threads = parse(flag, next)?,
+            "--dependence" | "--copula" => {
+                o.config.dependence = spectra_risk::DependenceModel::parse(&parse::<String>(flag, next)?)
+                    .map_err(|e| e.to_string())?;
+            }
             "--scenario" => o.scenario = parse(flag, next)?,
             "--repetitions" => o.repetitions = parse(flag, next)?,
             "--warmups" => o.warmups = parse(flag, next)?,

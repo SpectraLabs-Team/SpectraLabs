@@ -5,13 +5,28 @@
 export type RiskMetric = 'var' | 'cvar' | 'volatility' | 'hhi' | 'downsidedeviation' | 'semideviation' | 'skewness' | 'kurtosis';
 export type BackendRequest = 'auto' | 'cpu' | 'parallel';
 /** Built-in scenarios of /api/stress (spectra-risk SCENARIOS). */
-export type EngineScenario = 'market-crash' | 'mild-correction';
+export type EngineScenario =
+  | 'market-crash'
+  | 'mild-correction'
+  | 'covid-crash-2020'
+  | 'gfc-2008'
+  | 'tech-bubble-2000'
+  | 'black-monday-1987';
 
 export interface HealthResponse {
   status: string;
   engine: string;
   engine_version: string;
   cli_exists: boolean;
+}
+
+export interface PositionRiskContribution {
+  symbol: string;
+  position_value: number;
+  weight: number;
+  component_var: number;
+  component_cvar: number;
+  cvar_contribution_pct: number;
 }
 
 export interface RiskResult {
@@ -36,6 +51,14 @@ export interface RiskResult {
   compute_ms: number;
   /** Present only for adaptive runs. */
   convergence?: { converged: boolean; relative_std_error: number };
+  /** M7: Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`). */
+  dependence_model?: string;
+  /** M7: Euler component risk attribution by position. */
+  position_contributions?: PositionRiskContribution[];
+  /** M7: Extreme Value Theory (POT GPD) VaR at the same confidence level. */
+  evt_var?: number;
+  /** M7: Extreme Value Theory (POT GPD) CVaR at the same confidence level. */
+  evt_cvar?: number;
 }
 
 /** /api/stress: the VaR report (always 99%) of the shocked book plus scenario fields. */
@@ -104,4 +127,6 @@ export interface RiskRequest {
   horizon_days: number;
   backend: BackendRequest;
   seed?: number;
+  dependence?: 'aggregate' | 'gaussian_copula' | 't_copula';
+  degrees_of_freedom?: number;
 }

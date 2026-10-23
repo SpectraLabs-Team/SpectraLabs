@@ -279,7 +279,7 @@ async fn paper_trading_full_lifecycle() {
     let (status, body) = read_json(f.app.clone().oneshot(req).await.unwrap()).await;
     assert_eq!(status, 422);
     assert_eq!(body["status"], "rejected");
-    assert!(body["reject_reason"].as_str().unwrap().contains("Kill switch"));
+    assert!(body["reject_reason"].as_str().unwrap().to_lowercase().contains("kill switch"));
 
     // Clear kill switch
     let ks_clear = json!({

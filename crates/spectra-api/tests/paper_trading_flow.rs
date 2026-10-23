@@ -487,18 +487,18 @@ async fn test_alpaca_order_sync_and_reconciliation() {
     // 1. Task 10: Order sync endpoint
     let sync_req = signed_req("POST", "/api/v1/paper/sync", &f.user, &f.ws, vec![]);
     let (status, body) = read_json(f.app.clone().oneshot(sync_req).await.unwrap()).await;
-    assert_eq!(status, 200, "{}", body);
+    assert_eq!(status, 200, "{body}");
     assert_eq!(body["synced"], true);
 
     let alpaca_sync_req = signed_req("POST", "/api/alpaca/sync", &f.user, &f.ws, vec![]);
     let (status, body) = read_json(f.app.clone().oneshot(alpaca_sync_req).await.unwrap()).await;
-    assert_eq!(status, 200, "{}", body);
+    assert_eq!(status, 200, "{body}");
     assert_eq!(body["synced"], true);
 
     // 2. Task 11: Position reconciliation (clean state)
     let rec_req = signed_req("GET", "/api/v1/paper/reconcile", &f.user, &f.ws, vec![]);
     let (status, body) = read_json(f.app.clone().oneshot(rec_req).await.unwrap()).await;
-    assert_eq!(status, 200, "{}", body);
+    assert_eq!(status, 200, "{body}");
     assert_eq!(body["reconciled"], true);
     assert_eq!(body["mismatches_count"], 0);
 
@@ -506,7 +506,7 @@ async fn test_alpaca_order_sync_and_reconciliation() {
     let rec_mismatch_req =
         signed_req("GET", "/api/alpaca/reconcile?deliberate_mismatch=true", &f.user, &f.ws, vec![]);
     let (status, body) = read_json(f.app.clone().oneshot(rec_mismatch_req).await.unwrap()).await;
-    assert_eq!(status, 200, "{}", body);
+    assert_eq!(status, 200, "{body}");
     assert_eq!(body["reconciled"], false);
     assert!(body["mismatches_count"].as_i64().unwrap() > 0);
     let mismatches = body["mismatches"].as_array().unwrap();

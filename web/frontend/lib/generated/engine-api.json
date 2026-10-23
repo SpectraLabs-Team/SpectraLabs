@@ -2518,6 +2518,27 @@
         }
       }
     },
+    "/api/v1/paper/reconcile": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Reconcile open positions between broker and local ledger (Task 11).",
+        "operationId": "reconcile_paper_positions",
+        "responses": {
+          "200": {
+            "description": "Position reconciliation report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcilePositionsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/paper/step": {
       "post": {
         "tags": [
@@ -2551,6 +2572,27 @@
           },
           "422": {
             "description": "Invalid request or bar input"
+          }
+        }
+      }
+    },
+    "/api/v1/paper/sync": {
+      "post": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Sync orders and fills with broker or simulated ledger (Task 10).",
+        "operationId": "sync_paper_orders",
+        "responses": {
+          "200": {
+            "description": "Orders synced successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncOrdersResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -7773,6 +7815,32 @@
           }
         }
       },
+      "PositionMismatchView": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "broker_qty",
+          "local_qty",
+          "discrepancy"
+        ],
+        "properties": {
+          "broker_qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "discrepancy": {
+            "type": "number",
+            "format": "double"
+          },
+          "local_qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
       "PositionSnapshotDto": {
         "type": "object",
         "required": [
@@ -8284,6 +8352,37 @@
           }
         },
         "additionalProperties": false
+      },
+      "ReconcilePositionsResponse": {
+        "type": "object",
+        "required": [
+          "reconciled",
+          "source",
+          "mismatches_count",
+          "mismatches",
+          "timestamp"
+        ],
+        "properties": {
+          "mismatches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PositionMismatchView"
+            }
+          },
+          "mismatches_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "reconciled": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        }
       },
       "RefreshScheduleView": {
         "type": "object",
@@ -9799,6 +9898,31 @@
           }
         },
         "additionalProperties": false
+      },
+      "SyncOrdersResponse": {
+        "type": "object",
+        "required": [
+          "synced",
+          "source",
+          "orders_synced",
+          "fills_processed"
+        ],
+        "properties": {
+          "fills_processed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "orders_synced": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source": {
+            "type": "string"
+          },
+          "synced": {
+            "type": "boolean"
+          }
+        }
       },
       "TriggerRefreshRequest": {
         "type": "object",

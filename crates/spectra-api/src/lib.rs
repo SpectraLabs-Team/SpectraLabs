@@ -14,7 +14,7 @@
 //! | `GET /api/v1/metrics` | signed | which metric names are computable |
 //! | `GET /api/v1/sample-portfolio` | signed | `{csv}` |
 //! | `GET /api/v1/telemetry/{cpu,workers,gpu}` | signed | host readings |
-//! | `/api/v1/alpaca/*` | signed | 501: not ported yet |
+//! | `/api/v1/alpaca/*` | signed | brokerage proxy with pre-trade risk enforcement, sync & reconciliation |
 //! | `POST /api/v1/jobs`, `GET /api/v1/jobs[/{id}]`, `POST /api/v1/jobs/{id}/cancel` | signed | queued work; see [`jobs_api`] |
 //! | `/api/v1/experiments`, `/api/v1/runs`, `/api/v1/registry/*` | signed | workspace-scoped research registry |
 //! | `POST /api/v1/datasets/preview` | signed | parse a file's first rows with ingest settings; see [`datasets_api`] |
@@ -922,6 +922,8 @@ fn paper_routes() -> Router<AppState> {
         .route("/api/v1/paper/orders", only(get(paper_api::list_orders).post(paper_api::create_order)))
         .route("/api/v1/paper/orders/{id}", only(get(paper_api::get_order)))
         .route("/api/v1/paper/step", only(post(paper_api::step_strategy)))
+        .route("/api/v1/paper/sync", only(post(paper_api::sync_paper_orders)))
+        .route("/api/v1/paper/reconcile", only(get(paper_api::reconcile_paper_positions)))
 }
 
 /// The application. `db` is checked by `/ready`; pass `None` where there is

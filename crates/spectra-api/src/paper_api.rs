@@ -210,6 +210,31 @@ pub(crate) struct StepPaperResponse {
     pub account: PaperAccountView,
 }
 
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct SyncOrdersResponse {
+    pub synced: bool,
+    pub source: String,
+    pub orders_synced: usize,
+    pub fills_processed: usize,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct PositionMismatchView {
+    pub symbol: String,
+    pub broker_qty: f64,
+    pub local_qty: f64,
+    pub discrepancy: f64,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct ReconcilePositionsResponse {
+    pub reconciled: bool,
+    pub source: String,
+    pub mismatches_count: usize,
+    pub mismatches: Vec<PositionMismatchView>,
+    pub timestamp: String,
+}
+
 // ---------------------------------------------------------------- Handlers
 
 /// Get the paper account (balance and open positions) for a strategy.
@@ -1003,4 +1028,36 @@ pub(crate) async fn step_strategy(
     };
 
     json_response(200, json!(resp).to_string())
+}
+
+/// Sync orders and fills with broker or simulated ledger (Task 10).
+#[utoipa::path(post, path = "/api/v1/paper/sync", tag = "paper",
+    responses((status = 200, description = "Orders synced successfully", body = SyncOrdersResponse)))]
+pub(crate) async fn sync_paper_orders(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let creds = crate::providers::vault::resolve_alpaca_credentials(&pool, ws, None, &json!({})).await.ok();
+    crate::broker_api::handle_sync_orders(&pool, ws, creds.as_ref()).await
+}
+
+/// Reconcile open positions between broker and local ledger (Task 11).
+#[utoipa::path(get, path = "/api/v1/paper/reconcile", tag = "paper",
+    responses((status = 200, description = "Position reconciliation report", body = ReconcilePositionsResponse)))]
+pub(crate) async fn reconcile_paper_positions(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    uri: axum::http::Uri,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let creds = crate::providers::vault::resolve_alpaca_credentials(&pool, ws, None, &json!({})).await.ok();
+    crate::broker_api::handle_reconcile_positions(&pool, ws, creds.as_ref(), uri.query().unwrap_or_default())
+        .await
 }

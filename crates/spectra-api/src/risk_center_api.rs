@@ -35,7 +35,7 @@ fn parse_body<T: serde::de::DeserializeOwned>(body: Result<Bytes, BytesRejection
 
 const FORBIDDEN_VIEWER: &str = "Viewers have read-only access to risk center configuration.";
 
-fn user_of(id: &Identity) -> Option<Uuid> {
+pub(crate) fn user_of(id: &Identity) -> Option<Uuid> {
     Uuid::parse_str(&id.user).ok()
 }
 
@@ -188,6 +188,8 @@ pub struct PreTradeCheckRequest {
     pub side: String,
     pub qty: f64,
     pub price: f64,
+    /// Caller-supplied portfolio snapshot (deprecated & ignored: per Decision 1, portfolio is strictly server-built from DB).
+    #[serde(default)]
     pub portfolio: Option<PortfolioSnapshotDto>,
 }
 
@@ -396,7 +398,7 @@ pub struct ReplayDecisionView {
 
 // ---------------------------------------------------------------- Fail Closed Helper (Task 3)
 
-async fn fail_closed_response(
+pub(crate) async fn fail_closed_response(
     pool: &spectra_db::PgPool,
     ws: Uuid,
     strategy_id: Option<Uuid>,
@@ -733,7 +735,9 @@ pub(crate) async fn pre_trade_check(
         .await;
     };
 
-    let portfolio = if !db_positions.is_empty() || db_balance.is_some() {
+    // 3. Task 1 & Decision 1: The server strictly builds the portfolio snapshot from the database.
+    // The caller's portfolio field is completely ignored to prevent any client-side bypass.
+    let portfolio = {
         let mut positions = HashMap::new();
         for p in db_positions {
             positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price });
@@ -745,20 +749,6 @@ pub(crate) async fn pre_trade_check(
             (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
         };
         PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions }
-    } else if let Some(dto) = req.portfolio {
-        let mut positions = HashMap::new();
-        for (sym, p) in dto.positions {
-            positions.insert(sym, PositionSnapshot { qty: p.qty, price: p.price });
-        }
-        PortfolioSnapshot {
-            cash: dto.cash,
-            equity: dto.equity,
-            peak_equity: dto.peak_equity,
-            daily_start_equity: dto.daily_start_equity,
-            positions,
-        }
-    } else {
-        PortfolioSnapshot::default()
     };
 
     // 4. Run pre-trade check

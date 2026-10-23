@@ -209,7 +209,18 @@ async fn pre_trade_approvals_reductions_and_rejections() {
     assert_eq!(res["approved_qty"], 200.0);
     assert_eq!(res["breaches"][0]["code"], "position_size_exceeded");
 
-    // Case 3: Portfolio in severe drawdown (>15%) -> Rejected
+    // Case 3: Portfolio in severe drawdown (>15%) in DB -> Rejected
+    // Even if caller passes a fake clean portfolio, server strictly checks DB balance!
+    let balance_drawdown = json!({
+        "strategy_id": null,
+        "cash": 75_000.0,
+        "equity": 75_000.0,
+        "peak_equity": 100_000.0, // 25% drawdown > 15% limit
+        "daily_start_equity": 100_000.0
+    });
+    let (code, _) = fx.call("PUT", "/api/v1/risk/balance", &balance_drawdown).await;
+    assert_eq!(code, 200);
+
     let order_drawdown = json!({
         "strategy_id": null,
         "symbol": "GOOG",
@@ -217,9 +228,10 @@ async fn pre_trade_approvals_reductions_and_rejections() {
         "qty": 10.0,
         "price": 100.0,
         "portfolio": {
-            "cash": 75_000.0,
-            "equity": 75_000.0,
-            "peak_equity": 100_000.0, // 25% drawdown > 15% limit
+            // Attempted spoof to bypass drawdown: server MUST ignore this!
+            "cash": 100_000.0,
+            "equity": 100_000.0,
+            "peak_equity": 100_000.0,
             "daily_start_equity": 100_000.0,
             "positions": {}
         }
@@ -482,6 +494,81 @@ async fn decision_replay_and_exposure_history() {
     let (code, history_res) = fx.call("GET", "/api/v1/risk/exposure-history", &Value::Null).await;
     assert_eq!(code, 200);
     assert!(history_res.is_array());
+
+    fx.clean_up().await;
+}
+
+#[tokio::test]
+async fn paper_broker_order_pre_trade_enforcement() {
+    let Some(pool) = pool().await else { return };
+    let fx = Fixture::new(pool);
+
+    let _ = sqlx::query("INSERT INTO workspaces (id, slug, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+        .bind(fx.ws)
+        .bind(format!("ws-{}", fx.ws.simple()))
+        .bind("Paper Broker Test Workspace")
+        .execute(&fx.pool)
+        .await;
+
+    // 1. Account probe does not answer 501: returns simulated paper account
+    let (code, acct_res) = fx.call("GET", "/api/alpaca/account", &Value::Null).await;
+    assert_eq!(code, 200, "Alpaca account probe must return 200 instead of 501");
+    assert_eq!(acct_res["status"], "ACTIVE");
+    assert_eq!(acct_res["currency"], "USD");
+
+    // 2. Set strict limits: max position size $10,000, size reduction disabled
+    let limits_payload = json!({
+        "strategy_id": null,
+        "max_gross_exposure": 200_000.0,
+        "max_net_exposure": 100_000.0,
+        "max_leverage": 2.0,
+        "max_position_size": 10_000.0,
+        "max_concentration_pct": 50.0,
+        "max_drawdown_pct": 15.0,
+        "max_daily_loss": 5_000.0,
+        "max_var_pct": 10.0,
+        "size_reduction_enabled": false
+    });
+    let (code, _) = fx.call("PUT", "/api/v1/risk/limits", &limits_payload).await;
+    assert_eq!(code, 200);
+
+    // 3. Task 8: A paper order over the limit is rejected before it reaches the broker
+    let order_over_limit = json!({
+        "symbol": "TSLA",
+        "qty": 100.0,
+        "side": "buy",
+        "limit_price": 200.0 // Notional $20,000 > $10,000 limit
+    });
+    let (code, rej_res) = fx.call("POST", "/api/alpaca/orders", &order_over_limit).await;
+    assert_eq!(code, 422, "Order over limit must be rejected with HTTP 422 before reaching broker");
+    assert_eq!(rej_res["verdict"], "rejected");
+    assert_eq!(rej_res["approved_qty"], 0.0);
+
+    // 4. Verify audit decision logged for this rejection
+    let (code, audit_res) = fx.call("GET", "/api/v1/risk/audit", &Value::Null).await;
+    assert_eq!(code, 200);
+    let audits = audit_res.as_array().unwrap();
+    let tsla_audit = audits.iter().find(|d| d["symbol"] == "TSLA").expect("audit entry for rejected TSLA order");
+    assert_eq!(tsla_audit["verdict"], "rejected");
+
+    // 5. Submit valid order under the limit ($4,000 <= $10,000)
+    let valid_order = json!({
+        "symbol": "TSLA",
+        "qty": 20.0,
+        "side": "buy",
+        "limit_price": 200.0
+    });
+    let (code, ok_res) = fx.call("POST", "/api/alpaca/orders", &valid_order).await;
+    assert_eq!(code, 201, "Valid order must be approved and executed");
+    assert_eq!(ok_res["status"], "filled");
+    assert_eq!(ok_res["pre_trade_verdict"], "approved");
+
+    // 6. Query positions through broker route
+    let (code, pos_res) = fx.call("GET", "/api/alpaca/positions", &Value::Null).await;
+    assert_eq!(code, 200);
+    let positions = pos_res.as_array().unwrap();
+    let tsla_pos = positions.iter().find(|p| p["symbol"] == "TSLA").expect("TSLA position updated in DB");
+    assert_eq!(tsla_pos["qty"], "20");
 
     fx.clean_up().await;
 }

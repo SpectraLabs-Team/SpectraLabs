@@ -41,6 +41,7 @@
 
 pub mod auth;
 pub mod backtests_api;
+pub mod broker_api;
 pub mod config;
 pub mod corporate_actions_api;
 pub mod datasets_api;
@@ -649,14 +650,6 @@ async fn telemetry_gpu(State(st): State<AppState>) -> Response {
     compute(&st, || Ok(telemetry::gpu())).await
 }
 
-#[allow(clippy::unused_async)] // axum handlers are async fns
-async fn alpaca() -> Response {
-    error_response(
-        501,
-        "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
-         has not been added.",
-    )
-}
 
 #[allow(clippy::unused_async)] // axum handlers are async fns
 async fn not_found() -> Response {
@@ -684,8 +677,8 @@ fn engine_routes(prefix: &str) -> Router<AppState> {
         .route(&format!("{prefix}/telemetry/cpu"), only(get(telemetry_cpu)))
         .route(&format!("{prefix}/telemetry/workers"), only(get(telemetry_workers)))
         .route(&format!("{prefix}/telemetry/gpu"), only(get(telemetry_gpu)))
-        .route(&format!("{prefix}/alpaca"), any(alpaca))
-        .route(&format!("{prefix}/alpaca/{{*rest}}"), any(alpaca))
+        .route(&format!("{prefix}/alpaca"), any(broker_api::alpaca_proxy))
+        .route(&format!("{prefix}/alpaca/{{*rest}}"), any(broker_api::alpaca_proxy))
 }
 
 /// The queued-job routes (`/api/v1` only; there was never an `/api` version).

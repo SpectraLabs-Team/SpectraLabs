@@ -7124,7 +7124,8 @@
                 "type": "null"
               },
               {
-                "$ref": "#/components/schemas/PortfolioSnapshotDto"
+                "$ref": "#/components/schemas/PortfolioSnapshotDto",
+                "description": "Caller-supplied portfolio snapshot (deprecated & ignored: per Decision 1, portfolio is strictly server-built from DB)."
               }
             ]
           },

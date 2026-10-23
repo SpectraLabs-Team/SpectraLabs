@@ -38,10 +38,12 @@ pub struct RiskRequest {
     pub backend: Option<String>,
     /// Horizon in trading days, up to 7,560. Default 252.
     pub horizon_days: Option<f64>,
-    /// Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`).
+    /// Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`, `clayton_copula`).
     pub dependence: Option<String>,
     /// Degrees of freedom for Student-t copula (default 4.0).
     pub degrees_of_freedom: Option<f64>,
+    /// Clayton copula parameter theta > 0 (default 2.0).
+    pub theta: Option<f64>,
 }
 
 /// `POST /api/v1/risk/regimes` body.
@@ -55,6 +57,10 @@ pub struct RiskRegimesRequest {
     pub confidence: Option<f64>,
     /// Horizon in trading days (default 1.0).
     pub horizon_days: Option<f64>,
+    /// Regime model architecture: "hmm2" (default), "hmm3", or "jump_model".
+    pub model: Option<String>,
+    /// Jump penalty lambda for Statistical Jump Model (default 0.05).
+    pub jump_penalty: Option<f64>,
 }
 
 /// `POST /api/v1/risk/garch` body.
@@ -62,6 +68,8 @@ pub struct RiskRegimesRequest {
 pub struct RiskGarchRequest {
     /// Historical returns series (at least 30 observations).
     pub returns: Vec<f64>,
+    /// Volatility model: "garch11" (default), "gjr_garch", or "egarch".
+    pub model: Option<String>,
 }
 
 /// `POST /api/v1/risk/evt` body.
@@ -84,6 +92,8 @@ pub struct RiskBacktestRequest {
     pub var_forecasts: Vec<f64>,
     /// Stated VaR confidence level (default 0.99).
     pub confidence: Option<f64>,
+    /// Optional Expected Shortfall forecasts for Fissler-Ziegel joint elicitability scoring.
+    pub es_forecasts: Option<Vec<f64>>,
 }
 
 /// `POST /api/v1/benchmark` body (also the `benchmark` job payload).

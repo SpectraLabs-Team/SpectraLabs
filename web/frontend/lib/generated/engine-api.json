@@ -8497,6 +8497,17 @@
             "format": "double",
             "description": "Stated VaR confidence level (default 0.99)."
           },
+          "es_forecasts": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Optional Expected Shortfall forecasts for Fissler-Ziegel joint elicitability scoring."
+          },
           "realized_losses": {
             "type": "array",
             "items": {
@@ -8654,6 +8665,13 @@
           "returns"
         ],
         "properties": {
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Volatility model: \"garch11\" (default), \"gjr_garch\", or \"egarch\"."
+          },
           "returns": {
             "type": "array",
             "items": {
@@ -8890,6 +8908,21 @@
             "format": "double",
             "description": "Horizon in trading days (default 1.0)."
           },
+          "jump_penalty": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Jump penalty lambda for Statistical Jump Model (default 0.05)."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Regime model architecture: \"hmm2\" (default), \"hmm3\", or \"jump_model\"."
+          },
           "portfolio_value": {
             "type": [
               "number",
@@ -8943,7 +8976,7 @@
               "string",
               "null"
             ],
-            "description": "Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`)."
+            "description": "Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`, `clayton_copula`)."
           },
           "horizon_days": {
             "type": [
@@ -8981,6 +9014,14 @@
             "format": "int64",
             "description": "1,000..100,000,000, default 1,000,000.",
             "minimum": 0
+          },
+          "theta": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Clayton copula parameter theta > 0 (default 2.0)."
           }
         }
       },

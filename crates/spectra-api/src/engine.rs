@@ -159,6 +159,13 @@ fn run_options(j: &Json, base: RiskConfig) -> Result<RiskConfig, (u16, String)> 
                 }
                 DependenceModel::TCopula { degrees_of_freedom: df as u32 }
             }
+            "clayton" | "clayton_copula" => {
+                let theta = float_field(j, "theta", 2.0, "theta must be numeric.")?;
+                if theta <= 0.0 {
+                    return Err(unprocessable("Clayton copula parameter theta must be positive."));
+                }
+                DependenceModel::ClaytonCopula { theta }
+            }
             _ => return Err(unprocessable(format!("Unknown dependence model: {dep}"))),
         };
     }
@@ -200,12 +207,86 @@ pub fn risk(j: &Json) -> Reply {
 /// Returns an HTTP error if the returns series is invalid or too short.
 pub fn regimes(j: &Json) -> Reply {
     let returns = float_array(j, "returns")?;
-    let model = spectra_risk::RegimeModel::fit(&returns).map_err(|e| engine_error(&e))?;
     let portfolio_val = float_field(j, "portfolio_value", 100_000.0, "portfolio_value must be numeric.")?;
     let confidence = float_field(j, "confidence", 0.99, "confidence must be numeric.")?;
     let horizon_days = float_field(j, "horizon_days", 1.0, "horizon_days must be numeric.")?;
     let horizon_years = horizon_days / 252.0;
+    let model_type = str_field(j, "model", "hmm2")?.to_ascii_lowercase();
 
+    if model_type == "hmm3" {
+        let model = spectra_risk::Regime3State::fit(&returns).map_err(|e| engine_error(&e))?;
+        let (v_bull, v_neut, v_cris, cur_v) =
+            model.regime_conditional_var(portfolio_val, horizon_years, confidence);
+
+        let state_json = |s: &spectra_risk::RegimeState| {
+            Json::object()
+                .with("mu_daily", Json::number(s.mu_daily).unwrap_or(Json::Null))
+                .with("sigma_daily", Json::number(s.sigma_daily).unwrap_or(Json::Null))
+                .with("volatility_annualized", Json::number(s.volatility_annualized).unwrap_or(Json::Null))
+        };
+
+        let decoded = model.decode_viterbi(&returns);
+        let decoded_strs: Vec<Json> = decoded
+            .iter()
+            .map(|&r| match r {
+                0 => Json::string("bull"),
+                1 => Json::string("neutral"),
+                _ => Json::string("crisis"),
+            })
+            .collect();
+
+        let cur_str = match model.current_regime {
+            0 => "bull",
+            1 => "neutral",
+            _ => "crisis",
+        };
+
+        return Ok(Json::object()
+            .with("model", Json::string("hmm3"))
+            .with("current_regime", Json::string(cur_str))
+            .with("regime_bull_var", Json::number(v_bull).unwrap_or(Json::Null))
+            .with("regime_neutral_var", Json::number(v_neut).unwrap_or(Json::Null))
+            .with("regime_crisis_var", Json::number(v_cris).unwrap_or(Json::Null))
+            .with("current_regime_var", Json::number(cur_v).unwrap_or(Json::Null))
+            .with("state_bull", state_json(&model.state_0))
+            .with("state_neutral", state_json(&model.state_1))
+            .with("state_crisis", state_json(&model.state_2))
+            .with("viterbi_path", Json::Array(decoded_strs)));
+    }
+
+    if model_type == "jump" || model_type == "jump_model" {
+        let lambda = float_field(j, "jump_penalty", 0.05, "jump_penalty must be numeric.")?;
+        let model =
+            spectra_risk::StatisticalJumpModel::fit(&returns, lambda).map_err(|e| engine_error(&e))?;
+
+        let decoded_strs: Vec<Json> = model
+            .states
+            .iter()
+            .map(|&s| if s == 0 { Json::string("calm") } else { Json::string("crisis") })
+            .collect();
+
+        let cur_str = if model.current_state == 0 { "calm" } else { "crisis" };
+
+        let state_json = |s: &spectra_risk::RegimeState| {
+            Json::object()
+                .with("mu_daily", Json::number(s.mu_daily).unwrap_or(Json::Null))
+                .with("sigma_daily", Json::number(s.sigma_daily).unwrap_or(Json::Null))
+                .with("volatility_annualized", Json::number(s.volatility_annualized).unwrap_or(Json::Null))
+        };
+
+        return Ok(Json::object()
+            .with("model", Json::string("jump_model"))
+            .with("jump_penalty", Json::number(model.jump_penalty).unwrap_or(Json::Null))
+            .with("jump_count", Json::integer(model.jump_count as i64))
+            .with("persistence_ratio", Json::number(model.persistence_ratio).unwrap_or(Json::Null))
+            .with("current_regime", Json::string(cur_str))
+            .with("current_state", Json::integer(model.current_state as i64))
+            .with("state_0", state_json(&model.state_0))
+            .with("state_1", state_json(&model.state_1))
+            .with("viterbi_path", Json::Array(decoded_strs)));
+    }
+
+    let model = spectra_risk::RegimeModel::fit(&returns).map_err(|e| engine_error(&e))?;
     let (v0, v1, cur_v) = model.regime_conditional_var(portfolio_val, horizon_years, confidence);
 
     let state_json = |s: &spectra_risk::RegimeState| {
@@ -230,6 +311,7 @@ pub fn regimes(j: &Json) -> Reply {
     let decoded_strs: Vec<Json> = decoded.iter().map(|r| Json::string(r.as_str())).collect();
 
     Ok(Json::object()
+        .with("model", Json::string("hmm2"))
         .with("current_regime", Json::string(model.current_regime.as_str()))
         .with("current_high_vol_prob", Json::number(model.current_high_vol_prob).unwrap_or(Json::Null))
         .with("regime_0_var", Json::number(v0).unwrap_or(Json::Null))
@@ -241,19 +323,66 @@ pub fn regimes(j: &Json) -> Reply {
         .with("viterbi_path", Json::Array(decoded_strs)))
 }
 
-/// Fit GARCH(1,1) volatility model and forecast next-step volatility.
+/// Fit GARCH(1,1), GJR-GARCH(1,1), or EGARCH(1,1) volatility model and forecast next-step volatility.
 ///
 /// # Errors
 ///
 /// Returns an HTTP error if the returns series is invalid or has negligible variance.
 pub fn garch(j: &Json) -> Reply {
     let returns = float_array(j, "returns")?;
+    let model_type = str_field(j, "model", "garch11")?.to_ascii_lowercase();
+
+    if model_type == "gjr_garch" || model_type == "gjr" {
+        let model = spectra_risk::GjrGarch11::fit(&returns).map_err(|e| engine_error(&e))?;
+        let last_r = *returns.last().unwrap_or(&0.0);
+        let forecast_1d_var = model.forecast_variance(last_r, None, 1);
+        let forecast_1d_vol_ann = (forecast_1d_var.max(0.0) * 252.0).sqrt();
+
+        return Ok(Json::object()
+            .with("model", Json::string("gjr_garch"))
+            .with("omega", Json::number(model.omega).unwrap_or(Json::Null))
+            .with("alpha", Json::number(model.alpha).unwrap_or(Json::Null))
+            .with("gamma", Json::number(model.gamma).unwrap_or(Json::Null))
+            .with("beta", Json::number(model.beta).unwrap_or(Json::Null))
+            .with("persistence", Json::number(model.persistence).unwrap_or(Json::Null))
+            .with("unconditional_variance", Json::number(model.unconditional_variance).unwrap_or(Json::Null))
+            .with("log_likelihood", Json::number(model.log_likelihood).unwrap_or(Json::Null))
+            .with("forecast_1d_variance", Json::number(forecast_1d_var).unwrap_or(Json::Null))
+            .with(
+                "forecast_1d_volatility_annualized",
+                Json::number(forecast_1d_vol_ann).unwrap_or(Json::Null),
+            ));
+    }
+
+    if model_type == "egarch" {
+        let model = spectra_risk::Egarch11::fit(&returns).map_err(|e| engine_error(&e))?;
+        let last_r = *returns.last().unwrap_or(&0.0);
+        let forecast_1d_var = model.forecast_variance(last_r, None, 1);
+        let forecast_1d_vol_ann = (forecast_1d_var.max(0.0) * 252.0).sqrt();
+
+        return Ok(Json::object()
+            .with("model", Json::string("egarch"))
+            .with("omega", Json::number(model.omega).unwrap_or(Json::Null))
+            .with("alpha", Json::number(model.alpha).unwrap_or(Json::Null))
+            .with("gamma", Json::number(model.gamma).unwrap_or(Json::Null))
+            .with("beta", Json::number(model.beta).unwrap_or(Json::Null))
+            .with("persistence", Json::number(model.persistence).unwrap_or(Json::Null))
+            .with("unconditional_variance", Json::number(model.unconditional_variance).unwrap_or(Json::Null))
+            .with("log_likelihood", Json::number(model.log_likelihood).unwrap_or(Json::Null))
+            .with("forecast_1d_variance", Json::number(forecast_1d_var).unwrap_or(Json::Null))
+            .with(
+                "forecast_1d_volatility_annualized",
+                Json::number(forecast_1d_vol_ann).unwrap_or(Json::Null),
+            ));
+    }
+
     let model = spectra_risk::Garch11::fit(&returns).map_err(|e| engine_error(&e))?;
     let last_r = *returns.last().unwrap_or(&0.0);
     let forecast_1d_var = model.forecast_variance(last_r, None, 1);
     let forecast_1d_vol_ann = (forecast_1d_var.max(0.0) * 252.0).sqrt();
 
     Ok(Json::object()
+        .with("model", Json::string("garch11"))
         .with("omega", Json::number(model.omega).unwrap_or(Json::Null))
         .with("alpha", Json::number(model.alpha).unwrap_or(Json::Null))
         .with("beta", Json::number(model.beta).unwrap_or(Json::Null))
@@ -292,7 +421,7 @@ pub fn evt(j: &Json) -> Reply {
         .with("evt_cvar", Json::number(evt_cvar).unwrap_or(Json::Null)))
 }
 
-/// Run Kupiec and Christoffersen VaR backtest on realized losses vs forecasts.
+/// Run Kupiec, Christoffersen, and Fissler-Ziegel VaR/ES backtest on realized losses vs forecasts.
 ///
 /// # Errors
 ///
@@ -304,7 +433,7 @@ pub fn backtest(j: &Json) -> Reply {
 
     let res = spectra_risk::backtest_var(&realized, &forecasts, confidence).map_err(|e| engine_error(&e))?;
 
-    Ok(Json::object()
+    let mut out = Json::object()
         .with("total_observations", Json::integer(res.total_observations as i64))
         .with("exceptions_count", Json::integer(res.exceptions_count as i64))
         .with("expected_exceptions", Json::number(res.expected_exceptions).unwrap_or(Json::Null))
@@ -318,7 +447,28 @@ pub fn backtest(j: &Json) -> Reply {
             "conditional_coverage_p_value",
             Json::number(res.conditional_coverage_p_value).unwrap_or(Json::Null),
         )
-        .with("basel_zone", Json::string(res.basel_zone.as_str())))
+        .with("basel_zone", Json::string(res.basel_zone.as_str()));
+
+    if let Ok(es) = float_array(j, "es_forecasts") {
+        let alpha = 1.0 - confidence;
+        if let Ok(fz_loss) = spectra_risk::fissler_ziegel_loss(&realized, &forecasts, &es, alpha) {
+            out = out.with("fissler_ziegel_loss", Json::number(fz_loss).unwrap_or(Json::Null));
+        }
+    }
+
+    if let Ok(jb) = spectra_risk::jarque_bera_test(&realized) {
+        out = out.with(
+            "jarque_bera",
+            Json::object()
+                .with("jb_stat", Json::number(jb.jb_stat).unwrap_or(Json::Null))
+                .with("p_value", Json::number(jb.p_value).unwrap_or(Json::Null))
+                .with("skewness", Json::number(jb.skewness).unwrap_or(Json::Null))
+                .with("excess_kurtosis", Json::number(jb.excess_kurtosis).unwrap_or(Json::Null))
+                .with("is_normal", Json::boolean(jb.is_normal)),
+        );
+    }
+
+    Ok(out)
 }
 
 /// The validated arguments of a benchmark request: portfolio, simulations,

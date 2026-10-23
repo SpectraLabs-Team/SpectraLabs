@@ -343,6 +343,7 @@ impl RiskReport {
             DependenceModel::Aggregate => "MonteCarlo/GBM aggregate position",
             DependenceModel::GaussianCopula => "MonteCarlo/Gaussian copula correlated paths",
             DependenceModel::TCopula { .. } => "MonteCarlo/t-copula correlated paths",
+            DependenceModel::ClaytonCopula { .. } => "MonteCarlo/Clayton copula correlated paths",
         };
         let mut j = Json::object()
             .with("metric", Json::string(self.metric_name.clone()))

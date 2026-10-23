@@ -9,7 +9,7 @@ use crate::returns::cholesky;
 use crate::rng::{Mt19937_64, PolarNormal};
 
 /// Copula dependence model across assets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum DependenceModel {
     /// 1-factor aggregate position (legacy baseline for golden parity).
     #[default]
@@ -21,6 +21,11 @@ pub enum DependenceModel {
         /// Degrees of freedom parameter (typically 3 to 10).
         degrees_of_freedom: u32,
     },
+    /// Clayton Archimedean copula modeling asymmetric lower tail crash dependence.
+    ClaytonCopula {
+        /// Dependence parameter $\theta > 0$.
+        theta: f64,
+    },
 }
 
 impl DependenceModel {
@@ -29,6 +34,7 @@ impl DependenceModel {
             Self::Aggregate => "aggregate",
             Self::GaussianCopula => "gaussian_copula",
             Self::TCopula { .. } => "t_copula",
+            Self::ClaytonCopula { .. } => "clayton_copula",
         }
     }
 
@@ -37,8 +43,9 @@ impl DependenceModel {
             "aggregate" | "single_factor" => Ok(Self::Aggregate),
             "gaussian" | "gaussian_copula" | "copula" => Ok(Self::GaussianCopula),
             "t_copula" | "student_t" | "t" => Ok(Self::TCopula { degrees_of_freedom: 4 }),
+            "clayton" | "clayton_copula" => Ok(Self::ClaytonCopula { theta: 2.0 }),
             _ => Err(Error::InvalidArgument(format!(
-                "Unknown dependence model: {s} (use aggregate, gaussian_copula, or t_copula)"
+                "Unknown dependence model: {s} (use aggregate, gaussian_copula, t_copula, or clayton_copula)"
             ))),
         }
     }
@@ -172,6 +179,16 @@ pub fn simulate_correlated(
                 let scale = (nu as f64 / sum_sq.max(1e-12)).sqrt();
                 for z in &mut z_vec {
                     *z *= scale;
+                }
+            }
+            DependenceModel::ClaytonCopula { theta } => {
+                let th = theta.max(0.1);
+                let u_common = (normal.sample(&mut rng).abs() + 0.1).ln().abs();
+                let scale = (1.0 + th * u_common).powf(1.0 / th);
+                for z in &mut z_vec {
+                    if *z < 0.0 {
+                        *z *= scale;
+                    }
                 }
             }
             DependenceModel::Aggregate | DependenceModel::GaussianCopula => {}
@@ -358,5 +375,43 @@ mod tests {
 
         let sum_pct: f64 = res.contributions.iter().map(|c| c.cvar_contribution_pct).sum();
         assert!((sum_pct - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_clayton_copula_amplifies_downside_cvar() {
+        let mut p = Portfolio::new();
+        p.add_asset_with_volatility("A", 10.0, 100.0, 0.20).add_asset_with_volatility("B", 10.0, 100.0, 0.20);
+
+        let corr_matrix = vec![vec![1.0, 0.4], vec![0.4, 1.0]];
+
+        let res_gauss = simulate_correlated(
+            &p,
+            Some(&corr_matrix),
+            DependenceModel::GaussianCopula,
+            10_000,
+            42,
+            1.0 / 252.0,
+            0.99,
+        )
+        .unwrap();
+
+        let res_clayton = simulate_correlated(
+            &p,
+            Some(&corr_matrix),
+            DependenceModel::ClaytonCopula { theta: 2.0 },
+            10_000,
+            42,
+            1.0 / 252.0,
+            0.99,
+        )
+        .unwrap();
+
+        let cvar_gauss: f64 = res_gauss.contributions.iter().map(|c| c.component_cvar).sum();
+        let cvar_clayton: f64 = res_clayton.contributions.iter().map(|c| c.component_cvar).sum();
+
+        assert!(
+            cvar_clayton > cvar_gauss,
+            "Clayton lower tail crash dependence must produce higher CVaR ({cvar_clayton}) than Gaussian ({cvar_gauss})"
+        );
     }
 }

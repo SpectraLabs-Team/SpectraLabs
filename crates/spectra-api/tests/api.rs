@@ -759,3 +759,118 @@ async fn m7_correlated_copula_risk() {
     assert_eq!(j.at("dependence_model").unwrap().as_str().unwrap(), "gaussian_copula");
     assert!(j.find("position_contributions").is_some());
 }
+
+#[tokio::test]
+async fn m7_advanced_regimes_3state_endpoint() {
+    let mut returns = Vec::new();
+    for i in 0..60 {
+        returns.push(if i < 20 {
+            0.002
+        } else if i < 40 {
+            -0.0005
+        } else {
+            -0.025
+        });
+    }
+    let body = Json::object()
+        .with("returns", Json::Array(returns.into_iter().map(|v| Json::number(v).unwrap()).collect()))
+        .with("model", Json::string("hmm3"));
+
+    let (status, j) = call(post("/api/v1/risk/regimes", &body)).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    assert_eq!(j.at("model").unwrap().as_str().unwrap(), "hmm3");
+    assert!(j.find("regime_bull_var").is_some());
+    assert!(j.find("regime_neutral_var").is_some());
+    assert!(j.find("regime_crisis_var").is_some());
+    assert!(j.find("state_bull").is_some());
+    assert!(j.find("state_neutral").is_some());
+    assert!(j.find("state_crisis").is_some());
+}
+
+#[tokio::test]
+async fn m7_advanced_regimes_jump_model_endpoint() {
+    let mut returns = Vec::new();
+    for i in 0..50 {
+        returns.push(if i % 5 == 0 { 0.02 } else { 0.001 });
+    }
+    let body = Json::object()
+        .with("returns", Json::Array(returns.into_iter().map(|v| Json::number(v).unwrap()).collect()))
+        .with("model", Json::string("jump_model"))
+        .with("jump_penalty", Json::number(0.1).unwrap());
+
+    let (status, j) = call(post("/api/v1/risk/regimes", &body)).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    assert_eq!(j.at("model").unwrap().as_str().unwrap(), "jump_model");
+    assert!(j.find("current_regime").is_some());
+    assert!(j.find("state_0").is_some());
+    assert!(j.find("state_1").is_some());
+    assert!(j.find("jump_count").is_some());
+}
+
+#[tokio::test]
+async fn m7_advanced_garch_gjr_and_egarch_endpoint() {
+    let mut returns = Vec::new();
+    for i in 0..60 {
+        returns.push(0.001 * ((f64::from(i) * 0.2).sin()));
+    }
+    let body_gjr = Json::object()
+        .with("returns", Json::Array(returns.iter().copied().map(|v| Json::number(v).unwrap()).collect()))
+        .with("model", Json::string("gjr_garch"));
+
+    let (status_gjr, j_gjr) = call(post("/api/v1/risk/garch", &body_gjr)).await;
+    assert_eq!(status_gjr, 200, "{}", j_gjr.dump());
+    assert_eq!(j_gjr.at("model").unwrap().as_str().unwrap(), "gjr_garch");
+    assert!(j_gjr.find("gamma").is_some());
+
+    let body_egarch = Json::object()
+        .with("returns", Json::Array(returns.into_iter().map(|v| Json::number(v).unwrap()).collect()))
+        .with("model", Json::string("egarch"));
+
+    let (status_egarch, j_egarch) = call(post("/api/v1/risk/garch", &body_egarch)).await;
+    assert_eq!(status_egarch, 200, "{}", j_egarch.dump());
+    assert_eq!(j_egarch.at("model").unwrap().as_str().unwrap(), "egarch");
+    assert!(j_egarch.find("gamma").is_some());
+}
+
+#[tokio::test]
+async fn m7_advanced_backtest_with_fz_and_jb() {
+    let mut realized = vec![0.0; 100];
+    let var_forecasts = vec![50.0; 100];
+    let es_forecasts = vec![65.0; 100];
+    realized[10] = 60.0;
+    let body = Json::object()
+        .with(
+            "realized_losses",
+            Json::Array(realized.into_iter().map(|v| Json::number(v).unwrap()).collect()),
+        )
+        .with(
+            "var_forecasts",
+            Json::Array(var_forecasts.into_iter().map(|v| Json::number(v).unwrap()).collect()),
+        )
+        .with(
+            "es_forecasts",
+            Json::Array(es_forecasts.into_iter().map(|v| Json::number(v).unwrap()).collect()),
+        )
+        .with("confidence", Json::number(0.99).unwrap());
+
+    let (status, j) = call(post("/api/v1/risk/backtest", &body)).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    assert!(j.find("fissler_ziegel_loss").is_some());
+    assert!(j.find("jarque_bera").is_some());
+}
+
+#[tokio::test]
+async fn m7_advanced_clayton_copula_risk() {
+    let body = Json::object()
+        .with("portfolio_csv", Json::string(SAMPLE_PORTFOLIO))
+        .with("metric", Json::string("var"))
+        .with("confidence", Json::number(0.99).unwrap())
+        .with("simulations", Json::integer(5_000))
+        .with("dependence", Json::string("clayton_copula"))
+        .with("theta", Json::number(2.5).unwrap());
+
+    let (status, j) = call(post("/api/v1/risk", &body)).await;
+    assert_eq!(status, 200, "{}", j.dump());
+    assert_eq!(j.at("dependence_model").unwrap().as_str().unwrap(), "clayton_copula");
+    assert!(j.find("position_contributions").is_some());
+}

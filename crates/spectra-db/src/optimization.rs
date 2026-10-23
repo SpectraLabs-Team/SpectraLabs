@@ -15,6 +15,7 @@ pub struct OptimizationSweep {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub job_id: Option<Uuid>,
+    pub experiment_id: Option<Uuid>,
     pub strategy_id: Option<Uuid>,
     pub strategy_version_id: Option<Uuid>,
     pub dataset_version_id: Uuid,
@@ -108,11 +109,13 @@ pub struct HoldoutEvaluation {
 // ---------------------------------------------------------------- Sweeps
 
 /// Insert a new queued optimization sweep.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_sweep(
     pool: &PgPool,
     id: Uuid,
     workspace_id: Uuid,
     job_id: Option<Uuid>,
+    experiment_id: Option<Uuid>,
     strategy_id: Option<Uuid>,
     strategy_version_id: Option<Uuid>,
     dataset_version_id: Uuid,
@@ -125,6 +128,7 @@ pub async fn insert_sweep(
         .bind(id)
         .bind(workspace_id)
         .bind(job_id)
+        .bind(experiment_id)
         .bind(strategy_id)
         .bind(strategy_version_id)
         .bind(dataset_version_id)
@@ -410,4 +414,42 @@ pub async fn evaluations_of_holdout(
     holdout_id: Uuid,
 ) -> Result<Vec<HoldoutEvaluation>, Error> {
     sqlx::query_as(include_str!("../queries/holdout_evals_of.sql")).bind(holdout_id).fetch_all(pool).await
+}
+
+/// Check if a dataset version is sealed in the holdout vault for this workspace.
+pub async fn is_holdout_sealed(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    dataset_version_id: Uuid,
+) -> Result<bool, Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM holdout_vault WHERE workspace_id = $1 AND dataset_version_id = $2)",
+    )
+    .bind(workspace_id)
+    .bind(dataset_version_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// Find holdout evaluations associated with a workspace and optionally strategy version or dataset version.
+pub async fn evaluations_for_run_target(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_version_id: Option<Uuid>,
+    dataset_version_id: Option<Uuid>,
+) -> Result<Vec<HoldoutEvaluation>, Error> {
+    sqlx::query_as(
+        "SELECT e.id, e.holdout_id, e.workspace_id, e.strategy_version_id, e.evaluation_num, e.metrics, e.dsr, e.warnings, e.evaluated_by, e.evaluated_at \
+         FROM holdout_evaluations e \
+         JOIN holdout_vault v ON v.id = e.holdout_id \
+         WHERE e.workspace_id = $1 \
+           AND ($2::uuid IS NULL OR e.strategy_version_id = $2) \
+           AND ($3::uuid IS NULL OR v.dataset_version_id = $3) \
+         ORDER BY e.evaluated_at DESC LIMIT 20",
+    )
+    .bind(workspace_id)
+    .bind(strategy_version_id)
+    .bind(dataset_version_id)
+    .fetch_all(pool)
+    .await
 }

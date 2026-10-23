@@ -1207,6 +1207,16 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
         drop(permit);
         return;
     };
+    let strategy_version_id = job
+        .payload
+        .get("strategy_version_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok());
+    let experiment_id = job
+        .payload
+        .get("experiment_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok());
 
     let version = match datasets::resolve_version(&ctx.pool, job.workspace_id, version_id).await {
         Ok(Some(v)) => v,
@@ -1392,6 +1402,27 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     ret_vol,
                 )
                 .await;
+
+                // Also record as a child run in runs table (Task 2)
+                let run_id = spectra_db::new_id();
+                let _ = sqlx::query(
+                    "INSERT INTO runs (id, workspace_id, experiment_id, strategy_version_id, dataset_version_id, job_id, kind, status, params, metrics, counts_as_trial, strategy, dataset_id, sharpe_per_period, n_obs, finished_at) \
+                     VALUES ($1, $2, $3, $4, $5, $6, 'sweep_trial', 'succeeded', $7, $8, true, $9, $10, $11, $12, now())"
+                )
+                .bind(run_id)
+                .bind(job.workspace_id)
+                .bind(experiment_id)
+                .bind(strategy_version_id)
+                .bind(version_id)
+                .bind(job.id)
+                .bind(&params_json)
+                .bind(&metrics_json)
+                .bind(&strategy)
+                .bind(&version.checksum)
+                .bind(ret_mean.unwrap_or(0.0))
+                .bind(trial.returns.len() as i64)
+                .execute(&ctx.pool)
+                .await;
             }
 
             // Compute statistical overfitting metrics
@@ -1477,11 +1508,37 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
             let _ = jobs::mark_cancelled(&ctx.pool, job.id, &ctx.worker_id).await;
         }
         Err(msg) => {
-            let _ = sqlx::query("UPDATE optimization_sweeps SET status='failed', finished_at=now() WHERE workspace_id=$1 AND id=$2")
+            let attempted_trials = param_sets.len() as i32;
+            let _ = sqlx::query("UPDATE optimization_sweeps SET status='failed', trial_count=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
                 .bind(job.workspace_id)
                 .bind(sweep_id)
+                .bind(attempted_trials)
                 .execute(&ctx.pool)
                 .await;
+            if let Some(exp_id) = experiment_id {
+                for pset in &param_sets {
+                    let mut p_map = serde_json::Map::new();
+                    for (k, v) in &pset.values {
+                        p_map.insert(k.clone(), serde_json::json!(v));
+                    }
+                    let run_id = spectra_db::new_id();
+                    let _ = sqlx::query(
+                        "INSERT INTO runs (id, workspace_id, experiment_id, strategy_version_id, dataset_version_id, job_id, kind, status, params, counts_as_trial, strategy, error, finished_at) \
+                         VALUES ($1, $2, $3, $4, $5, $6, 'sweep_trial', 'failed', $7, true, $8, $9, now())"
+                    )
+                    .bind(run_id)
+                    .bind(job.workspace_id)
+                    .bind(exp_id)
+                    .bind(strategy_version_id)
+                    .bind(version_id)
+                    .bind(job.id)
+                    .bind(serde_json::Value::Object(p_map))
+                    .bind(&strategy)
+                    .bind(&msg)
+                    .execute(&ctx.pool)
+                    .await;
+                }
+            }
             fail_job(&ctx, &job, started, &msg, false).await;
         }
     }

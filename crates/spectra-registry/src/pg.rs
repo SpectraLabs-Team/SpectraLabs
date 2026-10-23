@@ -820,7 +820,7 @@ impl PgRegistry {
             None
         };
         let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM runs WHERE workspace_id = $1 AND status = 'succeeded' \
+            "SELECT count(*) FROM runs WHERE workspace_id = $1 \
              AND counts_as_trial AND ($2::uuid IS NULL OR experiment_id = $2)",
         )
         .bind(self.workspace_id)

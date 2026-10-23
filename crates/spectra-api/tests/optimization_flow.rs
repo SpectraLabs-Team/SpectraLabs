@@ -297,3 +297,186 @@ async fn holdout_vault_budget_lockout_flow() {
     assert_eq!(refused["code"], "holdout_budget_exhausted");
     f.clean_up().await;
 }
+
+#[tokio::test]
+async fn holdout_sealed_direct_read_refused() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // 1. Seal holdout
+    let (status, holdout) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/holdout/seal",
+            &json!({
+                "name": "Strict Vault",
+                "dataset_version_id": ds_ver,
+                "budget": 3,
+                "notes": "Direct read lockout test"
+            }),
+        )
+        .await;
+    assert_eq!(status, 201, "status: {status}, body: {holdout}");
+
+    // 2. Direct read of bars MUST be refused (403 holdout_sealed)
+    let (status, refused_bars) =
+        f.call("GET", &format!("/api/v1/datasets/versions/{ds_ver}/bars"), &Value::Null).await;
+    assert_eq!(status, 403, "status: {status}, body: {refused_bars}");
+    assert_eq!(refused_bars["code"], "holdout_sealed");
+
+    // 3. Direct backtest queueing MUST be refused (403 holdout_sealed)
+    let (status, refused_bt) = f
+        .call(
+            "POST",
+            "/api/v1/backtests",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "buy_and_hold"
+            }),
+        )
+        .await;
+    assert_eq!(status, 403, "status: {status}, body: {refused_bt}");
+    assert_eq!(refused_bt["code"], "holdout_sealed");
+
+    // 4. Sweep queueing on sealed holdout MUST be refused (403 holdout_sealed)
+    let (status, refused_sweep) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/sweep",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "buy_and_hold",
+                "param_grid": { "p": [1.0, 2.0] }
+            }),
+        )
+        .await;
+    assert_eq!(status, 403, "status: {status}, body: {refused_sweep}");
+    assert_eq!(refused_sweep["code"], "holdout_sealed");
+
+    // 5. Walk-forward on sealed holdout MUST be refused (403 holdout_sealed)
+    let (status, refused_wf) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/walkforward",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "buy_and_hold",
+                "train_size": 100,
+                "test_size": 20,
+                "param_grid": { "p": [1.0] }
+            }),
+        )
+        .await;
+    assert_eq!(status, 403, "status: {status}, body: {refused_wf}");
+    assert_eq!(refused_wf["code"], "holdout_sealed");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn holdout_viewer_role_refused() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // Set user role to 'viewer' in workspace_members
+    let _ = sqlx::query(
+        "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'viewer') \
+         ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = 'viewer'",
+    )
+    .bind(f.ws)
+    .bind(f.user)
+    .execute(&f.pool)
+    .await;
+
+    // 1. Viewer cannot seal a holdout (403 viewer_read_only)
+    let (status, refused_seal) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/holdout/seal",
+            &json!({
+                "name": "Viewer Vault",
+                "dataset_version_id": ds_ver,
+                "budget": 5
+            }),
+        )
+        .await;
+    assert_eq!(status, 403, "status: {status}, body: {refused_seal}");
+    assert_eq!(refused_seal["code"], "viewer_read_only");
+
+    // 2. Viewer cannot evaluate a holdout (403 viewer_read_only)
+    let dummy_id = spectra_db::new_id();
+    let (status, refused_eval) = f
+        .call(
+            "POST",
+            &format!("/api/v1/optimization/holdout/{dummy_id}/evaluate"),
+            &json!({ "strategy": "buy_and_hold" }),
+        )
+        .await;
+    assert_eq!(status, 403, "status: {status}, body: {refused_eval}");
+    assert_eq!(refused_eval["code"], "viewer_read_only");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn sweep_search_budget_cap_enforced() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // Create grid with 40 * 30 = 1200 combinations (> 1000 budget cap)
+    let fast_vals: Vec<f64> = (1..=40).map(|i| i as f64).collect();
+    let slow_vals: Vec<f64> = (1..=30).map(|i| i as f64).collect();
+
+    let (status, res) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/sweep",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "sma_cross",
+                "param_grid": {
+                    "fast": fast_vals,
+                    "slow": slow_vals
+                }
+            }),
+        )
+        .await;
+
+    assert_eq!(status, 422, "status: {status}, body: {res}");
+    assert_eq!(res["code"], "search_budget_exceeded");
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn sweep_export_report_flow() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // 1. Queue sweep
+    let (status, sweep) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/sweep",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "sma_cross",
+                "param_grid": {
+                    "fast": [5.0, 10.0],
+                    "slow": [20.0, 30.0]
+                }
+            }),
+        )
+        .await;
+    assert_eq!(status, 202);
+    let sweep_id = sweep["id"].as_str().unwrap();
+
+    // 2. Export sweep report
+    let (status, res) =
+        f.call("GET", &format!("/api/v1/optimization/sweep/{sweep_id}/export"), &Value::Null).await;
+    assert_eq!(status, 200, "status: {status}, body: {res}");
+    f.clean_up().await;
+}

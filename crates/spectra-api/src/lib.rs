@@ -852,6 +852,7 @@ fn optimization_routes() -> Router<AppState> {
         .route("/api/v1/optimization/sweep", only(post(optimization_api::queue_sweep)))
         .route("/api/v1/optimization/sweeps", only(get(optimization_api::list_sweeps)))
         .route("/api/v1/optimization/sweep/{id}", only(get(optimization_api::get_sweep)))
+        .route("/api/v1/optimization/sweep/{id}/export", only(get(optimization_api::export_sweep)))
         .route(
             "/api/v1/optimization/walkforward",
             only(get(optimization_api::list_walk_forwards).post(optimization_api::queue_walk_forward)),

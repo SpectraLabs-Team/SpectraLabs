@@ -257,6 +257,8 @@ pub struct StressRequest {
         crate::paper_api::get_order,
         crate::paper_api::create_order,
         crate::paper_api::step_strategy,
+        crate::paper_api::sync_paper_orders,
+        crate::paper_api::reconcile_paper_positions,
     ),
     components(schemas(
         ErrorDoc,
@@ -389,6 +391,9 @@ pub struct StressRequest {
         crate::paper_api::StepPaperRequest,
         crate::paper_api::PaperBarInput,
         crate::paper_api::StepPaperResponse,
+        crate::paper_api::SyncOrdersResponse,
+        crate::paper_api::PositionMismatchView,
+        crate::paper_api::ReconcilePositionsResponse,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),
@@ -479,6 +484,8 @@ mod tests {
             "/api/v1/risk/kill-switch",
             "/api/v1/risk/audit",
             "/api/v1/risk/metrics",
+            "/api/v1/paper/sync",
+            "/api/v1/paper/reconcile",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

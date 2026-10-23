@@ -89,7 +89,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
                 aria-checked={false}
                 aria-disabled
                 disabled
-                title="Not connected: the Rust API answers 501 on /api/alpaca/* (the brokerage proxy needs an HTTPS client)."
+                title="Live / Broker Paper Trading: Add your Alpaca keys in Broker Keys to enable broker synchronization."
                 className="flex w-full cursor-not-allowed items-center gap-2.5 rounded-lg border border-ink/[0.07] px-3 py-2 text-left opacity-60"
               >
                 <span className="h-2 w-2 rounded-full bg-loss/60" />

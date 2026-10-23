@@ -799,6 +799,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reconcile open positions between broker and local ledger (Task 11). */
+        get: operations["reconcile_paper_positions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/paper/step": {
         parameters: {
             query?: never;
@@ -810,6 +827,23 @@ export interface paths {
         put?: never;
         /** Step a saved strategy version on incoming bars against the paper account. */
         post: operations["step_strategy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync orders and fills with broker or simulated ledger (Task 10). */
+        post: operations["sync_paper_orders"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2781,6 +2815,15 @@ export interface components {
                 [key: string]: components["schemas"]["PositionSnapshotDto"];
             };
         };
+        PositionMismatchView: {
+            /** Format: double */
+            broker_qty: number;
+            /** Format: double */
+            discrepancy: number;
+            /** Format: double */
+            local_qty: number;
+            symbol: string;
+        };
         PositionSnapshotDto: {
             /** Format: double */
             price: number;
@@ -2979,6 +3022,13 @@ export interface components {
              * @description Frozen bars in a row that count as a stale run (default 5).
              */
             stale_run?: number | null;
+        };
+        ReconcilePositionsResponse: {
+            mismatches: components["schemas"]["PositionMismatchView"][];
+            mismatches_count: number;
+            reconciled: boolean;
+            source: string;
+            timestamp: string;
         };
         /** @description Refresh schedule view. */
         RefreshScheduleView: {
@@ -3575,6 +3625,12 @@ export interface components {
              * @description Bars with zero volume.
              */
             zero_volume_bars: number;
+        };
+        SyncOrdersResponse: {
+            fills_processed: number;
+            orders_synced: number;
+            source: string;
+            synced: boolean;
         };
         /** @description Request to trigger a manual refresh. */
         TriggerRefreshRequest: {
@@ -5883,6 +5939,26 @@ export interface operations {
             };
         };
     };
+    reconcile_paper_positions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Position reconciliation report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcilePositionsResponse"];
+                };
+            };
+        };
+    };
     step_strategy: {
         parameters: {
             query?: never;
@@ -5918,6 +5994,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    sync_paper_orders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Orders synced successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncOrdersResponse"];
+                };
             };
         };
     };

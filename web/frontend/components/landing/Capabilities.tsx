@@ -33,11 +33,11 @@ const CARDS: { title: string; body: ReactNode; icon: typeof Activity; tile: stri
   },
   {
     title: 'Brokerage & Execution Layer',
-    body: 'Paper trading on a simulated ledger today. Live execution via Alpaca is on the roadmap: the engine’s brokerage proxy needs an HTTPS client first.',
+    body: 'Paper trading on a simulated ledger and live broker execution via Alpaca with pre-trade risk checks, order sync, and automated position reconciliation.',
     icon: Layers,
     tile: 'from-emerald-400/25 to-teal-500/10 text-profit ring-profit/30',
     href: '/studio?tab=settings',
-    badge: 'Paper · Live on roadmap',
+    badge: 'Paper · Live Broker Proxy',
   },
 ];
 

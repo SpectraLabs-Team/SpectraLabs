@@ -193,6 +193,36 @@ impl ArtifactStore {
         }
         Ok(bytes)
     }
+
+    /// Lists all SHA-256 hashes currently stored on disk under `root/sha256/xx/yy/<hash>`.
+    pub fn list_stored_hashes(&self) -> io::Result<Vec<String>> {
+        let base = self.root.join("sha256");
+        if !base.exists() {
+            return Ok(Vec::new());
+        }
+        let mut hashes = Vec::new();
+        for entry1 in fs::read_dir(&base)? {
+            let entry1 = entry1?;
+            if entry1.file_type()?.is_dir() {
+                for entry2 in fs::read_dir(entry1.path())? {
+                    let entry2 = entry2?;
+                    if entry2.file_type()?.is_dir() {
+                        for entry3 in fs::read_dir(entry2.path())? {
+                            let entry3 = entry3?;
+                            if entry3.file_type()?.is_file() {
+                                if let Some(name) = entry3.file_name().to_str() {
+                                    if is_sha256_hex(name) {
+                                        hashes.push(name.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(hashes)
+    }
 }
 
 /// Where artifact bytes live.
@@ -332,6 +362,18 @@ impl ArtifactBackend {
             Self::Local(store) => store.staging_dir(),
             #[cfg(feature = "s3")]
             Self::S3(_) => std::env::temp_dir().join("spectra-staging"),
+        }
+    }
+
+    /// Lists all stored SHA-256 hashes.
+    pub async fn list_stored_hashes(&self) -> io::Result<Vec<String>> {
+        match self {
+            Self::Local(store) => {
+                let store = store.clone();
+                tokio::task::spawn_blocking(move || store.list_stored_hashes()).await.map_err(io::Error::other)?
+            }
+            #[cfg(feature = "s3")]
+            Self::S3(_) => Ok(Vec::new()),
         }
     }
 
@@ -523,6 +565,31 @@ pub async fn find_for_run(
         .fetch_optional(pool)
         .await?;
     Ok(row.map(|(sha256, content_type, size)| ArtifactRef { sha256, content_type, size }))
+}
+
+/// Sweeps orphaned artifact files whose workspaces or referencing rows have been deleted.
+/// Collects all active hashes from `workspace_storage`, compares them against the store's
+/// stored hashes, and deletes any file not referenced by any active workspace.
+/// Returns the list of deleted hashes.
+pub async fn sweep_unreferenced(
+    pool: &PgPool,
+    store: &ArtifactBackend,
+) -> Result<Vec<String>, sqlx::Error> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT DISTINCT sha256 FROM workspace_storage")
+        .fetch_all(pool)
+        .await?;
+    let active_hashes: std::collections::HashSet<String> = rows.into_iter().map(|(h,)| h).collect();
+
+    let on_disk = store.list_stored_hashes().await.unwrap_or_default();
+    let mut deleted = Vec::new();
+    for hash in on_disk {
+        if !active_hashes.contains(&hash) {
+            if let Ok(()) = store.delete(&hash).await {
+                deleted.push(hash);
+            }
+        }
+    }
+    Ok(deleted)
 }
 
 /// S3-compatible artifact storage (the `s3` feature).
@@ -827,6 +894,25 @@ mod tests {
         s.delete(&sha).unwrap();
         assert_eq!(s.get(&sha).unwrap_err().kind(), io::ErrorKind::NotFound);
         s.delete(&sha).unwrap();
+        let _ = fs::remove_dir_all(s.root());
+    }
+
+    #[tokio::test]
+    async fn list_stored_hashes_returns_all_hashes() {
+        let s = temp_store("list-hashes");
+        let a1 = s.put(b"item-1").unwrap();
+        let a2 = s.put(b"item-2").unwrap();
+        let mut hashes = s.list_stored_hashes().unwrap();
+        hashes.sort();
+        let mut expected = vec![a1.sha256, a2.sha256];
+        expected.sort();
+        assert_eq!(hashes, expected);
+
+        let backend = ArtifactBackend::from(s.clone());
+        let mut backend_hashes = backend.list_stored_hashes().await.unwrap();
+        backend_hashes.sort();
+        assert_eq!(backend_hashes, expected);
+
         let _ = fs::remove_dir_all(s.root());
     }
 }

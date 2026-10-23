@@ -148,7 +148,8 @@ async function proxy(req: Request, path: string[], method: EngineMethod) {
       const value = upstream.headers.get(name);
       if (value) responseHeaders[name] = value;
     }
-    return new NextResponse(await upstream.text(), { status: upstream.status, headers: responseHeaders });
+    const bodyBuf = Buffer.from(await upstream.arrayBuffer());
+    return new NextResponse(bodyBuf, { status: upstream.status, headers: responseHeaders });
   } catch (e) {
     const timedOut = e instanceof Error && e.name === 'AbortError';
     return NextResponse.json(

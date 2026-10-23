@@ -175,6 +175,7 @@ async fn main() -> ExitCode {
         let mut expire = tokio::time::interval(EXPIRE_UPLOADS_EVERY);
         let mut sample = tokio::time::interval(Duration::from_secs(15));
         let mut refresh_sweep = tokio::time::interval(Duration::from_secs(30));
+        let mut artifact_sweep = tokio::time::interval(Duration::from_secs(1800));
         loop {
             tokio::select! {
                 _ = hk_stop.changed() => break,
@@ -184,6 +185,15 @@ async fn main() -> ExitCode {
                     }
                 }
                 _ = expire.tick() => expire_uploads(&hk_pool, &hk_store).await,
+                _ = artifact_sweep.tick() => {
+                    match spectra_db::artifacts::sweep_unreferenced(&hk_pool, &hk_store).await {
+                        Ok(pruned) if !pruned.is_empty() => {
+                            info!("garbage collected {} unreferenced artifact(s) from deleted workspaces", pruned.len());
+                        }
+                        Ok(_) => {}
+                        Err(e) => warn!("unreferenced artifact sweep failed: {e}"),
+                    }
+                }
                 _ = refresh_sweep.tick() => {
                     spectra_api::providers::runner::sweep_due_refresh_schedules(&hk_pool).await;
                 }

@@ -57,6 +57,7 @@ export function ExperimentRegistry() {
   const [name, setName] = useState('');
   const [hypothesis, setHypothesis] = useState('');
   const [tags, setTags] = useState('');
+  const [parentId, setParentId] = useState('');
   const [csv, setCsv] = useState('');
   const [fast, setFast] = useState(5);
   const [slow, setSlow] = useState(20);
@@ -69,6 +70,19 @@ export function ExperimentRegistry() {
   const [message, setMessage] = useState('');
 
   const selectedExperiment = useMemo(() => items.find((item) => item.id === selected) ?? null, [items, selected]);
+  const childExperiments = useMemo(
+    () => (selected ? items.filter((item) => item.parent_id === selected) : []),
+    [items, selected]
+  );
+
+  const forkExperiment = useCallback((exp: Experiment) => {
+    setParentId(exp.id);
+    setName(`${exp.name} (Fork)`);
+    setHypothesis(exp.hypothesis ? `Derived from ${exp.name}: ` : '');
+    setTags(exp.tags.join(', '));
+    setMessage(`Ready to create a child experiment branched from "${exp.name}".`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
   const selectExperiment = useCallback((expId: string) => {
     setSelected(expId);
@@ -174,12 +188,19 @@ export function ExperimentRegistry() {
     event.preventDefault();
     setBusy(true); setError(''); setMessage('');
     try {
+      const payload: Record<string, unknown> = {
+        name,
+        hypothesis,
+        tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+      };
+      if (parentId) payload.parent_id = parentId;
       const created = await request<{ id: string }>('/api/v1/experiments', {
-        method: 'POST', body: JSON.stringify({ name, hypothesis, tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean) }),
+        method: 'POST',
+        body: JSON.stringify(payload),
       });
-      setName(''); setHypothesis(''); setTags('');
+      setName(''); setHypothesis(''); setTags(''); setParentId('');
       await loadExperiments(); setSelected(created.id);
-      setMessage('Experiment created.');
+      setMessage(parentId ? 'Child experiment created with lineage.' : 'Root experiment created.');
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Could not create experiment.');
     } finally { setBusy(false); }
@@ -244,6 +265,21 @@ export function ExperimentRegistry() {
             <label className="mt-3 block text-xs font-medium text-ink/65">Tags <span className="font-normal text-ink/40">comma separated</span>
               <input value={tags} onChange={(event) => setTags(event.target.value)} className="input mt-1 w-full" placeholder="daily, baseline" />
             </label>
+            <label className="mt-3 block text-xs font-medium text-ink/65">
+              Parent experiment (Lineage branch)
+              <select
+                value={parentId}
+                onChange={(event) => setParentId(event.target.value)}
+                className="input mt-1 w-full"
+              >
+                <option value="">None (Root experiment)</option>
+                {items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} {item.id === selected ? '(Selected)' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button disabled={busy} className="btn-primary mt-4 inline-flex items-center gap-2"><Plus className="h-4 w-4" />Create experiment</button>
           </form>
 
@@ -263,7 +299,16 @@ export function ExperimentRegistry() {
                     <span className="shrink-0 font-mono text-[10px] text-ink/45" title={`${item.succeeded_count} succeeded`}>{item.run_count} {item.run_count === 1 ? 'run' : 'runs'}</span>
                   </span>
                   <span className="mt-1 block line-clamp-2 text-xs text-ink/50">{item.hypothesis || 'No hypothesis added.'}</span>
-                  <span className="mt-2 flex flex-wrap gap-1">{item.tags.map((tag) => <span key={tag} className="rounded-full bg-ink/5 px-2 py-0.5 font-mono text-[10px] text-ink/55">{tag}</span>)}</span>
+                  <span className="mt-2 flex items-center justify-between gap-1">
+                    <span className="flex flex-wrap gap-1">{item.tags.map((tag) => <span key={tag} className="rounded-full bg-ink/5 px-2 py-0.5 font-mono text-[10px] text-ink/55">{tag}</span>)}</span>
+                    <span
+                      onClick={(e) => { e.stopPropagation(); forkExperiment(item); }}
+                      className="rounded px-2 py-0.5 font-mono text-[10px] font-semibold text-accent/80 hover:bg-accent/10 hover:text-accent cursor-pointer"
+                      title="Fork / branch a child experiment from this"
+                    >
+                      + Branch
+                    </span>
+                  </span>
                 </button>
               ))}
               {!items.length && <p className="rounded-lg border border-dashed border-ink/15 p-4 text-sm text-ink/45">Create an experiment to start recording research.</p>}
@@ -276,40 +321,95 @@ export function ExperimentRegistry() {
             <div className="rounded-2xl border border-ink/10 bg-ink/[0.025] p-4 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <span className="flex items-center gap-1.5 font-mono text-[10.5px] uppercase tracking-wider text-ink/50">
-                  <GitFork className="h-3.5 w-3.5 text-accent" /> Lineage chain
+                  <GitFork className="h-3.5 w-3.5 text-accent" /> Lineage Tree
                 </span>
-                <span className="font-mono text-[10px] text-ink/40">
-                  {lineage.length === 1 ? 'Root experiment' : `${lineage.length} generations (root → leaf)`}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[10px] text-ink/40">
+                    {lineage.length === 1 ? 'Root node' : `${lineage.length} generations (ancestors → current)`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => forkExperiment(selectedExperiment)}
+                    className="inline-flex items-center gap-1 rounded-md border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent transition hover:bg-accent/20"
+                    title="Branch a new child experiment from the current one"
+                  >
+                    <Plus className="h-3 w-3" /> Fork / Branch
+                  </button>
+                </div>
               </div>
-              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+
+              {/* Ancestor generation pipeline */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 {lineage.map((id, idx) => {
                   const item = items.find((e) => e.id === id);
                   const label = item ? item.name : id.slice(0, 8);
                   const isCurrent = id === selected;
+                  const isRoot = idx === 0;
+                  const genNumber = idx + 1;
                   return (
                     <div key={id} className="flex items-center gap-2">
                       {idx > 0 && <span className="text-ink/30">→</span>}
                       {isCurrent ? (
-                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-1 font-semibold text-accent" title={`Current experiment: ${id}`}>
+                        <div
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-1.5 font-semibold text-accent"
+                          title={`Current experiment: ${id}`}
+                        >
+                          <span className="rounded bg-accent/20 px-1 py-0.5 font-mono text-[9px] uppercase tracking-wider text-accent">
+                            Gen {genNumber}
+                          </span>
                           <span>{label}</span>
-                          <span className="rounded bg-accent/20 px-1 py-0.2 text-[9px] uppercase tracking-wider text-accent">current</span>
-                        </span>
+                          <span className="font-mono text-[9.5px] text-accent/80">
+                            ({item?.run_count ?? 0} runs)
+                          </span>
+                          <span className="rounded bg-accent/20 px-1 py-0.5 text-[9px] uppercase tracking-wider text-accent">
+                            current
+                          </span>
+                        </div>
                       ) : (
                         <button
                           type="button"
                           onClick={() => selectExperiment(id)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-ink/[0.08] bg-ink/[0.03] px-2.5 py-1 text-ink/75 transition hover:border-ink/20 hover:bg-ink/[0.06] hover:text-ink"
-                          title={`Navigate to ancestor experiment: ${id}`}
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-ink/[0.08] bg-ink/[0.03] px-2.5 py-1.5 text-ink/75 transition hover:border-ink/20 hover:bg-ink/[0.06] hover:text-ink"
+                          title={`Navigate to ancestor: ${id}`}
                         >
+                          <span className="rounded bg-ink/5 px-1 py-0.5 font-mono text-[9px] text-ink/45">
+                            {isRoot ? 'Root' : `Gen ${genNumber}`}
+                          </span>
                           <span>{label}</span>
-                          {idx === 0 && <span className="text-[10px] text-ink/40">(root)</span>}
+                          <span className="font-mono text-[9.5px] text-ink/40">
+                            ({item?.run_count ?? 0})
+                          </span>
                         </button>
                       )}
                     </div>
                   );
                 })}
               </div>
+
+              {/* Child branch derivations if any exist */}
+              {childExperiments.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-ink/10">
+                  <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-ink/45">
+                    <span className="text-accent">↳</span> Child branches ({childExperiments.length})
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    {childExperiments.map((child) => (
+                      <button
+                        key={child.id}
+                        type="button"
+                        onClick={() => selectExperiment(child.id)}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-ink/[0.08] bg-ink/[0.03] px-2.5 py-1 text-ink/75 transition hover:border-accent/30 hover:bg-accent/5 hover:text-accent"
+                        title={`Navigate to child branch: ${child.name}`}
+                      >
+                        <span className="font-medium">{child.name}</span>
+                        <span className="font-mono text-[9.5px] text-ink/40">
+                          ({child.run_count} runs)
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

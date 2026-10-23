@@ -2,8 +2,8 @@
 //! Overfitting Statistics (PSR, DSR, MinTRL, CSCV PBO), and Holdout Vault.
 
 use axum::body::Bytes;
-use axum::extract::rejection::{BytesRejection, PathRejection};
-use axum::extract::{Path, State};
+use axum::extract::rejection::{BytesRejection, PathRejection, QueryRejection};
+use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::Extension;
 use chrono::{DateTime, Utc};
@@ -564,16 +564,30 @@ pub(crate) async fn get_sweep(
     )
 }
 
-/// Export sweep validation report as CSV (Task 8).
+/// Query parameters for validation report export.
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+pub(crate) struct ExportSweepQuery {
+    #[param(inline)]
+    pub format: Option<String>,
+}
+
+/// Export sweep validation report as CSV or PDF (Task 8).
 #[utoipa::path(get, path = "/api/v1/optimization/sweep/{id}/export", tag = "optimization",
-    params(("id" = Uuid, Path, description = "Sweep id")),
-    responses((status = 200, description = "Validation report CSV"), (status = 404, body = crate::openapi::ErrorDoc)))]
+    params(
+        ("id" = Uuid, Path, description = "Sweep id"),
+        ExportSweepQuery
+    ),
+    responses((status = 200, description = "Validation report CSV or PDF"), (status = 404, body = crate::openapi::ErrorDoc)))]
 pub(crate) async fn export_sweep(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
     sweep_id: Result<Path<Uuid>, PathRejection>,
+    query: Result<Query<ExportSweepQuery>, QueryRejection>,
 ) -> Response {
     let Ok(Path(sweep_id)) = sweep_id else { return error_response(404, NOT_FOUND) };
+    let export_format =
+        query.ok().and_then(|Query(q)| q.format).unwrap_or_else(|| "csv".to_string()).to_lowercase();
+
     let (pool, ws) = match context(&st, &id) {
         Ok(c) => c,
         Err(r) => return r,
@@ -597,6 +611,17 @@ pub(crate) async fn export_sweep(
     .await
     .ok()
     .and_then(|list| list.into_iter().next());
+
+    if export_format == "pdf" {
+        let pdf_bytes = generate_validation_pdf(&sweep, &trials, holdout_eval.as_ref());
+        let filename = format!("sweep-{}-validation-report.pdf", sweep.id);
+        return Response::builder()
+            .status(200)
+            .header("content-type", "application/pdf")
+            .header("content-disposition", format!("attachment; filename=\"{filename}\""))
+            .body(axum::body::Body::from(pdf_bytes))
+            .unwrap();
+    }
 
     let mut csv = String::new();
     csv.push_str("# SpectraLabs M4 Optimization & Validation Report\n");
@@ -652,6 +677,270 @@ pub(crate) async fn export_sweep(
         .header("content-disposition", format!("attachment; filename=\"{filename}\""))
         .body(axum::body::Body::from(csv))
         .unwrap()
+}
+
+fn escape_pdf(text: &str) -> String {
+    let mut out = String::new();
+    for c in text.chars() {
+        match c {
+            '(' => out.push_str("\\("),
+            ')' => out.push_str("\\)"),
+            '\\' => out.push_str("\\\\"),
+            '\n' | '\r' | '\t' => out.push(' '),
+            c if c.is_ascii() => out.push(c),
+            _ => out.push('?'),
+        }
+    }
+    out
+}
+
+struct SimplePdf {
+    objects: Vec<Vec<u8>>,
+}
+
+impl SimplePdf {
+    fn new() -> Self {
+        Self { objects: Vec::new() }
+    }
+
+    fn add_object(&mut self, data: Vec<u8>) -> usize {
+        self.objects.push(data);
+        self.objects.len()
+    }
+
+    fn finish(self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+        let mut offsets = Vec::new();
+        for (i, obj) in self.objects.iter().enumerate() {
+            offsets.push(out.len());
+            let num = i + 1;
+            let header = format!("{num} 0 obj\n");
+            out.extend_from_slice(header.as_bytes());
+            out.extend_from_slice(obj);
+            out.extend_from_slice(b"\nendobj\n");
+        }
+        let xref_offset = out.len();
+        let total_objs = self.objects.len() + 1;
+        out.extend_from_slice(format!("xref\n0 {total_objs}\n0000000000 65535 f \n").as_bytes());
+        for offset in offsets {
+            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        out.extend_from_slice(
+            format!("trailer\n<< /Size {total_objs} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n")
+                .as_bytes(),
+        );
+        out
+    }
+}
+
+fn generate_validation_pdf(
+    sweep: &OptimizationSweep,
+    trials: &[OptimizationTrial],
+    holdout_eval: Option<&HoldoutEvaluation>,
+) -> Vec<u8> {
+    let mut pdf = SimplePdf::new();
+
+    // 1: Catalog
+    pdf.add_object(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
+    // 2: Pages
+    pdf.add_object(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec());
+    // 3: Page (US Letter: 612 x 792 pt)
+    pdf.add_object(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>".to_vec());
+    // 4: Font F1 (Helvetica)
+    pdf.add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec());
+    // 5: Font F2 (Helvetica-Bold)
+    pdf.add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>".to_vec());
+
+    let mut stream = String::new();
+
+    // Top Brand Accent Bar (Blue)
+    stream.push_str("0.12 0.35 0.85 rg\n");
+    stream.push_str("40 756 532 5 re f\n");
+
+    // Header Text
+    stream.push_str("0.08 0.08 0.12 rg\n");
+    stream.push_str("BT\n/F2 16 Tf\n40 734 Td\n(SPECTRALABS OPTIMIZATION & VALIDATION REPORT) Tj\n");
+    stream.push_str("/F1 8.5 Tf\n0 -14 Td\n0.4 0.42 0.48 rg\n(M4 Robustness Audit, Deflated Sharpe Ratio (DSR) & Overfitting Validation) Tj\nET\n");
+
+    // Divider Line
+    stream.push_str("0.85 0.86 0.90 RG\n0.75 w\n40 706 m 572 706 l S\n");
+
+    // Metadata Bar
+    let sweep_id_short = sweep.id.to_string();
+    let method = sweep.method.to_uppercase();
+    let objective = sweep.objective.to_uppercase();
+    let now = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+    stream.push_str("0.2 0.22 0.28 rg\n");
+    stream.push_str("BT\n/F2 8.5 Tf\n40 690 Td\n(Sweep ID: ) Tj\n/F1 8.5 Tf\n");
+    stream.push_str(&format!("({}) Tj\n", escape_pdf(&sweep_id_short)));
+    stream.push_str("/F2 8.5 Tf\n200 0 Td\n(Method: ) Tj\n/F1 8.5 Tf\n");
+    stream.push_str(&format!("({}) Tj\n", escape_pdf(&method)));
+    stream.push_str("/F2 8.5 Tf\n100 0 Td\n(Objective: ) Tj\n/F1 8.5 Tf\n");
+    stream.push_str(&format!("({}) Tj\n", escape_pdf(&objective)));
+    stream.push_str("/F1 8 Tf\n120 0 Td\n0.45 0.47 0.52 rg\n");
+    stream.push_str(&format!("(Generated: {}) Tj\n", escape_pdf(&now)));
+    stream.push_str("ET\n");
+
+    let best_trial_sub = format!("Trial #{}", sweep.best_trial_num.unwrap_or(0));
+    // 6 Key Metric Cards (2 rows of 3)
+    let cards = [
+        (
+            "DEFLATED SHARPE (DSR)",
+            sweep.dsr.map_or("—".to_string(), |v| format!("{v:.4}")),
+            "Haircut for trial selection bias",
+            40,
+            615,
+        ),
+        (
+            "PBO (CSCV OVERFITTING)",
+            sweep.pbo.map_or("—".to_string(), |v| format!("{v:.4}")),
+            "Probability of out-of-sample loss",
+            222,
+            615,
+        ),
+        (
+            "TOTAL TRIALS COUNTED",
+            sweep.trial_count.to_string(),
+            "Honest trial accounting (all runs)",
+            404,
+            615,
+        ),
+        (
+            "MIN TRACK RECORD (MinTRL)",
+            sweep.min_trl.map_or("—".to_string(), |v| format!("{v:.2} obs")),
+            "Observations for significance",
+            40,
+            550,
+        ),
+        (
+            "PROBABILISTIC SHARPE (PSR)",
+            sweep.psr.map_or("—".to_string(), |v| format!("{v:.4}")),
+            "Confidence vs zero benchmark",
+            222,
+            550,
+        ),
+        (
+            "BEST IN-SAMPLE OBJECTIVE",
+            sweep.best_objective.map_or("—".to_string(), |v| format!("{v:.4}")),
+            best_trial_sub.as_str(),
+            404,
+            550,
+        ),
+    ];
+
+    for (label, val, sub, x, y) in cards {
+        stream.push_str(&format!("0.96 0.97 0.99 rg\n{x} {y} 168 54 re f\n"));
+        stream.push_str(&format!("0.86 0.88 0.92 RG\n0.5 w\n{x} {y} 168 54 re S\n"));
+        stream.push_str("BT\n");
+        stream.push_str(&format!(
+            "/F2 7 Tf\n0.4 0.44 0.50 rg\n{} {} Td\n({}) Tj\n",
+            x + 10,
+            y + 40,
+            escape_pdf(label)
+        ));
+        stream.push_str(&format!("/F2 13 Tf\n0.10 0.12 0.18 rg\n0 -16 Td\n({}) Tj\n", escape_pdf(&val)));
+        stream.push_str(&format!("/F1 6.5 Tf\n0.48 0.52 0.58 rg\n0 -11 Td\n({}) Tj\n", escape_pdf(sub)));
+        stream.push_str("ET\n");
+    }
+
+    // Holdout Vault Result Banner (y = 485, h = 50)
+    stream.push_str("0.95 0.97 1.00 rg\n40 485 532 50 re f\n");
+    stream.push_str("0.70 0.80 0.95 RG\n0.75 w\n40 485 532 50 re S\n");
+
+    stream.push_str("BT\n");
+    stream.push_str(
+        "/F2 9.5 Tf\n0.12 0.32 0.70 rg\n52 520 Td\n(HOLDOUT VAULT INTEGRITY & OUT-OF-SAMPLE RESULT) Tj\n",
+    );
+    stream.push_str("/F1 8 Tf\n0.25 0.30 0.40 rg\n0 -14 Td\n");
+    if let Some(h) = holdout_eval {
+        let holdout_text = format!(
+            "EVALUATED: Evaluation #{} on {} | Holdout DSR: {}",
+            h.evaluation_num,
+            h.evaluated_at.format("%Y-%m-%d %H:%M UTC"),
+            h.dsr.map_or("—".to_string(), |v| format!("{v:.4}"))
+        );
+        stream.push_str(&format!("({}) Tj\n", escape_pdf(&holdout_text)));
+    } else {
+        stream.push_str("(SEALED & PROTECTED: Holdout partition remains locked. Direct bar reads are blocked until evaluation.) Tj\n");
+    }
+    stream.push_str("/F1 7 Tf\n0.45 0.50 0.60 rg\n0 -10 Td\n(All accesses to the holdout dataset are cryptographically audited and sealed against selection leakage.) Tj\n");
+    stream.push_str("ET\n");
+
+    // Trials Table Title
+    stream.push_str("BT\n/F2 10 Tf\n0.12 0.14 0.18 rg\n40 455 Td\n(TOP PARAMETER COMBINATIONS & SENSITIVITY RUNS) Tj\nET\n");
+
+    // Table Header Bar (y = 432, h = 16)
+    stream.push_str("0.92 0.94 0.97 rg\n40 432 532 16 re f\n");
+    stream.push_str("BT\n/F2 7.5 Tf\n0.30 0.35 0.42 rg\n");
+    stream.push_str("48 436 Td\n(RANK) Tj\n");
+    stream.push_str("45 0 Td\n(TRIAL #) Tj\n");
+    stream.push_str("55 0 Td\n(OBJECTIVE) Tj\n");
+    stream.push_str("70 0 Td\n(RETURN MEAN) Tj\n");
+    stream.push_str("85 0 Td\n(RETURN VOL) Tj\n");
+    stream.push_str("80 0 Td\n(PARAMETERS) Tj\n");
+    stream.push_str("ET\n");
+
+    let mut sorted_trials = trials.to_vec();
+    sorted_trials.sort_by(|a, b| {
+        b.objective_value.partial_cmp(&a.objective_value).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let top_trials = &sorted_trials[..sorted_trials.len().min(12)];
+
+    let mut row_y = 414;
+    for (i, t) in top_trials.iter().enumerate() {
+        if i % 2 == 1 {
+            stream.push_str(&format!("0.98 0.98 0.99 rg\n40 {row_y} 532 15 re f\n"));
+        }
+        stream.push_str(&format!("0.90 0.91 0.94 RG\n0.25 w\n40 {row_y} m 572 {row_y} l S\n"));
+
+        let rank = format!("#{}", i + 1);
+        let trial_num = format!("Trial {}", t.trial_num);
+        let obj = format!("{:.4}", t.objective_value);
+        let ret_mean = t.returns_mean.map_or("—".to_string(), |v| format!("{v:.4}"));
+        let ret_vol = t.returns_vol.map_or("—".to_string(), |v| format!("{v:.4}"));
+        let params_str = serde_json::to_string(&t.params).unwrap_or_default();
+        let params_truncated =
+            if params_str.len() > 38 { format!("{}...", &params_str[..35]) } else { params_str };
+
+        stream.push_str("BT\n");
+        stream.push_str(&format!(
+            "/F2 7 Tf\n0.2 0.22 0.28 rg\n48 {} Td\n({}) Tj\n",
+            row_y + 4,
+            escape_pdf(&rank)
+        ));
+        stream.push_str(&format!("/F1 7 Tf\n45 0 Td\n({}) Tj\n", escape_pdf(&trial_num)));
+        stream.push_str(&format!("/F2 7 Tf\n0.12 0.35 0.85 rg\n55 0 Td\n({}) Tj\n", escape_pdf(&obj)));
+        stream.push_str(&format!("/F1 7 Tf\n0.25 0.28 0.32 rg\n70 0 Td\n({}) Tj\n", escape_pdf(&ret_mean)));
+        stream.push_str(&format!("85 0 Td\n({}) Tj\n", escape_pdf(&ret_vol)));
+        stream.push_str(&format!("80 0 Td\n({}) Tj\n", escape_pdf(&params_truncated)));
+        stream.push_str("ET\n");
+
+        row_y -= 16;
+    }
+
+    // Footer Section (y = 55)
+    stream.push_str("0.85 0.86 0.90 RG\n0.75 w\n40 55 m 572 55 l S\n");
+    stream.push_str("BT\n/F1 6.5 Tf\n0.45 0.48 0.54 rg\n40 42 Td\n");
+    stream.push_str("(SpectraLabs Engine M4 · Cryptographic Trial Tracking · DSR/PSR computed with independent-returns model) Tj\n");
+    stream.push_str("0 -9 Td\n");
+    stream.push_str(
+        "(Holdout evaluation history is permanently anchored. Page 1 of 1 · Generated automatically) Tj\n",
+    );
+    stream.push_str("ET\n");
+
+    let stream_bytes = stream.into_bytes();
+    let stream_len = stream_bytes.len();
+    let stream_obj = format!("<< /Length {stream_len} >>\nstream\n").into_bytes();
+    let mut full_stream_obj = Vec::with_capacity(stream_obj.len() + stream_bytes.len() + 12);
+    full_stream_obj.extend_from_slice(&stream_obj);
+    full_stream_obj.extend_from_slice(&stream_bytes);
+    full_stream_obj.extend_from_slice(b"\nendstream");
+
+    // 6: Stream Contents
+    pdf.add_object(full_stream_obj);
+
+    pdf.finish()
 }
 
 /// Computes 2D heatmap matrix if two distinct parameters vary across trials.

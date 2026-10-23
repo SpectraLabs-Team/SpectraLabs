@@ -2150,7 +2150,7 @@
         "tags": [
           "optimization"
         ],
-        "summary": "Export sweep validation report as CSV (Task 8).",
+        "summary": "Export sweep validation report as CSV or PDF (Task 8).",
         "operationId": "export_sweep",
         "parameters": [
           {
@@ -2162,11 +2162,22 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "format",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Validation report CSV"
+            "description": "Validation report CSV or PDF"
           },
           "404": {
             "description": "",

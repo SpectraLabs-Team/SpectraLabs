@@ -92,18 +92,18 @@ impl Fixture {
     }
 }
 
+fn default_survival_config() -> Value {
+    let json_core = spectra_research::SurvivalConfig::default().to_json().unwrap();
+    serde_json::from_str(&json_core.dump()).unwrap()
+}
+
 #[tokio::test]
 async fn survival_presets_lifecycle_crud() {
     let Some(pool) = pool().await else { return };
     let f = Fixture::new(pool);
     spectra_db::identity::ensure_identity(&f.pool, Some(f.user), f.ws).await.unwrap();
 
-    let default_cfg = json!({
-        "seed": 42,
-        "significance": 0.05,
-        "n_simulations": 100,
-        "block_length": 5
-    });
+    let default_cfg = default_survival_config();
 
     // 1. Create a preset
     let (status, created) = f
@@ -160,12 +160,7 @@ async fn survival_lab_queue_report_and_retrieve_scorecard() {
     .await
     .unwrap();
 
-    let survival_cfg = json!({
-        "seed": 100,
-        "significance": 0.05,
-        "n_simulations": 50,
-        "block_length": 5
-    });
+    let survival_cfg = default_survival_config();
 
     // 1. Queue a survival report
     let (status, res) = f

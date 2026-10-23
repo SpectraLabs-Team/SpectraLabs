@@ -521,10 +521,10 @@ async fn paper_broker_order_pre_trade_enforcement() {
         "max_net_exposure": 100_000.0,
         "max_leverage": 2.0,
         "max_position_size": 10_000.0,
-        "max_concentration_pct": 50.0,
-        "max_drawdown_pct": 15.0,
+        "max_concentration_pct": 0.50,
+        "max_drawdown_pct": 0.15,
         "max_daily_loss": 5_000.0,
-        "max_var_pct": 10.0,
+        "max_var_pct": 0.10,
         "size_reduction_enabled": false
     });
     let (code, _) = fx.call("PUT", "/api/v1/risk/limits", &limits_payload).await;

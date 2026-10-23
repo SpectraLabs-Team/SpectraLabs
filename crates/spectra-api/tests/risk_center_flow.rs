@@ -548,7 +548,8 @@ async fn paper_broker_order_pre_trade_enforcement() {
     let (code, audit_res) = fx.call("GET", "/api/v1/risk/audit", &Value::Null).await;
     assert_eq!(code, 200);
     let audits = audit_res.as_array().unwrap();
-    let tsla_audit = audits.iter().find(|d| d["symbol"] == "TSLA").expect("audit entry for rejected TSLA order");
+    let tsla_audit =
+        audits.iter().find(|d| d["symbol"] == "TSLA").expect("audit entry for rejected TSLA order");
     assert_eq!(tsla_audit["verdict"], "rejected");
 
     // 5. Submit valid order under the limit ($4,000 <= $10,000)

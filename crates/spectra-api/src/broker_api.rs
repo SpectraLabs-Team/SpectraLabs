@@ -87,14 +87,13 @@ pub(crate) async fn alpaca_proxy(
 
     // Viewers cannot place or modify orders
     if (method == Method::POST || method == Method::DELETE) && user_id.is_some() {
-        let role: Option<(String,)> = sqlx::query_as(
-            "SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2",
-        )
-        .bind(ws)
-        .bind(user_id)
-        .fetch_optional(&pool)
-        .await
-        .unwrap_or(None);
+        let role: Option<(String,)> =
+            sqlx::query_as("SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2")
+                .bind(ws)
+                .bind(user_id)
+                .fetch_optional(&pool)
+                .await
+                .unwrap_or(None);
 
         if let Some((r,)) = role {
             if r == "viewer" {
@@ -136,11 +135,7 @@ pub(crate) async fn alpaca_proxy(
     }
 }
 
-async fn handle_get_account(
-    pool: &sqlx::PgPool,
-    ws: Uuid,
-    creds: Option<&(String, String)>,
-) -> Response {
+async fn handle_get_account(pool: &sqlx::PgPool, ws: Uuid, creds: Option<&(String, String)>) -> Response {
     if let Some((key_id, secret_key)) = creds {
         let client = reqwest::Client::new();
         if let Ok(resp) = client
@@ -165,40 +160,40 @@ async fn handle_get_account(
     };
     let buying_power = (cash * 2.0).max(0.0);
 
-    json_response(200, json!({
-        "id": format!("paper-{ws}"),
-        "account_number": format!("PA-{}", &ws.to_string()[..8]),
-        "status": "ACTIVE",
-        "crypto_status": "ACTIVE",
-        "currency": "USD",
-        "buying_power": format!("{:.2}", buying_power),
-        "regt_buying_power": format!("{:.2}", buying_power),
-        "daytrading_buying_power": format!("{:.2}", buying_power),
-        "cash": format!("{:.2}", cash),
-        "portfolio_value": format!("{:.2}", equity),
-        "equity": format!("{:.2}", equity),
-        "last_equity": format!("{:.2}", daily_start),
-        "multiplier": "2",
-        "initial_margin": "0.00",
-        "maintenance_margin": "0.00",
-        "sma": "0.00",
-        "daytrade_count": 0,
-        "last_maintenance_margin": "0.00",
-        "pattern_day_trader": false,
-        "trading_blocked": false,
-        "transfers_blocked": false,
-        "account_blocked": false,
-        "created_at": "2026-01-01T00:00:00Z",
-        "trade_suspended_by_user": false,
-        "shorting_enabled": true
-    }).to_string())
+    json_response(
+        200,
+        json!({
+            "id": format!("paper-{ws}"),
+            "account_number": format!("PA-{}", &ws.to_string()[..8]),
+            "status": "ACTIVE",
+            "crypto_status": "ACTIVE",
+            "currency": "USD",
+            "buying_power": format!("{:.2}", buying_power),
+            "regt_buying_power": format!("{:.2}", buying_power),
+            "daytrading_buying_power": format!("{:.2}", buying_power),
+            "cash": format!("{:.2}", cash),
+            "portfolio_value": format!("{:.2}", equity),
+            "equity": format!("{:.2}", equity),
+            "last_equity": format!("{:.2}", daily_start),
+            "multiplier": "2",
+            "initial_margin": "0.00",
+            "maintenance_margin": "0.00",
+            "sma": "0.00",
+            "daytrade_count": 0,
+            "last_maintenance_margin": "0.00",
+            "pattern_day_trader": false,
+            "trading_blocked": false,
+            "transfers_blocked": false,
+            "account_blocked": false,
+            "created_at": "2026-01-01T00:00:00Z",
+            "trade_suspended_by_user": false,
+            "shorting_enabled": true
+        })
+        .to_string(),
+    )
 }
 
-async fn handle_get_positions(
-    pool: &sqlx::PgPool,
-    ws: Uuid,
-    creds: Option<&(String, String)>,
-) -> Response {
+async fn handle_get_positions(pool: &sqlx::PgPool, ws: Uuid, creds: Option<&(String, String)>) -> Response {
     if let Some((key_id, secret_key)) = creds {
         let client = reqwest::Client::new();
         if let Ok(resp) = client
@@ -356,27 +351,20 @@ async fn handle_create_order(
     let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
 
     // 4. Run pre-trade check
-    let candidate = OrderCandidate {
-        symbol: order_req.symbol.clone(),
-        side,
-        qty,
-        price: symbol_price,
-    };
+    let candidate = OrderCandidate { symbol: order_req.symbol.clone(), side, qty, price: symbol_price };
     let eval_res = PreTradeChecker::evaluate(&limits, &portfolio, &candidate, kill_switch_active);
 
     // If order is rejected: STOP BEFORE REACHING BROKER!
-    let breaches_json = json!(
-        eval_res
-            .breaches
-            .iter()
-            .map(|b| json!({
-                "code": b.code.as_str(),
-                "limit": b.limit,
-                "projected": b.projected,
-                "message": b.message.clone(),
-            }))
-            .collect::<Vec<_>>()
-    );
+    let breaches_json = json!(eval_res
+        .breaches
+        .iter()
+        .map(|b| json!({
+            "code": b.code.as_str(),
+            "limit": b.limit,
+            "projected": b.projected,
+            "message": b.message.clone(),
+        }))
+        .collect::<Vec<_>>());
     let breach_msgs: Vec<String> = eval_res.breaches.iter().map(|b| b.message.clone()).collect();
     let metrics_json = json!({
         "gross_exposure": eval_res.projected_metrics.gross_exposure,
@@ -426,11 +414,8 @@ async fn handle_create_order(
             .into_response();
     }
 
-    let approved_qty = if let PreTradeVerdict::Reduced = eval_res.verdict {
-        eval_res.approved_qty
-    } else {
-        qty
-    };
+    let approved_qty =
+        if let PreTradeVerdict::Reduced = eval_res.verdict { eval_res.approved_qty } else { qty };
 
     // Log approved/reduced decision
     let verdict_str = match eval_res.verdict {
@@ -493,9 +478,7 @@ async fn handle_create_order(
     // Simulated paper order execution
     let order_id = Uuid::now_v7();
     let now = chrono::Utc::now().to_rfc3339();
-    let client_order_id = order_req
-        .client_order_id
-        .unwrap_or_else(|| Uuid::now_v7().to_string());
+    let client_order_id = order_req.client_order_id.unwrap_or_else(|| Uuid::now_v7().to_string());
     let order_type = order_req.order_type.unwrap_or_else(|| "market".to_string());
     let time_in_force = order_req.time_in_force.unwrap_or_else(|| "day".to_string());
 
@@ -533,23 +516,27 @@ async fn handle_create_order(
         "Paper order pre-trade verified and executed"
     );
 
-    json_response(201, json!({
-        "id": order_id.to_string(),
-        "client_order_id": client_order_id,
-        "created_at": now,
-        "updated_at": now,
-        "submitted_at": now,
-        "filled_at": now,
-        "symbol": order_req.symbol,
-        "qty": approved_qty.to_string(),
-        "filled_qty": approved_qty.to_string(),
-        "type": order_type,
-        "side": match side { OrderSide::Buy => "buy", OrderSide::Sell => "sell" },
-        "time_in_force": time_in_force,
-        "status": "filled",
-        "filled_avg_price": format!("{:.2}", symbol_price),
-        "pre_trade_verdict": verdict_str,
-    }).to_string())
+    json_response(
+        201,
+        json!({
+            "id": order_id.to_string(),
+            "client_order_id": client_order_id,
+            "created_at": now,
+            "updated_at": now,
+            "submitted_at": now,
+            "filled_at": now,
+            "symbol": order_req.symbol,
+            "qty": approved_qty.to_string(),
+            "filled_qty": approved_qty.to_string(),
+            "type": order_type,
+            "side": match side { OrderSide::Buy => "buy", OrderSide::Sell => "sell" },
+            "time_in_force": time_in_force,
+            "status": "filled",
+            "filled_avg_price": format!("{:.2}", symbol_price),
+            "pre_trade_verdict": verdict_str,
+        })
+        .to_string(),
+    )
 }
 
 async fn handle_cancel_order(order_id: &str, creds: Option<&(String, String)>) -> Response {

@@ -650,7 +650,6 @@ async fn telemetry_gpu(State(st): State<AppState>) -> Response {
     compute(&st, || Ok(telemetry::gpu())).await
 }
 
-
 #[allow(clippy::unused_async)] // axum handlers are async fns
 async fn not_found() -> Response {
     error_response(404, "Not Found")

@@ -17,7 +17,7 @@ use spectra_db::datasets::{register_version, resolve_workspace, NewDatasetVersio
 use spectra_db::{connect, migrate, pending_migrations, seed_dev, web_migrations, PoolConfig};
 
 const USAGE: &str =
-    "usage: spectra-db <migrate|seed|status>   (reads DATABASE_URL; seed also reads ADMIN_EMAIL)
+    "usage: spectra-db <migrate|seed|status|provision-roles>   (reads DATABASE_URL; seed also reads ADMIN_EMAIL)
        spectra-db dataset-add --workspace ID|SLUG --name NAME --store DIR --id CHECKSUM";
 
 #[tokio::main(flavor = "current_thread")]
@@ -33,7 +33,7 @@ async fn main() -> ExitCode {
     } else {
         None
     };
-    if !matches!(cmd.as_str(), "migrate" | "seed" | "status" | "dataset-add") {
+    if !matches!(cmd.as_str(), "migrate" | "seed" | "status" | "dataset-add" | "provision-roles") {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     }
@@ -84,6 +84,25 @@ async fn run(cmd: &str, pool: &spectra_db::PgPool) -> Result<(), String> {
     }
     migrate(pool).await.map_err(|e| e.to_string())?;
     eprintln!("spectra-db: migrations applied");
+    if cmd == "provision-roles" {
+        let app_user = std::env::var("POSTGRES_APP_USER").unwrap_or_else(|_| "spectra_app".into());
+        let app_pw = std::env::var("POSTGRES_APP_PASSWORD").ok();
+        let outcome = spectra_db::roles::provision_service_roles(pool, &app_user, app_pw.as_deref())
+            .await
+            .map_err(|e| format!("provision service roles: {e}"))?;
+        let ver = spectra_db::roles::verify_service_role(pool, &app_user)
+            .await
+            .map_err(|e| format!("verify service role: {e}"))?;
+        eprintln!(
+            "spectra-db: provisioned role '{}' (created: {}, connect: {}, write_jobs: {}, read_workspaces: {}, cannot_write_users: {})",
+            outcome.role_name,
+            outcome.created,
+            ver.can_connect,
+            ver.can_write_jobs,
+            ver.can_read_workspaces,
+            ver.cannot_write_users
+        );
+    }
     if cmd == "seed" {
         let email = std::env::var("ADMIN_EMAIL").map_err(|_| "ADMIN_EMAIL is not set".to_string())?;
         let s = seed_dev(pool, &email).await.map_err(|e| e.to_string())?;

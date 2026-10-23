@@ -22,7 +22,13 @@ static SENTRY_GUARD: OnceLock<sentry::ClientInitGuard> = OnceLock::new();
 pub fn init_observability() {
     let json_layer =
         fmt::layer().json().with_target(true).with_thread_ids(true).with_file(true).with_line_number(true);
-    let _ = SENTRY_GUARD.get_or_init(|| sentry::init(sentry::ClientOptions::default()));
+    let _ = SENTRY_GUARD.get_or_init(|| {
+        let dsn = std::env::var("SENTRY_DSN").ok().filter(|s| !s.trim().is_empty());
+        let mut opts = sentry::ClientOptions::default();
+        opts.dsn = dsn.and_then(|d| d.parse().ok());
+        opts.release = sentry::release_name!();
+        sentry::init(sentry::apply_defaults(opts))
+    });
     let sentry_layer = sentry::integrations::tracing::layer().event_filter(|metadata| {
         if *metadata.level() == tracing::Level::ERROR {
             sentry::integrations::tracing::EventFilter::Event
@@ -59,6 +65,70 @@ pub fn init_observability() {
 /// [`init_observability`] has run.
 pub fn render_metrics() -> Option<String> {
     PROMETHEUS.get().map(PrometheusHandle::render)
+}
+
+/// Returns true if Sentry is currently initialized and enabled with a valid DSN.
+pub fn is_sentry_enabled() -> bool {
+    sentry::Hub::current().client().is_some_and(|c| c.is_enabled())
+}
+
+/// Sentry delivery status.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct SentryStatus {
+    pub enabled: bool,
+    pub dsn_configured: bool,
+    pub release: Option<String>,
+}
+
+/// Return current Sentry status.
+pub fn sentry_status() -> SentryStatus {
+    let dsn_configured = std::env::var("SENTRY_DSN").is_ok_and(|s| !s.trim().is_empty());
+    SentryStatus {
+        enabled: is_sentry_enabled(),
+        dsn_configured,
+        release: sentry::release_name!().map(Into::into),
+    }
+}
+
+/// Verification result of sending an event to Sentry.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct SentryVerifyOutcome {
+    pub enabled: bool,
+    pub event_id: Option<String>,
+    pub message: String,
+    pub delivered: bool,
+}
+
+/// Sends a test verification message to Sentry and flushes the client.
+pub fn verify_sentry_delivery(custom_message: Option<&str>) -> SentryVerifyOutcome {
+    let dsn_configured = std::env::var("SENTRY_DSN").is_ok_and(|s| !s.trim().is_empty());
+    if !is_sentry_enabled() {
+        return SentryVerifyOutcome {
+            enabled: false,
+            event_id: None,
+            message: if dsn_configured {
+                "SENTRY_DSN was set but could not be initialized or parsed.".into()
+            } else {
+                "SENTRY_DSN is not configured; error reporting is disabled.".into()
+            },
+            delivered: false,
+        };
+    }
+
+    let msg = custom_message.unwrap_or("Spectra Labs Sentry delivery verification test event");
+    let event_id = sentry::capture_message(msg, sentry::Level::Info);
+    let delivered = if let Some(client) = sentry::Hub::current().client() {
+        client.flush(Some(std::time::Duration::from_secs(2)))
+    } else {
+        false
+    };
+
+    SentryVerifyOutcome {
+        enabled: true,
+        event_id: Some(event_id.to_string()),
+        message: format!("Verification event successfully dispatched: {msg}"),
+        delivered,
+    }
 }
 
 /// Metrics for request handling.

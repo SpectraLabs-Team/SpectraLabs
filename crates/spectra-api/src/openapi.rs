@@ -259,6 +259,11 @@ pub struct StressRequest {
         crate::paper_api::step_strategy,
         crate::paper_api::sync_paper_orders,
         crate::paper_api::reconcile_paper_positions,
+        crate::sentry_status_handler,
+        crate::sentry_verify_handler,
+        crate::gap_api::handle_analyze_gap,
+        crate::gap_api::handle_list_gap_reports,
+        crate::gap_api::handle_get_gap_report,
     ),
     components(schemas(
         ErrorDoc,
@@ -394,8 +399,17 @@ pub struct StressRequest {
         crate::paper_api::SyncOrdersResponse,
         crate::paper_api::PositionMismatchView,
         crate::paper_api::ReconcilePositionsResponse,
+        crate::observability::SentryStatus,
+        crate::observability::SentryVerifyOutcome,
+        crate::SentryVerifyRequest,
+        crate::gap_api::AnalyzeGapRequest,
+        crate::gap_api::PaperFillInput,
+        crate::gap_api::BacktestFillInput,
+        crate::gap_api::GapReportSummaryView,
+        crate::gap_api::GapReportDetailView,
     )),
     tags(
+        (name = "system", description = "System observability, probes and metrics"),
         (name = "probes", description = "Liveness and readiness"),
         (name = "engine", description = "Synchronous engine calls"),
         (name = "jobs", description = "Queued engine work, run by spectra-worker"),
@@ -486,6 +500,11 @@ mod tests {
             "/api/v1/risk/metrics",
             "/api/v1/paper/sync",
             "/api/v1/paper/reconcile",
+            "/api/v1/observability/sentry",
+            "/api/v1/observability/sentry/verify",
+            "/api/v1/paper/gap/analyze",
+            "/api/v1/paper/gap/reports",
+            "/api/v1/paper/gap/reports/{id}",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

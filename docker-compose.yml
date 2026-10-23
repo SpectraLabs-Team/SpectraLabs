@@ -35,10 +35,12 @@ services:
     command:
       - sh
       - -c
-      - 'if [ -n "$$ADMIN_EMAIL" ]; then exec spectra-db seed; else exec spectra-db migrate; fi'
+      - 'if [ -n "$$POSTGRES_APP_USER" ]; then spectra-db provision-roles; fi; if [ -n "$$ADMIN_EMAIL" ]; then exec spectra-db seed; else exec spectra-db migrate; fi'
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-spectra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-spectra}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:-}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-}
     healthcheck:
       disable: true
     depends_on:
@@ -52,7 +54,7 @@ services:
       dockerfile: docker/engine.Dockerfile
     image: spectralabs/engine:dev
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-spectra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-spectra}
+      DATABASE_URL: postgres://${POSTGRES_APP_USER:-${POSTGRES_USER:-spectra}}:${POSTGRES_APP_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB:-spectra}
       ENGINE_SECRET: ${ENGINE_SECRET:?set ENGINE_SECRET in .env (openssl rand -base64 48)}
       SENTRY_DSN: ${SENTRY_DSN:-}
       SPECTRA_API_ADDR: 0.0.0.0:8000
@@ -87,7 +89,7 @@ services:
     command: ["spectra-worker"]
     # Scale out with: docker compose up -d --scale worker=3 (each claims jobs with SKIP LOCKED).
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-spectra}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-spectra}
+      DATABASE_URL: postgres://${POSTGRES_APP_USER:-${POSTGRES_USER:-spectra}}:${POSTGRES_APP_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB:-spectra}
       SENTRY_DSN: ${SENTRY_DSN:-}
       ARTIFACT_STORAGE: local # s3: see deploy/compose.s3.yml
       ARTIFACT_DIR: /var/lib/spectra/artifacts

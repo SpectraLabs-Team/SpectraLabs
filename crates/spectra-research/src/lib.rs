@@ -4,6 +4,7 @@
 //! (`quantforge` v0.6.0); reports are text-identical.
 
 pub mod benchmark;
+pub mod gap;
 pub mod pbo;
 pub mod stats;
 pub mod survival;
@@ -13,6 +14,10 @@ pub mod validation;
 pub mod walkforward;
 
 pub use benchmark::{aligned_returns, benchmark_returns, compute_benchmark_metrics, BenchmarkMetrics};
+pub use gap::{
+    compute_backtest_to_paper_gap, BacktestFillRecord, GapAlert, GapAlertStatus, GapAttribution, GapMetrics,
+    GapReport, GapThresholds, GapTradeSide, MatchedTradeGap, PaperFillRecord,
+};
 pub use pbo::{cscv_pbo, PboResult};
 pub use stats::{
     deflated_sharpe, expected_max_sharpe, min_track_record_length, moments, normal_cdf, normal_inv_cdf,

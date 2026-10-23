@@ -88,6 +88,7 @@ jobs:
           cargo run --quiet -p spectra-db -- migrate
           ADMIN_EMAIL=ci@example.com cargo run --quiet -p spectra-db -- seed
           psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f crates/spectra-db/tests/schema_checks.sql
+          psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f crates/spectra-db/tests/role_checks.sql
           { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/queue_checks.sql; } \
             | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
           { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/backtest_checks.sql; } \

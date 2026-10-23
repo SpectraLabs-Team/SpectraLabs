@@ -427,8 +427,8 @@ async fn sweep_search_budget_cap_enforced() {
     let ds_ver = f.dataset_version().await;
 
     // Create grid with 40 * 30 = 1200 combinations (> 1000 budget cap)
-    let fast_vals: Vec<f64> = (1..=40).map(|i| i as f64).collect();
-    let slow_vals: Vec<f64> = (1..=30).map(|i| i as f64).collect();
+    let fast_vals: Vec<f64> = (1..=40).map(f64::from).collect();
+    let slow_vals: Vec<f64> = (1..=30).map(f64::from).collect();
 
     let (status, res) = f
         .call(

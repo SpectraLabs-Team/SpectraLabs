@@ -53,6 +53,7 @@ pub mod lifecycle_api;
 pub mod observability;
 pub mod openapi;
 pub mod optimization_api;
+pub mod paper_api;
 pub mod providers;
 pub mod providers_api;
 pub mod registry_api;
@@ -881,6 +882,18 @@ fn risk_center_routes() -> Router<AppState> {
         .route("/api/v1/risk/replay/{decision_id}", only(post(risk_center_api::replay_decision)))
 }
 
+/// Module 9: Paper Trading.
+fn paper_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/paper/account", only(get(paper_api::get_account)))
+        .route("/api/v1/paper/account/reset", only(post(paper_api::reset_account)))
+        .route(
+            "/api/v1/paper/orders",
+            only(get(paper_api::list_orders).post(paper_api::create_order)),
+        )
+        .route("/api/v1/paper/orders/{id}", only(get(paper_api::get_order)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -900,6 +913,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(session_routes())
         .merge(optimization_routes())
         .merge(risk_center_routes())
+        .merge(paper_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .merge(upload_routes())

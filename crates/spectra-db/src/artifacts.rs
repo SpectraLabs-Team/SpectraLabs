@@ -195,6 +195,9 @@ impl ArtifactStore {
     }
 
     /// Lists all SHA-256 hashes currently stored on disk under `root/sha256/xx/yy/<hash>`.
+    ///
+    /// # Errors
+    /// Any I/O error reading the storage directories.
     pub fn list_stored_hashes(&self) -> io::Result<Vec<String>> {
         let base = self.root.join("sha256");
         if !base.exists() {
@@ -366,6 +369,9 @@ impl ArtifactBackend {
     }
 
     /// Lists all stored SHA-256 hashes.
+    ///
+    /// # Errors
+    /// Any I/O or storage backend error.
     pub async fn list_stored_hashes(&self) -> io::Result<Vec<String>> {
         match self {
             Self::Local(store) => {
@@ -573,6 +579,9 @@ pub async fn find_for_run(
 /// Collects all active hashes from `workspace_storage`, compares them against the store's
 /// stored hashes, and deletes any file not referenced by any active workspace.
 /// Returns the list of deleted hashes.
+///
+/// # Errors
+/// Any database or storage error.
 pub async fn sweep_unreferenced(pool: &PgPool, store: &ArtifactBackend) -> Result<Vec<String>, sqlx::Error> {
     let rows: Vec<(String,)> =
         sqlx::query_as("SELECT DISTINCT sha256 FROM workspace_storage").fetch_all(pool).await?;

@@ -132,6 +132,7 @@ fn print(out: &mut String, name: &str, r: &BacktestResult) {
             Some(Reject::InsufficientCash) => 3,
             Some(Reject::ShortNotAllowed) => 4,
             Some(Reject::LeverageExceeded) => panic!("not possible under the reference policy"),
+            Some(Reject::RiskLimitExceeded) => panic!("not possible under the reference policy"),
         }] += 1;
     }
     writeln!(
@@ -245,6 +246,8 @@ fn backtester_matches_cpp_reference() {
             financing: spectra_engine::FinancingConfig::default(), // the reference engine had none
             impact: spectra_engine::ImpactConfig::default(),
             exchange: None,
+            risk_limits: None,
+            kill_switch: false,
         };
         for seed in 1..=3u64 {
             let bars = random_market(seed * 101 + c as u64, 1 + (c % 4) as usize, 300);

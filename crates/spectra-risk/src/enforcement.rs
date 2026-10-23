@@ -714,4 +714,34 @@ mod tests {
             assert_eq!(over_res.verdict, PreTradeVerdict::Rejected, "Over-limit order must be rejected");
         }
     }
+
+    #[test]
+    fn test_rejected_when_var_limit_exceeded() {
+        // Tight max_var_pct limit of 0.001 (0.1%)
+        let limits = RiskLimits {
+            max_var_pct: 0.001,
+            max_position_size: 1_000_000.0,
+            max_gross_exposure: 1_000_000.0,
+            ..RiskLimits::default()
+        };
+        let portfolio = PortfolioSnapshot {
+            cash: 100_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions: HashMap::new(),
+        };
+
+        // Buying $50,000 of stock generates ~0.6% 1-day 99% VaR, which breaches the 0.1% limit
+        let order = OrderCandidate {
+            symbol: "AAPL".into(),
+            side: OrderSide::Buy,
+            qty: 250.0,
+            price: 200.0, // $50,000
+        };
+
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
+        assert_eq!(res.verdict, PreTradeVerdict::Rejected);
+        assert!(res.breaches.iter().any(|b| b.code == "var_limit_exceeded"));
+    }
 }

@@ -608,6 +608,34 @@ async fn risk_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejec
     post_json(&st, body, engine::risk).await
 }
 
+/// Regime detection and regime-conditional risk.
+#[utoipa::path(post, path = "/api/v1/risk/regimes", tag = "engine", request_body = crate::openapi::RiskRegimesRequest,
+    responses((status = 200, description = "Regime report"), (status = 422, body = crate::openapi::ErrorDoc)))]
+async fn risk_regimes_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
+    post_json(&st, body, engine::regimes).await
+}
+
+/// GARCH(1,1) volatility modeling and forecast.
+#[utoipa::path(post, path = "/api/v1/risk/garch", tag = "engine", request_body = crate::openapi::RiskGarchRequest,
+    responses((status = 200, description = "GARCH report"), (status = 422, body = crate::openapi::ErrorDoc)))]
+async fn risk_garch_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
+    post_json(&st, body, engine::garch).await
+}
+
+/// EVT Peaks-Over-Threshold tail risk estimation.
+#[utoipa::path(post, path = "/api/v1/risk/evt", tag = "engine", request_body = crate::openapi::RiskEvtRequest,
+    responses((status = 200, description = "EVT report"), (status = 422, body = crate::openapi::ErrorDoc)))]
+async fn risk_evt_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
+    post_json(&st, body, engine::evt).await
+}
+
+/// VaR backtesting (Kupiec, Christoffersen, Basel traffic light).
+#[utoipa::path(post, path = "/api/v1/risk/backtest", tag = "engine", request_body = crate::openapi::RiskBacktestRequest,
+    responses((status = 200, description = "VaR backtest report"), (status = 422, body = crate::openapi::ErrorDoc)))]
+async fn risk_backtest_handler(State(st): State<AppState>, body: Result<Bytes, BytesRejection>) -> Response {
+    post_json(&st, body, engine::backtest).await
+}
+
 /// Benchmark the engine on a portfolio.
 #[utoipa::path(post, path = "/api/v1/benchmark", tag = "engine", request_body = crate::openapi::BenchmarkRequest,
     responses((status = 200, description = "Benchmark report"), (status = 422, body = crate::openapi::ErrorDoc)))]
@@ -669,6 +697,10 @@ fn only(route: MethodRouter<AppState>) -> MethodRouter<AppState> {
 fn engine_routes(prefix: &str) -> Router<AppState> {
     Router::new()
         .route(&format!("{prefix}/risk"), only(post(risk_handler)))
+        .route(&format!("{prefix}/risk/regimes"), only(post(risk_regimes_handler)))
+        .route(&format!("{prefix}/risk/garch"), only(post(risk_garch_handler)))
+        .route(&format!("{prefix}/risk/evt"), only(post(risk_evt_handler)))
+        .route(&format!("{prefix}/risk/backtest"), only(post(risk_backtest_handler)))
         .route(&format!("{prefix}/benchmark"), only(post(benchmark_handler)))
         .route(&format!("{prefix}/stress"), only(post(stress_handler)))
         .route(&format!("{prefix}/metrics"), only(get(metrics_handler)))

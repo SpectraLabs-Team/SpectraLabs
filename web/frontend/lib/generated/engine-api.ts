@@ -865,6 +865,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/risk/backtest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** VaR backtesting (Kupiec, Christoffersen, Basel traffic light). */
+        post: operations["risk_backtest_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/risk/balance": {
         parameters: {
             query?: never;
@@ -900,6 +917,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/risk/evt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** EVT Peaks-Over-Threshold tail risk estimation. */
+        post: operations["risk_evt_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/risk/exposure-history": {
         parameters: {
             query?: never;
@@ -911,6 +945,23 @@ export interface paths {
         get: operations["get_exposure_history"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/garch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** GARCH(1,1) volatility modeling and forecast. */
+        post: operations["risk_garch_handler"];
         delete?: never;
         options?: never;
         head?: never;
@@ -982,6 +1033,23 @@ export interface paths {
         /** Upsert a position for workspace/strategy (Task 1). */
         put: operations["put_position"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/regimes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Regime detection and regime-conditional risk. */
+        post: operations["risk_regimes_handler"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2812,6 +2880,18 @@ export interface components {
             /** Format: double */
             utilization_pct: number;
         };
+        /** @description `POST /api/v1/risk/backtest` body. */
+        RiskBacktestRequest: {
+            /**
+             * Format: double
+             * @description Stated VaR confidence level (default 0.99).
+             */
+            confidence?: number | null;
+            /** @description Realized losses (positive values = loss). */
+            realized_losses: number[];
+            /** @description Ex-ante VaR forecasts corresponding to each period. */
+            var_forecasts: number[];
+        };
         RiskBreachView: {
             code: string;
             /** Format: double */
@@ -2843,6 +2923,26 @@ export interface components {
             verdict: string;
             /** Format: uuid */
             workspace_id: string;
+        };
+        /** @description `POST /api/v1/risk/evt` body. */
+        RiskEvtRequest: {
+            /**
+             * Format: double
+             * @description VaR/CVaR confidence level (default 0.99).
+             */
+            confidence?: number | null;
+            /** @description Loss series (at least 50 observations). */
+            losses: number[];
+            /**
+             * Format: double
+             * @description Threshold quantile for POT tail fitting (default 0.90).
+             */
+            threshold_quantile?: number | null;
+        };
+        /** @description `POST /api/v1/risk/garch` body. */
+        RiskGarchRequest: {
+            /** @description Historical returns series (at least 30 observations). */
+            returns: number[];
         };
         RiskLimitsView: {
             /** Format: uuid */
@@ -2917,6 +3017,26 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        /** @description `POST /api/v1/risk/regimes` body. */
+        RiskRegimesRequest: {
+            /**
+             * Format: double
+             * @description VaR confidence level (default 0.99).
+             */
+            confidence?: number | null;
+            /**
+             * Format: double
+             * @description Horizon in trading days (default 1.0).
+             */
+            horizon_days?: number | null;
+            /**
+             * Format: double
+             * @description Portfolio value for currency-denominated VaR (default 100,000).
+             */
+            portfolio_value?: number | null;
+            /** @description Historical returns series (at least 30 observations). */
+            returns: number[];
+        };
         /** @description `POST /api/v1/risk` body. */
         RiskRequest: {
             /** @description `auto`, `cpu` or `parallel`. */
@@ -2926,6 +3046,13 @@ export interface components {
              * @description 0.5..1, default 0.99.
              */
             confidence?: number | null;
+            /**
+             * Format: double
+             * @description Degrees of freedom for Student-t copula (default 4.0).
+             */
+            degrees_of_freedom?: number | null;
+            /** @description Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`). */
+            dependence?: string | null;
             /**
              * Format: double
              * @description Horizon in trading days, up to 7,560. Default 252.
@@ -5674,6 +5801,36 @@ export interface operations {
             };
         };
     };
+    risk_backtest_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskBacktestRequest"];
+            };
+        };
+        responses: {
+            /** @description VaR backtest report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     get_balance: {
         parameters: {
             query?: never;
@@ -5742,6 +5899,36 @@ export interface operations {
             };
         };
     };
+    risk_evt_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskEvtRequest"];
+            };
+        };
+        responses: {
+            /** @description EVT report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     get_exposure_history: {
         parameters: {
             query?: never;
@@ -5761,6 +5948,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EquitySnapshotView"][];
+                };
+            };
+        };
+    };
+    risk_garch_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskGarchRequest"];
+            };
+        };
+        responses: {
+            /** @description GARCH report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
         };
@@ -5920,6 +6137,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    risk_regimes_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskRegimesRequest"];
+            };
+        };
+        responses: {
+            /** @description Regime report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
             };
         };
     };

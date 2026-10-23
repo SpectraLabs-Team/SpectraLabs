@@ -2620,6 +2620,40 @@
         }
       }
     },
+    "/api/v1/risk/backtest": {
+      "post": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "VaR backtesting (Kupiec, Christoffersen, Basel traffic light).",
+        "operationId": "risk_backtest_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskBacktestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "VaR backtest report"
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/risk/balance": {
       "get": {
         "tags": [
@@ -2715,6 +2749,40 @@
         }
       }
     },
+    "/api/v1/risk/evt": {
+      "post": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "EVT Peaks-Over-Threshold tail risk estimation.",
+        "operationId": "risk_evt_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskEvtRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "EVT report"
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/risk/exposure-history": {
       "get": {
         "tags": [
@@ -2758,6 +2826,40 @@
                   "items": {
                     "$ref": "#/components/schemas/EquitySnapshotView"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/risk/garch": {
+      "post": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "GARCH(1,1) volatility modeling and forecast.",
+        "operationId": "risk_garch_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskGarchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "GARCH report"
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
                 }
               }
             }
@@ -2987,6 +3089,40 @@
         "responses": {
           "200": {
             "description": "Position upserted"
+          }
+        }
+      }
+    },
+    "/api/v1/risk/regimes": {
+      "post": {
+        "tags": [
+          "engine"
+        ],
+        "summary": "Regime detection and regime-conditional risk.",
+        "operationId": "risk_regimes_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RiskRegimesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Regime report"
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
           }
         }
       }
@@ -7781,6 +7917,40 @@
           }
         }
       },
+      "RiskBacktestRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/risk/backtest` body.",
+        "required": [
+          "realized_losses",
+          "var_forecasts"
+        ],
+        "properties": {
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Stated VaR confidence level (default 0.99)."
+          },
+          "realized_losses": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Realized losses (positive values = loss)."
+          },
+          "var_forecasts": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Ex-ante VaR forecasts corresponding to each period."
+          }
+        }
+      },
       "RiskBreachView": {
         "type": "object",
         "required": [
@@ -7877,6 +8047,56 @@
           "workspace_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "RiskEvtRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/risk/evt` body.",
+        "required": [
+          "losses"
+        ],
+        "properties": {
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "VaR/CVaR confidence level (default 0.99)."
+          },
+          "losses": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Loss series (at least 50 observations)."
+          },
+          "threshold_quantile": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Threshold quantile for POT tail fitting (default 0.90)."
+          }
+        }
+      },
+      "RiskGarchRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/risk/garch` body.",
+        "required": [
+          "returns"
+        ],
+        "properties": {
+          "returns": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Historical returns series (at least 30 observations)."
           }
         }
       },
@@ -8083,6 +8303,47 @@
           }
         }
       },
+      "RiskRegimesRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/risk/regimes` body.",
+        "required": [
+          "returns"
+        ],
+        "properties": {
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "VaR confidence level (default 0.99)."
+          },
+          "horizon_days": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Horizon in trading days (default 1.0)."
+          },
+          "portfolio_value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Portfolio value for currency-denominated VaR (default 100,000)."
+          },
+          "returns": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Historical returns series (at least 30 observations)."
+          }
+        }
+      },
       "RiskRequest": {
         "type": "object",
         "description": "`POST /api/v1/risk` body.",
@@ -8104,6 +8365,21 @@
             ],
             "format": "double",
             "description": "0.5..1, default 0.99."
+          },
+          "degrees_of_freedom": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Degrees of freedom for Student-t copula (default 4.0)."
+          },
+          "dependence": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`)."
           },
           "horizon_days": {
             "type": [

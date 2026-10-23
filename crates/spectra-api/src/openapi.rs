@@ -38,6 +38,52 @@ pub struct RiskRequest {
     pub backend: Option<String>,
     /// Horizon in trading days, up to 7,560. Default 252.
     pub horizon_days: Option<f64>,
+    /// Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`).
+    pub dependence: Option<String>,
+    /// Degrees of freedom for Student-t copula (default 4.0).
+    pub degrees_of_freedom: Option<f64>,
+}
+
+/// `POST /api/v1/risk/regimes` body.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RiskRegimesRequest {
+    /// Historical returns series (at least 30 observations).
+    pub returns: Vec<f64>,
+    /// Portfolio value for currency-denominated VaR (default 100,000).
+    pub portfolio_value: Option<f64>,
+    /// VaR confidence level (default 0.99).
+    pub confidence: Option<f64>,
+    /// Horizon in trading days (default 1.0).
+    pub horizon_days: Option<f64>,
+}
+
+/// `POST /api/v1/risk/garch` body.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RiskGarchRequest {
+    /// Historical returns series (at least 30 observations).
+    pub returns: Vec<f64>,
+}
+
+/// `POST /api/v1/risk/evt` body.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RiskEvtRequest {
+    /// Loss series (at least 50 observations).
+    pub losses: Vec<f64>,
+    /// VaR/CVaR confidence level (default 0.99).
+    pub confidence: Option<f64>,
+    /// Threshold quantile for POT tail fitting (default 0.90).
+    pub threshold_quantile: Option<f64>,
+}
+
+/// `POST /api/v1/risk/backtest` body.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RiskBacktestRequest {
+    /// Realized losses (positive values = loss).
+    pub realized_losses: Vec<f64>,
+    /// Ex-ante VaR forecasts corresponding to each period.
+    pub var_forecasts: Vec<f64>,
+    /// Stated VaR confidence level (default 0.99).
+    pub confidence: Option<f64>,
 }
 
 /// `POST /api/v1/benchmark` body (also the `benchmark` job payload).
@@ -80,6 +126,10 @@ pub struct StressRequest {
         crate::health,
         crate::ready,
         crate::risk_handler,
+        crate::risk_regimes_handler,
+        crate::risk_garch_handler,
+        crate::risk_evt_handler,
+        crate::risk_backtest_handler,
         crate::benchmark_handler,
         crate::stress_handler,
         crate::metrics_handler,
@@ -195,6 +245,10 @@ pub struct StressRequest {
     components(schemas(
         ErrorDoc,
         RiskRequest,
+        RiskRegimesRequest,
+        RiskGarchRequest,
+        RiskEvtRequest,
+        RiskBacktestRequest,
         BenchmarkRequest,
         StressRequest,
         crate::jobs_api::CreateJob,
@@ -349,6 +403,10 @@ mod tests {
             "/health",
             "/ready",
             "/api/v1/risk",
+            "/api/v1/risk/regimes",
+            "/api/v1/risk/garch",
+            "/api/v1/risk/evt",
+            "/api/v1/risk/backtest",
             "/api/v1/jobs",
             "/api/v1/jobs/{id}",
             "/api/v1/jobs/{id}/cancel",

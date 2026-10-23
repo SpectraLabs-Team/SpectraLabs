@@ -91,6 +91,32 @@ impl Fixture {
         self.call_in(self.ws, method, path, &text).await
     }
 
+    async fn call_as(&self, user: Uuid, ws: Uuid, method: &str, path: &str, body: &Value) -> (u16, Value) {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
+        let (user_str, ws_str) = (user.to_string(), ws.to_string());
+        let req_id = spectra_db::new_id().to_string();
+        let text = if body.is_null() { String::new() } else { body.to_string() };
+        let sig = sign(
+            SECRET.as_bytes(),
+            &canonical(method, path, &ts, &user_str, &ws_str, &req_id, text.as_bytes()),
+        );
+        let req = Request::builder()
+            .method(method)
+            .uri(path)
+            .header("X-Spectra-User", user_str)
+            .header("X-Spectra-Workspace", ws_str)
+            .header("X-Request-Id", req_id)
+            .header("X-Spectra-Timestamp", ts)
+            .header("X-Spectra-Signature", sig)
+            .header("Content-Type", "application/json")
+            .body(Body::from(text))
+            .unwrap();
+        let res = self.app.clone().oneshot(req).await.unwrap();
+        let status = res.status().as_u16();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
     /// A dataset version in the fixture's workspace (rows only; nothing is run here).
     async fn dataset_version(&self) -> Uuid {
         spectra_db::identity::ensure_identity(&self.pool, Some(self.user), self.ws)
@@ -774,5 +800,132 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
         .await
         .unwrap();
     sqlx::query("DELETE FROM strategies WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await.unwrap();
+    f.clean_up();
+}
+
+#[tokio::test]
+async fn strategy_sharing_viewer_can_run_and_cannot_edit() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let dataset = f.dataset_version().await;
+
+    // 1. Owner creates workspace and saves strategy version (M2 Task 13)
+    let owner_id = f.user;
+    let _ = sqlx::query(
+        "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner') ON CONFLICT DO NOTHING",
+    )
+    .bind(f.ws)
+    .bind(owner_id)
+    .execute(&f.pool)
+    .await;
+
+    let (status, created) = f
+        .call(
+            "POST",
+            "/api/v1/strategies",
+            &json!({
+                "name": "Shared SMA Strategy",
+                "description": "SMA on SPY",
+                "builtin": "sma_cross",
+                "params": { "fast": 10, "slow": 50 }
+            }),
+        )
+        .await;
+    assert_eq!(status, 201, "Failed creating strategy: {created}");
+    let strat_id = created["strategy"]["id"].as_str().unwrap();
+    let version_id = created["versions"][0]["id"].as_str().unwrap();
+
+    // 2. Add second user as read-only viewer in the same workspace
+    let viewer_id = spectra_db::new_id();
+    spectra_db::identity::ensure_identity(&f.pool, Some(viewer_id), f.ws).await.unwrap();
+    let _ = sqlx::query(
+        "INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'viewer') \
+         ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = 'viewer'",
+    )
+    .bind(f.ws)
+    .bind(viewer_id)
+    .execute(&f.pool)
+    .await;
+
+    // 3. Viewer can READ the shared strategy and its version
+    let (status, strat_view) =
+        f.call_as(viewer_id, f.ws, "GET", &format!("/api/v1/strategies/{strat_id}"), &Value::Null).await;
+    assert_eq!(status, 200);
+    assert_eq!(strat_view["strategy"]["name"], "Shared SMA Strategy");
+
+    let (status, ver_view) = f
+        .call_as(viewer_id, f.ws, "GET", &format!("/api/v1/strategies/versions/{version_id}"), &Value::Null)
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(ver_view["strategy_id"], strat_id);
+
+    // 4. Task 13: Viewer can RUN a backtest using the shared strategy version
+    let (status, job_res) = f
+        .call_as(
+            viewer_id,
+            f.ws,
+            "POST",
+            "/api/v1/jobs",
+            &json!({
+                "kind": "backtest",
+                "payload": {
+                    "dataset_version_id": dataset,
+                    "strategy_version_id": version_id
+                }
+            }),
+        )
+        .await;
+    assert_eq!(status, 202, "Viewer must be able to run backtest on shared strategy version: {job_res}");
+
+    // 5. Task 13: Viewer CANNOT edit, save versions, modify drafts or add parameter sets (403 Forbidden)
+    let (status, err) = f
+        .call_as(
+            viewer_id,
+            f.ws,
+            "POST",
+            &format!("/api/v1/strategies/{strat_id}/versions"),
+            &json!({
+                "builtin": "sma_cross",
+                "parameters": { "fast": 15, "slow": 60 }
+            }),
+        )
+        .await;
+    assert_eq!(status, 403);
+    assert_eq!(err["code"], "viewer_read_only");
+
+    let (status, err) = f
+        .call_as(
+            viewer_id,
+            f.ws,
+            "PUT",
+            &format!("/api/v1/strategies/{strat_id}/draft"),
+            &json!({ "code": "param fast = 12;", "parameters": {} }),
+        )
+        .await;
+    assert_eq!(status, 403);
+    assert_eq!(err["code"], "viewer_read_only");
+
+    let (status, err) = f
+        .call_as(
+            viewer_id,
+            f.ws,
+            "POST",
+            &format!("/api/v1/strategies/{strat_id}/versions/{version_id}/parameter_sets"),
+            &json!({ "name": "Unauthorized preset", "parameters": {} }),
+        )
+        .await;
+    assert_eq!(status, 403);
+    assert_eq!(err["code"], "viewer_read_only");
+
+    // Clean up
+    let _ = sqlx::query("DELETE FROM strategy_versions WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM strategies WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await;
+    let _ = sqlx::query("DELETE FROM workspace_members WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await;
     f.clean_up();
 }

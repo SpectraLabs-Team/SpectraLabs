@@ -70,6 +70,7 @@ export function StrategyStudio() {
   const [validationErrors, setValidationErrors] = useState<ValidationErrorItem[]>([]);
   const [isValid, setIsValid] = useState(true);
   const [draftStatus, setDraftStatus] = useState<'saved' | 'saving' | 'dirty' | 'idle'>('idle');
+  const [isReadOnly, setIsReadOnly] = useState(false);
 
   // Sub-tabs: 'code' | 'history' | 'diff' | 'presets'
   const [activeSubTab, setActiveSubTab] = useState<'code' | 'history' | 'diff' | 'presets'>('code');
@@ -218,8 +219,14 @@ export function StrategyStudio() {
         try {
           await saveDraft(selectedStrategy.id, code, parameters);
           setDraftStatus('saved');
-        } catch {
-          setDraftStatus('dirty');
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('viewer_read_only') || msg.includes('403')) {
+            setIsReadOnly(true);
+            setDraftStatus('idle');
+          } else {
+            setDraftStatus('dirty');
+          }
         }
       }
     }, 600);
@@ -252,7 +259,11 @@ export function StrategyStudio() {
       }
       setSelectedVersionForRun(v.id);
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Failed to save version.');
+      const msg = e instanceof Error ? e.message : 'Failed to save version.';
+      if (msg.includes('viewer_read_only') || msg.includes('403')) {
+        setIsReadOnly(true);
+      }
+      alert(msg);
     } finally {
       setIsSavingVersion(false);
     }
@@ -388,6 +399,12 @@ export function StrategyStudio() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {isReadOnly && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
+                Shared · Read-only (Viewer)
+              </span>
+            )}
+
             {/* Draft status indicator */}
             <div className="flex items-center gap-1.5 rounded-full border border-ink/10 bg-ink/[0.03] px-3 py-1 text-xs font-mono text-ink/70">
               {draftStatus === 'saving' && (
@@ -414,7 +431,9 @@ export function StrategyStudio() {
             <button
               type="button"
               onClick={() => setShowSaveModal(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-onaccent shadow-sm transition hover:brightness-110 active:scale-95"
+              disabled={isReadOnly}
+              title={isReadOnly ? 'Viewers cannot modify or save strategy versions' : 'Save Version'}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-onaccent shadow-sm transition hover:brightness-110 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Save className="h-4 w-4" /> Save Version
             </button>

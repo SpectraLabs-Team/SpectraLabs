@@ -194,8 +194,8 @@ async fn survival_lab_queue_report_and_retrieve_scorecard() {
     sqlx::query(
         "UPDATE survival_reports \
          SET status = 'succeeded', \
-             worst_verdict = 'fragile', \
-             verdicts = '{\"cost_fragility\":\"fragile\",\"execution_delay\":\"pass\"}', \
+             worst_verdict = 'fail', \
+             verdicts = '{\"cost_fragility\":\"fail\",\"execution_delay\":\"pass\"}', \
              finished_at = now() \
          WHERE workspace_id = $1 AND id = $2",
     )
@@ -208,7 +208,7 @@ async fn survival_lab_queue_report_and_retrieve_scorecard() {
     let (status, rep_updated) = f.call("GET", &format!("/api/v1/survival/{report_id}"), &Value::Null).await;
     assert_eq!(status, 200);
     assert_eq!(rep_updated["status"], "succeeded");
-    assert_eq!(rep_updated["worst_verdict"], "fragile");
+    assert_eq!(rep_updated["worst_verdict"], "fail");
 
     f.clean_up().await;
 }

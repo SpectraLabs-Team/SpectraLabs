@@ -46,10 +46,18 @@ impl Fixture {
     }
 
     async fn clean_up(&self) {
-        let _ = sqlx::query("DELETE FROM survival_reports WHERE workspace_id = $1").bind(self.ws).execute(&self.pool).await;
-        let _ = sqlx::query("DELETE FROM survival_presets WHERE workspace_id = $1").bind(self.ws).execute(&self.pool).await;
-        let _ = sqlx::query("DELETE FROM runs WHERE workspace_id = $1").bind(self.ws).execute(&self.pool).await;
-        let _ = sqlx::query("DELETE FROM jobs WHERE workspace_id = $1").bind(self.ws).execute(&self.pool).await;
+        let _ = sqlx::query("DELETE FROM survival_reports WHERE workspace_id = $1")
+            .bind(self.ws)
+            .execute(&self.pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM survival_presets WHERE workspace_id = $1")
+            .bind(self.ws)
+            .execute(&self.pool)
+            .await;
+        let _ =
+            sqlx::query("DELETE FROM runs WHERE workspace_id = $1").bind(self.ws).execute(&self.pool).await;
+        let _ =
+            sqlx::query("DELETE FROM jobs WHERE workspace_id = $1").bind(self.ws).execute(&self.pool).await;
         let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(self.ws).execute(&self.pool).await;
         let _ = sqlx::query("DELETE FROM users WHERE id = $1").bind(self.user).execute(&self.pool).await;
         let _ = std::fs::remove_dir_all(&self.dir);

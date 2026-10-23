@@ -825,12 +825,13 @@ async fn strategy_sharing_viewer_can_run_and_cannot_edit() {
             "/api/v1/strategies",
             &json!({
                 "name": "Shared SMA Strategy",
+                "description": "SMA on SPY",
                 "builtin": "sma_cross",
-                "parameters": { "fast": 10, "slow": 50 }
+                "params": { "fast": 10, "slow": 50 }
             }),
         )
         .await;
-    assert_eq!(status, 201);
+    assert_eq!(status, 201, "Failed creating strategy: {created}");
     let strat_id = created["strategy"]["id"].as_str().unwrap();
     let version_id = created["versions"][0]["id"].as_str().unwrap();
 
@@ -920,8 +921,14 @@ async fn strategy_sharing_viewer_can_run_and_cannot_edit() {
     assert_eq!(err["code"], "viewer_read_only");
 
     // Clean up
-    let _ = sqlx::query("DELETE FROM strategy_versions WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await;
+    let _ = sqlx::query("DELETE FROM strategy_versions WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await;
     let _ = sqlx::query("DELETE FROM strategies WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await;
-    let _ = sqlx::query("DELETE FROM workspace_members WHERE workspace_id = $1").bind(f.ws).execute(&f.pool).await;
+    let _ = sqlx::query("DELETE FROM workspace_members WHERE workspace_id = $1")
+        .bind(f.ws)
+        .execute(&f.pool)
+        .await;
     f.clean_up();
 }

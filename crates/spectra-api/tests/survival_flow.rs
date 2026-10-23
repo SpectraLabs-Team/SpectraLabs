@@ -132,7 +132,8 @@ async fn survival_presets_lifecycle_crud() {
             "PATCH",
             &format!("/api/v1/survival/presets/{preset_id}"),
             &json!({
-                "name": "Updated Institutional Battery"
+                "name": "Updated Institutional Battery",
+                "config": default_cfg
             }),
         )
         .await;

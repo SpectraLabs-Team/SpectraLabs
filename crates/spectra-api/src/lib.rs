@@ -887,10 +887,7 @@ fn paper_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/paper/account", only(get(paper_api::get_account)))
         .route("/api/v1/paper/account/reset", only(post(paper_api::reset_account)))
-        .route(
-            "/api/v1/paper/orders",
-            only(get(paper_api::list_orders).post(paper_api::create_order)),
-        )
+        .route("/api/v1/paper/orders", only(get(paper_api::list_orders).post(paper_api::create_order)))
         .route("/api/v1/paper/orders/{id}", only(get(paper_api::get_order)))
 }
 

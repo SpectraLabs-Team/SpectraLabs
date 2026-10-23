@@ -43,10 +43,7 @@ fn signature_headers(
     let ts = now();
     let u_str = user.to_string();
     let ws_str = ws.to_string();
-    let sig = sign(
-        SECRET.as_bytes(),
-        &canonical(method, path, &ts, &u_str, &ws_str, "req-paper-1", body),
-    );
+    let sig = sign(SECRET.as_bytes(), &canonical(method, path, &ts, &u_str, &ws_str, "req-paper-1", body));
     vec![
         ("x-spectra-user", u_str),
         ("x-spectra-workspace", ws_str),
@@ -77,12 +74,7 @@ async fn paper_routes_require_signature() {
     let app = router(cfg, None);
 
     let res = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/v1/paper/orders")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri("/api/v1/paper/orders").body(Body::empty()).unwrap())
         .await
         .unwrap();
 
@@ -97,13 +89,7 @@ async fn paper_routes_report_503_without_database() {
     let ws = spectra_db::new_id();
     let strat = spectra_db::new_id();
 
-    let req = signed_req(
-        "GET",
-        &format!("/api/v1/paper/account?strategy_id={strat}"),
-        &user,
-        &ws,
-        vec![],
-    );
+    let req = signed_req("GET", &format!("/api/v1/paper/account?strategy_id={strat}"), &user, &ws, vec![]);
     let (status, body) = read_json(app.oneshot(req).await.unwrap()).await;
     assert_eq!(status, 503);
     assert!(body["message"].as_str().unwrap().contains("Jobs need the database"));
@@ -164,13 +150,7 @@ impl TestFixture {
         let cfg = ApiConfig::new(Secret::new(SECRET));
         let app = router(cfg, Some(pool.clone()));
 
-        Self {
-            app,
-            pool,
-            user,
-            ws,
-            strategy,
-        }
+        Self { app, pool, user, ws, strategy }
     }
 
     async fn clean_up(&self) {
@@ -202,18 +182,10 @@ impl TestFixture {
             .bind(self.ws)
             .execute(&self.pool)
             .await;
-        let _ = sqlx::query("DELETE FROM strategies WHERE id = $1")
-            .bind(self.strategy)
-            .execute(&self.pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1")
-            .bind(self.ws)
-            .execute(&self.pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM users WHERE id = $1")
-            .bind(self.user)
-            .execute(&self.pool)
-            .await;
+        let _ =
+            sqlx::query("DELETE FROM strategies WHERE id = $1").bind(self.strategy).execute(&self.pool).await;
+        let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(self.ws).execute(&self.pool).await;
+        let _ = sqlx::query("DELETE FROM users WHERE id = $1").bind(self.user).execute(&self.pool).await;
     }
 }
 
@@ -346,7 +318,7 @@ async fn paper_trading_full_lifecycle() {
     assert_eq!(status, 201);
     assert_eq!(body["status"], "filled");
     assert_eq!(body["filled_qty"], 100.0);
-    assert!(body["fills"].as_array().unwrap().len() >= 1);
+    assert!(!body["fills"].as_array().unwrap().is_empty());
 
     // Verify account state: cash deducted, position held, equity matches cash + marked positions
     let path = format!("/api/v1/paper/account?strategy_id={}", f.strategy);
@@ -364,7 +336,10 @@ async fn paper_trading_full_lifecycle() {
     let pos_qty = positions[0]["qty"].as_f64().unwrap();
     let pos_price = positions[0]["price"].as_f64().unwrap();
 
-    assert!((equity - (cash + pos_qty * pos_price)).abs() < 0.01, "Equity must equal cash + marked positions");
+    assert!(
+        (equity - (cash + pos_qty * pos_price)).abs() < 0.01,
+        "Equity must equal cash + marked positions"
+    );
 
     // Clean up DB rows
     f.clean_up().await;

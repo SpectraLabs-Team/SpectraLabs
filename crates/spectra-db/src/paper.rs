@@ -81,39 +81,35 @@ pub async fn get_or_init_paper_account(
 ) -> Result<PaperAccount, Error> {
     let starting = initial_cash.unwrap_or(DEFAULT_PAPER_STARTING_CASH);
 
-    let balance = if let Some(b) = crate::risk_center::get_balance(pool, workspace_id, Some(strategy_id)).await? {
-        b
-    } else {
-        // Task 1: One paper account per strategy, with starting balance and no positions.
-        crate::risk_center::upsert_balance(
-            pool,
-            workspace_id,
-            Some(strategy_id),
-            starting,
-            starting,
-            starting,
-            starting,
-        )
-        .await?;
-        crate::risk_center::get_balance(pool, workspace_id, Some(strategy_id))
-            .await?
-            .unwrap_or(PortfolioBalanceRow {
-                cash: starting,
-                equity: starting,
-                peak_equity: starting,
-                daily_start_equity: starting,
-                updated_at: Utc::now(),
-            })
-    };
+    let balance =
+        if let Some(b) = crate::risk_center::get_balance(pool, workspace_id, Some(strategy_id)).await? {
+            b
+        } else {
+            // Task 1: One paper account per strategy, with starting balance and no positions.
+            crate::risk_center::upsert_balance(
+                pool,
+                workspace_id,
+                Some(strategy_id),
+                starting,
+                starting,
+                starting,
+                starting,
+            )
+            .await?;
+            crate::risk_center::get_balance(pool, workspace_id, Some(strategy_id)).await?.unwrap_or(
+                PortfolioBalanceRow {
+                    cash: starting,
+                    equity: starting,
+                    peak_equity: starting,
+                    daily_start_equity: starting,
+                    updated_at: Utc::now(),
+                },
+            )
+        };
 
     let positions = crate::risk_center::get_positions(pool, workspace_id, Some(strategy_id)).await?;
 
-    Ok(PaperAccount {
-        workspace_id,
-        strategy_id,
-        balance,
-        positions,
-    })
+    Ok(PaperAccount { workspace_id, strategy_id, balance, positions })
 }
 
 /// Reset a strategy's paper account: clear all open positions and reset balance to `initial_cash`.
@@ -129,11 +125,7 @@ pub async fn reset_paper_account(
     let starting = initial_cash.unwrap_or(DEFAULT_PAPER_STARTING_CASH);
 
     // Clear positions
-    sqlx::query(CLEAR_POSITIONS_SQL)
-        .bind(workspace_id)
-        .bind(strategy_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(CLEAR_POSITIONS_SQL).bind(workspace_id).bind(strategy_id).execute(pool).await?;
 
     // Reset balance
     crate::risk_center::upsert_balance(
@@ -147,22 +139,17 @@ pub async fn reset_paper_account(
     )
     .await?;
 
-    let balance = crate::risk_center::get_balance(pool, workspace_id, Some(strategy_id))
-        .await?
-        .unwrap_or(PortfolioBalanceRow {
+    let balance = crate::risk_center::get_balance(pool, workspace_id, Some(strategy_id)).await?.unwrap_or(
+        PortfolioBalanceRow {
             cash: starting,
             equity: starting,
             peak_equity: starting,
             daily_start_equity: starting,
             updated_at: Utc::now(),
-        });
+        },
+    );
 
-    Ok(PaperAccount {
-        workspace_id,
-        strategy_id,
-        balance,
-        positions: Vec::new(),
-    })
+    Ok(PaperAccount { workspace_id, strategy_id, balance, positions: Vec::new() })
 }
 
 /// Insert a paper order.
@@ -211,11 +198,7 @@ pub async fn get_paper_order(
     workspace_id: Uuid,
     order_id: Uuid,
 ) -> Result<Option<PaperOrderRow>, Error> {
-    sqlx::query_as(GET_ORDER_SQL)
-        .bind(workspace_id)
-        .bind(order_id)
-        .fetch_optional(pool)
-        .await
+    sqlx::query_as(GET_ORDER_SQL).bind(workspace_id).bind(order_id).fetch_optional(pool).await
 }
 
 /// List paper orders for a workspace, optionally filtered by strategy and/or status.
@@ -300,9 +283,5 @@ pub async fn list_paper_fills_for_order(
     workspace_id: Uuid,
     order_id: Uuid,
 ) -> Result<Vec<PaperFillRow>, Error> {
-    sqlx::query_as(LIST_FILLS_FOR_ORDER_SQL)
-        .bind(workspace_id)
-        .bind(order_id)
-        .fetch_all(pool)
-        .await
+    sqlx::query_as(LIST_FILLS_FOR_ORDER_SQL).bind(workspace_id).bind(order_id).fetch_all(pool).await
 }

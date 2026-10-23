@@ -15,8 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use spectra_db::paper::{PaperAccount, PaperFillRow, PaperOrderRow};
 use spectra_risk::enforcement::{
-    OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker,
-    PreTradeVerdict,
+    OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeVerdict,
 };
 use spectra_risk::RiskLimits;
 use utoipa::{IntoParams, ToSchema};
@@ -340,17 +339,9 @@ pub(crate) async fn create_order(
         positions_map.insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price });
     }
 
-    let eval_price = req.fill_price
-        .or(req.limit_price)
-        .or(current_sym_price)
-        .unwrap_or(100.0);
+    let eval_price = req.fill_price.or(req.limit_price).or(current_sym_price).unwrap_or(100.0);
 
-    let candidate = OrderCandidate {
-        symbol: symbol.clone(),
-        side,
-        qty: req.qty,
-        price: eval_price,
-    };
+    let candidate = OrderCandidate { symbol: symbol.clone(), side, qty: req.qty, price: eval_price };
 
     let snapshot = PortfolioSnapshot {
         cash: account.balance.cash,
@@ -433,10 +424,10 @@ pub(crate) async fn create_order(
 
     // If rejected, store rejected order with reason (Task 3: "Done when a rejected order is stored with its reason")
     if pre_trade.verdict == PreTradeVerdict::Rejected {
-        let reason = pre_trade.breaches.first().map_or_else(
-            || "Order rejected by risk check".to_string(),
-            |b| b.message.clone(),
-        );
+        let reason = pre_trade
+            .breaches
+            .first()
+            .map_or_else(|| "Order rejected by risk check".to_string(), |b| b.message.clone());
 
         let order = match spectra_db::paper::insert_paper_order(
             &pool,
@@ -453,7 +444,8 @@ pub(crate) async fn create_order(
             Some(&reason),
             user_id,
         )
-        .await {
+        .await
+        {
             Ok(o) => o,
             Err(e) => return db_error(&e),
         };
@@ -477,7 +469,8 @@ pub(crate) async fn create_order(
         None,
         user_id,
     )
-    .await {
+    .await
+    {
         Ok(o) => o,
         Err(e) => return db_error(&e),
     };
@@ -495,26 +488,16 @@ pub(crate) async fn create_order(
         OrderSide::Buy => base_price * (1.0 + slippage),
         OrderSide::Sell => base_price * (1.0 - slippage),
     };
-    let fill_qty = if pre_trade.verdict == PreTradeVerdict::Reduced {
-        pre_trade.approved_qty
-    } else {
-        req.qty
-    };
+    let fill_qty =
+        if pre_trade.verdict == PreTradeVerdict::Reduced { pre_trade.approved_qty } else { req.qty };
     let fee = 1.0;
 
     // Record fill
     let fill_row = match spectra_db::paper::insert_paper_fill(
-        &pool,
-        order.id,
-        ws,
-        strat_id,
-        &symbol,
-        &side_str,
-        fill_qty,
-        fill_price,
-        fee,
+        &pool, order.id, ws, strat_id, &symbol, &side_str, fill_qty, fill_price, fee,
     )
-    .await {
+    .await
+    {
         Ok(f) => f,
         Err(e) => return db_error(&e),
     };
@@ -529,9 +512,12 @@ pub(crate) async fn create_order(
 
     if new_qty.abs() < 1e-9 {
         // Position flattened
-        let _ = spectra_db::risk_center::upsert_position(&pool, ws, Some(strat_id), &symbol, 0.0, fill_price).await;
+        let _ = spectra_db::risk_center::upsert_position(&pool, ws, Some(strat_id), &symbol, 0.0, fill_price)
+            .await;
     } else {
-        let _ = spectra_db::risk_center::upsert_position(&pool, ws, Some(strat_id), &symbol, new_qty, fill_price).await;
+        let _ =
+            spectra_db::risk_center::upsert_position(&pool, ws, Some(strat_id), &symbol, new_qty, fill_price)
+                .await;
     }
 
     // Update balances in portfolio_balances
@@ -542,7 +528,8 @@ pub(crate) async fn create_order(
     let new_cash = account.balance.cash + cash_delta;
 
     // Calculate new total equity = cash + sum(pos.qty * pos.price)
-    let updated_positions = spectra_db::risk_center::get_positions(&pool, ws, Some(strat_id)).await.unwrap_or_default();
+    let updated_positions =
+        spectra_db::risk_center::get_positions(&pool, ws, Some(strat_id)).await.unwrap_or_default();
     let pos_value: f64 = updated_positions.iter().map(|p| p.qty * p.price).sum();
     let new_equity = new_cash + pos_value;
     let new_peak = account.balance.peak_equity.max(new_equity);
@@ -581,7 +568,8 @@ pub(crate) async fn create_order(
         Some(fill_price),
         None,
     )
-    .await {
+    .await
+    {
         Ok(Some(o)) => o,
         _ => order,
     };

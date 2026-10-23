@@ -2145,6 +2145,42 @@
         }
       }
     },
+    "/api/v1/optimization/sweep/{id}/export": {
+      "get": {
+        "tags": [
+          "optimization"
+        ],
+        "summary": "Export sweep validation report as CSV (Task 8).",
+        "operationId": "export_sweep",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Sweep id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Validation report CSV"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/optimization/sweeps": {
       "get": {
         "tags": [
@@ -5396,6 +5432,13 @@
               "null"
             ]
           },
+          "experiment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
           "max_trials": {
             "type": [
               "integer",
@@ -6545,6 +6588,13 @@
               "null"
             ],
             "format": "double"
+          },
+          "experiment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           },
           "finished_at": {
             "type": [

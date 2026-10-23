@@ -661,6 +661,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/optimization/sweep/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Export sweep validation report as CSV (Task 8). */
+        get: operations["export_sweep"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/optimization/sweeps": {
         parameters: {
             query?: never;
@@ -1844,6 +1861,8 @@ export interface components {
             /** Format: uuid */
             dataset_version_id: string;
             dsl_code?: string | null;
+            /** Format: uuid */
+            experiment_id?: string | null;
             max_trials?: number | null;
             method?: string;
             objective?: string;
@@ -2330,6 +2349,8 @@ export interface components {
             dataset_version_id: string;
             /** Format: double */
             dsr?: number | null;
+            /** Format: uuid */
+            experiment_id?: string | null;
             /** Format: date-time */
             finished_at?: string | null;
             /** Format: uuid */
@@ -5077,6 +5098,35 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    export_sweep: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sweep id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Validation report CSV */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             404: {
                 headers: {

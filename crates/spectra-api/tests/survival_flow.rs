@@ -75,7 +75,7 @@ impl Fixture {
             .header("x-spectra-user", &user)
             .header("x-spectra-workspace", &ws)
             .header("x-spectra-timestamp", &ts)
-            .header("x-spectra-request-id", &req_id)
+            .header("x-request-id", &req_id)
             .header("x-spectra-signature", &sig)
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))

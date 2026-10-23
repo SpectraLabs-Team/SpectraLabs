@@ -910,7 +910,7 @@ async fn strategy_sharing_viewer_can_run_and_cannot_edit() {
             viewer_id,
             f.ws,
             "POST",
-            &format!("/api/v1/strategies/{strat_id}/versions/{version_id}/parameters"),
+            &format!("/api/v1/strategies/{strat_id}/versions/{version_id}/parameter_sets"),
             &json!({ "name": "Unauthorized preset", "parameters": {} }),
         )
         .await;

@@ -849,7 +849,7 @@ async fn strategy_sharing_viewer_can_run_and_cannot_edit() {
     let (status, strat_view) =
         f.call_as(viewer_id, f.ws, "GET", &format!("/api/v1/strategies/{strat_id}"), &Value::Null).await;
     assert_eq!(status, 200);
-    assert_eq!(strat_view["name"], "Shared SMA Strategy");
+    assert_eq!(strat_view["strategy"]["name"], "Shared SMA Strategy");
 
     let (status, ver_view) = f
         .call_as(viewer_id, f.ws, "GET", &format!("/api/v1/strategies/versions/{version_id}"), &Value::Null)

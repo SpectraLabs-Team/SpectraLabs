@@ -3079,6 +3079,8 @@ export interface components {
              * @description Stated VaR confidence level (default 0.99).
              */
             confidence?: number | null;
+            /** @description Optional Expected Shortfall forecasts for Fissler-Ziegel joint elicitability scoring. */
+            es_forecasts?: number[] | null;
             /** @description Realized losses (positive values = loss). */
             realized_losses: number[];
             /** @description Ex-ante VaR forecasts corresponding to each period. */
@@ -3133,6 +3135,8 @@ export interface components {
         };
         /** @description `POST /api/v1/risk/garch` body. */
         RiskGarchRequest: {
+            /** @description Volatility model: "garch11" (default), "gjr_garch", or "egarch". */
+            model?: string | null;
             /** @description Historical returns series (at least 30 observations). */
             returns: number[];
         };
@@ -3223,6 +3227,13 @@ export interface components {
             horizon_days?: number | null;
             /**
              * Format: double
+             * @description Jump penalty lambda for Statistical Jump Model (default 0.05).
+             */
+            jump_penalty?: number | null;
+            /** @description Regime model architecture: "hmm2" (default), "hmm3", or "jump_model". */
+            model?: string | null;
+            /**
+             * Format: double
              * @description Portfolio value for currency-denominated VaR (default 100,000).
              */
             portfolio_value?: number | null;
@@ -3243,7 +3254,7 @@ export interface components {
              * @description Degrees of freedom for Student-t copula (default 4.0).
              */
             degrees_of_freedom?: number | null;
-            /** @description Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`). */
+            /** @description Cross-asset dependence model (`aggregate`, `gaussian_copula`, `t_copula`, `clayton_copula`). */
             dependence?: string | null;
             /**
              * Format: double
@@ -3264,6 +3275,11 @@ export interface components {
              * @description 1,000..100,000,000, default 1,000,000.
              */
             simulations?: number | null;
+            /**
+             * Format: double
+             * @description Clayton copula parameter theta > 0 (default 2.0).
+             */
+            theta?: number | null;
         };
         /** @description A rejected row. */
         RowIssue: {

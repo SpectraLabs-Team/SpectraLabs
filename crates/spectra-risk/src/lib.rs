@@ -46,7 +46,9 @@ pub mod returns;
 pub mod rng;
 pub mod simulation;
 
-pub use backtest::{backtest_var, BaselZone, VarBacktestResult};
+pub use backtest::{
+    backtest_var, fissler_ziegel_loss, jarque_bera_test, BaselZone, JarqueBeraResult, VarBacktestResult,
+};
 pub use copula::{
     compute_risk_contributions, simulate_correlated, CorrelatedSimulationResult, DependenceModel,
     PositionRiskContribution,
@@ -56,8 +58,8 @@ pub use enforcement::{
     PreTradeVerdict, ProjectedMetrics, RiskBreach, RiskLimits,
 };
 pub use evt::EvtTailModel;
-pub use garch::Garch11;
-pub use regime::{MarketRegime, RegimeModel, RegimeState};
+pub use garch::{Egarch11, Garch11, GjrGarch11};
+pub use regime::{MarketRegime, Regime3State, RegimeModel, RegimeState, StatisticalJumpModel};
 pub use returns::{
     cholesky, correlation, correlation_matrix, covariance, fit_asset_returns, AssetReturnStats,
 };

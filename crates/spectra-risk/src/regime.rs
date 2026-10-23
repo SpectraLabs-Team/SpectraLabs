@@ -301,6 +301,479 @@ impl RegimeModel {
     }
 }
 
+/// Three-state Hidden Markov Model (Low Volatility / Bull, Neutral, High Volatility / Crisis).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Regime3State {
+    /// Low volatility state (Bull / Growth).
+    pub state_0: RegimeState,
+    /// Moderate volatility state (Neutral / Transition).
+    pub state_1: RegimeState,
+    /// High volatility state (Crisis / Shock).
+    pub state_2: RegimeState,
+    /// Transition probability matrix: `transitions[i][j] = P(S_t = j | S_{t-1} = i)`.
+    pub transitions: [[f64; 3]; 3],
+    /// Initial state probabilities.
+    pub initial_probs: [f64; 3],
+    /// Filtered probability distribution at end of sample `[P(S_T=0), P(S_T=1), P(S_T=2)]`.
+    pub filtered_probs: [f64; 3],
+    /// Most likely current regime index (0, 1, or 2).
+    pub current_regime: usize,
+}
+
+impl Regime3State {
+    /// Fit a 3-state Gaussian HMM on historical returns using Baum-Welch EM.
+    pub fn fit(returns: &[f64]) -> Result<Self> {
+        let t = returns.len();
+        if t < 30 {
+            return Err(Error::InvalidArgument(format!(
+                "3-state HMM requires at least 30 observations, got {t}"
+            )));
+        }
+
+        let total_mean = mean(returns);
+        let total_std = variance(returns).sqrt().max(1e-6);
+
+        // Initial state clusters: low, med, high volatility
+        let mut s0 = RegimeState {
+            mu_daily: total_mean + 0.0003,
+            sigma_daily: (total_std * 0.6).max(1e-6),
+            volatility_annualized: (total_std * 0.6 * TRADING_DAYS_PER_YEAR.sqrt()).max(1e-6),
+        };
+        let mut s1 = RegimeState {
+            mu_daily: total_mean,
+            sigma_daily: total_std.max(1e-6),
+            volatility_annualized: (total_std * TRADING_DAYS_PER_YEAR.sqrt()).max(1e-6),
+        };
+        let mut s2 = RegimeState {
+            mu_daily: total_mean - 0.001,
+            sigma_daily: (total_std * 2.0).max(1e-6),
+            volatility_annualized: (total_std * 2.0 * TRADING_DAYS_PER_YEAR.sqrt()).max(1e-6),
+        };
+
+        let mut a = [[0.85, 0.12, 0.03], [0.10, 0.80, 0.10], [0.05, 0.15, 0.80]];
+        let mut pi = [0.6, 0.3, 0.1];
+
+        let gaussian_density = |x: f64, s: &RegimeState| -> f64 {
+            let z = (x - s.mu_daily) / s.sigma_daily;
+            (1.0 / (s.sigma_daily * (2.0 * std::f64::consts::PI).sqrt())) * (-0.5 * z * z).exp()
+        };
+
+        let mut alpha = vec![[0.0; 3]; t];
+        let mut beta = vec![[0.0; 3]; t];
+        let mut scale = vec![0.0; t];
+
+        for _iter in 0..25 {
+            // Forward pass
+            let b0 = [
+                gaussian_density(returns[0], &s0).max(1e-300),
+                gaussian_density(returns[0], &s1).max(1e-300),
+                gaussian_density(returns[0], &s2).max(1e-300),
+            ];
+            let c0 = (pi[0] * b0[0] + pi[1] * b0[1] + pi[2] * b0[2]).max(1e-300);
+            scale[0] = c0;
+            alpha[0] = [pi[0] * b0[0] / c0, pi[1] * b0[1] / c0, pi[2] * b0[2] / c0];
+
+            for step in 1..t {
+                let r = returns[step];
+                let b = [
+                    gaussian_density(r, &s0).max(1e-300),
+                    gaussian_density(r, &s1).max(1e-300),
+                    gaussian_density(r, &s2).max(1e-300),
+                ];
+                let mut sum_c = 0.0;
+                for j in 0..3 {
+                    let trans_sum = alpha[step - 1][0] * a[0][j]
+                        + alpha[step - 1][1] * a[1][j]
+                        + alpha[step - 1][2] * a[2][j];
+                    alpha[step][j] = trans_sum * b[j];
+                    sum_c += alpha[step][j];
+                }
+                let c = sum_c.max(1e-300);
+                scale[step] = c;
+                for j in 0..3 {
+                    alpha[step][j] /= c;
+                }
+            }
+
+            // Backward pass
+            beta[t - 1] = [1.0, 1.0, 1.0];
+            for step in (0..t - 1).rev() {
+                let r_next = returns[step + 1];
+                let b_next = [
+                    gaussian_density(r_next, &s0).max(1e-300),
+                    gaussian_density(r_next, &s1).max(1e-300),
+                    gaussian_density(r_next, &s2).max(1e-300),
+                ];
+                let c_next = scale[step + 1];
+                for i in 0..3 {
+                    beta[step][i] = (a[i][0] * b_next[0] * beta[step + 1][0]
+                        + a[i][1] * b_next[1] * beta[step + 1][1]
+                        + a[i][2] * b_next[2] * beta[step + 1][2])
+                        / c_next;
+                }
+            }
+
+            // Gammas and Xis
+            let mut gamma = vec![[0.0; 3]; t];
+            for step in 0..t {
+                let denom = (alpha[step][0] * beta[step][0]
+                    + alpha[step][1] * beta[step][1]
+                    + alpha[step][2] * beta[step][2])
+                    .max(1e-300);
+                for i in 0..3 {
+                    gamma[step][i] = (alpha[step][i] * beta[step][i]) / denom;
+                }
+            }
+
+            pi = gamma[0];
+
+            for i in 0..3 {
+                let mut denom = 0.0;
+                let mut num = [0.0; 3];
+                for step in 0..t - 1 {
+                    let r_next = returns[step + 1];
+                    let b_next = [
+                        gaussian_density(r_next, &s0).max(1e-300),
+                        gaussian_density(r_next, &s1).max(1e-300),
+                        gaussian_density(r_next, &s2).max(1e-300),
+                    ];
+                    let c_next = scale[step + 1];
+                    denom += gamma[step][i];
+                    for j in 0..3 {
+                        num[j] += (alpha[step][i] * a[i][j] * b_next[j] * beta[step + 1][j]) / c_next;
+                    }
+                }
+                if denom > 1e-12 {
+                    for j in 0..3 {
+                        a[i][j] = (num[j] / denom).clamp(0.01, 0.98);
+                    }
+                    let row_sum: f64 = a[i].iter().sum();
+                    for j in 0..3 {
+                        a[i][j] /= row_sum;
+                    }
+                }
+            }
+
+            // Update emission parameters
+            for (idx, state) in [(&mut s0, 0), (&mut s1, 1), (&mut s2, 2)] {
+                let mut gamma_sum = 0.0;
+                let mut mean_sum = 0.0;
+                for step in 0..t {
+                    let g = gamma[step][state];
+                    gamma_sum += g;
+                    mean_sum += g * returns[step];
+                }
+                if gamma_sum > 1e-8 {
+                    let new_mu = mean_sum / gamma_sum;
+                    let mut var_sum = 0.0;
+                    for step in 0..t {
+                        let diff = returns[step] - new_mu;
+                        var_sum += gamma[step][state] * diff * diff;
+                    }
+                    let new_sigma = (var_sum / gamma_sum).sqrt().max(1e-6);
+                    idx.mu_daily = new_mu;
+                    idx.sigma_daily = new_sigma;
+                    idx.volatility_annualized = new_sigma * TRADING_DAYS_PER_YEAR.sqrt();
+                }
+            }
+        }
+
+        // Sort states by volatility so state_0 = low, state_1 = med, state_2 = high
+        let mut states = [s0, s1, s2];
+        states.sort_by(|x, y| x.sigma_daily.partial_cmp(&y.sigma_daily).unwrap());
+
+        let last_probs = alpha[t - 1];
+        let current_regime = if last_probs[0] >= last_probs[1] && last_probs[0] >= last_probs[2] {
+            0
+        } else if last_probs[1] >= last_probs[2] {
+            1
+        } else {
+            2
+        };
+
+        Ok(Self {
+            state_0: states[0],
+            state_1: states[1],
+            state_2: states[2],
+            transitions: a,
+            initial_probs: pi,
+            filtered_probs: last_probs,
+            current_regime,
+        })
+    }
+
+    /// Decode the most likely regime path using Viterbi algorithm.
+    pub fn decode_viterbi(&self, returns: &[f64]) -> Vec<usize> {
+        let t = returns.len();
+        if t == 0 {
+            return Vec::new();
+        }
+
+        let log_trans = [
+            [self.transitions[0][0].ln(), self.transitions[0][1].ln(), self.transitions[0][2].ln()],
+            [self.transitions[1][0].ln(), self.transitions[1][1].ln(), self.transitions[1][2].ln()],
+            [self.transitions[2][0].ln(), self.transitions[2][1].ln(), self.transitions[2][2].ln()],
+        ];
+
+        let gaussian_log_density = |x: f64, s: &RegimeState| -> f64 {
+            let z = (x - s.mu_daily) / s.sigma_daily;
+            -s.sigma_daily.ln() - 0.5 * (2.0 * std::f64::consts::PI).ln() - 0.5 * z * z
+        };
+
+        let mut v = vec![[-f64::INFINITY; 3]; t];
+        let mut backpointer = vec![[0usize; 3]; t];
+
+        for i in 0..3 {
+            let state = if i == 0 {
+                &self.state_0
+            } else if i == 1 {
+                &self.state_1
+            } else {
+                &self.state_2
+            };
+            v[0][i] = self.initial_probs[i].max(1e-12).ln() + gaussian_log_density(returns[0], state);
+        }
+
+        for step in 1..t {
+            let r = returns[step];
+            for j in 0..3 {
+                let state = if j == 0 {
+                    &self.state_0
+                } else if j == 1 {
+                    &self.state_1
+                } else {
+                    &self.state_2
+                };
+                let emit = gaussian_log_density(r, state);
+                let mut best_prev = 0;
+                let mut best_val = -f64::INFINITY;
+                for i in 0..3 {
+                    let score = v[step - 1][i] + log_trans[i][j];
+                    if score > best_val {
+                        best_val = score;
+                        best_prev = i;
+                    }
+                }
+                v[step][j] = best_val + emit;
+                backpointer[step][j] = best_prev;
+            }
+        }
+
+        let mut path = vec![0usize; t];
+        let mut best_last = 0;
+        let mut max_val = v[t - 1][0];
+        if v[t - 1][1] > max_val {
+            max_val = v[t - 1][1];
+            best_last = 1;
+        }
+        if v[t - 1][2] > max_val {
+            best_last = 2;
+        }
+
+        path[t - 1] = best_last;
+        for step in (1..t).rev() {
+            best_last = backpointer[step][best_last];
+            path[step - 1] = best_last;
+        }
+
+        path
+    }
+
+    /// Compute regime-conditional Value-at-Risk across all three states.
+    /// Returns `(var_bull, var_neutral, var_crisis, current_var)` in currency units.
+    pub fn regime_conditional_var(
+        &self,
+        portfolio_value: f64,
+        horizon_years: f64,
+        confidence: f64,
+    ) -> (f64, f64, f64, f64) {
+        let z = normal_quantile(confidence);
+        let calc_var = |state: &RegimeState| -> f64 {
+            let drift = (state.mu_daily * TRADING_DAYS_PER_YEAR - 0.5 * state.volatility_annualized.powi(2))
+                * horizon_years;
+            let diffusion = state.volatility_annualized * horizon_years.sqrt();
+            let ret = (drift - diffusion * z).exp();
+            (portfolio_value * (1.0 - ret)).max(0.0)
+        };
+
+        let v0 = calc_var(&self.state_0);
+        let v1 = calc_var(&self.state_1);
+        let v2 = calc_var(&self.state_2);
+        let current = match self.current_regime {
+            0 => v0,
+            1 => v1,
+            _ => v2,
+        };
+
+        (v0, v1, v2, current)
+    }
+}
+
+/// Statistical Jump Model (Nystrup et al. 2024).
+///
+/// Discretizes returns into persistent market regimes by adding an explicit jump penalty $\lambda$
+/// that prevents high-frequency whipsaws.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatisticalJumpModel {
+    /// Jump penalty parameter $\lambda \ge 0$.
+    pub jump_penalty: f64,
+    /// Low-volatility calm state parameters.
+    pub state_0: RegimeState,
+    /// High-volatility crisis state parameters.
+    pub state_1: RegimeState,
+    /// Decoded state sequence (0 = Calm, 1 = Crisis).
+    pub states: Vec<usize>,
+    /// Number of regime transitions in the sample.
+    pub jump_count: usize,
+    /// Persistence ratio: $1.0 - (\text{jump\_count} / (T - 1))$.
+    pub persistence_ratio: f64,
+    /// Current regime at the end of the sample.
+    pub current_state: usize,
+}
+
+impl StatisticalJumpModel {
+    /// Fit a Statistical Jump Model with jump penalty $\lambda$.
+    pub fn fit(returns: &[f64], jump_penalty: f64) -> Result<Self> {
+        let t = returns.len();
+        if t < 20 {
+            return Err(Error::InvalidArgument(format!(
+                "Statistical Jump Model requires at least 20 observations, got {t}"
+            )));
+        }
+
+        let total_mean = mean(returns);
+        let total_std = variance(returns).sqrt().max(1e-6);
+
+        let mut s0 = RegimeState {
+            mu_daily: total_mean + 0.0002,
+            sigma_daily: (total_std * 0.7).max(1e-6),
+            volatility_annualized: (total_std * 0.7 * TRADING_DAYS_PER_YEAR.sqrt()).max(1e-6),
+        };
+        let mut s1 = RegimeState {
+            mu_daily: total_mean - 0.001,
+            sigma_daily: (total_std * 1.8).max(1e-6),
+            volatility_annualized: (total_std * 1.8 * TRADING_DAYS_PER_YEAR.sqrt()).max(1e-6),
+        };
+
+        let mut states = vec![0usize; t];
+
+        // Coordinate descent iterations
+        for _iter in 0..10 {
+            // Dynamic programming pass with jump penalty
+            let mut dp = vec![[f64::INFINITY; 2]; t];
+            let mut bp = vec![[0usize; 2]; t];
+
+            let loss = |x: f64, s: &RegimeState| -> f64 {
+                let diff = x - s.mu_daily;
+                (diff * diff) / (2.0 * s.sigma_daily * s.sigma_daily) + s.sigma_daily.ln()
+            };
+
+            dp[0][0] = loss(returns[0], &s0);
+            dp[0][1] = loss(returns[0], &s1);
+
+            for step in 1..t {
+                let r = returns[step];
+                let l0 = loss(r, &s0);
+                let l1 = loss(r, &s1);
+
+                for j in 0..2 {
+                    let cost_j = if j == 0 { l0 } else { l1 };
+                    let stay = dp[step - 1][j] + cost_j;
+                    let jump = dp[step - 1][1 - j] + cost_j + jump_penalty;
+
+                    if stay <= jump {
+                        dp[step][j] = stay;
+                        bp[step][j] = j;
+                    } else {
+                        dp[step][j] = jump;
+                        bp[step][j] = 1 - j;
+                    }
+                }
+            }
+
+            let mut last = if dp[t - 1][0] <= dp[t - 1][1] { 0 } else { 1 };
+            states[t - 1] = last;
+            for step in (1..t).rev() {
+                last = bp[step][last];
+                states[step - 1] = last;
+            }
+
+            // Update state parameters from assigned clusters
+            let mut count0 = 0usize;
+            let mut sum0 = 0.0;
+            let mut count1 = 0usize;
+            let mut sum1 = 0.0;
+
+            for step in 0..t {
+                if states[step] == 0 {
+                    count0 += 1;
+                    sum0 += returns[step];
+                } else {
+                    count1 += 1;
+                    sum1 += returns[step];
+                }
+            }
+
+            if count0 >= 3 && count1 >= 3 {
+                let mu0 = sum0 / count0 as f64;
+                let mu1 = sum1 / count1 as f64;
+
+                let var0 = returns
+                    .iter()
+                    .zip(&states)
+                    .filter(|(_, &s)| s == 0)
+                    .map(|(&r, _)| (r - mu0).powi(2))
+                    .sum::<f64>()
+                    / count0 as f64;
+                let var1 = returns
+                    .iter()
+                    .zip(&states)
+                    .filter(|(_, &s)| s == 1)
+                    .map(|(&r, _)| (r - mu1).powi(2))
+                    .sum::<f64>()
+                    / count1 as f64;
+
+                s0.mu_daily = mu0;
+                s0.sigma_daily = var0.sqrt().max(1e-6);
+                s0.volatility_annualized = s0.sigma_daily * TRADING_DAYS_PER_YEAR.sqrt();
+
+                s1.mu_daily = mu1;
+                s1.sigma_daily = var1.sqrt().max(1e-6);
+                s1.volatility_annualized = s1.sigma_daily * TRADING_DAYS_PER_YEAR.sqrt();
+            }
+        }
+
+        // Ensure state_0 is lower volatility
+        if s0.sigma_daily > s1.sigma_daily {
+            std::mem::swap(&mut s0, &mut s1);
+            for s in &mut states {
+                *s = 1 - *s;
+            }
+        }
+
+        let mut jumps = 0usize;
+        for i in 1..t {
+            if states[i] != states[i - 1] {
+                jumps += 1;
+            }
+        }
+
+        let persistence_ratio = if t > 1 { 1.0 - (jumps as f64 / (t - 1) as f64) } else { 1.0 };
+
+        let current_state = states[t - 1];
+
+        Ok(Self {
+            jump_penalty,
+            state_0: s0,
+            state_1: s1,
+            states,
+            jump_count: jumps,
+            persistence_ratio,
+            current_state,
+        })
+    }
+}
+
 /// Rational approximation of inverse standard normal CDF $\Phi^{-1}(p)$ (Acklam's algorithm).
 pub fn normal_quantile(p: f64) -> f64 {
     let p_clamped = p.clamp(1e-15, 1.0 - 1e-15);
@@ -406,5 +879,52 @@ mod tests {
             "Crisis VaR ({var_1}) should be significantly higher than Calm VaR ({var_0})"
         );
         assert!(current_var > 0.0);
+    }
+
+    #[test]
+    fn test_regime_3_state_monotonic_volatility_ordering() {
+        let mut returns = Vec::with_capacity(90);
+        let pi2 = 2.0 * std::f64::consts::PI;
+        // Bull: low vol
+        for i in 0..30 {
+            returns.push(0.0008 + 0.004 * ((i as f64 * pi2 / 10.0).sin()));
+        }
+        // Neutral: med vol
+        for i in 30..60 {
+            returns.push(0.0001 + 0.012 * ((i as f64 * pi2 / 10.0).sin()));
+        }
+        // Crisis: high vol
+        for i in 60..90 {
+            returns.push(-0.002 + 0.035 * ((i as f64 * pi2 / 10.0).sin()));
+        }
+
+        let model = Regime3State::fit(&returns).unwrap();
+        assert!(model.state_0.sigma_daily <= model.state_1.sigma_daily);
+        assert!(model.state_1.sigma_daily <= model.state_2.sigma_daily);
+
+        let (v0, _v1, v2, cur) = model.regime_conditional_var(1_000_000.0, 1.0 / 252.0, 0.99);
+        assert!(v2 > v0);
+        assert!(cur > 0.0);
+
+        let decoded = model.decode_viterbi(&returns);
+        assert_eq!(decoded.len(), 90);
+    }
+
+    #[test]
+    fn test_statistical_jump_model_penalizes_whipsaws() {
+        let mut returns = Vec::with_capacity(60);
+        for i in 0..30 {
+            returns.push(0.0005 + 0.005 * ((i as f64 * 0.6).sin()));
+        }
+        for i in 30..60 {
+            returns.push(-0.002 + 0.030 * ((i as f64 * 0.6).sin()));
+        }
+
+        let sjm_low_penalty = StatisticalJumpModel::fit(&returns, 0.1).unwrap();
+        let sjm_high_penalty = StatisticalJumpModel::fit(&returns, 10.0).unwrap();
+
+        assert!(sjm_high_penalty.jump_count <= sjm_low_penalty.jump_count);
+        assert!(sjm_high_penalty.persistence_ratio >= sjm_low_penalty.persistence_ratio);
+        assert_eq!(sjm_high_penalty.states.len(), 60);
     }
 }

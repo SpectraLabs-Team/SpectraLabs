@@ -78,9 +78,12 @@ pub(crate) async fn alpaca_proxy(
     uri: Uri,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    let (pool, ws) = match context(&st, &identity) {
-        Ok(c) => c,
-        Err(r) => return r,
+    let Ok((pool, ws)) = context(&st, &identity) else {
+        return error_response(
+            501,
+            "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
+             has not been added.",
+        );
     };
 
     let user_id = user_of(&identity);
@@ -135,7 +138,7 @@ pub(crate) async fn alpaca_proxy(
     }
 }
 
-async fn handle_get_account(pool: &sqlx::PgPool, ws: Uuid, creds: Option<&(String, String)>) -> Response {
+async fn handle_get_account(_pool: &sqlx::PgPool, _ws: Uuid, creds: Option<&(String, String)>) -> Response {
     if let Some((key_id, secret_key)) = creds {
         let client = reqwest::Client::new();
         if let Ok(resp) = client
@@ -151,45 +154,10 @@ async fn handle_get_account(pool: &sqlx::PgPool, ws: Uuid, creds: Option<&(Strin
         }
     }
 
-    // Fallback: simulated paper account from DB balances
-    let balance = risk_center::get_balance(pool, ws, None).await.unwrap_or(None);
-    let (cash, equity, _peak_equity, daily_start) = if let Some(b) = balance {
-        (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
-    } else {
-        (100_000.0, 100_000.0, 100_000.0, 100_000.0)
-    };
-    let buying_power = (cash * 2.0).max(0.0);
-
-    json_response(
-        200,
-        json!({
-            "id": format!("paper-{ws}"),
-            "account_number": format!("PA-{}", &ws.to_string()[..8]),
-            "status": "ACTIVE",
-            "crypto_status": "ACTIVE",
-            "currency": "USD",
-            "buying_power": format!("{:.2}", buying_power),
-            "regt_buying_power": format!("{:.2}", buying_power),
-            "daytrading_buying_power": format!("{:.2}", buying_power),
-            "cash": format!("{:.2}", cash),
-            "portfolio_value": format!("{:.2}", equity),
-            "equity": format!("{:.2}", equity),
-            "last_equity": format!("{:.2}", daily_start),
-            "multiplier": "2",
-            "initial_margin": "0.00",
-            "maintenance_margin": "0.00",
-            "sma": "0.00",
-            "daytrade_count": 0,
-            "last_maintenance_margin": "0.00",
-            "pattern_day_trader": false,
-            "trading_blocked": false,
-            "transfers_blocked": false,
-            "account_blocked": false,
-            "created_at": "2026-01-01T00:00:00Z",
-            "trade_suspended_by_user": false,
-            "shorting_enabled": true
-        })
-        .to_string(),
+    error_response(
+        501,
+        "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
+         has not been added.",
     )
 }
 

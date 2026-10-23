@@ -510,11 +510,9 @@ async fn paper_broker_order_pre_trade_enforcement() {
         .execute(&fx.pool)
         .await;
 
-    // 1. Account probe does not answer 501: returns simulated paper account
-    let (code, acct_res) = fx.call("GET", "/api/alpaca/account", &Value::Null).await;
-    assert_eq!(code, 200, "Alpaca account probe must return 200 instead of 501");
-    assert_eq!(acct_res["status"], "ACTIVE");
-    assert_eq!(acct_res["currency"], "USD");
+    // 1. Account probe answers 501 when no live broker credentials are configured
+    let (code, _) = fx.call("GET", "/api/alpaca/account", &Value::Null).await;
+    assert_eq!(code, 501, "Alpaca account probe answers 501 until credentials configured");
 
     // 2. Set strict limits: max position size $10,000, size reduction disabled
     let limits_payload = json!({

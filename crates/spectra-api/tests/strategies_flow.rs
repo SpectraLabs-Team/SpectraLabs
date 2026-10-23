@@ -897,7 +897,7 @@ async fn strategy_sharing_viewer_can_run_and_cannot_edit() {
         .call_as(
             viewer_id,
             f.ws,
-            "POST",
+            "PUT",
             &format!("/api/v1/strategies/{strat_id}/draft"),
             &json!({ "code": "param fast = 12;", "parameters": {} }),
         )

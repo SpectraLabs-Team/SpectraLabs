@@ -2518,6 +2518,43 @@
         }
       }
     },
+    "/api/v1/paper/step": {
+      "post": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Step a saved strategy version on incoming bars against the paper account.",
+        "operationId": "step_strategy",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StepPaperRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Strategy stepped on bars",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StepPaperResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Strategy or version not found"
+          },
+          "422": {
+            "description": "Invalid request or bar input"
+          }
+        }
+      }
+    },
     "/api/v1/providers/configs": {
       "get": {
         "tags": [
@@ -7304,6 +7341,47 @@
           }
         }
       },
+      "PaperBarInput": {
+        "type": "object",
+        "required": [
+          "symbol",
+          "ts_ns",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume"
+        ],
+        "properties": {
+          "close": {
+            "type": "number",
+            "format": "double"
+          },
+          "high": {
+            "type": "number",
+            "format": "double"
+          },
+          "low": {
+            "type": "number",
+            "format": "double"
+          },
+          "open": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "ts_ns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "volume": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
       "PaperFillView": {
         "type": "object",
         "required": [
@@ -8831,6 +8909,75 @@
         "properties": {
           "config": {},
           "preset_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "StepPaperRequest": {
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "bars"
+        ],
+        "properties": {
+          "bars": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaperBarInput"
+            }
+          },
+          "config_preset": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "strategy_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "StepPaperResponse": {
+        "type": "object",
+        "required": [
+          "strategy_id",
+          "orders",
+          "fills",
+          "account"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/PaperAccountView"
+          },
+          "fills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaperFillView"
+            }
+          },
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PaperOrderView"
+            }
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "strategy_version_id": {
             "type": [
               "string",
               "null"

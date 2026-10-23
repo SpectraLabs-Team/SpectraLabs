@@ -799,6 +799,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/step": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Step a saved strategy version on incoming bars against the paper account. */
+        post: operations["step_strategy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers/configs": {
         parameters: {
             query?: never;
@@ -2596,6 +2613,21 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        PaperBarInput: {
+            /** Format: double */
+            close: number;
+            /** Format: double */
+            high: number;
+            /** Format: double */
+            low: number;
+            /** Format: double */
+            open: number;
+            symbol: string;
+            /** Format: int64 */
+            ts_ns: number;
+            /** Format: double */
+            volume: number;
+        };
         PaperFillView: {
             /** Format: date-time */
             created_at: string;
@@ -3191,6 +3223,23 @@ export interface components {
             config?: unknown;
             /** Format: uuid */
             preset_id?: string | null;
+        };
+        StepPaperRequest: {
+            bars: components["schemas"]["PaperBarInput"][];
+            config_preset?: string | null;
+            /** Format: uuid */
+            strategy_id: string;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
+        };
+        StepPaperResponse: {
+            account: components["schemas"]["PaperAccountView"];
+            fills: components["schemas"]["PaperFillView"][];
+            orders: components["schemas"]["PaperOrderView"][];
+            /** Format: uuid */
+            strategy_id: string;
+            /** Format: uuid */
+            strategy_version_id?: string | null;
         };
         /** @description A saved strategy with every version, newest first. */
         StrategyDetail: {
@@ -5688,6 +5737,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PaperOrderView"];
                 };
+            };
+        };
+    };
+    step_strategy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StepPaperRequest"];
+            };
+        };
+        responses: {
+            /** @description Strategy stepped on bars */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StepPaperResponse"];
+                };
+            };
+            /** @description Strategy or version not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid request or bar input */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

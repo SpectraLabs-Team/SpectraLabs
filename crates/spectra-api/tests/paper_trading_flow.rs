@@ -344,3 +344,137 @@ async fn paper_trading_full_lifecycle() {
     // Clean up DB rows
     f.clean_up().await;
 }
+
+#[tokio::test]
+async fn test_paper_backtest_parity() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool.clone()).await;
+
+    // 1. Create a saved strategy with version 1 (buy_and_hold)
+    let strat_payload = json!({
+        "name": format!("Parity-BnH-{}", f.strategy.simple()),
+        "description": "Buy and Hold strategy for paper parity test",
+        "builtin": "buy_and_hold",
+        "params": {
+            "allocation": 0.20
+        }
+    });
+    let req =
+        signed_req("POST", "/api/v1/strategies", &f.user, &f.ws, serde_json::to_vec(&strat_payload).unwrap());
+    let (status, body) = read_json(f.app.clone().oneshot(req).await.unwrap()).await;
+    assert_eq!(status, 201, "Strategy creation failed: {body}");
+    let strategy_id = Uuid::parse_str(body["strategy"]["id"].as_str().unwrap()).unwrap();
+    let version_id = Uuid::parse_str(body["versions"][0]["id"].as_str().unwrap()).unwrap();
+
+    // 2. Prepare fixed sequence of daily bars
+    let day_ns: i64 = 86_400_000_000_000;
+    let base_ts: i64 = 1_700_000_000_000_000_000;
+    let prices = [
+        (100.0, 105.0, 99.0, 104.0, 10_000.0),
+        (104.0, 110.0, 103.0, 108.0, 12_000.0),
+        (108.0, 112.0, 107.0, 111.0, 15_000.0),
+    ];
+
+    let mut paper_bars = Vec::new();
+    let mut engine_bars = Vec::new();
+    for (i, &(o, h, l, c, v)) in prices.iter().enumerate() {
+        let ts = base_ts + (i as i64) * day_ns;
+        paper_bars.push(json!({
+            "symbol": "AAPL",
+            "ts_ns": ts,
+            "open": o,
+            "high": h,
+            "low": l,
+            "close": c,
+            "volume": v,
+        }));
+        engine_bars.push(spectra_core::Bar::new(
+            ts,
+            0,
+            spectra_core::Price::from_f64(o).unwrap(),
+            spectra_core::Price::from_f64(h).unwrap(),
+            spectra_core::Price::from_f64(l).unwrap(),
+            spectra_core::Price::from_f64(c).unwrap(),
+            spectra_core::Qty::from_f64(v).unwrap(),
+        ));
+    }
+
+    // 3. Run backtest directly with Default preset and risk limits
+    let preset = spectra_backtest::config::Preset::Default;
+    let mut backtest_cfg = preset.config();
+    backtest_cfg.initial_cash = spectra_core::Money::from_f64(100_000.0).unwrap();
+    backtest_cfg.risk_limits = Some(spectra_risk::RiskLimits::default());
+
+    let strat_def = spectra_backtest::strategies::builtin("buy_and_hold").unwrap();
+    let params = strat_def
+        .resolve_params_json(Some(&spectra_core::Json::parse(r#"{"allocation": 0.20}"#).unwrap()))
+        .unwrap();
+    let mut direct_strategy = strat_def.build(&params).unwrap();
+
+    let backtest_res = spectra_engine::run_backtest(&engine_bars, direct_strategy.as_mut(), &backtest_cfg)
+        .expect("Direct backtest run failed");
+
+    // 4. Run through Paper Trading Step API (Task 6)
+    let step_payload = json!({
+        "strategy_id": strategy_id,
+        "strategy_version_id": version_id,
+        "bars": paper_bars,
+        "config_preset": "default"
+    });
+    let req =
+        signed_req("POST", "/api/v1/paper/step", &f.user, &f.ws, serde_json::to_vec(&step_payload).unwrap());
+    let (status, body) = read_json(f.app.clone().oneshot(req).await.unwrap()).await;
+    assert_eq!(status, 200, "Paper step failed: {body}");
+
+    // 5. Assertions: Task 6 & Task 7 Parity Verification
+    // A version places an order on a bar
+    let orders = body["orders"].as_array().unwrap();
+    assert!(!orders.is_empty(), "Strategy must have placed at least one order");
+    assert_eq!(orders.len(), backtest_res.orders.len(), "Order count parity");
+
+    let fills = body["fills"].as_array().unwrap();
+    assert!(!fills.is_empty(), "Strategy must have executed at least one fill");
+
+    // Extract direct backtest fills
+    let mut backtest_fills = Vec::new();
+    for entry in backtest_res.ledger.journal() {
+        if entry.kind == spectra_core::EntryType::Fill {
+            backtest_fills.push(&entry.fill);
+        }
+    }
+    assert_eq!(fills.len(), backtest_fills.len(), "Fill count parity");
+
+    // Bit-exact match on every fill
+    for (i, paper_fill) in fills.iter().enumerate() {
+        let bt_fill = backtest_fills[i];
+        assert_eq!(paper_fill["symbol"], "AAPL");
+        assert_eq!(paper_fill["qty"].as_f64().unwrap(), bt_fill.qty.to_f64());
+        assert_eq!(paper_fill["price"].as_f64().unwrap(), bt_fill.price.to_f64());
+        assert_eq!(paper_fill["fee"].as_f64().unwrap(), bt_fill.fee.to_f64());
+    }
+
+    // Parity on cash, equity and positions
+    let expected_cash = backtest_res.ledger.cash().to_f64();
+    let expected_equity = backtest_res.ledger.equity().unwrap().to_f64();
+
+    assert_eq!(body["account"]["cash"].as_f64().unwrap(), expected_cash, "Cash parity");
+    assert_eq!(body["account"]["equity"].as_f64().unwrap(), expected_equity, "Equity parity");
+
+    let account_positions = body["account"]["positions"].as_array().unwrap();
+    assert_eq!(account_positions.len(), backtest_res.ledger.positions().len(), "Position count parity");
+    for pos in account_positions {
+        let sym = pos["symbol"].as_str().unwrap();
+        assert_eq!(sym, "AAPL");
+        let qty = pos["qty"].as_f64().unwrap();
+        let expected_qty = backtest_res.ledger.position(0).qty.to_f64();
+        assert_eq!(qty, expected_qty, "Position quantity parity");
+    }
+
+    // Clean up
+    let _ = sqlx::query("DELETE FROM strategy_versions WHERE strategy_id = $1")
+        .bind(strategy_id)
+        .execute(&f.pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM strategies WHERE id = $1").bind(strategy_id).execute(&f.pool).await;
+    f.clean_up().await;
+}

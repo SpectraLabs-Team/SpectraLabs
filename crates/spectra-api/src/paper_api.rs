@@ -13,7 +13,10 @@ use axum::Extension;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use spectra_backtest::config::Preset;
+use spectra_core::{Bar, Money, Price, Qty, Side};
 use spectra_db::paper::{PaperAccount, PaperFillRow, PaperOrderRow};
+use spectra_engine::{OrderState, Strategy};
 use spectra_risk::enforcement::{
     OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeVerdict,
 };
@@ -175,6 +178,36 @@ impl From<PaperFillRow> for PaperFillView {
             created_at: r.created_at,
         }
     }
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub(crate) struct StepPaperRequest {
+    pub strategy_id: Uuid,
+    #[serde(default)]
+    pub strategy_version_id: Option<Uuid>,
+    pub bars: Vec<PaperBarInput>,
+    #[serde(default)]
+    pub config_preset: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub(crate) struct PaperBarInput {
+    pub symbol: String,
+    pub ts_ns: i64,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
+    pub volume: f64,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct StepPaperResponse {
+    pub strategy_id: Uuid,
+    pub strategy_version_id: Option<Uuid>,
+    pub orders: Vec<PaperOrderView>,
+    pub fills: Vec<PaperFillView>,
+    pub account: PaperAccountView,
 }
 
 // ---------------------------------------------------------------- Handlers
@@ -578,4 +611,396 @@ pub(crate) async fn create_order(
     view.fills = Some(vec![PaperFillView::from(fill_row)]);
 
     json_response(201, json!(view).to_string())
+}
+
+/// Step a saved strategy version on incoming bars against the paper account.
+#[utoipa::path(post, path = "/api/v1/paper/step", tag = "paper", request_body = StepPaperRequest,
+    responses(
+        (status = 200, description = "Strategy stepped on bars", body = StepPaperResponse),
+        (status = 404, description = "Strategy or version not found"),
+        (status = 422, description = "Invalid request or bar input")
+    ))]
+pub(crate) async fn step_strategy(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let user_id = user_of(&identity);
+    let req: StepPaperRequest = match parse_body(body) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+
+    if req.bars.is_empty() {
+        return error_response(422, "Bars list cannot be empty.");
+    }
+
+    // 1. Load paper account
+    let account = match spectra_db::paper::get_or_init_paper_account(&pool, ws, req.strategy_id, None).await {
+        Ok(acc) => acc,
+        Err(e) => return db_error(&e),
+    };
+
+    // 2. Resolve strategy version
+    let version = if let Some(vid) = req.strategy_version_id {
+        match spectra_db::strategies::get_version(&pool, ws, vid).await {
+            Ok(Some(v)) => v,
+            Ok(None) => return error_response(404, "Strategy version not found."),
+            Err(e) => return db_error(&e),
+        }
+    } else {
+        let versions = match spectra_db::strategies::versions(&pool, ws, req.strategy_id).await {
+            Ok(v) => v,
+            Err(e) => return db_error(&e),
+        };
+        match versions.into_iter().next() {
+            Some(v) => v,
+            None => return error_response(404, "No saved versions found for strategy."),
+        }
+    };
+
+    // 3. Load Kill switch and Risk limits (before building non-Send strategy)
+    let kill_switch_active =
+        match spectra_db::risk_center::get_kill_switch(&pool, ws, Some(req.strategy_id)).await {
+            Ok(Some(ks)) => ks.active,
+            Ok(None) => match spectra_db::risk_center::get_kill_switch(&pool, ws, None).await {
+                Ok(Some(ks)) => ks.active,
+                Ok(None) => false,
+                Err(_) => true,
+            },
+            Err(_) => true,
+        };
+
+    let limits = match spectra_db::risk_center::get_limits(&pool, ws, Some(req.strategy_id)).await {
+        Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
+        Ok(None) | Err(_) => match spectra_db::risk_center::get_limits(&pool, ws, None).await {
+            Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
+            Ok(None) | Err(_) => RiskLimits::default(),
+        },
+    };
+
+    // 4. Map symbols and construct bars
+    let mut symbols: Vec<String> = Vec::new();
+    for b in &req.bars {
+        let sym = b.symbol.trim().to_uppercase();
+        if sym.is_empty() {
+            return error_response(422, "Symbol cannot be empty in bar input.");
+        }
+        if !symbols.contains(&sym) {
+            symbols.push(sym);
+        }
+    }
+    let sym_map: HashMap<String, u32> =
+        symbols.iter().enumerate().map(|(i, s)| (s.clone(), i as u32)).collect();
+
+    let mut engine_bars: Vec<Bar> = Vec::with_capacity(req.bars.len());
+    for b in &req.bars {
+        let sym = b.symbol.trim().to_uppercase();
+        let inst_id = sym_map[&sym];
+        let Ok(open) = Price::from_f64(b.open) else {
+            return error_response(422, format!("Invalid open price: {}", b.open));
+        };
+        let Ok(high) = Price::from_f64(b.high) else {
+            return error_response(422, format!("Invalid high price: {}", b.high));
+        };
+        let Ok(low) = Price::from_f64(b.low) else {
+            return error_response(422, format!("Invalid low price: {}", b.low));
+        };
+        let Ok(close) = Price::from_f64(b.close) else {
+            return error_response(422, format!("Invalid close price: {}", b.close));
+        };
+        let Ok(volume) = Qty::from_f64(b.volume) else {
+            return error_response(422, format!("Invalid volume: {}", b.volume));
+        };
+        engine_bars.push(Bar::new(b.ts_ns, inst_id, open, high, low, close, volume));
+    }
+    engine_bars.sort_by_key(|b| (b.ts_ns, b.instrument));
+
+    // 5. Build BacktestConfig
+    let preset = match req.config_preset.as_deref() {
+        Some(name) => match Preset::from_name(name) {
+            Some(p) => p,
+            None => return error_response(422, format!("Unknown config preset: {name}")),
+        },
+        None => Preset::Default,
+    };
+    let mut cfg = preset.config();
+    cfg.initial_cash = match Money::from_f64(account.balance.cash) {
+        Ok(m) => m,
+        Err(_) => return error_response(422, "Invalid initial cash."),
+    };
+    cfg.kill_switch = kill_switch_active;
+    cfg.risk_limits = Some(limits);
+
+    // 6. Instantiate strategy and execute synchronously (kept in isolated scope to preserve Send)
+    let backtest_res = {
+        let mut strategy: Box<dyn Strategy> = if version.builtin == "dsl" {
+            let Some(ref code) = version.code else {
+                return error_response(422, "DSL strategy version is missing source code.");
+            };
+            let program = match spectra_engine::dsl::parse_and_validate(code) {
+                Ok(p) => p,
+                Err(e) => return error_response(422, format!("Invalid DSL strategy: {e}")),
+            };
+            let mut overrides = std::collections::HashMap::new();
+            if let Some(obj) = version.parameters.as_object() {
+                for (k, v) in obj {
+                    if let Some(num) = v.as_f64() {
+                        overrides.insert(k.clone(), num);
+                    }
+                }
+            }
+            Box::new(spectra_engine::dsl::DslStrategy::new(program, &overrides))
+        } else {
+            let strat_def = match spectra_backtest::strategies::builtin(&version.builtin) {
+                Ok(s) => s,
+                Err(e) => return error_response(422, format!("Unknown builtin strategy: {e}")),
+            };
+            let json_text = version.parameters.to_string();
+            let parsed_json = match spectra_core::Json::parse(&json_text) {
+                Ok(j) => j,
+                Err(e) => return error_response(422, format!("Failed to parse parameters: {e}")),
+            };
+            let params = match strat_def.resolve_params_json(Some(&parsed_json)) {
+                Ok(p) => p,
+                Err(e) => return error_response(422, format!("Invalid parameters: {e}")),
+            };
+            match strat_def.build(&params) {
+                Ok(s) => s,
+                Err(e) => return error_response(422, format!("Failed to build strategy: {e}")),
+            }
+        };
+
+        match spectra_engine::run_backtest(&engine_bars, strategy.as_mut(), &cfg) {
+            Ok(res) => res,
+            Err(e) => return error_response(422, format!("Strategy execution failed: {e}")),
+        }
+    };
+
+    // 7. Persist orders and fills
+    let mut order_id_to_db = HashMap::new();
+    let mut order_views = Vec::new();
+
+    for o in &backtest_res.orders {
+        let sym =
+            symbols.get(o.instrument as usize).cloned().unwrap_or_else(|| format!("INST_{}", o.instrument));
+        let side_str = match o.side {
+            Side::Buy => "buy",
+            Side::Sell => "sell",
+        };
+        let order_type_str = o.kind.as_str();
+        let qty = o.qty.to_f64();
+        let limit_px = if o.limit.raw() > 0 { Some(o.limit.to_f64()) } else { None };
+        let stop_px = if o.stop.raw() > 0 { Some(o.stop.to_f64()) } else { None };
+        let tif = o.tif.as_str();
+
+        let initial_status = match o.state {
+            OrderState::Rejected => "rejected",
+            OrderState::Cancelled => "cancelled",
+            OrderState::Expired => "expired",
+            _ => "accepted",
+        };
+        let reject_reason = o.reject_reason.map(|r| r.as_str().to_string());
+
+        let inserted = match spectra_db::paper::insert_paper_order(
+            &pool,
+            ws,
+            req.strategy_id,
+            &sym,
+            side_str,
+            order_type_str,
+            qty,
+            limit_px,
+            stop_px,
+            tif,
+            initial_status,
+            reject_reason.as_deref(),
+            user_id,
+        )
+        .await
+        {
+            Ok(row) => row,
+            Err(e) => return db_error(&e),
+        };
+
+        // Record risk decision audit trail
+        let verdict_str = if o.state == OrderState::Rejected { "rejected" } else { "approved" };
+        let eval_price = limit_px.or(stop_px).unwrap_or(100.0);
+        let breach_msgs = if o.state == OrderState::Rejected {
+            vec![reject_reason.clone().unwrap_or_else(|| "Rejected by risk check".to_string())]
+        } else {
+            vec![]
+        };
+        let _ = spectra_db::risk_center::record_decision(
+            &pool,
+            ws,
+            Some(req.strategy_id),
+            &sym,
+            side_str,
+            qty,
+            eval_price,
+            if o.state == OrderState::Rejected { 0.0 } else { qty },
+            verdict_str,
+            &json!([]),
+            &breach_msgs,
+            &json!({}),
+            user_id,
+        )
+        .await;
+
+        order_id_to_db.insert(o.id, inserted);
+    }
+
+    // Persist fills
+    let mut fill_views = Vec::new();
+    let mut fill_order_idx = 0usize;
+    let mut order_fills_map: HashMap<Uuid, Vec<PaperFillView>> = HashMap::new();
+
+    for entry in backtest_res.ledger.journal() {
+        if entry.kind == spectra_core::EntryType::Fill {
+            let f = &entry.fill;
+            let order_num = backtest_res.fill_orders[fill_order_idx];
+            fill_order_idx += 1;
+
+            if let Some(db_order) = order_id_to_db.get(&order_num) {
+                let sym =
+                    symbols.get(f.instrument as usize).cloned().unwrap_or_else(|| db_order.symbol.clone());
+                let side_str = match f.side {
+                    Side::Buy => "buy",
+                    Side::Sell => "sell",
+                };
+                let fill_row = match spectra_db::paper::insert_paper_fill(
+                    &pool,
+                    db_order.id,
+                    ws,
+                    req.strategy_id,
+                    &sym,
+                    side_str,
+                    f.qty.to_f64(),
+                    f.price.to_f64(),
+                    f.fee.to_f64(),
+                )
+                .await
+                {
+                    Ok(row) => row,
+                    Err(e) => return db_error(&e),
+                };
+
+                let view = PaperFillView::from(fill_row);
+                order_fills_map.entry(db_order.id).or_default().push(view.clone());
+                fill_views.push(view);
+            }
+        }
+    }
+
+    // Update order statuses & build order views
+    for o in &backtest_res.orders {
+        if let Some(db_order) = order_id_to_db.get(&o.id) {
+            let status = match o.state {
+                OrderState::Filled => "filled",
+                OrderState::PartiallyFilled => "partially_filled",
+                OrderState::Pending => "accepted",
+                OrderState::Rejected => "rejected",
+                OrderState::Cancelled => "cancelled",
+                OrderState::Expired => "expired",
+            };
+            let filled_qty = (o.qty - o.remaining).to_f64();
+            let fills_for_order = order_fills_map.get(&db_order.id).cloned().unwrap_or_default();
+            let avg_price = if fills_for_order.is_empty() {
+                None
+            } else {
+                let notional: f64 = fills_for_order.iter().map(|f| f.qty * f.price).sum();
+                let tot_qty: f64 = fills_for_order.iter().map(|f| f.qty).sum();
+                if tot_qty > 0.0 {
+                    Some(notional / tot_qty)
+                } else {
+                    None
+                }
+            };
+            let reason = o.reject_reason.map(|r| r.as_str().to_string());
+
+            let updated_order = match spectra_db::paper::update_paper_order_status(
+                &pool,
+                ws,
+                db_order.id,
+                status,
+                filled_qty,
+                avg_price,
+                reason.as_deref(),
+            )
+            .await
+            {
+                Ok(Some(up)) => up,
+                _ => db_order.clone(),
+            };
+
+            let mut view = PaperOrderView::from(updated_order);
+            view.fills = Some(fills_for_order);
+            order_views.push(view);
+        }
+    }
+
+    // 8. Update portfolio positions
+    for (&inst, pos) in backtest_res.ledger.positions() {
+        let sym = symbols.get(inst as usize).cloned().unwrap_or_else(|| format!("INST_{inst}"));
+        let mark_px = backtest_res.ledger.mark_price(inst).map_or(0.0, spectra_core::Fixed::to_f64);
+        let _ = spectra_db::risk_center::upsert_position(
+            &pool,
+            ws,
+            Some(req.strategy_id),
+            &sym,
+            pos.qty.to_f64(),
+            mark_px,
+        )
+        .await;
+    }
+
+    // 9. Update portfolio balances and record snapshot
+    let final_cash = backtest_res.ledger.cash().to_f64();
+    let final_equity = backtest_res.ledger.equity().map_or(final_cash, spectra_core::Fixed::to_f64);
+    let final_peak = account.balance.peak_equity.max(final_equity);
+
+    let _ = spectra_db::risk_center::upsert_balance(
+        &pool,
+        ws,
+        Some(req.strategy_id),
+        final_cash,
+        final_equity,
+        final_peak,
+        account.balance.daily_start_equity,
+    )
+    .await;
+
+    let _ = spectra_db::risk_center::record_equity_snapshot(
+        &pool,
+        ws,
+        Some(req.strategy_id),
+        None,
+        0,
+        Utc::now().timestamp_nanos_opt().unwrap_or(0),
+        final_equity,
+        final_cash,
+    )
+    .await;
+
+    // 10. Refreshed paper account
+    let updated_account =
+        match spectra_db::paper::get_or_init_paper_account(&pool, ws, req.strategy_id, None).await {
+            Ok(acc) => acc,
+            Err(e) => return db_error(&e),
+        };
+
+    let resp = StepPaperResponse {
+        strategy_id: req.strategy_id,
+        strategy_version_id: Some(version.id),
+        orders: order_views,
+        fills: fill_views,
+        account: PaperAccountView::from(updated_account),
+    };
+
+    json_response(200, json!(resp).to_string())
 }

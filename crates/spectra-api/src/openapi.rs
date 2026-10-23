@@ -196,6 +196,7 @@ pub struct StressRequest {
         crate::paper_api::list_orders,
         crate::paper_api::get_order,
         crate::paper_api::create_order,
+        crate::paper_api::step_strategy,
     ),
     components(schemas(
         ErrorDoc,
@@ -321,6 +322,9 @@ pub struct StressRequest {
         crate::paper_api::CreatePaperOrderRequest,
         crate::paper_api::PaperOrderView,
         crate::paper_api::PaperFillView,
+        crate::paper_api::StepPaperRequest,
+        crate::paper_api::PaperBarInput,
+        crate::paper_api::StepPaperResponse,
     )),
     tags(
         (name = "probes", description = "Liveness and readiness"),

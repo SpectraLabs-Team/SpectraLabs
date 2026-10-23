@@ -889,6 +889,7 @@ fn paper_routes() -> Router<AppState> {
         .route("/api/v1/paper/account/reset", only(post(paper_api::reset_account)))
         .route("/api/v1/paper/orders", only(get(paper_api::list_orders).post(paper_api::create_order)))
         .route("/api/v1/paper/orders/{id}", only(get(paper_api::get_order)))
+        .route("/api/v1/paper/step", only(post(paper_api::step_strategy)))
 }
 
 /// The application. `db` is checked by `/ready`; pass `None` where there is

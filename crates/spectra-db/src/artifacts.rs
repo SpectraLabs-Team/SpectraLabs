@@ -370,7 +370,9 @@ impl ArtifactBackend {
         match self {
             Self::Local(store) => {
                 let store = store.clone();
-                tokio::task::spawn_blocking(move || store.list_stored_hashes()).await.map_err(io::Error::other)?
+                tokio::task::spawn_blocking(move || store.list_stored_hashes())
+                    .await
+                    .map_err(io::Error::other)?
             }
             #[cfg(feature = "s3")]
             Self::S3(_) => Ok(Vec::new()),
@@ -571,13 +573,9 @@ pub async fn find_for_run(
 /// Collects all active hashes from `workspace_storage`, compares them against the store's
 /// stored hashes, and deletes any file not referenced by any active workspace.
 /// Returns the list of deleted hashes.
-pub async fn sweep_unreferenced(
-    pool: &PgPool,
-    store: &ArtifactBackend,
-) -> Result<Vec<String>, sqlx::Error> {
-    let rows: Vec<(String,)> = sqlx::query_as("SELECT DISTINCT sha256 FROM workspace_storage")
-        .fetch_all(pool)
-        .await?;
+pub async fn sweep_unreferenced(pool: &PgPool, store: &ArtifactBackend) -> Result<Vec<String>, sqlx::Error> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT DISTINCT sha256 FROM workspace_storage").fetch_all(pool).await?;
     let active_hashes: std::collections::HashSet<String> = rows.into_iter().map(|(h,)| h).collect();
 
     let on_disk = store.list_stored_hashes().await.unwrap_or_default();

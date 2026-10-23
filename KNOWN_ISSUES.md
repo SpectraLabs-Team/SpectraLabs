@@ -42,7 +42,7 @@
 - PSR and DSR assume serially independent returns and independent trials.
 - The registry loads the whole log into memory. The hash chain shows tampering but does not prevent
   it: anchor the head hash somewhere you trust.
-- The holdout vault is process discipline plus an audit trail, not access control.
+- The holdout vault enforces access control at the API & database boundary: direct reads of sealed bars, exports and backtests are prohibited without a metered evaluate call.
 
 ## API deployment boundary
 

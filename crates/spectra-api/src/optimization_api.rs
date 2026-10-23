@@ -71,6 +71,7 @@ pub struct OptimizationSweepView {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub job_id: Option<Uuid>,
+    pub experiment_id: Option<Uuid>,
     pub strategy_id: Option<Uuid>,
     pub strategy_version_id: Option<Uuid>,
     pub dataset_version_id: Uuid,
@@ -98,6 +99,7 @@ impl From<OptimizationSweep> for OptimizationSweepView {
             id: s.id,
             workspace_id: s.workspace_id,
             job_id: s.job_id,
+            experiment_id: s.experiment_id,
             strategy_id: s.strategy_id,
             strategy_version_id: s.strategy_version_id,
             dataset_version_id: s.dataset_version_id,
@@ -270,6 +272,8 @@ pub struct CreateSweepRequest {
     #[serde(default)]
     pub strategy_version_id: Option<Uuid>,
     #[serde(default)]
+    pub experiment_id: Option<Uuid>,
+    #[serde(default)]
     pub strategy: Option<String>,
     #[serde(default)]
     pub dsl_code: Option<String>,
@@ -400,12 +404,67 @@ pub(crate) async fn queue_sweep(
         Err(e) => return db_error(&e),
     }
 
+    // Verify dataset version is not a sealed holdout
+    match optimization::is_holdout_sealed(&pool, ws, req.dataset_version_id).await {
+        Ok(true) => {
+            return error_with_code(
+                403,
+                "holdout_sealed",
+                "This dataset version is a sealed holdout; direct parameter sweeps are prohibited. Use /api/v1/optimization/holdout/{id}/evaluate.",
+            );
+        }
+        Ok(false) => {}
+        Err(e) => return db_error(&e),
+    }
+
+    // Enforce search budget cap (Task 10)
+    let total_points: usize = if let Some(obj) = req.param_grid.as_object() {
+        let mut count: usize = 1;
+        for (_, vals) in obj {
+            if let Some(arr) = vals.as_array() {
+                count = count.saturating_mul(arr.len());
+            }
+        }
+        count
+    } else {
+        1
+    };
+    if total_points > 1000 && req.max_trials.is_none_or(|m| m > 1000) {
+        return error_with_code(
+            422,
+            "search_budget_exceeded",
+            format!("Search budget exceeded: parameter sweep capped at 1000 trials. Grid has {total_points} combinations; specify max_trials <= 1000 or reduce the parameter space."),
+        );
+    }
+
+    let experiment_id: Option<Uuid> = if let Some(exp_id) = req.experiment_id {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM experiments WHERE workspace_id = $1 AND id = $2)",
+        )
+        .bind(ws)
+        .bind(exp_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(false);
+        if !exists {
+            return error_response(404, "Experiment not found in this workspace.");
+        }
+        Some(exp_id)
+    } else {
+        sqlx::query_scalar("SELECT id FROM experiments WHERE workspace_id = $1 AND tags @> ARRAY['default']::text[] ORDER BY created_at, id LIMIT 1")
+            .bind(ws)
+            .fetch_optional(&pool)
+            .await
+            .unwrap_or(None)
+    };
+
     let sweep_id = spectra_db::new_id();
 
     let job_payload = json!({
         "sweep_id": sweep_id,
         "dataset_version_id": req.dataset_version_id,
         "strategy_version_id": req.strategy_version_id,
+        "experiment_id": experiment_id,
         "strategy": req.strategy,
         "dsl_code": req.dsl_code,
         "param_grid": req.param_grid,
@@ -434,6 +493,7 @@ pub(crate) async fn queue_sweep(
         sweep_id,
         ws,
         Some(queued_job.id),
+        experiment_id,
         None,
         req.strategy_version_id,
         req.dataset_version_id,
@@ -502,6 +562,96 @@ pub(crate) async fn get_sweep(
             "sensitivity": sensitivity,
         }),
     )
+}
+
+/// Export sweep validation report as CSV (Task 8).
+#[utoipa::path(get, path = "/api/v1/optimization/sweep/{id}/export", tag = "optimization",
+    params(("id" = Uuid, Path, description = "Sweep id")),
+    responses((status = 200, description = "Validation report CSV"), (status = 404, body = crate::openapi::ErrorDoc)))]
+pub(crate) async fn export_sweep(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    sweep_id: Result<Path<Uuid>, PathRejection>,
+) -> Response {
+    let Ok(Path(sweep_id)) = sweep_id else { return error_response(404, NOT_FOUND) };
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let sweep = match optimization::get_sweep(&pool, ws, sweep_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return error_response(404, NOT_FOUND),
+        Err(e) => return db_error(&e),
+    };
+    let trials = match optimization::trials_of_sweep(&pool, sweep_id).await {
+        Ok(t) => t,
+        Err(e) => return db_error(&e),
+    };
+
+    let holdout_eval = optimization::evaluations_for_run_target(
+        &pool,
+        ws,
+        sweep.strategy_version_id,
+        Some(sweep.dataset_version_id),
+    )
+    .await
+    .ok()
+    .and_then(|list| list.into_iter().next());
+
+    let mut csv = String::new();
+    csv.push_str("# SpectraLabs M4 Optimization & Validation Report\n");
+    csv.push_str(&format!("# Sweep ID: {}\n", sweep.id));
+    csv.push_str(&format!("# Method: {}\n", sweep.method));
+    csv.push_str(&format!("# Objective: {}\n", sweep.objective));
+    csv.push_str(&format!("# Total Trials Attempted: {}\n", sweep.trial_count));
+    csv.push_str(&format!(
+        "# Best Trial: {}\n",
+        sweep.best_trial_num.map_or("-".to_string(), |n| n.to_string())
+    ));
+    csv.push_str(&format!(
+        "# Best Objective: {}\n",
+        sweep.best_objective.map_or("-".to_string(), |v| v.to_string())
+    ));
+    csv.push_str(&format!(
+        "# Deflated Sharpe Ratio (DSR): {}\n",
+        sweep.dsr.map_or("-".to_string(), |v| format!("{v:.4}"))
+    ));
+    csv.push_str(&format!(
+        "# Probabilistic Sharpe Ratio (PSR): {}\n",
+        sweep.psr.map_or("-".to_string(), |v| format!("{v:.4}"))
+    ));
+    csv.push_str(&format!(
+        "# Minimum Track Record Length (MinTRL): {}\n",
+        sweep.min_trl.map_or("-".to_string(), |v| format!("{v:.2}"))
+    ));
+    csv.push_str(&format!("# CSCV PBO: {}\n", sweep.pbo.map_or("-".to_string(), |v| format!("{v:.4}"))));
+    if let Some(h) = holdout_eval {
+        csv.push_str(&format!("# Holdout Evaluation Num: {}\n", h.evaluation_num));
+        csv.push_str(&format!("# Holdout Evaluated At: {}\n", h.evaluated_at));
+        csv.push_str(&format!("# Holdout DSR: {}\n", h.dsr.map_or("-".to_string(), |v| format!("{v:.4}"))));
+    } else {
+        csv.push_str("# Holdout Evaluation: None\n");
+    }
+    csv.push_str("\ntrial_num,objective_value,returns_mean,returns_vol,params\n");
+    for t in &trials {
+        let p_str = serde_json::to_string(&t.params).unwrap_or_default().replace('"', "\"\"");
+        csv.push_str(&format!(
+            "{},{},{},{},\"{}\"\n",
+            t.trial_num,
+            t.objective_value,
+            t.returns_mean.map_or(String::new(), |v| v.to_string()),
+            t.returns_vol.map_or(String::new(), |v| v.to_string()),
+            p_str
+        ));
+    }
+
+    let filename = format!("sweep-{}-validation-report.csv", sweep.id);
+    Response::builder()
+        .status(200)
+        .header("content-type", "text/csv; charset=utf-8")
+        .header("content-disposition", format!("attachment; filename=\"{filename}\""))
+        .body(axum::body::Body::from(csv))
+        .unwrap()
 }
 
 /// Computes 2D heatmap matrix if two distinct parameters vary across trials.
@@ -592,6 +742,19 @@ pub(crate) async fn queue_walk_forward(
     match datasets::resolve_version(&pool, ws, req.dataset_version_id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_response(404, "Dataset version not found in this workspace."),
+        Err(e) => return db_error(&e),
+    }
+
+    // Verify dataset version is not a sealed holdout
+    match optimization::is_holdout_sealed(&pool, ws, req.dataset_version_id).await {
+        Ok(true) => {
+            return error_with_code(
+                403,
+                "holdout_sealed",
+                "This dataset version is a sealed holdout; direct walk-forward validation is prohibited. Use /api/v1/optimization/holdout/{id}/evaluate.",
+            );
+        }
+        Ok(false) => {}
         Err(e) => return db_error(&e),
     }
 
@@ -792,6 +955,19 @@ pub(crate) async fn seal_holdout(
     match datasets::resolve_version(&pool, ws, req.dataset_version_id).await {
         Ok(Some(_)) => {}
         Ok(None) => return error_response(404, "Dataset version not found in this workspace."),
+        Err(e) => return db_error(&e),
+    }
+
+    // Verify dataset version is not already sealed
+    match optimization::is_holdout_sealed(&pool, ws, req.dataset_version_id).await {
+        Ok(true) => {
+            return error_with_code(
+                422,
+                "dataset_already_sealed",
+                "This dataset version is already sealed in the holdout vault.",
+            );
+        }
+        Ok(false) => {}
         Err(e) => return db_error(&e),
     }
 

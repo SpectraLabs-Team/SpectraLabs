@@ -168,6 +168,7 @@ pub struct StressRequest {
         crate::optimization_api::queue_sweep,
         crate::optimization_api::list_sweeps,
         crate::optimization_api::get_sweep,
+        crate::optimization_api::export_sweep,
         crate::optimization_api::queue_walk_forward,
         crate::optimization_api::list_walk_forwards,
         crate::optimization_api::get_walk_forward,

@@ -462,6 +462,42 @@ pub(crate) async fn get_run(
     let mut body = run_json(item);
     body["artifacts"] = Value::Array(artifacts.iter().map(artifact_json).collect());
     body["workspace_trial_count"] = json!(trials);
+
+    let holdout_history = if let Some(ref pool) = st.db {
+        let ws = identity.workspace.unwrap_or_default();
+        let evals = sqlx::query(
+            "SELECT e.id, h.name as holdout_name, e.evaluation_num, e.metrics, e.dsr, e.warnings, e.evaluated_at \
+             FROM holdout_evaluations e \
+             JOIN holdout_vault h ON h.id = e.holdout_id \
+             WHERE e.workspace_id = $1 \
+             ORDER BY e.evaluated_at DESC LIMIT 10",
+        )
+        .bind(ws)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+        let list: Vec<Value> = evals
+            .into_iter()
+            .map(|r| {
+                use sqlx::Row;
+                json!({
+                    "id": r.get::<Uuid, _>("id"),
+                    "holdout_name": r.get::<String, _>("holdout_name"),
+                    "evaluation_num": r.get::<i32, _>("evaluation_num"),
+                    "metrics": r.get::<serde_json::Value, _>("metrics"),
+                    "dsr": r.get::<Option<f64>, _>("dsr"),
+                    "warnings": r.get::<serde_json::Value, _>("warnings"),
+                    "evaluated_at": r.get::<chrono::DateTime<chrono::Utc>, _>("evaluated_at"),
+                })
+            })
+            .collect();
+        Value::Array(list)
+    } else {
+        Value::Array(Vec::new())
+    };
+    body["holdout_history"] = holdout_history;
+
     json_response(200, body.to_string())
 }
 

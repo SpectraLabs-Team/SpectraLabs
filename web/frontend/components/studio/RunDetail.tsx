@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CircleAlert, Download, Fingerprint, LoaderCircle, MessageSquarePlus, X } from 'lucide-react';
+import { CircleAlert, Download, Fingerprint, LoaderCircle, Lock, MessageSquarePlus, X } from 'lucide-react';
 import { API_BASE, ApiError, request } from '@/lib/api';
 import type { Run } from './ExperimentRegistry';
 import { SurvivalLabPanel } from './SurvivalLabPanel';
@@ -13,6 +13,20 @@ type Artifact = {
   size_bytes: number;
   content_type: string;
   summary: Record<string, unknown>;
+};
+
+export type HoldoutEvaluationItem = {
+  id: string;
+  holdout_name: string;
+  evaluation_num: number;
+  metrics: {
+    sharpe?: number;
+    total_return?: number;
+    max_drawdown?: number;
+  };
+  dsr?: number;
+  warnings?: string[];
+  evaluated_at: string;
 };
 
 type RunDetailData = Run & {
@@ -29,6 +43,7 @@ type RunDetailData = Run & {
   notes: string[];
   artifacts: Artifact[];
   workspace_trial_count: number;
+  holdout_history?: HoldoutEvaluationItem[];
 };
 
 const ARTIFACT_LABELS: Record<string, string> = {
@@ -134,6 +149,56 @@ export function RunDetail({ runId, experimentName, onClose, onChanged }: {
           </dl>
 
           <SurvivalLabPanel runId={run.id} enabled={run.status === 'succeeded'} strategy={run.strategy} params={run.params} datasetId={run.dataset_id} />
+
+          {run.holdout_history && run.holdout_history.length > 0 && (
+            <div className="mt-5 rounded-xl border border-accent/30 bg-accent/5 p-4" aria-label="Holdout Vault History">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold text-accent">
+                <Lock className="h-3.5 w-3.5" />
+                Holdout Vault Unlocks ({run.holdout_history.length})
+              </h3>
+              <p className="mt-1 text-[11px] text-ink/60">
+                Audited evaluations of sealed holdouts for this strategy and dataset. Each evaluation consumes permanent budget and penalizes DSR.
+              </p>
+              <div className="mt-3 space-y-2">
+                {run.holdout_history.map((evalItem) => (
+                  <div key={evalItem.id} className="rounded-lg border border-ink/[0.08] bg-surface p-3 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-ink">{evalItem.holdout_name}</span>
+                      <span className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[10px] text-accent">
+                        Unlock #{evalItem.evaluation_num}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-ink/60 sm:grid-cols-4">
+                      <div>
+                        <span className="text-[10px] uppercase text-ink/40">Holdout Sharpe</span>
+                        <p className="font-mono font-medium text-ink">
+                          {evalItem.metrics?.sharpe !== undefined ? evalItem.metrics.sharpe.toFixed(2) : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase text-ink/40">Deflated Sharpe</span>
+                        <p className="font-mono font-medium text-accent">
+                          {evalItem.dsr !== undefined ? `${(evalItem.dsr * 100).toFixed(1)}%` : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase text-ink/40">Total Return</span>
+                        <p className="font-mono font-medium text-ink">
+                          {evalItem.metrics?.total_return !== undefined ? `${(evalItem.metrics.total_return * 100).toFixed(1)}%` : '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase text-ink/40">Evaluated</span>
+                        <p className="text-[10px] text-ink/50">
+                          {new Date(evalItem.evaluated_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {run.artifacts.length > 0 && (
             <>

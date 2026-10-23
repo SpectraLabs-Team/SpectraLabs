@@ -23,7 +23,9 @@ use spectra_core::Json;
 use utoipa::ToSchema;
 
 use crate::jobs_api::{context, db_error, to_json, JobView, MAX_ATTEMPTS};
-use crate::{engine, error_response, invalid_fields, json_response, AppState, Identity, RequestId};
+use crate::{
+    engine, error_response, error_with_code, invalid_fields, json_response, AppState, Identity, RequestId,
+};
 
 /// Largest preview sample, in bytes (the dashboard proxy accepts 2 MB bodies).
 pub const MAX_PREVIEW_SAMPLE: usize = 1024 * 1024;
@@ -837,6 +839,18 @@ pub(crate) async fn get_version(
         Ok(None) => return error_response(404, NO_VERSION),
         Err(e) => return db_error(&e),
     };
+    match spectra_db::optimization::is_holdout_sealed(&pool, ws, version_id).await {
+        Ok(true) => {
+            tracing::warn!(%version_id, "direct read attempt on sealed holdout refused");
+            return error_with_code(
+                403,
+                "holdout_sealed",
+                "This dataset version is a sealed holdout; direct bar access is prohibited. Use /api/v1/optimization/holdout/{id}/evaluate.",
+            );
+        }
+        Ok(false) => {}
+        Err(e) => return db_error(&e),
+    }
     let chartable = v.blob_sha256.is_some()
         || st.cfg.data_dir.as_ref().is_some_and(|dir| dir.join(&v.checksum).join("bars.qfb").exists());
     to_json(
@@ -1156,6 +1170,18 @@ pub(crate) async fn bars(
         Ok(None) => return error_response(404, NO_VERSION),
         Err(e) => return db_error(&e),
     };
+    match spectra_db::optimization::is_holdout_sealed(&pool, ws, version_id).await {
+        Ok(true) => {
+            tracing::warn!(%version_id, "direct read attempt on sealed holdout refused");
+            return error_with_code(
+                403,
+                "holdout_sealed",
+                "This dataset version is a sealed holdout; direct bar access is prohibited. Use /api/v1/optimization/holdout/{id}/evaluate.",
+            );
+        }
+        Ok(false) => {}
+        Err(e) => return db_error(&e),
+    }
     let d = match load_for_chart(&st, &v.checksum, v.blob_sha256.as_deref()).await {
         Ok(d) => d,
         Err(r) => return r,
@@ -1328,6 +1354,18 @@ pub(crate) async fn derive_version(
         Ok(None) => return error_response(404, NO_VERSION),
         Err(e) => return db_error(&e),
     };
+    match spectra_db::optimization::is_holdout_sealed(&pool, ws, version_id).await {
+        Ok(true) => {
+            tracing::warn!(%version_id, "direct read attempt on sealed holdout refused");
+            return error_with_code(
+                403,
+                "holdout_sealed",
+                "This dataset version is a sealed holdout; direct bar access is prohibited. Use /api/v1/optimization/holdout/{id}/evaluate.",
+            );
+        }
+        Ok(false) => {}
+        Err(e) => return db_error(&e),
+    }
 
     let act_set =
         match spectra_db::corporate_actions::get_action_set(&pool, ws, req.corporate_action_set_id).await {
@@ -1524,6 +1562,18 @@ pub(crate) async fn export_version(
         Ok(None) => return error_response(404, NO_VERSION),
         Err(e) => return db_error(&e),
     };
+    match spectra_db::optimization::is_holdout_sealed(&pool, ws, version_id).await {
+        Ok(true) => {
+            tracing::warn!(%version_id, "direct read attempt on sealed holdout refused");
+            return error_with_code(
+                403,
+                "holdout_sealed",
+                "This dataset version is a sealed holdout; direct bar access is prohibited. Use /api/v1/optimization/holdout/{id}/evaluate.",
+            );
+        }
+        Ok(false) => {}
+        Err(e) => return db_error(&e),
+    }
     let d = match load_for_chart(&st, &v.checksum, v.blob_sha256.as_deref()).await {
         Ok(d) => d,
         Err(r) => return r,

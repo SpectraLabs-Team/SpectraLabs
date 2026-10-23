@@ -17,6 +17,7 @@ import {
   TrendingUp,
   Percent,
   Download,
+  FileText,
 } from 'lucide-react';
 import {
   listSweeps,
@@ -527,15 +528,26 @@ export function OptimizationLab() {
                   <div className="text-xs text-ink/60">
                     Sweep status: <span className="font-semibold text-ink">{selectedSweepDetail.sweep.status}</span> · Method: <span className="font-mono text-ink">{selectedSweepDetail.sweep.method}</span> · Trials: <span className="font-bold text-ink">{selectedSweepDetail.sweep.trial_count}</span>
                   </div>
-                  <a
-                    href={`/api/v1/optimization/sweep/${selectedSweepDetail.sweep.id}/export`}
-                    download
-                    className="btn-secondary inline-flex items-center gap-1.5 rounded-lg border border-ink/[0.12] bg-surface px-3 py-1.5 text-xs text-ink hover:bg-ink/[0.04]"
-                    title="Export 1-page validation report as CSV"
-                  >
-                    <Download className="h-3.5 w-3.5 text-accent" />
-                    Export Report (CSV)
-                  </a>
+                  <div className="flex items-center gap-2">
+                    <a
+                      href={`/api/v1/optimization/sweep/${selectedSweepDetail.sweep.id}/export?format=pdf`}
+                      download
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-xs hover:bg-accent/90"
+                      title="Export 1-page validation report as PDF"
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      Export Report (PDF)
+                    </a>
+                    <a
+                      href={`/api/v1/optimization/sweep/${selectedSweepDetail.sweep.id}/export?format=csv`}
+                      download
+                      className="btn-secondary inline-flex items-center gap-1.5 rounded-lg border border-ink/[0.12] bg-surface px-3 py-1.5 text-xs text-ink hover:bg-ink/[0.04]"
+                      title="Export validation report as CSV"
+                    >
+                      <Download className="h-3.5 w-3.5 text-accent" />
+                      Export (CSV)
+                    </a>
+                  </div>
                 </div>
 
                 {/* 2D SENSITIVITY HEATMAP */}

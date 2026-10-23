@@ -668,7 +668,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Export sweep validation report as CSV (Task 8). */
+        /** Export sweep validation report as CSV or PDF (Task 8). */
         get: operations["export_sweep"];
         put?: never;
         post?: never;
@@ -5285,12 +5285,13 @@ export interface operations {
             path: {
                 /** @description Sweep id */
                 id: string;
+                format: string | null;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Validation report CSV */
+            /** @description Validation report CSV or PDF */
             200: {
                 headers: {
                     [name: string]: unknown;

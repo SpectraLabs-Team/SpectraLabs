@@ -474,9 +474,15 @@ async fn sweep_export_report_flow() {
     assert_eq!(status, 202);
     let sweep_id = sweep["id"].as_str().unwrap();
 
-    // 2. Export sweep report
+    // 2. Export sweep report as CSV
     let (status, res) =
         f.call("GET", &format!("/api/v1/optimization/sweep/{sweep_id}/export"), &Value::Null).await;
     assert_eq!(status, 200, "status: {status}, body: {res}");
+
+    // 3. Export sweep report as PDF
+    let (status, res_pdf) = f
+        .call("GET", &format!("/api/v1/optimization/sweep/{sweep_id}/export?format=pdf"), &Value::Null)
+        .await;
+    assert_eq!(status, 200, "status: {status}, body: {res_pdf}");
     f.clean_up().await;
 }

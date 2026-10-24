@@ -105,3 +105,75 @@ export const runBenchmark = (body: {
   repetitions: number;
   warmups: number;
 }) => post<BenchmarkResult>('/api/benchmark', body, 120_000);
+
+export interface RegimeStateView {
+  mu_daily: number;
+  sigma_daily: number;
+  volatility_annualized: number;
+}
+
+export interface RegimeResult {
+  model: string;
+  current_regime: string;
+  current_high_vol_prob?: number;
+  current_regime_var?: number;
+  regime_0_var?: number;
+  regime_1_var?: number;
+  regime_bull_var?: number;
+  regime_neutral_var?: number;
+  regime_crisis_var?: number;
+  state_0?: RegimeStateView;
+  state_1?: RegimeStateView;
+  state_bull?: RegimeStateView;
+  state_neutral?: RegimeStateView;
+  state_crisis?: RegimeStateView;
+  transitions?: number[][];
+  viterbi_path?: string[];
+}
+
+export interface GarchResult {
+  model: string;
+  omega: number;
+  alpha: number;
+  beta: number;
+  gamma?: number;
+  persistence: number;
+  annualized_volatility: number;
+  unconditional_variance: number;
+  log_likelihood: number;
+  forecast_1d_variance: number;
+  forecast_1d_volatility_annualized: number;
+}
+
+export interface EvtResult {
+  threshold: number;
+  xi: number;
+  beta: number;
+  total_observations: number;
+  exceedances_count: number;
+  ks_statistic: number;
+  passes_goodness_of_fit: boolean;
+  evt_var: number;
+  evt_cvar: number;
+}
+
+export const detectRegimes = (body: {
+  returns: number[];
+  portfolio_value?: number;
+  confidence?: number;
+  horizon_days?: number;
+  model?: 'hmm2' | 'hmm3' | 'jump';
+  jump_penalty?: number;
+}) => post<RegimeResult>('/api/v1/risk/regimes', body);
+
+export const fitGarch = (body: {
+  returns: number[];
+  model?: 'garch11' | 'gjr_garch' | 'egarch';
+}) => post<GarchResult>('/api/v1/risk/garch', body);
+
+export const fitEvt = (body: {
+  losses: number[];
+  confidence?: number;
+  threshold_quantile?: number;
+}) => post<EvtResult>('/api/v1/risk/evt', body);
+

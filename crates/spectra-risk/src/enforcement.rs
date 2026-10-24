@@ -138,12 +138,35 @@ impl PortfolioSnapshot {
         (self.daily_start_equity - self.equity).max(0.0)
     }
 
-    /// Parametric 1-day 99% VaR approximation based on portfolio leverage.
+    /// Parametric or correlated copula 1-day 99% VaR approximation based on portfolio holdings.
     pub fn var_pct(&self) -> f64 {
-        if self.equity <= 0.0 {
-            0.0
-        } else {
-            self.leverage() * 0.0165 * 2.33
+        self.var_pct_with_model(crate::copula::DependenceModel::TCopula { degrees_of_freedom: 4 })
+    }
+
+    /// Calculates 1-day 99% VaR as a fraction of equity under a specific dependence model.
+    pub fn var_pct_with_model(&self, model: crate::copula::DependenceModel) -> f64 {
+        if self.equity <= 0.0 || self.positions.is_empty() {
+            return 0.0;
+        }
+
+        let mut p = crate::portfolio::Portfolio::new();
+        for (sym, pos) in &self.positions {
+            if pos.qty.abs() > 1e-8 && pos.price > 0.0 {
+                p.add_asset(sym.as_str(), pos.qty, pos.price);
+            }
+        }
+
+        if p.assets().is_empty() {
+            return 0.0;
+        }
+
+        // Run 2,000 simulations on 1-day horizon (1/252) at 99% confidence
+        match crate::copula::simulate_correlated(&p, None, model, 2_000, 42, 1.0 / 252.0, 0.99) {
+            Ok(sim) => match crate::metrics::value_at_risk(&sim.portfolio_losses, 0.99) {
+                Ok(var_dollars) => var_dollars.max(0.0) / self.equity,
+                Err(_) => (self.leverage() * 0.0165 * 2.33).max(0.0),
+            },
+            Err(_) => (self.leverage() * 0.0165 * 2.33).max(0.0),
         }
     }
 }
@@ -420,6 +443,7 @@ impl PreTradeChecker {
         let mut projected_gross = 0.0;
         let mut projected_net = 0.0;
         let mut found = false;
+        let mut projected_positions = portfolio.positions.clone();
 
         for (sym, p) in &portfolio.positions {
             if sym == &order.symbol {
@@ -436,13 +460,29 @@ impl PreTradeChecker {
             projected_net += projected_pos_qty * order.price;
         }
 
+        if projected_pos_qty.abs() > 1e-8 {
+            projected_positions.insert(
+                order.symbol.clone(),
+                PositionSnapshot { qty: projected_pos_qty, price: order.price },
+            );
+        } else {
+            projected_positions.remove(&order.symbol);
+        }
+
         let projected_leverage =
             if portfolio.equity <= 0.0 { f64::INFINITY } else { projected_gross / portfolio.equity };
 
         let projected_concentration =
             if portfolio.equity <= 0.0 { 0.0 } else { projected_pos_val / portfolio.equity };
 
-        let projected_var = if portfolio.equity <= 0.0 { 0.0 } else { projected_leverage * 0.0165 * 2.33 };
+        let projected_portfolio = PortfolioSnapshot {
+            cash: portfolio.cash,
+            equity: portfolio.equity,
+            peak_equity: portfolio.peak_equity,
+            daily_start_equity: portfolio.daily_start_equity,
+            positions: projected_positions,
+        };
+        let projected_var = projected_portfolio.var_pct();
 
         let projected_metrics = ProjectedMetrics {
             gross_exposure: projected_gross,
@@ -550,8 +590,16 @@ impl PreTradeChecker {
             let max_qty_for_gross = ((limits.max_gross_exposure - other_gross) / order.price).max(0.0);
             let max_qty_for_lev =
                 (((limits.max_leverage * portfolio.equity) - other_gross) / order.price).max(0.0);
+            let max_qty_for_var = if limits.max_var_pct > 0.0 {
+                let var_factor = (0.20 * 2.3263) / (252.0_f64).sqrt();
+                let max_gross_for_var = (limits.max_var_pct * portfolio.equity) / var_factor;
+                ((max_gross_for_var - other_gross) / order.price).max(0.0)
+            } else {
+                f64::INFINITY
+            };
 
-            let permissible_qty = max_qty_for_pos.min(max_qty_for_gross).min(max_qty_for_lev);
+            let permissible_qty =
+                max_qty_for_pos.min(max_qty_for_gross).min(max_qty_for_lev).min(max_qty_for_var);
 
             if permissible_qty > 0.0 && permissible_qty < order.qty {
                 return PreTradeResult {
@@ -743,5 +791,31 @@ mod tests {
         let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
         assert_eq!(res.verdict, PreTradeVerdict::Rejected);
         assert!(res.breaches.iter().any(|b| b.code == "var_limit_exceeded"));
+    }
+
+    #[test]
+    fn test_multi_asset_copula_var_enforcement() {
+        let limits = RiskLimits {
+            max_var_pct: 0.02, // 2% VaR limit
+            max_position_size: 1_000_000.0,
+            max_gross_exposure: 1_000_000.0,
+            ..RiskLimits::default()
+        };
+        let mut portfolio = PortfolioSnapshot {
+            cash: 100_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions: HashMap::new(),
+        };
+        portfolio.positions.insert("AAPL".into(), PositionSnapshot { qty: 200.0, price: 150.0 });
+
+        // Buying another $60,000 of MSFT pushes gross to $90,000, 0.9x leverage
+        let order = OrderCandidate { symbol: "MSFT".into(), side: OrderSide::Buy, qty: 200.0, price: 300.0 };
+
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
+        assert_eq!(res.verdict, PreTradeVerdict::Rejected);
+        assert!(res.breaches.iter().any(|b| b.code == "var_limit_exceeded"));
+        assert!(res.projected_metrics.var_pct > 0.02);
     }
 }

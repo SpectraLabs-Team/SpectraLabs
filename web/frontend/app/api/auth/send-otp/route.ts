@@ -81,14 +81,21 @@ export async function POST(req: Request) {
       console.log(`[AUTH] Sent 6-digit OTP code to ${cleanEmail}`);
     } catch (emailErr) {
       console.error('[AUTH SMTP ERROR]', emailErr);
-      if (process.env.NODE_ENV !== 'production') console.log(`[DEV FALLBACK OTP FOR ${cleanEmail}]: ${code}`);
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[DEV FALLBACK OTP FOR ${cleanEmail}]: ${code}`);
+        return NextResponse.json({ ok: true, message: 'Verification code generated (dev fallback).', devCode: code });
+      }
       return NextResponse.json(
         { ok: false, error: 'Failed to deliver verification email. Please check the email address or try again.' },
         { status: 500 },
       );
     }
 
-    return NextResponse.json({ ok: true, message: 'Verification code sent.' });
+    return NextResponse.json({
+      ok: true,
+      message: 'Verification code sent.',
+      devCode: process.env.NODE_ENV !== 'production' ? code : undefined,
+    });
   } catch (err: any) {
     console.error('[SEND-OTP ERROR]', err);
     return NextResponse.json({ ok: false, error: 'Internal server error.' }, { status: 500 });

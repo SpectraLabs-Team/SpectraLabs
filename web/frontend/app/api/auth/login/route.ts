@@ -124,10 +124,18 @@ export async function POST(req: Request) {
         await sendOtpEmail({ to: cleanEmail, code, type: 'login' });
       } catch (err) {
         console.error('[LOGIN 2FA SMTP ERROR]', err);
-        if (process.env.NODE_ENV !== 'production') console.log(`[DEV FALLBACK LOGIN CODE FOR ${cleanEmail}]: ${code}`);
+        if (process.env.NODE_ENV !== 'production') {
+          console.log(`[DEV FALLBACK LOGIN CODE FOR ${cleanEmail}]: ${code}`);
+          return NextResponse.json({ ok: true, twoFactor: true, method: 'email', devCode: code });
+        }
         return NextResponse.json({ ok: false, error: 'Could not send your login code. Please try again.' }, { status: 500 });
       }
-      return NextResponse.json({ ok: true, twoFactor: true, method: 'email' });
+      return NextResponse.json({
+        ok: true,
+        twoFactor: true,
+        method: 'email',
+        devCode: process.env.NODE_ENV !== 'production' ? code : undefined,
+      });
     }
 
     const session = await startSession(user, req, { notifyNewDevice: true });

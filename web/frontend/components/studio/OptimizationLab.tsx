@@ -946,7 +946,10 @@ export function OptimizationLab() {
 
               <div className="mt-4 space-y-3 text-xs">
                 <div>
-                  <label htmlFor={simTrialsInputId} className="font-medium text-ink/80">Number of Tested Trials (N)</label>
+                  <div className="flex items-center justify-between">
+                    <label htmlFor={simTrialsInputId} className="font-medium text-ink/80">Number of Tested Trials (N)</label>
+                    <span className="font-mono text-[10px] text-ink/40">trial count</span>
+                  </div>
                   <input
                     id={simTrialsInputId}
                     aria-label="Number of Tested Trials"
@@ -955,6 +958,9 @@ export function OptimizationLab() {
                     onChange={(e) => setSimTrials(Number(e.target.value))}
                     className="mt-1 w-full rounded-lg border border-ink/[0.12] bg-surface px-2.5 py-1.5 text-xs text-ink"
                   />
+                  <p className="mt-1 text-[10.5px] leading-4 text-ink/40">
+                    Total candidate strategies tested (parameter N in López de Prado&apos;s Deflated Sharpe Ratio to discount for multiple-testing selection bias).
+                  </p>
                 </div>
                 <div>
                   <label htmlFor={simObsInputId} className="font-medium text-ink/80">Observations Per Trial</label>

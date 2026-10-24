@@ -12,7 +12,7 @@ import { TickerChips } from './HoloCards';
 const BADGES = [
   { label: 'v0.7.0 Pure Rust', dot: 'bg-cyan-400 shadow-[0_0_8px_#22D3EE]' },
   { label: 'Sub-millisecond Execution', dot: 'bg-violet-400 shadow-[0_0_8px_#A78BFA]' },
-  { label: 'Zero Dependencies', dot: 'bg-emerald-400 shadow-[0_0_8px_#34D399]' },
+  { label: 'Std-Only Core Engines', dot: 'bg-emerald-400 shadow-[0_0_8px_#34D399]' },
 ];
 
 export function Hero() {

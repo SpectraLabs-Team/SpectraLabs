@@ -43,13 +43,22 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 function SurvivalCharts({ results }: { results: Record<string, unknown> }) {
   const costs = asRows(asObject(results.costs).levels).map((item) => ({ x: Number(item.extra_bps ?? 0), sharpe: Number(item.sharpe ?? 0), return: Number(item.total_return ?? 0) }));
   const executionCosts = asRows(asObject(results.costs).execution_levels).map((item, index) => ({
-    x: `S${index + 1}`,
-    scenario: `Borrow ${Number(item.borrow_rate ?? 0) * 100}% · impact ${Number(item.impact_coefficient ?? 0)} · participation ${Number(item.max_participation ?? 0) * 100}%`,
+    x: `Scenario ${index + 1}`,
+    scenario: `Scenario ${index + 1}: Borrow ${Number(item.borrow_rate ?? 0) * 100}% · impact ${Number(item.impact_coefficient ?? 0)} · participation ${Number(item.max_participation ?? 0) * 100}%`,
     sharpe: Number(item.sharpe ?? 0),
   }));
   const delays = asRows(asObject(results.delay).levels).map((item) => ({ x: Number(item.delay_bars ?? 0), sharpe: Number(item.sharpe ?? 0), return: Number(item.total_return ?? 0) }));
-  const neighbours = asRows(asObject(results.stability).neighbours).map((item, index) => ({ x: `N${index + 1}`, label: String(item.params ?? ''), sharpe: Number(item.sharpe ?? 0) }));
-  const periods = asRows(asObject(results.time).subperiods).map((item, index) => ({ x: `P${index + 1}`, sharpe: Number(item.sharpe ?? 0), return: Number(item.total_return ?? 0) }));
+  const neighbours = asRows(asObject(results.stability).neighbours).map((item, index) => ({
+    x: `Neighbor ${index + 1}`,
+    label: `Neighbor ${index + 1} (parameter perturbation): ${String(item.params ?? '')}`,
+    sharpe: Number(item.sharpe ?? 0),
+  }));
+  const periods = asRows(asObject(results.time).subperiods).map((item, index) => ({
+    x: `Period ${index + 1}`,
+    label: `Sub-period ${index + 1} out-of-sample window`,
+    sharpe: Number(item.sharpe ?? 0),
+    return: Number(item.total_return ?? 0),
+  }));
   const histogram = asRows(asObject(asObject(results.trades).resampling).bootstrap_terminal_histogram).map((item) => ({ x: Number(item.lower ?? 0), count: Number(item.count ?? 0) }));
   const tradePnls = asSeries(results.trade_pnl_sorted).map((pnl, index) => ({ x: index + 1, pnl }));
   const regimes = asRows(asObject(results.regimes).buckets).map((item) => ({ x: String(item.name ?? ''), sharpe: Number(item.sharpe ?? 0), mean: Number(item.mean_return ?? 0) }));
@@ -77,11 +86,11 @@ function SurvivalCharts({ results }: { results: Record<string, unknown> }) {
     <ChartCard title="Execution delay · Sharpe by bars">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={delays}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip /><Line dataKey="sharpe" stroke="#8b5cf6" dot /></LineChart></ResponsiveContainer>
     </ChartCard>
-    <ChartCard title="Parameter stability · neighbour Sharpe">
+    <ChartCard title="Parameter stability · neighbor Sharpe">
       <ResponsiveContainer width="100%" height="100%"><BarChart data={neighbours}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip labelFormatter={(value) => neighbours.find((item) => item.x === value)?.label ?? String(value)} /><Bar dataKey="sharpe" fill="#8b5cf6" /></BarChart></ResponsiveContainer>
     </ChartCard>
-    <ChartCard title="Time-period robustness · Sharpe">
-      <ResponsiveContainer width="100%" height="100%"><BarChart data={periods}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip /><Bar dataKey="sharpe" fill="#14b8a6" /></BarChart></ResponsiveContainer>
+    <ChartCard title="Time-period robustness · sub-period Sharpe">
+      <ResponsiveContainer width="100%" height="100%"><BarChart data={periods}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip labelFormatter={(value) => periods.find((item) => item.x === value)?.label ?? String(value)} /><Bar dataKey="sharpe" fill="#14b8a6" /></BarChart></ResponsiveContainer>
     </ChartCard>
     <ChartCard title="Trade bootstrap · terminal P&L histogram">
       <ResponsiveContainer width="100%" height="100%"><BarChart data={histogram}>{grid}<XAxis dataKey="x" type="number" tick={label} /><YAxis tick={label} width={32} /><ReferenceLine x={0} stroke="#ef4444" strokeDasharray="4 3" /><Tooltip /><Bar dataKey="count" fill="#6366f1" /></BarChart></ResponsiveContainer>

@@ -6,7 +6,6 @@ import { Activity, ArrowRight, BarChart3, Layers, Target } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { GlowCard } from '@/components/ui/primitives';
 import { HEADLINE } from '@/lib/baseline';
-import { GITHUB_URL } from '@/lib/site';
 import { cn, formatCompact } from '@/lib/utils';
 
 const CARDS: { title: string; body: ReactNode; icon: typeof Activity; tile: string; href: string; badge?: string }[] = [
@@ -22,14 +21,14 @@ const CARDS: { title: string; body: ReactNode; icon: typeof Activity; tile: stri
     body: 'Zero look-ahead bias by construction, a price-indexed limit order book, a gross leverage limit in the ledger, and realistic fills with slippage and participation caps.',
     icon: Activity,
     tile: 'from-sky-400/25 to-cyan-500/10 text-accent-ice ring-accent-ice/30',
-    href: `${GITHUB_URL}/tree/main/crates/spectra-engine`,
+    href: '/studio?tab=backtests',
   },
   {
     title: 'Overfitting & Validation Lab',
     body: 'Deflated Sharpe Ratio (DSR), Combinatorially Symmetric Cross-Validation (CSCV), PBO, walk-forward and strategy survival analysis, with every trial ledgered.',
     icon: BarChart3,
     tile: 'from-violet-500/30 to-fuchsia-500/10 text-violet-500 ring-violet-500/30 dark:text-violet-400',
-    href: `${GITHUB_URL}/tree/main/crates/spectra-research`,
+    href: '/studio?tab=survival',
   },
   {
     title: 'Brokerage & Execution Layer',

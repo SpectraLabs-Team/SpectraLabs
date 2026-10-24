@@ -441,7 +441,9 @@ export function RiskLab() {
           </div>
           <p className="mt-3 flex items-start gap-2 text-[11px] leading-5 text-ink/40">
             <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            Bars are exact bin probabilities of the engine&apos;s model: one aggregate GBM position, zero drift, σ = average asset volatility. The markers are the engine&apos;s Monte Carlo estimates.
+            {results?.var.dependence_model
+              ? `Simulated across correlated positions with ${results.var.dependence_model} copula. Bars are loss bin probabilities; markers denote Monte Carlo VaR & CVaR thresholds.`
+              : 'Bars are loss bin probabilities of the portfolio distribution. Markers denote Monte Carlo VaR & CVaR thresholds.'}
           </p>
         </GlassCard>
 
@@ -855,7 +857,7 @@ export function RiskLab() {
                   ['throughput', `${formatCompact((results.var.simulations_run * 1000) / results.var.compute_ms)}/s`],
                   ['engine', `v${results.var.library_version}`],
                   ['commit', results.var.git_commit.slice(0, 10)],
-                  ['model', 'GBM aggregate'],
+                  ['model', results.var.dependence_model ? `${results.var.dependence_model} copula` : 'GBM aggregate'],
                 ].map(([k, v]) => (
                   <div key={k}>
                     <dt className="text-[10px] uppercase tracking-wider text-ink/40">{k}</dt>

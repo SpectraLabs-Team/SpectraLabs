@@ -161,21 +161,11 @@ impl PortfolioSnapshot {
         }
 
         // Run 2,000 simulations on 1-day horizon (1/252) at 99% confidence
-        match crate::copula::simulate_correlated(
-            &p,
-            None,
-            model,
-            2_000,
-            42,
-            1.0 / 252.0,
-            0.99,
-        ) {
-            Ok(sim) => {
-                match crate::metrics::value_at_risk(&sim.portfolio_losses, 0.99) {
-                    Ok(var_dollars) => var_dollars.max(0.0) / self.equity,
-                    Err(_) => (self.leverage() * 0.0165 * 2.33).max(0.0),
-                }
-            }
+        match crate::copula::simulate_correlated(&p, None, model, 2_000, 42, 1.0 / 252.0, 0.99) {
+            Ok(sim) => match crate::metrics::value_at_risk(&sim.portfolio_losses, 0.99) {
+                Ok(var_dollars) => var_dollars.max(0.0) / self.equity,
+                Err(_) => (self.leverage() * 0.0165 * 2.33).max(0.0),
+            },
             Err(_) => (self.leverage() * 0.0165 * 2.33).max(0.0),
         }
     }
@@ -608,10 +598,8 @@ impl PreTradeChecker {
                 f64::INFINITY
             };
 
-            let permissible_qty = max_qty_for_pos
-                .min(max_qty_for_gross)
-                .min(max_qty_for_lev)
-                .min(max_qty_for_var);
+            let permissible_qty =
+                max_qty_for_pos.min(max_qty_for_gross).min(max_qty_for_lev).min(max_qty_for_var);
 
             if permissible_qty > 0.0 && permissible_qty < order.qty {
                 return PreTradeResult {
@@ -823,12 +811,7 @@ mod tests {
         portfolio.positions.insert("AAPL".into(), PositionSnapshot { qty: 200.0, price: 150.0 });
 
         // Buying another $60,000 of MSFT pushes gross to $90,000, 0.9x leverage
-        let order = OrderCandidate {
-            symbol: "MSFT".into(),
-            side: OrderSide::Buy,
-            qty: 200.0,
-            price: 300.0,
-        };
+        let order = OrderCandidate { symbol: "MSFT".into(), side: OrderSide::Buy, qty: 200.0, price: 300.0 };
 
         let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
         assert_eq!(res.verdict, PreTradeVerdict::Rejected);

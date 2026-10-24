@@ -73,10 +73,7 @@ impl From<PaperAccount> for PaperAccountView {
     fn from(acc: PaperAccount) -> Self {
         let mut positions_map = HashMap::new();
         for pos in &acc.positions {
-            positions_map.insert(
-                pos.symbol.clone(),
-                PositionSnapshot { qty: pos.qty, price: pos.price },
-            );
+            positions_map.insert(pos.symbol.clone(), PositionSnapshot { qty: pos.qty, price: pos.price });
         }
         let snap = PortfolioSnapshot {
             cash: acc.balance.cash,

@@ -10,4 +10,5 @@ out/
 /store/
 /registry/
 .data/
+.pgdata/
 

@@ -1873,6 +1873,64 @@
         }
       }
     },
+    "/api/v1/observability/sentry": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Sentry observability status.",
+        "operationId": "sentry_status_handler",
+        "responses": {
+          "200": {
+            "description": "Sentry observability status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SentryStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/observability/sentry/verify": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Sentry test delivery verification.",
+        "operationId": "sentry_verify_handler",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SentryVerifyRequest"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sentry test delivery outcome",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SentryVerifyOutcome"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/optimization/holdout": {
       "get": {
         "tags": [
@@ -2393,6 +2451,123 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/gap/analyze": {
+      "post": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "POST /api/v1/paper/gap/analyze",
+        "operationId": "handle_analyze_gap",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeGapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Gap report computed and saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GapReportDetailView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload"
+          },
+          "500": {
+            "description": "Database or execution error"
+          }
+        }
+      }
+    },
+    "/api/v1/paper/gap/reports": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "GET /api/v1/paper/gap/reports",
+        "operationId": "handle_list_gap_reports",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of gap report summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GapReportSummaryView"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database error"
+          }
+        }
+      }
+    },
+    "/api/v1/paper/gap/reports/{id}": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "GET /api/v1/paper/gap/reports/{id}",
+        "operationId": "handle_get_gap_report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Gap report ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Gap report detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GapReportDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Gap report not found"
+          },
+          "500": {
+            "description": "Database error"
           }
         }
       }
@@ -5175,6 +5350,132 @@
         },
         "additionalProperties": false
       },
+      "AnalyzeGapRequest": {
+        "type": "object",
+        "description": "Request payload to trigger gap analysis.",
+        "required": [
+          "strategy_id"
+        ],
+        "properties": {
+          "backtest_fills": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/BacktestFillInput"
+            },
+            "description": "Optional explicitly supplied backtest fills (defaults to querying backtest artifacts)."
+          },
+          "backtest_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Backtest run ID to compare against (optional)."
+          },
+          "max_slippage_drift_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Maximum acceptable slippage drift in basis points."
+          },
+          "max_timing_latency_ms": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Maximum acceptable execution latency in milliseconds."
+          },
+          "max_tracking_error_pct": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Maximum acceptable tracking error in percent."
+          },
+          "min_fill_ratio": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Minimum acceptable fill ratio."
+          },
+          "paper_fills": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/PaperFillInput"
+            },
+            "description": "Optional explicitly supplied paper fills (defaults to querying database)."
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Strategy ID to analyze."
+          }
+        }
+      },
+      "BacktestFillInput": {
+        "type": "object",
+        "description": "Backtest fill input record.",
+        "required": [
+          "symbol",
+          "side",
+          "qty",
+          "price",
+          "timestamp_ns",
+          "fee",
+          "slippage_bps",
+          "bar_price"
+        ],
+        "properties": {
+          "bar_price": {
+            "type": "number",
+            "format": "double"
+          },
+          "fee": {
+            "type": "number",
+            "format": "double"
+          },
+          "order_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "side": {
+            "type": "string"
+          },
+          "slippage_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "timestamp_ns": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "BacktestListItem": {
         "type": "object",
         "description": "One backtest in a list: what was asked for, its state and headline numbers.",
@@ -6774,6 +7075,188 @@
         },
         "additionalProperties": false
       },
+      "GapReportDetailView": {
+        "type": "object",
+        "description": "Detailed view of a gap report including attribution and trade matches.",
+        "required": [
+          "id",
+          "workspace_id",
+          "strategy_id",
+          "total_pnl_gap",
+          "cost_gap",
+          "slippage_gap",
+          "timing_delay_gap",
+          "missed_fills_gap",
+          "tracking_error_pct",
+          "mean_slippage_drift_bps",
+          "mean_timing_latency_ms",
+          "fill_ratio",
+          "alert_status",
+          "report",
+          "created_at"
+        ],
+        "properties": {
+          "alert_status": {
+            "type": "string"
+          },
+          "backtest_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "cost_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "fill_ratio": {
+            "type": "number",
+            "format": "double"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mean_slippage_drift_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "mean_timing_latency_ms": {
+            "type": "number",
+            "format": "double"
+          },
+          "missed_fills_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "paper_account_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "report": {},
+          "slippage_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timing_delay_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_pnl_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "tracking_error_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "GapReportSummaryView": {
+        "type": "object",
+        "description": "Summary view of a gap report.",
+        "required": [
+          "id",
+          "workspace_id",
+          "strategy_id",
+          "total_pnl_gap",
+          "cost_gap",
+          "slippage_gap",
+          "timing_delay_gap",
+          "missed_fills_gap",
+          "tracking_error_pct",
+          "mean_slippage_drift_bps",
+          "mean_timing_latency_ms",
+          "fill_ratio",
+          "alert_status",
+          "created_at"
+        ],
+        "properties": {
+          "alert_status": {
+            "type": "string"
+          },
+          "backtest_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "cost_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "fill_ratio": {
+            "type": "number",
+            "format": "double"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mean_slippage_drift_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "mean_timing_latency_ms": {
+            "type": "number",
+            "format": "double"
+          },
+          "missed_fills_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "paper_account_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "slippage_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timing_delay_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_pnl_gap": {
+            "type": "number",
+            "format": "double"
+          },
+          "tracking_error_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "HoldoutEvaluationView": {
         "type": "object",
         "required": [
@@ -7557,6 +8040,53 @@
           "volume": {
             "type": "number",
             "format": "double"
+          }
+        }
+      },
+      "PaperFillInput": {
+        "type": "object",
+        "description": "Paper fill input record.",
+        "required": [
+          "symbol",
+          "side",
+          "qty",
+          "price",
+          "timestamp_ns",
+          "fee",
+          "slippage_bps"
+        ],
+        "properties": {
+          "fee": {
+            "type": "number",
+            "format": "double"
+          },
+          "order_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "price": {
+            "type": "number",
+            "format": "double"
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "side": {
+            "type": "string"
+          },
+          "slippage_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "timestamp_ns": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -9242,6 +9772,66 @@
         },
         "additionalProperties": false
       },
+      "SentryStatus": {
+        "type": "object",
+        "description": "Sentry delivery status.",
+        "required": [
+          "enabled",
+          "dsn_configured"
+        ],
+        "properties": {
+          "dsn_configured": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "release": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "SentryVerifyOutcome": {
+        "type": "object",
+        "description": "Verification result of sending an event to Sentry.",
+        "required": [
+          "enabled",
+          "message",
+          "delivered"
+        ],
+        "properties": {
+          "delivered": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "event_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "SentryVerifyRequest": {
+        "type": "object",
+        "description": "Sentry test delivery verification request.",
+        "properties": {
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "SessionView": {
         "type": "object",
         "description": "A resumable upload.",
@@ -10833,6 +11423,10 @@
     }
   },
   "tags": [
+    {
+      "name": "system",
+      "description": "System observability, probes and metrics"
+    },
     {
       "name": "probes",
       "description": "Liveness and readiness"

@@ -67,6 +67,7 @@ if changed "${rust_paths[@]}"; then
       cargo run --quiet -p spectra-db -- migrate
       cargo test -p spectra-registry --features postgres --test pg_registry
       psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f crates/spectra-db/tests/schema_checks.sql
+      psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -f crates/spectra-db/tests/role_checks.sql
       { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/queue_checks.sql; } \
         | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
       { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/corporate_action_checks.sql; } \

@@ -542,6 +542,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/observability/sentry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sentry observability status. */
+        get: operations["sentry_status_handler"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/observability/sentry/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sentry test delivery verification. */
+        post: operations["sentry_verify_handler"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/optimization/holdout": {
         parameters: {
             query?: never;
@@ -758,6 +792,57 @@ export interface paths {
         put?: never;
         /** Reset a strategy's paper account (clears positions, resets cash to initial capital). */
         post: operations["reset_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/gap/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /api/v1/paper/gap/analyze */
+        post: operations["handle_analyze_gap"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/gap/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/paper/gap/reports */
+        get: operations["handle_list_gap_reports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/gap/reports/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/paper/gap/reports/{id} */
+        get: operations["handle_get_gap_report"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1722,6 +1807,61 @@ export interface components {
             /** @description Member symbol. */
             symbol: string;
         };
+        /** @description Request payload to trigger gap analysis. */
+        AnalyzeGapRequest: {
+            /** @description Optional explicitly supplied backtest fills (defaults to querying backtest artifacts). */
+            backtest_fills?: components["schemas"]["BacktestFillInput"][] | null;
+            /**
+             * Format: uuid
+             * @description Backtest run ID to compare against (optional).
+             */
+            backtest_run_id?: string | null;
+            /**
+             * Format: double
+             * @description Maximum acceptable slippage drift in basis points.
+             */
+            max_slippage_drift_bps?: number | null;
+            /**
+             * Format: double
+             * @description Maximum acceptable execution latency in milliseconds.
+             */
+            max_timing_latency_ms?: number | null;
+            /**
+             * Format: double
+             * @description Maximum acceptable tracking error in percent.
+             */
+            max_tracking_error_pct?: number | null;
+            /**
+             * Format: double
+             * @description Minimum acceptable fill ratio.
+             */
+            min_fill_ratio?: number | null;
+            /** @description Optional explicitly supplied paper fills (defaults to querying database). */
+            paper_fills?: components["schemas"]["PaperFillInput"][] | null;
+            /**
+             * Format: uuid
+             * @description Strategy ID to analyze.
+             */
+            strategy_id: string;
+        };
+        /** @description Backtest fill input record. */
+        BacktestFillInput: {
+            /** Format: double */
+            bar_price: number;
+            /** Format: double */
+            fee: number;
+            order_id?: string | null;
+            /** Format: double */
+            price: number;
+            /** Format: double */
+            qty: number;
+            side: string;
+            /** Format: double */
+            slippage_bps: number;
+            symbol: string;
+            /** Format: int64 */
+            timestamp_ns: number;
+        };
         /** @description One backtest in a list: what was asked for, its state and headline numbers. */
         BacktestListItem: {
             /** @description A cancel was asked for while it ran. */
@@ -2412,6 +2552,73 @@ export interface components {
             /** @description Format to export: currently only `parquet` is supported (default: `parquet`). */
             format?: string | null;
         };
+        /** @description Detailed view of a gap report including attribution and trade matches. */
+        GapReportDetailView: {
+            alert_status: string;
+            /** Format: uuid */
+            backtest_run_id?: string | null;
+            /** Format: double */
+            cost_gap: number;
+            created_at: string;
+            /** Format: double */
+            fill_ratio: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: double */
+            mean_slippage_drift_bps: number;
+            /** Format: double */
+            mean_timing_latency_ms: number;
+            /** Format: double */
+            missed_fills_gap: number;
+            /** Format: uuid */
+            paper_account_id?: string | null;
+            report: unknown;
+            /** Format: double */
+            slippage_gap: number;
+            /** Format: uuid */
+            strategy_id: string;
+            /** Format: double */
+            timing_delay_gap: number;
+            /** Format: double */
+            total_pnl_gap: number;
+            /** Format: double */
+            tracking_error_pct: number;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        /** @description Summary view of a gap report. */
+        GapReportSummaryView: {
+            alert_status: string;
+            /** Format: uuid */
+            backtest_run_id?: string | null;
+            /** Format: double */
+            cost_gap: number;
+            created_at: string;
+            /** Format: double */
+            fill_ratio: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: double */
+            mean_slippage_drift_bps: number;
+            /** Format: double */
+            mean_timing_latency_ms: number;
+            /** Format: double */
+            missed_fills_gap: number;
+            /** Format: uuid */
+            paper_account_id?: string | null;
+            /** Format: double */
+            slippage_gap: number;
+            /** Format: uuid */
+            strategy_id: string;
+            /** Format: double */
+            timing_delay_gap: number;
+            /** Format: double */
+            total_pnl_gap: number;
+            /** Format: double */
+            tracking_error_pct: number;
+            /** Format: uuid */
+            workspace_id: string;
+        };
         HoldoutEvaluationView: {
             /** Format: double */
             dsr?: number | null;
@@ -2729,6 +2936,22 @@ export interface components {
             ts_ns: number;
             /** Format: double */
             volume: number;
+        };
+        /** @description Paper fill input record. */
+        PaperFillInput: {
+            /** Format: double */
+            fee: number;
+            order_id?: string | null;
+            /** Format: double */
+            price: number;
+            /** Format: double */
+            qty: number;
+            side: string;
+            /** Format: double */
+            slippage_bps: number;
+            symbol: string;
+            /** Format: int64 */
+            timestamp_ns: number;
         };
         PaperFillView: {
             /** Format: date-time */
@@ -3370,6 +3593,23 @@ export interface components {
             dataset_version_id: string;
             name: string;
             notes?: string | null;
+        };
+        /** @description Sentry delivery status. */
+        SentryStatus: {
+            dsn_configured: boolean;
+            enabled: boolean;
+            release?: string | null;
+        };
+        /** @description Verification result of sending an event to Sentry. */
+        SentryVerifyOutcome: {
+            delivered: boolean;
+            enabled: boolean;
+            event_id?: string | null;
+            message: string;
+        };
+        /** @description Sentry test delivery verification request. */
+        SentryVerifyRequest: {
+            message?: string | null;
         };
         /** @description A resumable upload. */
         SessionView: {
@@ -5488,6 +5728,50 @@ export interface operations {
             };
         };
     };
+    sentry_status_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sentry observability status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SentryStatus"];
+                };
+            };
+        };
+    };
+    sentry_verify_handler: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": null | components["schemas"]["SentryVerifyRequest"];
+            };
+        };
+        responses: {
+            /** @description Sentry test delivery outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SentryVerifyOutcome"];
+                };
+            };
+        };
+    };
     list_holdouts: {
         parameters: {
             query?: never;
@@ -5859,6 +6143,110 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PaperAccountView"];
                 };
+            };
+        };
+    };
+    handle_analyze_gap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AnalyzeGapRequest"];
+            };
+        };
+        responses: {
+            /** @description Gap report computed and saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapReportDetailView"];
+                };
+            };
+            /** @description Invalid request payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Database or execution error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    handle_list_gap_reports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of gap report summaries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapReportSummaryView"][];
+                };
+            };
+            /** @description Database error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    handle_get_gap_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Gap report ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gap report detail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapReportDetailView"];
+                };
+            };
+            /** @description Gap report not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Database error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

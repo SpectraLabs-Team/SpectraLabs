@@ -296,3 +296,19 @@ async fn strategy_versions_are_idempotent_and_numbered_under_concurrency() {
     assert!(save_version(&pool, other, s.id, &v('e')).await.unwrap().is_none());
     assert_eq!(get(&pool, ws, s.id).await.unwrap().unwrap().version_count, 4);
 }
+
+#[tokio::test]
+async fn service_role_provisioning_and_privileges() {
+    let Some(pool) = pool().await else { return };
+    let role = "test_spectra_app_unit";
+    let outcome = spectra_db::roles::provision_service_roles(&pool, role, Some("secret_pw_123"))
+        .await
+        .expect("provision service role");
+    assert_eq!(outcome.role_name, role);
+
+    let ver = spectra_db::roles::verify_service_role(&pool, role).await.expect("verify service role");
+    assert!(ver.can_connect);
+    assert!(ver.can_read_workspaces);
+    assert!(ver.can_write_jobs);
+    assert!(ver.cannot_write_users);
+}

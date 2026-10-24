@@ -46,6 +46,7 @@ pub mod config;
 pub mod corporate_actions_api;
 pub mod datasets_api;
 pub mod engine;
+pub mod gap_api;
 pub mod identity;
 pub mod ingest;
 pub mod jobs_api;
@@ -602,6 +603,31 @@ async fn openapi_json() -> Response {
     json_response(200, openapi::spec_json())
 }
 
+/// Sentry observability status.
+#[utoipa::path(get, path = "/api/v1/observability/sentry", tag = "system",
+    responses((status = 200, description = "Sentry observability status", body = crate::observability::SentryStatus)))]
+#[allow(clippy::unused_async)]
+async fn sentry_status_handler() -> Response {
+    json_response(200, serde_json::to_string(&observability::sentry_status()).unwrap_or_default())
+}
+
+/// Sentry test delivery verification request.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct SentryVerifyRequest {
+    pub message: Option<String>,
+}
+
+/// Sentry test delivery verification.
+#[utoipa::path(post, path = "/api/v1/observability/sentry/verify", tag = "system", request_body = Option<SentryVerifyRequest>,
+    responses((status = 200, description = "Sentry test delivery outcome", body = crate::observability::SentryVerifyOutcome)))]
+#[allow(clippy::unused_async)]
+async fn sentry_verify_handler(body: Result<Bytes, BytesRejection>) -> Response {
+    let req: Option<SentryVerifyRequest> = body.ok().and_then(|b| serde_json::from_slice(&b).ok());
+    let msg = req.and_then(|r| r.message);
+    let outcome = observability::verify_sentry_delivery(msg.as_deref());
+    json_response(200, serde_json::to_string(&outcome).unwrap_or_default())
+}
+
 /// A risk metric for a portfolio.
 #[utoipa::path(post, path = "/api/v1/risk", tag = "engine", request_body = crate::openapi::RiskRequest,
     responses((status = 200, description = "Risk report"), (status = 422, body = crate::openapi::ErrorDoc)))]
@@ -924,6 +950,9 @@ fn paper_routes() -> Router<AppState> {
         .route("/api/v1/paper/step", only(post(paper_api::step_strategy)))
         .route("/api/v1/paper/sync", only(post(paper_api::sync_paper_orders)))
         .route("/api/v1/paper/reconcile", only(get(paper_api::reconcile_paper_positions)))
+        .route("/api/v1/paper/gap/analyze", only(post(gap_api::handle_analyze_gap)))
+        .route("/api/v1/paper/gap/reports", only(get(gap_api::handle_list_gap_reports)))
+        .route("/api/v1/paper/gap/reports/{id}", only(get(gap_api::handle_get_gap_report)))
 }
 
 /// The application. `db` is checked by `/ready`; pass `None` where there is
@@ -953,6 +982,8 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .route("/health", only(get(health)))
         .route("/ready", only(get(ready)))
         .route("/metrics", only(get(prometheus_metrics)))
+        .route("/api/v1/observability/sentry", only(get(sentry_status_handler)))
+        .route("/api/v1/observability/sentry/verify", only(post(sentry_verify_handler)))
         .route("/api/v1/openapi.json", only(get(openapi_json)))
         .merge(signed)
         .fallback(not_found)

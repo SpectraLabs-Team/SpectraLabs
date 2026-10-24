@@ -7963,10 +7963,17 @@
           "peak_equity",
           "daily_start_equity",
           "positions",
-          "updated_at"
+          "updated_at",
+          "var_pct",
+          "var_dollar",
+          "cvar_dollar"
         ],
         "properties": {
           "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "cvar_dollar": {
             "type": "number",
             "format": "double"
           },
@@ -7995,6 +8002,14 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "var_dollar": {
+            "type": "number",
+            "format": "double"
+          },
+          "var_pct": {
+            "type": "number",
+            "format": "double"
           },
           "workspace_id": {
             "type": "string",

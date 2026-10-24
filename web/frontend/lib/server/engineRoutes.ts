@@ -120,6 +120,9 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/risk/exposure-history': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/risk/alerts': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/risk/replay/{id}': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/risk/regimes': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  'api/v1/risk/garch': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  'api/v1/risk/evt': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
 };
 
 export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };

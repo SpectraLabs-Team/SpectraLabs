@@ -2909,6 +2909,8 @@ export interface components {
             /** Format: double */
             cash: number;
             /** Format: double */
+            cvar_dollar: number;
+            /** Format: double */
             daily_start_equity: number;
             /** Format: double */
             equity: number;
@@ -2919,6 +2921,10 @@ export interface components {
             strategy_id: string;
             /** Format: date-time */
             updated_at: string;
+            /** Format: double */
+            var_dollar: number;
+            /** Format: double */
+            var_pct: number;
             /** Format: uuid */
             workspace_id: string;
         };

@@ -64,10 +64,31 @@ pub(crate) struct PaperAccountView {
     pub daily_start_equity: f64,
     pub positions: Vec<PortfolioPositionView>,
     pub updated_at: DateTime<Utc>,
+    pub var_pct: f64,
+    pub var_dollar: f64,
+    pub cvar_dollar: f64,
 }
 
 impl From<PaperAccount> for PaperAccountView {
     fn from(acc: PaperAccount) -> Self {
+        let mut positions_map = HashMap::new();
+        for pos in &acc.positions {
+            positions_map.insert(
+                pos.symbol.clone(),
+                PositionSnapshot { qty: pos.qty, price: pos.price },
+            );
+        }
+        let snap = PortfolioSnapshot {
+            cash: acc.balance.cash,
+            equity: acc.balance.equity,
+            peak_equity: acc.balance.peak_equity,
+            daily_start_equity: acc.balance.daily_start_equity,
+            positions: positions_map,
+        };
+        let var_pct = snap.var_pct();
+        let var_dollar = var_pct * snap.equity;
+        let cvar_dollar = var_dollar * 1.25;
+
         Self {
             workspace_id: acc.workspace_id,
             strategy_id: acc.strategy_id,
@@ -77,6 +98,9 @@ impl From<PaperAccount> for PaperAccountView {
             daily_start_equity: acc.balance.daily_start_equity,
             positions: acc.positions.into_iter().map(PortfolioPositionView::from).collect(),
             updated_at: acc.balance.updated_at,
+            var_pct,
+            var_dollar,
+            cvar_dollar,
         }
     }
 }

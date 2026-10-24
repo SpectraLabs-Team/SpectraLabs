@@ -34,7 +34,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
 
   const loadDetail = useCallback(async (id: string) => {
     try {
-      const res = await fetch(`/api/v1/paper/gap/reports/${encodeURIComponent(id)}`);
+      const res = await fetch(`/api/engine/api/v1/paper/gap/reports/${encodeURIComponent(id)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as GapReportDetail;
       setSelectedReport(data);
@@ -48,8 +48,8 @@ export function BacktestToPaperGap({ strategyId }: Props) {
     setError(null);
     try {
       const url = strategyId
-        ? `/api/v1/paper/gap/reports?strategy_id=${encodeURIComponent(strategyId)}`
-        : '/api/v1/paper/gap/reports';
+        ? `/api/engine/api/v1/paper/gap/reports?strategy_id=${encodeURIComponent(strategyId)}`
+        : '/api/engine/api/v1/paper/gap/reports';
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as GapReportSummary[];
@@ -72,7 +72,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
     setAnalyzing(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/paper/gap/analyze', {
+      const res = await fetch('/api/engine/api/v1/paper/gap/analyze', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({

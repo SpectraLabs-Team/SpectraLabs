@@ -3,6 +3,7 @@
 //! statistics and the Strategy Survival Lab. Ported from the C++ reference
 //! (`quantforge` v0.6.0); reports are text-identical.
 
+pub mod attribution;
 pub mod benchmark;
 pub mod gap;
 pub mod pbo;
@@ -13,6 +14,10 @@ pub mod trades;
 pub mod validation;
 pub mod walkforward;
 
+pub use attribution::{
+    compute_pnl_attribution, CostDecomposition, DirectionalAttribution, InstrumentAttribution,
+    PnlAttribution, WaterfallStep,
+};
 pub use benchmark::{aligned_returns, benchmark_returns, compute_benchmark_metrics, BenchmarkMetrics};
 pub use gap::{
     compute_backtest_to_paper_gap, BacktestFillRecord, GapAlert, GapAlertStatus, GapAttribution, GapMetrics,

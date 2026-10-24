@@ -58,6 +58,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/{id}/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Detailed P&L attribution breakdown for a finished backtest (Module 11). */
+        get: operations["backtest_attribution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests/{id}/cancel": {
         parameters: {
             query?: never;
@@ -792,6 +809,23 @@ export interface paths {
         put?: never;
         /** Reset a strategy's paper account (clears positions, resets cash to initial capital). */
         post: operations["reset_account"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get P&L attribution breakdown for a paper trading strategy account (Module 11). */
+        get: operations["get_paper_attribution"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4481,6 +4515,45 @@ export interface operations {
             };
         };
     };
+    backtest_attribution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest job id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The attribution breakdown */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such backtest */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The backtest has not succeeded yet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     cancel_backtest: {
         parameters: {
             query?: never;
@@ -6148,6 +6221,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaperAccountView"];
+                };
+            };
+        };
+    };
+    get_paper_attribution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string;
+                initial_cash: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paper trading P&L attribution */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

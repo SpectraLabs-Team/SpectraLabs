@@ -10,6 +10,7 @@ import { DataLab } from './DataLab';
 import { MarketSettings } from './MarketSettings';
 import { OptimizationLab } from './OptimizationLab';
 import { OverviewDashboard } from './OverviewDashboard';
+import { PaperLab } from './PaperLab';
 import { PortfolioProvider } from './PortfolioContext';
 import { PortfolioStudio } from './PortfolioStudio';
 import { RiskCenter } from './RiskCenter';
@@ -35,6 +36,7 @@ export function StudioApp() {
             {tab === 'overview' && <OverviewDashboard onTab={setTab} onSelectRun={selectRun} />}
             {tab === 'risk' && <RiskLab />}
             {tab === 'risk-center' && <RiskCenter />}
+            {tab === 'paper' && <PaperLab />}
             {tab === 'portfolio' && <PortfolioStudio />}
             {tab === 'data' && <DataLab />}
             {tab === 'strategies' && <StrategyStudio />}

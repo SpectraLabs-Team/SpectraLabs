@@ -74,6 +74,9 @@ export async function request<T>(path: string, init?: RequestInit & { timeoutMs?
   return response.json() as Promise<T>;
 }
 
+const get = <T>(path: string, timeoutMs?: number) =>
+  request<T>(path, { method: 'GET', timeoutMs });
+
 const post = <T>(path: string, body: unknown, timeoutMs?: number) =>
   request<T>(path, { method: 'POST', body: JSON.stringify(body), timeoutMs });
 
@@ -176,4 +179,123 @@ export const fitEvt = (body: {
   confidence?: number;
   threshold_quantile?: number;
 }) => post<EvtResult>('/api/v1/risk/evt', body);
+
+// ---------------------------------------------------------------- Paper Trading & Gap Analysis (M9 & M10)
+
+export interface PaperPosition {
+  symbol: string;
+  qty: number;
+  price: number;
+  market_value: number;
+  weight: number;
+  unrealized_pnl: number;
+}
+
+export interface PaperAccountView {
+  workspace_id: string;
+  strategy_id: string;
+  cash: number;
+  equity: number;
+  peak_equity: number;
+  daily_start_equity: number;
+  positions: PaperPosition[];
+  updated_at: string;
+  var_pct: number;
+  var_dollar: number;
+  cvar_dollar: number;
+}
+
+export interface PaperFillView {
+  id: string;
+  order_id: string;
+  workspace_id: string;
+  strategy_id: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  qty: number;
+  price: number;
+  fee: number;
+  created_at: string;
+}
+
+export interface PaperOrderView {
+  id: string;
+  workspace_id: string;
+  strategy_id: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  order_type: 'market' | 'limit' | 'stop';
+  qty: number;
+  limit_price?: number;
+  stop_price?: number;
+  tif: string;
+  status: 'new' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected';
+  filled_qty: number;
+  filled_avg_price?: number;
+  reject_reason?: string;
+  created_at: string;
+  updated_at: string;
+  fills?: PaperFillView[];
+}
+
+export interface CreatePaperOrderRequest {
+  strategy_id: string;
+  symbol: string;
+  side: 'buy' | 'sell';
+  order_type: 'market' | 'limit' | 'stop';
+  qty: number;
+  limit_price?: number;
+  stop_price?: number;
+  tif?: string;
+  fill_now?: boolean;
+  fill_price?: number;
+}
+
+export interface SyncOrdersResponse {
+  synced: boolean;
+  source: string;
+  orders_synced: number;
+  fills_processed: number;
+}
+
+export interface PositionMismatch {
+  symbol: string;
+  broker_qty: number;
+  local_qty: number;
+  discrepancy: number;
+}
+
+export interface ReconcilePositionsResponse {
+  reconciled: boolean;
+  source: string;
+  mismatches_count: number;
+  mismatches: PositionMismatch[];
+  timestamp: string;
+}
+
+export const getPaperAccount = (strategy_id: string, initial_cash?: number) => {
+  const query = initial_cash ? `?strategy_id=${encodeURIComponent(strategy_id)}&initial_cash=${initial_cash}` : `?strategy_id=${encodeURIComponent(strategy_id)}`;
+  return get<PaperAccountView>(`/api/v1/paper/account${query}`);
+};
+
+export const resetPaperAccount = (strategy_id: string, initial_cash?: number) =>
+  post<PaperAccountView>('/api/v1/paper/account/reset', { strategy_id, initial_cash });
+
+export const listPaperOrders = (strategy_id?: string, status?: string) => {
+  const params = new URLSearchParams();
+  if (strategy_id) params.set('strategy_id', strategy_id);
+  if (status) params.set('status', status);
+  const qs = params.toString();
+  return get<PaperOrderView[]>(`/api/v1/paper/orders${qs ? `?${qs}` : ''}`);
+};
+
+export const createPaperOrder = (order: CreatePaperOrderRequest) =>
+  post<PaperOrderView>('/api/v1/paper/orders', order);
+
+export const syncPaperOrders = (strategy_id?: string) =>
+  post<SyncOrdersResponse>('/api/v1/paper/sync', { strategy_id });
+
+export const reconcilePaperPositions = () =>
+  get<ReconcilePositionsResponse>('/api/v1/paper/reconcile');
+
 

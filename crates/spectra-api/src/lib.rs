@@ -788,6 +788,7 @@ fn backtest_routes() -> Router<AppState> {
         .route("/api/v1/backtests/{id}", only(get(backtests_api::get_backtest)))
         .route("/api/v1/backtests/{id}/cancel", only(post(backtests_api::cancel_backtest)))
         .route("/api/v1/backtests/{id}/series", only(get(backtests_api::backtest_series)))
+        .route("/api/v1/backtests/{id}/attribution", only(get(backtests_api::backtest_attribution)))
         .route("/api/v1/backtests/{id}/monthly-returns", only(get(backtests_api::backtest_monthly_returns)))
         .route("/api/v1/backtests/{id}/monthly_returns", only(get(backtests_api::backtest_monthly_returns)))
         .route("/api/v1/backtests/{id}/artifacts/{kind}", only(get(backtests_api::backtest_artifact)))
@@ -944,6 +945,7 @@ fn risk_center_routes() -> Router<AppState> {
 fn paper_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/paper/account", only(get(paper_api::get_account)))
+        .route("/api/v1/paper/attribution", only(get(paper_api::get_paper_attribution)))
         .route("/api/v1/paper/account/reset", only(post(paper_api::reset_account)))
         .route("/api/v1/paper/orders", only(get(paper_api::list_orders).post(paper_api::create_order)))
         .route("/api/v1/paper/orders/{id}", only(get(paper_api::get_order)))

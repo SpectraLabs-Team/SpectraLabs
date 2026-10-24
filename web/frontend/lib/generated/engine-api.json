@@ -220,6 +220,52 @@
         }
       }
     },
+    "/api/v1/backtests/{id}/attribution": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Detailed P&L attribution breakdown for a finished backtest (Module 11).",
+        "operationId": "backtest_attribution",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest job id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The attribution breakdown"
+          },
+          "404": {
+            "description": "No such backtest",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The backtest has not succeeded yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests/{id}/cancel": {
       "post": {
         "tags": [
@@ -2449,6 +2495,48 @@
                 "schema": {
                   "$ref": "#/components/schemas/PaperAccountView"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/attribution": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Get P&L attribution breakdown for a paper trading strategy account (Module 11).",
+        "operationId": "get_paper_attribution",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "initial_cash",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paper trading P&L attribution",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }

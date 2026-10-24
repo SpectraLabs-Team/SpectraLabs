@@ -21,7 +21,7 @@ use spectra_engine::{
     compute_drawdown_stats, compute_tail_stats, returns_from_curve, BacktestResult, EquityPoint, OrderState,
     TimeInForce,
 };
-use spectra_research::{compute_trade_stats, extract_trades};
+use spectra_research::{compute_pnl_attribution, compute_trade_stats, extract_trades};
 
 use crate::config::config_to_user_json;
 use crate::run::BacktestOutput;
@@ -295,6 +295,7 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("exposure", exposure_json(r))
         .with("activity", activity)
         .with("trades", trades)
+        .with("attribution", compute_pnl_attribution(&r.ledger, Some(&out.symbols), None)?.to_json())
         .with("instruments", instruments_json(out)?)
         .with("benchmark", benchmark_json(out)?);
     if req.is_multi() {

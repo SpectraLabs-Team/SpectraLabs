@@ -32,6 +32,7 @@ import { DrawdownChart, EquityChart, MonthlyHeatmap, StrategyCurvesChart } from 
 import { ago, cash, dash, int, pct, ratio, shortHash, signedPct, tone } from './format';
 import { StatusBadge } from './RunList';
 import { SurvivalLabPanel } from '../SurvivalLabPanel';
+import { BacktestToPaperGap } from '../BacktestToPaperGap';
 
 type Row = [label: string, value: string, tone?: 'profit' | 'loss' | 'neutral'];
 
@@ -644,6 +645,11 @@ export function RunDetail({ backtestId, catalog, datasets, canRun, onRerun, onCh
           params={b.request.params ?? {}}
           datasetId={dataset ? `${dataset.dataset_name} v${dataset.version}` : b.request.dataset_version_id ?? ''}
         />
+      )}
+      {b.status === 'succeeded' && (
+        <GlassCard className="p-5">
+          <BacktestToPaperGap strategyId={b.request.strategy_version_id} />
+        </GlassCard>
       )}
     </div>
   );

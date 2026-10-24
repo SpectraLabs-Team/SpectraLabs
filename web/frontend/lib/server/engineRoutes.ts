@@ -54,6 +54,7 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/backtests/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/backtests/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
   'api/v1/backtests/{id}/series': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/backtests/{id}/attribution': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/backtests/{id}/monthly-returns': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/backtests/{id}/artifacts/{kind}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   'api/v1/datasets': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
@@ -123,6 +124,19 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/risk/regimes': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
   'api/v1/risk/garch': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
   'api/v1/risk/evt': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  // Module 9: Paper Trading & Live Ledger
+  'api/v1/paper/account': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/paper/attribution': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/paper/account/reset': { method: 'POST', minRole: 'editor', timeoutMs: 15_000 },
+  'api/v1/paper/orders': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/paper/orders/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
+  'api/v1/paper/step': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  'api/v1/paper/sync': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  'api/v1/paper/reconcile': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  // Module 10: Backtest-to-Paper Gap Analysis
+  'api/v1/paper/gap/analyze': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  'api/v1/paper/gap/reports': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/paper/gap/reports/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
 };
 
 export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };
@@ -145,12 +159,14 @@ const REGISTRY_PATTERNS: [RegExp, string][] = [
 export function routePolicyKey(path: string): string {
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}\/cancel$/i.test(path)) return 'api/v1/jobs/{id}/cancel';
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/jobs/{id}';
+  if (/^api\/v1\/paper\/orders\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/orders/{id}';
+  if (/^api\/v1\/paper\/gap\/reports\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/gap/reports/{id}';
   for (const [pattern, key] of REGISTRY_PATTERNS) if (pattern.test(path)) return key;
   // Only the stored files the API serves; any other name stays unlisted (a 404 here).
   if (/^api\/v1\/backtests\/[0-9a-f-]{36}\/artifacts\/(summary|request|equity_csv|orders_csv|fills_csv|returns_csv|strategies_csv)$/i.test(path)) {
     return 'api/v1/backtests/{id}/artifacts/{kind}';
   }
-  const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series|\/monthly-returns)?$/i.exec(path);
+  const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series|\/monthly-returns|\/attribution)?$/i.exec(path);
   if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
   const session = /^api\/v1\/uploads\/sessions\/[0-9a-f-]{36}(\/complete)?$/i.exec(path);
   if (session) return `api/v1/uploads/sessions/{id}${session[1] ?? ''}`;

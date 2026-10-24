@@ -413,6 +413,47 @@ pub(crate) async fn backtest_series(
     }
 }
 
+/// Detailed P&L attribution breakdown for a finished backtest (Module 11).
+#[utoipa::path(
+    get,
+    path = "/api/v1/backtests/{id}/attribution",
+    tag = "backtests",
+    params(("id" = Uuid, Path, description = "Backtest job id")),
+    responses(
+        (status = 200, description = "The attribution breakdown"),
+        (status = 404, description = "No such backtest", body = crate::openapi::ErrorDoc),
+        (status = 409, description = "The backtest has not succeeded yet", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn backtest_attribution(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    job_id: Result<Path<Uuid>, PathRejection>,
+) -> Response {
+    let Ok(Path(job_id)) = job_id else { return error_response(404, NOT_FOUND) };
+    let job = match backtest_job(&st, &id, job_id).await {
+        Ok(j) => j,
+        Err(r) => return r,
+    };
+    if job.status != "succeeded" {
+        return error_response(
+            409,
+            format!("The backtest is {}; attribution exists once it has succeeded.", job.status),
+        );
+    }
+    let view = BacktestView::from(job);
+    let Some(summary) = view.summary else {
+        return error_response(404, "This backtest has no summary recorded.");
+    };
+    let serde_json::Value::Object(map) = summary else {
+        return error_response(500, "Corrupted summary document.");
+    };
+    match map.get("attribution") {
+        Some(attr) => json_response(200, attr.to_string()),
+        None => error_response(404, "This backtest has no attribution breakdown recorded."),
+    }
+}
+
 /// A monthly return point for the heatmap and dashboard.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct MonthlyReturn {

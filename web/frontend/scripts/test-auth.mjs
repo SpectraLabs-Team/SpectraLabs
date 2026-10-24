@@ -827,6 +827,20 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.minimumRole(routes['api/v1/uploads/limits'], 'GET'), 'viewer');
   assert.equal(engineRoutes.ENGINE_CHUNK_ROUTE.minRole, 'editor');
   assert.equal(engineRoutes.ENGINE_CHUNK_ROUTE.maxBytes, 8 * 1024 * 1024, 'chunks stay under the 10 MB middleware body buffer');
+
+  // Paper Trading & Backtest-to-Paper Gap (M9 & M10)
+  const ordId = '0192f3a4-0000-7000-8000-00000000000e';
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/paper/orders/${ordId}`), 'api/v1/paper/orders/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/paper/gap/reports/${ordId}`), 'api/v1/paper/gap/reports/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/backtests/${ordId}/attribution`), 'api/v1/backtests/{id}/attribution');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/paper/account'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/paper/attribution'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/backtests/{id}/attribution'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/paper/account/reset'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/paper/orders'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/paper/orders'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/paper/gap/analyze'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/paper/gap/reports'], 'GET'), 'viewer');
 });
 
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {

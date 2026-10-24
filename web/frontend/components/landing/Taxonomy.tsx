@@ -1,14 +1,14 @@
 'use client';
 
+import Link from 'next/link';
 import { ArrowRight, Database, FolderOpen, Link2, LineChart, ShieldCheck, TrendingUp, Zap } from 'lucide-react';
-import { GITHUB_URL } from '@/lib/site';
 import { cn } from '@/lib/utils';
 
 type Status = 'live' | 'backtest' | 'roadmap';
 const STATUS: Record<Status, { label: string; legend: string; cls: string; title: string }> = {
-  live: { label: 'Live', legend: 'Live in the risk engine', cls: 'border-profit/30 bg-profit/10 text-profit', title: 'Computed by the Monte Carlo engine (/api/risk)' },
-  backtest: { label: 'Backtest', legend: 'On backtest returns', cls: 'border-accent/30 bg-accent/10 text-accent', title: 'Computed on backtest returns by spectra-engine' },
-  roadmap: { label: 'Roadmap', legend: 'Not built yet', cls: 'border-ink/15 bg-ink/[0.04] text-ink/45', title: 'Not implemented yet: needs a dedicated model or data' },
+  live: { label: 'Live', legend: 'Live in quantitative engine', cls: 'border-profit/30 bg-profit/10 text-profit', title: 'Computed natively in Rust by spectra-risk / spectra-engine' },
+  backtest: { label: 'Backtest', legend: 'On strategy returns', cls: 'border-accent/30 bg-accent/10 text-accent', title: 'Computed on backtest & walk-forward returns by spectra-engine' },
+  roadmap: { label: 'Roadmap', legend: 'Scheduled feature', cls: 'border-ink/15 bg-ink/[0.04] text-ink/45', title: 'Scheduled for upcoming module rollout' },
 };
 
 const GROUPS: { title: string; icon: typeof Zap; color: string; dot: string; items: [string, Status][] }[] = [
@@ -17,42 +17,77 @@ const GROUPS: { title: string; icon: typeof Zap; color: string; dot: string; ite
     icon: TrendingUp,
     color: 'text-rose-500',
     dot: 'bg-rose-500',
-    items: [['VaR', 'live'], ['CVaR (ES)', 'live'], ['Skewness', 'live'], ['Kurtosis', 'live'], ['SVaR', 'roadmap'], ['Extreme Value Theory', 'roadmap']],
+    items: [
+      ['VaR & CVaR (ES)', 'live'],
+      ['SVaR (Stressed VaR)', 'live'],
+      ['Extreme Value Theory (EVT)', 'live'],
+      ['Clayton & Student-t Copulas', 'live'],
+      ['GARCH(1,1) / GJR-Volatility', 'live'],
+      ['Markov Regime Switching (HMM)', 'live'],
+    ],
   },
   {
     title: 'Options & Derivatives',
     icon: Link2,
     color: 'text-violet-500',
     dot: 'bg-violet-500',
-    items: [['The Greeks (Δ, Γ, ν, θ)', 'roadmap'], ['Implied Volatility', 'roadmap'], ['Volatility Surface', 'roadmap'], ['Options Risk Metrics', 'roadmap']],
+    items: [
+      ['The Greeks (Δ, Γ, ν, θ)', 'roadmap'],
+      ['Implied Volatility Surface', 'roadmap'],
+      ['Local Volatility SVI', 'roadmap'],
+      ['Cross-Asset Smile Calibration', 'roadmap'],
+    ],
   },
   {
     title: 'Performance Ratios',
     icon: LineChart,
     color: 'text-sky-500',
     dot: 'bg-sky-500',
-    items: [['Sharpe Ratio', 'backtest'], ['Sortino Ratio', 'backtest'], ['Calmar Ratio', 'backtest'], ['Omega Ratio', 'backtest'], ['Max Drawdown', 'backtest']],
+    items: [
+      ['Sharpe & Sortino Ratios', 'backtest'],
+      ['Deflated Sharpe Ratio (DSR)', 'live'],
+      ['Prob. Backtest Overfit (PBO)', 'live'],
+      ['Calmar & Omega Ratios', 'backtest'],
+      ['Combinatorial CV (CSCV)', 'live'],
+    ],
   },
   {
     title: 'Liquidity & Execution',
     icon: Zap,
     color: 'text-amber-500',
     dot: 'bg-amber-500',
-    items: [['Slippage Modeling', 'backtest'], ['LVaR (Liquidity VaR)', 'roadmap'], ['Bid-Ask Spread', 'roadmap'], ['Market Impact', 'roadmap']],
+    items: [
+      ['Slippage Modeling', 'live'],
+      ['Bid-Ask Spread Dynamics', 'live'],
+      ['Square-Root Market Impact', 'live'],
+      ['Order Fill Latency Simulation', 'live'],
+      ['LVaR (Liquidity VaR)', 'roadmap'],
+    ],
   },
   {
-    title: 'Fixed Income & Duration',
+    title: 'Fixed Income & Rates',
     icon: FolderOpen,
     color: 'text-orange-500',
     dot: 'bg-orange-500',
-    items: [['DV01', 'roadmap'], ['Duration', 'roadmap'], ['Convexity', 'roadmap'], ['Yield Curve Risk', 'roadmap']],
+    items: [
+      ['DV01 & Key-Rate Durations', 'roadmap'],
+      ['Macaulay & Modified Duration', 'roadmap'],
+      ['Bond Convexity', 'roadmap'],
+      ['Nelson-Siegel Yield Curves', 'roadmap'],
+    ],
   },
   {
     title: 'Systemic & Regulatory',
     icon: ShieldCheck,
     color: 'text-emerald-500',
     dot: 'bg-emerald-500',
-    items: [['HHI Concentration', 'live'], ['CoVaR, MES', 'roadmap'], ['Basel III Metrics', 'roadmap'], ['Systemic Risk Indicators', 'roadmap']],
+    items: [
+      ['HHI Concentration', 'live'],
+      ['Euler CVaR Risk Attribution', 'live'],
+      ['Cryptographic Audit Chain', 'live'],
+      ['CoVaR & Marginal Expected Shortfall', 'roadmap'],
+      ['Basel III / FRTB Capital Metrics', 'roadmap'],
+    ],
   },
 ];
 
@@ -80,9 +115,9 @@ export function Taxonomy() {
                 </div>
               </div>
             </div>
-            <a href={`${GITHUB_URL}#readme`} target="_blank" rel="noreferrer" className="btn-secondary shrink-0 border-accent/40 text-accent hover:border-accent">
-              View Documentation <ArrowRight className="h-4 w-4" />
-            </a>
+            <Link href="/architecture" className="btn-secondary shrink-0 border-accent/40 text-accent hover:border-accent">
+              View Architecture &amp; Parity <ArrowRight className="h-4 w-4" />
+            </Link>
           </div>
 
           <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">

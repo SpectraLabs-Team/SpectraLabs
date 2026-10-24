@@ -9,6 +9,6 @@ export const NAV: { href: string; label: string; external?: boolean }[] = [
 
 /** Developer references: footer only, kept out of the product header. */
 export const DEV_LINKS: { href: string; label: string; external?: boolean }[] = [
-  { href: `${GITHUB_URL}#readme`, label: 'Docs', external: true },
+  { href: '/architecture', label: 'Docs' },
   { href: GITHUB_URL, label: 'GitHub', external: true },
 ];

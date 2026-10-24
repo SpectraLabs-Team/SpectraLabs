@@ -36,7 +36,7 @@ export function Footer() {
         </div>
       </div>
       <div className="border-t border-ink/[0.05] px-5 py-4 text-center text-[11px] leading-5 text-ink/40 sm:px-8">
-        Model note: the risk engine treats the book as one aggregate GBM position (zero drift, average volatility, no correlations). It is a defensible first model, not a production market-risk model.
+        Quantitative note: Spectra Labs computes correlated multi-asset risk using copula simulations (Gaussian, Student-t, Clayton), GARCH/GJR conditional volatility, EVT tail risk, and Markov regime-switching models alongside deterministic event-driven backtesting.
       </div>
     </footer>
   );

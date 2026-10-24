@@ -3,17 +3,47 @@ import nodemailer from 'nodemailer';
 const user = process.env.GMAIL_USER || '';
 const pass = process.env.GMAIL_APP_PASSWORD || '';
 
-if (process.env.NODE_ENV === 'production' && (!user || !pass)) {
+export function isEmailConfigured(): boolean {
+  return Boolean(user && pass);
+}
+
+if (process.env.NODE_ENV === 'production' && !isEmailConfigured()) {
   throw new Error('FATAL: GMAIL_USER and GMAIL_APP_PASSWORD environment variables are required in production.');
 }
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // Port 587 uses STARTTLS
-  auth: { user, pass },
-  connectionTimeout: 10000,
-});
+const transporter = isEmailConfigured()
+  ? nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false, // Port 587 uses STARTTLS
+      auth: { user, pass },
+      connectionTimeout: 10000,
+    })
+  : null;
+
+async function deliverMail(opts: { from?: string; to: string; subject: string; text: string; html: string }) {
+  if (!transporter) {
+    console.log(`\n=======================================================`);
+    console.log(`📧 [MOCK EMAIL DELIVERY - SMTP NOT CONFIGURED]`);
+    console.log(`To:      ${opts.to}`);
+    console.log(`Subject: ${opts.subject}`);
+    console.log(`Text:    ${opts.text}`);
+    console.log(`=======================================================\n`);
+    return { messageId: `mock-dev-${Date.now()}` };
+  }
+
+  try {
+    return await transporter.sendMail(opts);
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn(`[AUTH SMTP DEV FALLBACK] Failed to send email via SMTP, logging fallback:`, err);
+      console.log(`📧 [FALLBACK DEV EMAIL] To: ${opts.to} | Subject: ${opts.subject}`);
+      console.log(`Text: ${opts.text}`);
+      return { messageId: `fallback-dev-${Date.now()}` };
+    }
+    throw err;
+  }
+}
 
 export async function sendOtpEmail({
   to,
@@ -117,8 +147,8 @@ export async function sendOtpEmail({
 </html>
   `;
 
-  const info = await transporter.sendMail({
-    from: `"Spectra Labs Security" <${user}>`,
+  return deliverMail({
+    from: `"Spectra Labs Security" <${user || 'security@spectralabs.dev'}>`,
     to,
     subject:
       type === 'reset'
@@ -132,8 +162,6 @@ export async function sendOtpEmail({
         : `Your Spectra Labs 6-digit verification code is: ${code}. This code expires in 5 minutes.`,
     html,
   });
-
-  return info;
 }
 
 /**
@@ -180,7 +208,7 @@ export async function sendLockoutEmail({ to, minutes, ip }: { to: string; minute
   </table>
 </body>
 </html>`;
-  return transporter.sendMail({ from: `"Spectra Labs Security" <${user}>`, to, subject: 'Sign-in to your Spectra Labs account was locked', text, html });
+  return deliverMail({ from: `"Spectra Labs Security" <${user || 'security@spectralabs.dev'}>`, to, subject: 'Sign-in to your Spectra Labs account was locked', text, html });
 }
 
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
@@ -233,7 +261,7 @@ export async function sendNewDeviceEmail({ to, device, ip, when }: { to: string;
   </table>
 </body>
 </html>`;
-  return transporter.sendMail({ from: `"Spectra Labs Security" <${user}>`, to, subject: 'New sign-in to your Spectra Labs account', text, html });
+  return deliverMail({ from: `"Spectra Labs Security" <${user || 'security@spectralabs.dev'}>`, to, subject: 'New sign-in to your Spectra Labs account', text, html });
 }
 
 /** Workspace invitation (M19 task 12). The link is single-use and valid for 7 days. */
@@ -274,7 +302,7 @@ export async function sendInviteEmail({ to, inviter, workspace, role, link }: { 
   </table>
 </body>
 </html>`;
-  return transporter.sendMail({ from: `"Spectra Labs" <${user}>`, to, subject: `${inviter} invited you to ${workspace} on Spectra Labs`, text, html });
+  return deliverMail({ from: `"Spectra Labs" <${user || 'team@spectralabs.dev'}>`, to, subject: `${inviter} invited you to ${workspace} on Spectra Labs`, text, html });
 }
 
 /**
@@ -310,8 +338,8 @@ export async function sendSecurityAlertEmail({ to, summary, alert }: { to: strin
   </table>
 </body>
 </html>`;
-  return transporter.sendMail({
-    from: `"Spectra Labs Security" <${user}>`,
+  return deliverMail({
+    from: `"Spectra Labs Security" <${user || 'security@spectralabs.dev'}>`,
     to: to.join(', '),
     subject: `[Spectra Labs] Security alert: spike in ${what}`,
     text: `${summary}\n\n${advice}\nYou won't get another alert of this kind for an hour.`,

@@ -13,7 +13,7 @@ const RESEND_SECONDS = 60;
 const empty = () => Array<string>(LEN).fill('');
 
 // ── Real API transport connecting to Gmail SMTP & session endpoints ──
-async function sendSignupCode(email: string, password: string, name: string, twoFactor: boolean) {
+async function sendSignupCode(email: string, password: string, name: string, twoFactor: boolean): Promise<{ ok: boolean; devCode?: string; message?: string }> {
   const res = await fetch('/api/auth/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -23,9 +23,10 @@ async function sendSignupCode(email: string, password: string, name: string, two
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'Failed to send verification code.');
   }
+  return data;
 }
 
-async function resendCode(email: string) {
+async function resendCode(email: string): Promise<{ ok: boolean; devCode?: string; message?: string }> {
   const res = await fetch('/api/auth/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -35,6 +36,7 @@ async function resendCode(email: string) {
   if (!res.ok || !data.ok) {
     throw new Error(data.error || 'Failed to resend code.');
   }
+  return data;
 }
 
 async function verifySignupCode(email: string, code: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
@@ -53,7 +55,7 @@ async function verifySignupCode(email: string, code: string): Promise<{ ok: bool
 async function loginWithPassword(
   email: string,
   password: string,
-): Promise<{ ok: boolean; user?: AuthUser; twoFactor?: boolean; method?: 'email' | 'totp'; challenge?: string; error?: string }> {
+): Promise<{ ok: boolean; user?: AuthUser; twoFactor?: boolean; method?: 'email' | 'totp'; challenge?: string; devCode?: string; error?: string }> {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -63,10 +65,10 @@ async function loginWithPassword(
   if (!res.ok || !data.ok) {
     return { ok: false, error: data.error || 'Incorrect email or password.' };
   }
-  return { ok: true, user: data.user, twoFactor: data.twoFactor === true, method: data.method === 'totp' ? 'totp' : 'email', challenge: data.challenge };
+  return { ok: true, user: data.user, twoFactor: data.twoFactor === true, method: data.method === 'totp' ? 'totp' : 'email', challenge: data.challenge, devCode: data.devCode };
 }
 
-async function requestReset(email: string): Promise<string> {
+async function requestReset(email: string): Promise<{ message: string; devCode?: string }> {
   const res = await fetch('/api/auth/forgot', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -74,7 +76,7 @@ async function requestReset(email: string): Promise<string> {
   });
   const data = await res.json();
   if (!res.ok || !data.ok) throw new Error(data.error || 'Could not send the reset code.');
-  return data.message as string;
+  return { message: (data.message || 'Reset code sent.') as string, devCode: data.devCode };
 }
 
 async function resetPassword(email: string, code: string, password: string): Promise<{ ok: boolean; user?: AuthUser; error?: string }> {
@@ -184,6 +186,7 @@ export function AuthModal() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [left, setLeft] = useState(0);
+  const [devHint, setDevHint] = useState<string | null>(null);
   // Second step of a two-step login: emailed code, or authenticator app (with a challenge from the
   // password step; a recovery code also works there).
   const [mfaMethod, setMfaMethod] = useState<'email' | 'totp'>('email');
@@ -215,6 +218,7 @@ export function AuthModal() {
     setDigits(empty());
     setError(null);
     setInfo(null);
+    setDevHint(null);
     setLeft(0);
     setTouched({});
     focusEmail();
@@ -294,7 +298,12 @@ export function AuthModal() {
         setUseRecovery(false);
         setRecovery('');
         setStep(2);
-        setDigits(empty());
+        if (res.devCode) {
+          setDevHint(res.devCode);
+          setDigits(res.devCode.split(''));
+        } else {
+          setDigits(empty());
+        }
         setLeft(res.method === 'totp' ? 0 : RESEND_SECONDS);
         setTimeout(() => boxes.current[0]?.focus(), 50);
         return;
@@ -319,9 +328,14 @@ export function AuthModal() {
     setBusy(true);
     setError(null);
     try {
-      await sendSignupCode(email.trim(), password, cleanName(name), twoFactor);
+      const res = await sendSignupCode(email.trim(), password, cleanName(name), twoFactor);
       setStep(2);
-      setDigits(empty());
+      if (res?.devCode) {
+        setDevHint(res.devCode);
+        setDigits(res.devCode.split(''));
+      } else {
+        setDigits(empty());
+      }
       setLeft(RESEND_SECONDS);
       setTimeout(() => boxes.current[0]?.focus(), 50);
     } catch (err: any) {
@@ -336,8 +350,13 @@ export function AuthModal() {
     setBusy(true);
     setError(null);
     try {
-      await resendCode(email.trim());
-      setDigits(empty());
+      const res = await resendCode(email.trim());
+      if (res?.devCode) {
+        setDevHint(res.devCode);
+        setDigits(res.devCode.split(''));
+      } else {
+        setDigits(empty());
+      }
       setLeft(RESEND_SECONDS);
       boxes.current[0]?.focus();
     } catch (err: any) {
@@ -418,9 +437,15 @@ export function AuthModal() {
     setBusy(true);
     setError(null);
     try {
-      setInfo(await requestReset(email.trim()));
+      const r = await requestReset(email.trim());
+      setInfo(r.message);
+      if (r.devCode) {
+        setDevHint(r.devCode);
+        setDigits(r.devCode.split(''));
+      } else {
+        setDigits(empty());
+      }
       setStep(2);
-      setDigits(empty());
       setLeft(RESEND_SECONDS);
       setTimeout(() => boxes.current[0]?.focus(), 50);
     } catch (err: any) {
@@ -719,6 +744,15 @@ export function AuthModal() {
                     </button>
                   </p>
 
+                  {devHint && (
+                    <div className="mt-4 flex items-center justify-between rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3.5 py-2 text-xs text-cyan-800 dark:text-cyan-300">
+                      <span>Dev code: <strong className="font-mono text-sm tracking-widest">{devHint}</strong></span>
+                      <button type="button" onClick={() => setDigits(devHint.split(''))} className="font-semibold underline hover:opacity-80">
+                        Auto-fill
+                      </button>
+                    </div>
+                  )}
+
                   {codeBoxes}
 
                   {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
@@ -764,6 +798,14 @@ export function AuthModal() {
                       <Pencil className="h-3 w-3" /> Back
                     </button>
                   </p>
+                  {devHint && !useRecovery && (
+                    <div className="mt-4 flex items-center justify-between rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3.5 py-2 text-xs text-cyan-800 dark:text-cyan-300">
+                      <span>Dev 2FA code: <strong className="font-mono text-sm tracking-widest">{devHint}</strong></span>
+                      <button type="button" onClick={() => setDigits(devHint.split(''))} className="font-semibold underline hover:opacity-80">
+                        Auto-fill
+                      </button>
+                    </div>
+                  )}
                   {useRecovery ? (
                     <input
                       autoFocus
@@ -848,6 +890,15 @@ export function AuthModal() {
                       <Pencil className="h-3 w-3" /> Edit
                     </button>
                   </p>
+
+                  {devHint && (
+                    <div className="mt-4 flex items-center justify-between rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3.5 py-2 text-xs text-cyan-800 dark:text-cyan-300">
+                      <span>Dev reset code: <strong className="font-mono text-sm tracking-widest">{devHint}</strong></span>
+                      <button type="button" onClick={() => setDigits(devHint.split(''))} className="font-semibold underline hover:opacity-80">
+                        Auto-fill
+                      </button>
+                    </div>
+                  )}
 
                   <p className="mt-5 text-[12px] font-medium text-ink/70">Reset code</p>
                   <div className="-mt-4">{codeBoxes}</div>

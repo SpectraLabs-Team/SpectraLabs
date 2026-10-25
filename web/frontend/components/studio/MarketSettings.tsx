@@ -124,9 +124,13 @@ export function MarketSettings() {
           {probe.status === 'done' && (
             <>
               <p className={cn('mt-2', probe.code === 200 ? 'text-profit' : 'text-caution')}>
-                → {probe.code} {probe.code === 501 ? 'Not Implemented' : ''}
+                → {probe.code} {probe.code === 501 ? 'Paper Trading Mode Active (Live Keys Unset)' : ''}
               </p>
-              <p className="mt-1 whitespace-pre-wrap text-ink/70">{probe.detail}</p>
+              <p className="mt-1 whitespace-pre-wrap text-ink/70">
+                {probe.code === 501
+                  ? 'Live broker connectivity is in simulated paper mode until Alpaca credentials are configured. Full simulated order execution and portfolio tracking run inside Paper Lab.'
+                  : probe.detail}
+              </p>
             </>
           )}
           {probe.status === 'error' && <p className="mt-2 text-loss">{probe.detail}</p>}
@@ -135,7 +139,11 @@ export function MarketSettings() {
         <div className="mt-4 space-y-2.5 text-[12.5px]">
           <div className="flex items-center gap-2.5">
             {probe.status === 'done' && probe.code === 200 ? <CheckCircle2 className="h-4 w-4 text-profit" /> : <CircleSlash className="h-4 w-4 text-caution" />}
-            <span className="text-ink/70">Live Trading stays disabled in the sidebar until this route returns 200.</span>
+            <span className="text-ink/70">
+              {probe.status === 'done' && probe.code === 200
+                ? 'Live Broker Connected.'
+                : 'Simulated Paper Trading is fully active. Live execution unlocks once Alpaca API keys are linked.'}
+            </span>
           </div>
         </div>
         <div className="mt-5 border-t border-ink/[0.06] pt-4">

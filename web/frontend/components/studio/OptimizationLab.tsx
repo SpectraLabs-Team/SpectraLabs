@@ -176,6 +176,10 @@ export function OptimizationLab() {
 
   // Queue parameter sweep
   const handleQueueSweep = async () => {
+    if (!sweepDatasetId) {
+      setError('Please select or upload a dataset in Data Studio first.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -198,6 +202,10 @@ export function OptimizationLab() {
 
   // Queue walk forward
   const handleQueueWalkForward = async () => {
+    if (!sweepDatasetId) {
+      setError('Please select or upload a dataset in Data Studio first.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -369,11 +377,15 @@ export function OptimizationLab() {
                     onChange={(e) => setSweepDatasetId(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-ink/[0.12] bg-surface px-2.5 py-1.5 text-xs text-ink outline-none focus:border-accent"
                   >
-                    {datasets.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.dataset_name} (v{d.version} · {d.row_count} bars)
-                      </option>
-                    ))}
+                    {datasets.length === 0 ? (
+                      <option value="" disabled>No datasets available — upload one in Data Studio</option>
+                    ) : (
+                      datasets.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.dataset_name} (v{d.version} · {d.row_count} bars)
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -745,9 +757,13 @@ export function OptimizationLab() {
                     onChange={(e) => setSweepDatasetId(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-ink/[0.12] bg-surface px-2.5 py-1.5 text-xs text-ink outline-none"
                   >
-                    {datasets.map((d) => (
-                      <option key={d.id} value={d.id}>{d.dataset_name} (v{d.version})</option>
-                    ))}
+                    {datasets.length === 0 ? (
+                      <option value="" disabled>No datasets available — upload one in Data Studio</option>
+                    ) : (
+                      datasets.map((d) => (
+                        <option key={d.id} value={d.id}>{d.dataset_name} (v{d.version})</option>
+                      ))
+                    )}
                   </select>
                 </div>
 

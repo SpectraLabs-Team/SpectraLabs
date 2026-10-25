@@ -326,6 +326,17 @@ export function RiskCenter() {
         </div>
       </div>
 
+      {/* Educational Explainer: What is the Kill Switch? */}
+      <div className="rounded-xl border border-ink/[0.08] bg-canvas/40 p-4 text-xs text-ink/75">
+        <div className="flex items-center gap-2 font-semibold text-ink">
+          <ShieldAlert className="h-4 w-4 text-rose-500" />
+          <span>What is the Kill Switch?</span>
+        </div>
+        <p className="mt-1 leading-relaxed">
+          The <strong>Kill Switch</strong> is an emergency risk circuit-breaker for quantitative trading systems. When activated (either manually by an operator or automatically when hard loss limits or VaR limits are breached), the engine <strong>instantly halts all automated order routing</strong>, rejects any new buy/sell orders at the pre-trade check stage, and freezes active executions. Clearing the kill switch requires entering an explicit audit reason to preserve institutional compliance and full audit trail history.
+        </p>
+      </div>
+
       {error && (
         <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 text-sm text-rose-600 dark:text-rose-400">
           <div className="flex items-center gap-2">

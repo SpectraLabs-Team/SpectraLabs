@@ -692,8 +692,8 @@ export function AuthModal() {
                   {emailField}
                   <Field id="auth-new-password" label="Password" icon={<Lock className="h-4 w-4" />} error={touched.password && !passOk && 'Password does not meet all requirements below.'}>
                     <PasswordInput id="auth-new-password" value={password} onChange={setPassword} onBlur={() => touch('password')} invalid={!!touched.password && !passOk} autoComplete="new-password" placeholder="Min. 8 characters" />
-                    {rulesChecklist}
                   </Field>
+                  {rulesChecklist}
                   <Field id="auth-confirm" label="Confirm Password" icon={<Lock className="h-4 w-4" />}>
                     <PasswordInput id="auth-confirm" value={confirm} onChange={setConfirm} onBlur={() => touch('confirm')} invalid={confirm.length > 0 && !confirmOk} autoComplete="new-password" placeholder="Repeat password" />
                   </Field>
@@ -905,8 +905,8 @@ export function AuthModal() {
 
                   <Field id="auth-reset-password" label="New Password" icon={<Lock className="h-4 w-4" />}>
                     <PasswordInput id="auth-reset-password" value={password} onChange={setPassword} onBlur={() => touch('password')} invalid={!!touched.password && !isPasswordValid(password)} autoComplete="new-password" placeholder="Min. 8 characters" />
-                    {rulesChecklist}
                   </Field>
+                  {rulesChecklist}
                   <Field id="auth-reset-confirm" label="Confirm New Password" icon={<Lock className="h-4 w-4" />}>
                     <PasswordInput id="auth-reset-confirm" value={confirm} onChange={setConfirm} onBlur={() => touch('confirm')} invalid={confirm.length > 0 && !confirmOk} autoComplete="new-password" placeholder="Repeat new password" />
                   </Field>

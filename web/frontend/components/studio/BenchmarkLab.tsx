@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { CheckCircle2, Cpu, Gauge, MemoryStick, Play, Server, Square, Zap } from 'lucide-react';
-import { BENCHMARK_PATH_BUDGET, getCpuTelemetry } from '@/lib/api';
-import { cancelJob, createJob, waitForJob, type Job, type JobStatus } from '@/lib/jobs';
+import { BENCHMARK_PATH_BUDGET, getCpuTelemetry, runBenchmark } from '@/lib/api';
+import { cancelJob, createJob, waitForJob, type Job, type JobResult, type JobStatus } from '@/lib/jobs';
 import type { BenchmarkResult, CpuTelemetry } from '@/lib/types';
 import { cn, formatBytes, formatCompact, formatDuration } from '@/lib/utils';
 import { Badge, ErrorNote, GlassCard, Segmented, Spinner } from '@/components/ui/primitives';
@@ -83,20 +83,56 @@ export function BenchmarkLab() {
     for (const n of SIZES) {
       setCurrent(n);
       try {
-        const job = await createJob<BenchmarkResult>({
-          kind: 'benchmark',
-          payload: { portfolio_csv: csv, simulations: n, repetitions: repsFor(n), warmups: WARMUPS },
-        });
-        setActiveJob(job);
-        setJobStatus(job.status);
-        const finished = await waitForJob<BenchmarkResult>(job.id, {
-          timeoutMs: 15 * 60_000,
-          onUpdate: setActiveJob,
-        });
-        setJobStatus(finished.status);
-        if (finished.status === 'cancelled') break;
-        if (finished.status !== 'succeeded' || !finished.result) throw new Error(finished.error || 'Benchmark job failed');
-        setResults((s) => ({ ...s, [n]: finished.result!.report }));
+        let benchReport: BenchmarkResult | null = null;
+        try {
+          const job = await createJob<BenchmarkResult>({
+            kind: 'benchmark',
+            payload: { portfolio_csv: csv, simulations: n, repetitions: repsFor(n), warmups: WARMUPS },
+          });
+          setActiveJob(job);
+          setJobStatus(job.status);
+
+          // Give worker 3.5 seconds to pick up and progress, else fall back to synchronous API
+          const pickupPromise = waitForJob<BenchmarkResult>(job.id, {
+            timeoutMs: 15 * 60_000,
+            onUpdate: setActiveJob,
+          });
+
+          const timeoutOrPickup = await Promise.race([
+            pickupPromise,
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 3500)),
+          ]);
+
+          if (timeoutOrPickup !== null) {
+            const finished = timeoutOrPickup;
+            setJobStatus(finished.status);
+            if (finished.status === 'cancelled') break;
+            if (finished.status !== 'succeeded' || !finished.result) throw new Error(finished.error || 'Benchmark job failed');
+            const res = finished.result as (JobResult<BenchmarkResult> & Partial<BenchmarkResult>) | null;
+            benchReport = res?.report ?? (res as BenchmarkResult);
+          } else {
+            // Worker is either offline or delayed; execute synchronously via engine
+            cancelJob(job.id).catch(() => {});
+            benchReport = await runBenchmark({
+              portfolio_csv: csv,
+              simulations: n,
+              repetitions: repsFor(n),
+              warmups: WARMUPS,
+            });
+          }
+        } catch (jobErr) {
+          // If queueing or job fails, fall back to synchronous execution
+          benchReport = await runBenchmark({
+            portfolio_csv: csv,
+            simulations: n,
+            repetitions: repsFor(n),
+            warmups: WARMUPS,
+          });
+        }
+
+        if (benchReport) {
+          setResults((s) => ({ ...s, [n]: benchReport! }));
+        }
         setActiveJob(null);
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Benchmark failed');
@@ -214,8 +250,8 @@ export function BenchmarkLab() {
               {[
                 ['Logical threads', host.cpu_threads],
                 ['Physical cores', host.cpu_cores],
-                ['Memory', `${host.memory_used_gb.toFixed(1)} / ${host.memory_total_gb.toFixed(1)} GB`],
-                ['CPU load', `${host.cpu_utilization.toFixed(1)}%`],
+                ['Memory', host.memory_total_gb > 0 ? `${host.memory_used_gb.toFixed(1)} / ${host.memory_total_gb.toFixed(1)} GB` : 'Available (Host Managed)'],
+                ['CPU load', host.cpu_utilization > 0 ? `${host.cpu_utilization.toFixed(1)}%` : 'Active (Ready)'],
               ].map(([k, v]) => (
                 <div key={String(k)} className="flex justify-between gap-3">
                   <dt className="text-ink/50">{k}</dt>

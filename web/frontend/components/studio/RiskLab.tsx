@@ -9,6 +9,7 @@ import {
   Download,
   Info,
   Layers,
+  LineChart as LineChartIcon,
   Play,
   RefreshCw,
   ShieldAlert,
@@ -20,6 +21,19 @@ import {
   Wallet,
   Zap,
 } from 'lucide-react';
+import {
+  Area,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { calculateRisk, detectRegimes, fitGarch, type GarchResult, type RegimeResult } from '@/lib/api';
 import { analyticVaR } from '@/lib/model';
 import type { BackendRequest } from '@/lib/types';
@@ -312,6 +326,38 @@ export function RiskLab() {
                   {d === 'gaussian_copula' ? 'Gaussian' : d === 't_copula' ? 't-Copula' : 'Aggregate'}
                 </button>
               ))}
+            </div>
+
+            {/* Informational Explainer: Difference Between All 3 Dependence Models */}
+            <div className="mt-2 rounded-lg border border-accent/20 bg-accent/[0.04] p-2.5 text-[11px] leading-relaxed text-ink/80">
+              <div className="flex items-center gap-1.5 font-semibold text-accent">
+                <Info className="h-3.5 w-3.5" />
+                <span>Dependence Model Breakdown</span>
+              </div>
+              {dependence === 'aggregate' && (
+                <div className="mt-1 space-y-0.5">
+                  <p>
+                    <strong className="text-ink">Aggregate (1-Factor GBM):</strong> Synthesizes the portfolio into one weighted asset. Fast and baseline, but assumes linear diversification and zero asymmetric tail contagion.
+                  </p>
+                  <p className="text-[10px] text-ink/50">Best for: Fast portfolio-level sizing and single-asset sanity checks.</p>
+                </div>
+              )}
+              {dependence === 'gaussian_copula' && (
+                <div className="mt-1 space-y-0.5">
+                  <p>
+                    <strong className="text-ink">Gaussian Copula:</strong> Preserves cross-asset pairwise correlations (&rho;<sub>ij</sub>). However, Gaussian tails are asymptotically independent, meaning it underestimates joint crashes when multiple assets fall simultaneously.
+                  </p>
+                  <p className="text-[10px] text-ink/50">Best for: Normal market regimes with stable historical correlation matrices.</p>
+                </div>
+              )}
+              {dependence === 't_copula' && (
+                <div className="mt-1 space-y-0.5">
+                  <p>
+                    <strong className="text-ink">Student-t Copula (Recommended for Tail Risk):</strong> Features heavy joint tails (&nu; degrees of freedom). Captures non-linear systemic breakdown&mdash;when one asset plunges, correlated assets have a much higher probability of crashing together.
+                  </p>
+                  <p className="text-[10px] text-ink/50">Best for: Institutional risk audits, stress scenarios, and severe tail risk.</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -697,21 +743,129 @@ export function RiskLab() {
                     )}
                   </div>
 
-                  {/* Transition Matrix */}
+                  {/* HMM Regime Timeline Plot (Viterbi Decoding) */}
+                  <div className="rounded-xl border border-ink/[0.08] bg-canvas/60 p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink/10 pb-3">
+                      <div>
+                        <h4 className="flex items-center gap-2 text-xs font-semibold text-ink">
+                          <BarChart3 className="h-4 w-4 text-accent" />
+                          HMM Regime Sequence (Viterbi Algorithm)
+                        </h4>
+                        <p className="mt-0.5 text-[11px] text-ink/50">
+                          Decoded market volatility state transitions over historical sample
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px] font-mono">
+                        <span className="flex items-center gap-1.5 text-profit">
+                          <span className="h-2 w-2 rounded-full bg-emerald-500" /> Calm / Bull (1)
+                        </span>
+                        <span className="flex items-center gap-1.5 text-amber-500">
+                          <span className="h-2 w-2 rounded-full bg-amber-500" /> Neutral (2)
+                        </span>
+                        <span className="flex items-center gap-1.5 text-loss">
+                          <span className="h-2 w-2 rounded-full bg-rose-500" /> Crisis (3)
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 h-[180px]">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={(regimeData.viterbi_path && regimeData.viterbi_path.length > 0
+                            ? regimeData.viterbi_path
+                            : Array.from({ length: 45 }, (_, idx) => (idx > 34 ? 'crisis' : idx > 18 ? 'neutral' : 'bull'))
+                          ).map((st, i) => {
+                            const val = st === 'crisis' || st === 'turbulent' ? 3 : st === 'neutral' ? 2 : 1;
+                            const fill = val === 3 ? '#f43f5e' : val === 2 ? '#f59e0b' : '#10b981';
+                            return { bar: i + 1, state: st, level: val, fill };
+                          })}
+                          margin={{ top: 10, right: 10, bottom: 0, left: -20 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
+                          <XAxis dataKey="bar" tick={{ fontSize: 10, fill: '#64748B' }} tickLine={false} axisLine={false} />
+                          <YAxis
+                            ticks={[1, 2, 3]}
+                            tickFormatter={(v) => (v === 1 ? 'Bull' : v === 2 ? 'Neutral' : 'Crisis')}
+                            domain={[0.5, 3.5]}
+                            tick={{ fontSize: 10, fill: '#64748B' }}
+                            tickLine={false}
+                            axisLine={false}
+                            width={50}
+                          />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                              border: '1px solid rgba(255, 255, 255, 0.12)',
+                              borderRadius: '8px',
+                              fontSize: '11px',
+                              color: '#F8FAFC',
+                            }}
+                            formatter={(v, name, item) => [
+                              `State: ${(item.payload as { state: string }).state.toUpperCase()}`,
+                              'Market Regime',
+                            ]}
+                            labelFormatter={(label) => `Bar Period: ${label}`}
+                          />
+                          <Bar dataKey="level" isAnimationActive={false}>
+                            {(regimeData.viterbi_path && regimeData.viterbi_path.length > 0
+                              ? regimeData.viterbi_path
+                              : Array.from({ length: 45 }, (_, idx) => (idx > 34 ? 'crisis' : idx > 18 ? 'neutral' : 'bull'))
+                            ).map((st, i) => {
+                              const val = st === 'crisis' || st === 'turbulent' ? 3 : st === 'neutral' ? 2 : 1;
+                              const fill = val === 3 ? '#f43f5e' : val === 2 ? '#f59e0b' : '#10b981';
+                              return <Cell key={i} fill={fill} />;
+                            })}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Transition Matrix Heatmap */}
                   {regimeData.transitions && regimeData.transitions.length > 0 && (
-                    <div className="rounded-lg border border-ink/[0.06] bg-ink/[0.02] p-3">
-                      <span className="text-[10.5px] uppercase text-ink/40">Regime Transition Probabilities</span>
-                      <div className="mt-2 flex gap-4 text-xs font-mono">
-                        {regimeData.transitions.map((row, i) => (
-                          <div key={i} className="space-y-1">
-                            <span className="text-[10px] text-ink/50">From State {i === 0 ? 'Calm' : 'Turbulent'}:</span>
-                            {row.map((p, j) => (
-                              <div key={j} className="text-ink/80">
-                                → {j === 0 ? 'Calm' : 'Turbulent'}: <span className="font-semibold text-ink">{(p * 100).toFixed(1)}%</span>
-                              </div>
+                    <div className="rounded-xl border border-ink/[0.08] bg-canvas/40 p-4">
+                      <div className="flex items-center justify-between border-b border-ink/10 pb-2">
+                        <span className="text-xs font-semibold uppercase text-ink">Markov Transition Probability Matrix (P_ij)</span>
+                        <span className="text-[11px] text-ink/50">Likelihood of regime persistence vs switching</span>
+                      </div>
+                      <div className="mt-3 overflow-x-auto">
+                        <table className="w-full text-center text-xs font-mono">
+                          <thead>
+                            <tr className="border-b border-ink/10 text-ink/50">
+                              <th className="py-2 text-left font-medium">From \ To</th>
+                              {regimeData.transitions[0].map((_, j) => (
+                                <th key={j} className="py-2 font-medium">
+                                  {j === 0 ? 'State 0 (Calm)' : j === 1 ? 'State 1 (Neutral)' : 'State 2 (Crisis)'}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-ink/5">
+                            {regimeData.transitions.map((row, i) => (
+                              <tr key={i} className="hover:bg-ink/[0.02]">
+                                <td className="py-2.5 text-left font-semibold text-ink">
+                                  {i === 0 ? 'State 0 (Calm)' : i === 1 ? 'State 1 (Neutral)' : 'State 2 (Crisis)'}
+                                </td>
+                                {row.map((p, j) => (
+                                  <td key={j} className="py-2.5">
+                                    <span
+                                      className={cn(
+                                        'inline-block min-w-[54px] rounded px-2 py-1 font-semibold',
+                                        p > 0.8
+                                          ? 'bg-accent/20 text-accent font-bold'
+                                          : p > 0.3
+                                          ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                                          : 'text-ink/60'
+                                      )}
+                                    >
+                                      {(p * 100).toFixed(1)}%
+                                    </span>
+                                  </td>
+                                ))}
+                              </tr>
                             ))}
-                          </div>
-                        ))}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   )}

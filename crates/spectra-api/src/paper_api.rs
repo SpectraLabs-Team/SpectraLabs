@@ -40,6 +40,22 @@ fn user_of(id: &Identity) -> Option<Uuid> {
     Uuid::parse_str(&id.user).ok()
 }
 
+async fn ensure_paper_strategy(pool: &spectra_db::PgPool, ws: Uuid, strat_id: Uuid, user_id: Option<Uuid>) {
+    let short_id = &strat_id.to_string()[..8];
+    let name = format!("Paper Portfolio {short_id}");
+    let _ = sqlx::query(
+        "INSERT INTO strategies (id, workspace_id, name, description, created_by) \
+         VALUES ($1, $2, $3, 'Default simulated paper portfolio strategy', $4) \
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(strat_id)
+    .bind(ws)
+    .bind(name)
+    .bind(user_id)
+    .execute(pool)
+    .await;
+}
+
 // ---------------------------------------------------------------- DTOs
 
 #[derive(Debug, Clone, Deserialize, IntoParams)]
@@ -274,6 +290,8 @@ pub(crate) async fn get_account(
         return error_response(422, "Invalid query parameters.");
     };
 
+    ensure_paper_strategy(&pool, ws, q.strategy_id, user_of(&identity)).await;
+
     match spectra_db::paper::get_or_init_paper_account(&pool, ws, q.strategy_id, q.initial_cash).await {
         Ok(acc) => json_response(200, json!(PaperAccountView::from(acc)).to_string()),
         Err(e) => db_error(&e),
@@ -300,6 +318,8 @@ pub(crate) async fn get_paper_attribution(
     let Ok(Query(q)) = query else {
         return error_response(422, "Invalid query parameters.");
     };
+
+    ensure_paper_strategy(&pool, ws, q.strategy_id, user_of(&identity)).await;
 
     match spectra_db::paper::get_or_init_paper_account(&pool, ws, q.strategy_id, q.initial_cash).await {
         Ok(acc) => {
@@ -392,6 +412,8 @@ pub(crate) async fn reset_account(
         Ok(b) => b,
         Err(r) => return r,
     };
+
+    ensure_paper_strategy(&pool, ws, req.strategy_id, user_of(&identity)).await;
 
     match spectra_db::paper::reset_paper_account(&pool, ws, req.strategy_id, req.initial_cash).await {
         Ok(acc) => json_response(200, json!(PaperAccountView::from(acc)).to_string()),
@@ -498,6 +520,8 @@ pub(crate) async fn create_order(
 
     let tif = req.tif.unwrap_or_else(|| "gtc".to_string()).to_lowercase();
     let strat_id = req.strategy_id;
+
+    ensure_paper_strategy(&pool, ws, strat_id, user_id).await;
 
     // Load or initialize paper account to construct the portfolio snapshot
     let account = match spectra_db::paper::get_or_init_paper_account(&pool, ws, strat_id, None).await {

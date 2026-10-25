@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
-import { type ReactNode, useId, useRef } from 'react';
+import { type ReactNode, useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 export function GlassCard({ className, children, as: Tag = 'div', ...rest }: { className?: string; children: ReactNode; as?: 'div' | 'section' | 'article' } & React.HTMLAttributes<HTMLElement>) {
@@ -153,33 +153,21 @@ export function AnimatedValue({ value, className }: { value: string; className?:
 }
 
 export function Logo({ className }: { className?: string }) {
-  const uid = useId().replace(/:/g, '');
-  const gid1 = `sl-g1-${uid}`;
-  const gid2 = `sl-g2-${uid}`;
   return (
     <span className={cn('flex items-center gap-2.5', className)}>
-      <svg viewBox="0 0 36 36" className="h-8 w-8 drop-shadow-[0_0_12px_rgba(0,240,255,0.45)]" fill="none" aria-hidden>
-        <defs>
-          <linearGradient id={gid1} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#00F0FF" />
-            <stop offset="50%" stopColor="#38BDF8" />
-            <stop offset="100%" stopColor="#818CF8" />
-          </linearGradient>
-          <linearGradient id={gid2} x1="0" y1="1" x2="1" y2="0">
-            <stop offset="0%" stopColor="#6366F1" />
-            <stop offset="50%" stopColor="#8B5CF6" />
-            <stop offset="100%" stopColor="#EC4899" />
-          </linearGradient>
-        </defs>
-        {/* Modern geometric spectral prism with intersecting facets */}
-        <polygon points="18,4 32,28 4,28" stroke={`url(#${gid1})`} strokeWidth="2.2" strokeLinejoin="round" fill="rgba(0, 240, 255, 0.05)" />
-        <path d="M18 4 L18 20 L4 28" stroke={`url(#${gid1})`} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M18 20 L32 28" stroke={`url(#${gid2})`} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="18" cy="20" r="2.2" fill="#00F0FF" />
-        <line x1="18" y1="20" x2="18" y2="33" stroke={`url(#${gid2})`} strokeWidth="1.5" strokeDasharray="1.5 2" strokeOpacity="0.75" />
-      </svg>
-      <span className="whitespace-nowrap text-[16.5px] font-bold tracking-tight text-ink">
-        Spectra <span className="font-semibold text-accent dark:text-cyan-400">Labs</span>
+      {/* S ribbon icon — always visible */}
+      <img
+        src="/images/logo-icon.png"
+        alt="SpectraLabs icon"
+        className="h-8 w-8 shrink-0 object-contain"
+      />
+      {/* Full wordmark — hidden in collapsed sidebar via [&>span:last-child]:hidden passed from StudioShell */}
+      <span className="whitespace-nowrap">
+        <img
+          src="/images/logo-full.png"
+          alt="SpectraLabs"
+          className="h-7 object-contain"
+        />
       </span>
     </span>
   );

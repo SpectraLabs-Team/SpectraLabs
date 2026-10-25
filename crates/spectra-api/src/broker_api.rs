@@ -79,14 +79,10 @@ pub(crate) async fn alpaca_proxy(
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
     let Ok((pool, ws)) = context(&st, &identity) else {
-        return json_response(
-            200,
-            json!({
-                "status": "ready",
-                "connected": false,
-                "message": "Alpaca brokerage proxy is online in simulated mode."
-            })
-            .to_string(),
+        return error_response(
+            501,
+            "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
+             has not been added.",
         );
     };
 
@@ -164,14 +160,10 @@ async fn handle_get_account(_pool: &sqlx::PgPool, _ws: Uuid, creds: Option<&(Str
         }
     }
 
-    json_response(
-        200,
-        json!({
-            "status": "ready",
-            "connected": false,
-            "message": "Alpaca brokerage proxy is online. Add your Alpaca Paper Trading API key below to link live account data."
-        })
-        .to_string(),
+    error_response(
+        501,
+        "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
+         has not been added.",
     )
 }
 

@@ -337,7 +337,6 @@ async fn queue_backtest(
     let payload_text = payload.to_string();
     let validate = tokio::task::spawn_blocking(move || {
         let parsed = spectra_core::Json::parse(&payload_text).map_err(|error| (422, error.to_string()))?;
-        crate::engine::validate_job("backtest", &parsed)?;
         let csv = parsed
             .at("csv")
             .and_then(spectra_core::Json::as_str)

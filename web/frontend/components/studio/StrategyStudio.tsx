@@ -112,9 +112,24 @@ export function StrategyStudio() {
     setError('');
     try {
       const items = await listStrategies();
-      setStrategies(items);
-      if (items.length > 0 && !selectedStrategy) {
-        setSelectedStrategy(items[0]);
+      if (items.length > 0) {
+        setStrategies(items);
+        if (!selectedStrategy || !items.some((it) => it.id === selectedStrategy.id)) {
+          setSelectedStrategy(items[0]);
+        }
+      } else {
+        // No strategies exist yet in this workspace: create default Dual SMA crossover strategy
+        try {
+          const defaultStrat = await createStrategy({
+            name: 'Dual SMA Moving Average',
+            kind: 'custom',
+            description: 'Fast and slow simple moving average crossover strategy with parameter tuning.',
+          });
+          setStrategies([defaultStrat]);
+          setSelectedStrategy(defaultStrat);
+        } catch {
+          setStrategies([]);
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load strategies.');
@@ -378,11 +393,15 @@ export function StrategyStudio() {
                   }}
                   className="rounded-lg border border-ink/15 bg-white/70 px-3 py-1.5 text-base font-semibold text-ink shadow-sm dark:bg-ink/5"
                 >
-                  {strategies.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.kind})
-                    </option>
-                  ))}
+                  {strategies.length === 0 ? (
+                    <option value="" disabled>No strategies found</option>
+                  ) : (
+                    strategies.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.kind})
+                      </option>
+                    ))
+                  )}
                 </select>
                 <button
                   type="button"
@@ -637,7 +656,7 @@ export function StrategyStudio() {
                         <div className="flex items-center justify-between text-xs">
                           <span className="font-mono font-medium text-ink">{p.name}</span>
                           <span className="font-mono text-ink/60">
-                            {String(currentVal)} ({p.type})
+                            {String(currentVal)}{p.type ? ` (${p.type})` : ''}
                           </span>
                         </div>
 

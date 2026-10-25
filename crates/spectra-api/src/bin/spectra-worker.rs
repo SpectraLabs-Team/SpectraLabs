@@ -298,8 +298,11 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
         return;
     }
     if job.kind == spectra_backtest::JOB_KIND {
-        run_backtest_job(ctx, job, permit).await;
-        return;
+        // If the job payload contains registry_run_id or csv, it is a legacy/registry backtest run
+        if job.payload.get("registry_run_id").is_none() && job.payload.get("csv").is_none() {
+            run_backtest_job(ctx, job, permit).await;
+            return;
+        }
     }
     if job.kind == engine::INGEST_JOB_KIND {
         run_ingest_job(ctx, job, permit).await;

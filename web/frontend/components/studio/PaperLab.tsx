@@ -33,9 +33,11 @@ import {
   type PaperOrderView,
   type ReconcilePositionsResponse,
 } from '@/lib/api';
+import { listStrategies, createStrategy, type StrategySummary } from '@/lib/strategies';
 import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { cn, formatCurrency, formatNumber, formatPercent } from '@/lib/utils';
 import { BacktestToPaperGap } from './BacktestToPaperGap';
+import { MarketChart } from './MarketChart';
 
 // Default demo strategy ID when running in studio
 const DEFAULT_STRATEGY_ID = '00000000-0000-0000-0000-000000000001';
@@ -44,6 +46,7 @@ type TabView = 'positions' | 'orders' | 'gap';
 
 export function PaperLab() {
   const [strategyId, setStrategyId] = useState(DEFAULT_STRATEGY_ID);
+  const [strategies, setStrategies] = useState<StrategySummary[]>([]);
   const [account, setAccount] = useState<PaperAccountView | null>(null);
   const [orders, setOrders] = useState<PaperOrderView[]>([]);
   const [reconciliation, setReconciliation] = useState<ReconcilePositionsResponse | null>(null);
@@ -53,13 +56,42 @@ export function PaperLab() {
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabView>('positions');
 
+  // Load and seed workspace strategies
+  useEffect(() => {
+    listStrategies()
+      .then((items) => {
+        if (items.length > 0) {
+          setStrategies(items);
+          setStrategyId(items[0].id);
+        } else {
+          createStrategy({
+            name: 'Paper Trading Portfolio',
+            kind: 'custom',
+            description: 'Primary simulated paper portfolio strategy',
+          })
+            .then((strat) => {
+              setStrategies([strat]);
+              setStrategyId(strat.id);
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Order Ticket State
   const [orderSymbol, setOrderSymbol] = useState('AAPL');
   const [orderSide, setOrderSide] = useState<'buy' | 'sell'>('buy');
   const [orderType, setOrderType] = useState<'market' | 'limit' | 'stop'>('market');
   const [orderQty, setOrderQty] = useState('10');
-  const [orderPrice, setOrderPrice] = useState('180.00');
+  const [orderPrice, setOrderPrice] = useState('182.50');
   const [submittingOrder, setSubmittingOrder] = useState(false);
+
+  const handleQuickOrder = (sym: string, px: number, side: 'buy' | 'sell') => {
+    setOrderSymbol(sym);
+    setOrderPrice(px.toFixed(2));
+    setOrderSide(side);
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -188,6 +220,22 @@ export function PaperLab() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {strategies.length > 0 && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-ink/10 bg-canvas/60 px-2 py-1 text-xs">
+              <span className="text-ink/50">Strategy:</span>
+              <select
+                value={strategyId}
+                onChange={(e) => setStrategyId(e.target.value)}
+                className="bg-transparent font-medium text-ink outline-none"
+              >
+                {strategies.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <button
             type="button"
             className="btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
@@ -304,6 +352,16 @@ export function PaperLab() {
       <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
         {/* Left Tabs View */}
         <div className="space-y-4">
+          {/* Real-time Interactive Market Chart */}
+          <MarketChart
+            currentSymbol={orderSymbol}
+            onSelectSymbol={(sym, px) => {
+              setOrderSymbol(sym);
+              setOrderPrice(px.toFixed(2));
+            }}
+            onQuickOrder={handleQuickOrder}
+          />
+
           <div className="flex items-center gap-1 border-b border-ink/10 pb-2">
             <button
               type="button"

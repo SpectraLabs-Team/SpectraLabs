@@ -3180,7 +3180,7 @@ name = "spectra-api"
 version = "0.1.0"
 dependencies = [
  "arrow-array 54.3.1",
- "arrow-schema 54.3.1",
+ "arrow-schema 60.0.0",
  "axum",
  "chrono",
  "http-body-util",
@@ -3279,7 +3279,7 @@ version = "0.1.0"
 dependencies = [
  "arrow-array 54.3.1",
  "arrow-cast 60.0.0",
- "arrow-schema 54.3.1",
+ "arrow-schema 60.0.0",
  "bytes",
  "chrono",
  "parquet",

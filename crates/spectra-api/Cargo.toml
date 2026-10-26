@@ -43,7 +43,7 @@ s3 = ["spectra-db/s3"]
 sqlx.workspace = true
 tower.workspace = true
 parquet = { version = "54", default-features = false, features = ["arrow", "snap"] }
-arrow-schema = { version = "54" }
+arrow-schema = { version = "60" }
 arrow-array = { version = "54" }
 
 [lints]

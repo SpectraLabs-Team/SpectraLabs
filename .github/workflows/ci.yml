@@ -24,7 +24,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: clippy, rustfmt
       - name: Toolchain matches rust-toolchain.toml
@@ -63,7 +63,7 @@ jobs:
       DATABASE_URL: postgresql://spectra:spectra@localhost:5432/spectra
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
       - name: Test (debug, overflow checks on)
         run: cargo test --workspace
       - name: Test (release)
@@ -139,7 +139,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@1.120.0
       - name: Test (release)
         run: cargo test --workspace --release
 

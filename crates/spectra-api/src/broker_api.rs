@@ -160,7 +160,11 @@ async fn handle_get_account(_pool: &sqlx::PgPool, _ws: Uuid, creds: Option<&(Str
         }
     }
 
-    error_response(404, "No Alpaca paper credentials configured for this workspace.")
+    error_response(
+        501,
+        "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
+         has not been added.",
+    )
 }
 
 async fn handle_get_positions(pool: &sqlx::PgPool, ws: Uuid, creds: Option<&(String, String)>) -> Response {

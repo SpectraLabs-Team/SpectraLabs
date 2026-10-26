@@ -12,7 +12,7 @@ spectra-core = { path = "../spectra-core" }
 spectra-data = { path = "../spectra-data" }
 parquet = { version = "54", default-features = false, features = ["arrow", "snap"] }
 arrow-schema = { version = "54" }
-arrow-array = { version = "54" }
+arrow-array = { version = "60" }
 arrow-cast = { version = "60" }
 bytes = "1"
 chrono = { workspace = true }

@@ -44,7 +44,7 @@ sqlx.workspace = true
 tower.workspace = true
 parquet = { version = "54", default-features = false, features = ["arrow", "snap"] }
 arrow-schema = { version = "54" }
-arrow-array = { version = "54" }
+arrow-array = { version = "60" }
 
 [lints]
 workspace = true

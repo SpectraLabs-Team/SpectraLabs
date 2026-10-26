@@ -41,7 +41,7 @@
     "three": "^0.186.1"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
+    "@types/node": "^26.6.5",
     "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.11.10",
     "@types/qrcode": "^1.5.6",

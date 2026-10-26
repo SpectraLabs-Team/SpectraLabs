@@ -136,7 +136,7 @@ pub(crate) async fn alpaca_proxy(
         _ => {
             // Forward other GET requests to Alpaca if credentials exist, else 404
             if let Some((key_id, secret_key)) = creds {
-                forward_alpaca_request(subpath, &key_id, &secret_key).await
+                forward_alpaca_request(subpath, query_str, &key_id, &secret_key).await
             } else {
                 error_response(404, format!("Alpaca endpoint /{subpath} not found in paper mode."))
             }
@@ -161,9 +161,8 @@ async fn handle_get_account(_pool: &sqlx::PgPool, _ws: Uuid, creds: Option<&(Str
     }
 
     error_response(
-        501,
-        "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
-         has not been added.",
+        404,
+        "No Alpaca paper credentials configured for this workspace.",
     )
 }
 
@@ -532,10 +531,26 @@ async fn handle_cancel_order(order_id: &str, creds: Option<&(String, String)>) -
     StatusCode::NO_CONTENT.into_response()
 }
 
-async fn forward_alpaca_request(subpath: &str, key_id: &str, secret_key: &str) -> Response {
+async fn forward_alpaca_request(subpath: &str, query: &str, key_id: &str, secret_key: &str) -> Response {
+    let base_url = if subpath.starts_with("data/") || subpath.starts_with("stocks/") {
+        "https://data.alpaca.markets"
+    } else {
+        ALPACA_PAPER_BASE_URL
+    };
+    let clean_sub = subpath.strip_prefix("data/").unwrap_or(subpath);
+    let normalized = if clean_sub.starts_with("v2/") {
+        clean_sub.to_string()
+    } else {
+        format!("v2/{clean_sub}")
+    };
+    let url = if query.is_empty() {
+        format!("{base_url}/{normalized}")
+    } else {
+        format!("{base_url}/{normalized}?{query}")
+    };
     let client = reqwest::Client::new();
     match client
-        .get(format!("{ALPACA_PAPER_BASE_URL}/{subpath}"))
+        .get(&url)
         .header("APCA-API-KEY-ID", key_id)
         .header("APCA-API-SECRET-KEY", secret_key)
         .send()

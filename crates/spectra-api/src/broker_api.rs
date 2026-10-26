@@ -160,10 +160,7 @@ async fn handle_get_account(_pool: &sqlx::PgPool, _ws: Uuid, creds: Option<&(Str
         }
     }
 
-    error_response(
-        404,
-        "No Alpaca paper credentials configured for this workspace.",
-    )
+    error_response(404, "No Alpaca paper credentials configured for this workspace.")
 }
 
 async fn handle_get_positions(pool: &sqlx::PgPool, ws: Uuid, creds: Option<&(String, String)>) -> Response {
@@ -538,11 +535,8 @@ async fn forward_alpaca_request(subpath: &str, query: &str, key_id: &str, secret
         ALPACA_PAPER_BASE_URL
     };
     let clean_sub = subpath.strip_prefix("data/").unwrap_or(subpath);
-    let normalized = if clean_sub.starts_with("v2/") {
-        clean_sub.to_string()
-    } else {
-        format!("v2/{clean_sub}")
-    };
+    let normalized =
+        if clean_sub.starts_with("v2/") { clean_sub.to_string() } else { format!("v2/{clean_sub}") };
     let url = if query.is_empty() {
         format!("{base_url}/{normalized}")
     } else {

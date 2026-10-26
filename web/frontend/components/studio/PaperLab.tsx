@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertCircle,
@@ -10,618 +10,1310 @@ import {
   CheckCircle2,
   Clock,
   DollarSign,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  HelpCircle,
   Layers,
-  Percent,
-  Play,
+  Lock,
+  Plus,
   RefreshCw,
-  RotateCcw,
-  Send,
+  Search,
   ShieldAlert,
   ShieldCheck,
+  Star,
+  Trash2,
   TrendingDown,
   TrendingUp,
   Wallet,
+  X,
 } from 'lucide-react';
 import {
-  createPaperOrder,
-  getPaperAccount,
-  listPaperOrders,
-  reconcilePaperPositions,
-  resetPaperAccount,
-  syncPaperOrders,
-  type PaperAccountView,
-  type PaperOrderView,
-  type ReconcilePositionsResponse,
-} from '@/lib/api';
-import { listStrategies, createStrategy, type StrategySummary } from '@/lib/strategies';
+  cancelAlpacaOrder,
+  connectAlpaca,
+  createAlpacaOrder,
+  disconnectAlpaca,
+  getAlpacaAccount,
+  getAlpacaAssets,
+  getAlpacaBars,
+  getAlpacaOrders,
+  getAlpacaPositions,
+  getAlpacaStatus,
+  type AlpacaAccount,
+  type AlpacaAsset,
+  type AlpacaOrder,
+  type AlpacaPosition,
+  type CandleBar,
+} from '@/lib/alpaca';
 import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
-import { cn, formatCurrency, formatNumber, formatPercent } from '@/lib/utils';
-import { BacktestToPaperGap } from './BacktestToPaperGap';
-import { MarketChart } from './MarketChart';
+import { cn, formatCurrency, formatPercent } from '@/lib/utils';
+import { TradingChart } from './TradingChart';
 
-// Default demo strategy ID when running in studio
-const DEFAULT_STRATEGY_ID = '00000000-0000-0000-0000-000000000001';
+// Default initial watchlist symbols
+const INITIAL_WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'AMZN', 'GOOGL', 'META'];
 
-type TabView = 'positions' | 'orders' | 'gap';
+type BottomTab = 'positions' | 'open-orders' | 'history' | 'performance';
 
 export function PaperLab() {
-  const [strategyId, setStrategyId] = useState(DEFAULT_STRATEGY_ID);
-  const [strategies, setStrategies] = useState<StrategySummary[]>([]);
-  const [account, setAccount] = useState<PaperAccountView | null>(null);
-  const [orders, setOrders] = useState<PaperOrderView[]>([]);
-  const [reconciliation, setReconciliation] = useState<ReconcilePositionsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabView>('positions');
+  // Connection state
+  const [checkingConnection, setCheckingConnection] = useState(true);
+  const [isConnected, setIsConnected] = useState(false);
+  const [keyHint, setKeyHint] = useState<string>('');
 
-  // Load and seed workspace strategies
+  // Connect form state
+  const [inputKeyId, setInputKeyId] = useState('');
+  const [inputSecretKey, setInputSecretKey] = useState('');
+  const [showSecret, setShowSecret] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  // Trading data state
+  const [account, setAccount] = useState<AlpacaAccount | null>(null);
+  const [positions, setPositions] = useState<AlpacaPosition[]>([]);
+  const [orders, setOrders] = useState<AlpacaOrder[]>([]);
+  const [assets, setAssets] = useState<AlpacaAsset[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // Watchlist & Search state
+  const [watchlist, setWatchlist] = useState<string[]>(INITIAL_WATCHLIST);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSymbol, setSelectedSymbol] = useState('AAPL');
+
+  // Chart data state
+  const [chartBars, setChartBars] = useState<CandleBar[]>([]);
+  const [chartTimeframe, setChartTimeframe] = useState('1Day');
+  const [chartLoading, setChartLoading] = useState(false);
+  const [chartDataStatus, setChartDataStatus] = useState('Alpaca Paper (IEX Feed)');
+
+  // Order Ticket state
+  const [orderSide, setOrderSide] = useState<'buy' | 'sell'>('buy');
+  const [orderType, setOrderType] = useState<'market' | 'limit'>('market');
+  const [orderQty, setOrderQty] = useState('10');
+  const [limitPrice, setLimitPrice] = useState('180.00');
+  const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+
+  // Bottom Tabs
+  const [bottomTab, setBottomTab] = useState<BottomTab>('positions');
+
+  // Load Watchlist from LocalStorage
   useEffect(() => {
-    listStrategies()
-      .then((items) => {
-        if (items.length > 0) {
-          setStrategies(items);
-          setStrategyId(items[0].id);
-        } else {
-          createStrategy({
-            name: 'Paper Trading Portfolio',
-            kind: 'custom',
-            description: 'Primary simulated paper portfolio strategy',
-          })
-            .then((strat) => {
-              setStrategies([strat]);
-              setStrategyId(strat.id);
-            })
-            .catch(() => {});
-        }
-      })
-      .catch(() => {});
+    try {
+      const saved = localStorage.getItem('spectra-paper-watchlist');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) setWatchlist(parsed);
+      }
+    } catch {
+      // ignore
+    }
   }, []);
 
-  // Order Ticket State
-  const [orderSymbol, setOrderSymbol] = useState('AAPL');
-  const [orderSide, setOrderSide] = useState<'buy' | 'sell'>('buy');
-  const [orderType, setOrderType] = useState<'market' | 'limit' | 'stop'>('market');
-  const [orderQty, setOrderQty] = useState('10');
-  const [orderPrice, setOrderPrice] = useState('182.50');
-  const [submittingOrder, setSubmittingOrder] = useState(false);
-
-  const handleQuickOrder = (sym: string, px: number, side: 'buy' | 'sell') => {
-    setOrderSymbol(sym);
-    setOrderPrice(px.toFixed(2));
-    setOrderSide(side);
+  const saveWatchlist = (newList: string[]) => {
+    setWatchlist(newList);
+    try {
+      localStorage.setItem('spectra-paper-watchlist', JSON.stringify(newList));
+    } catch {
+      // ignore
+    }
   };
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [acc, ords, recon] = await Promise.all([
-        getPaperAccount(strategyId).catch(() => null),
-        listPaperOrders(strategyId).catch(() => []),
-        reconcilePaperPositions().catch(() => null),
-      ]);
-      if (acc) setAccount(acc);
-      if (ords) setOrders(ords);
-      if (recon) setReconciliation(recon);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load paper trading data');
-    } finally {
-      setLoading(false);
+  const addToWatchlist = (sym: string) => {
+    const upper = sym.toUpperCase().trim();
+    if (!watchlist.includes(upper)) {
+      saveWatchlist([...watchlist, upper]);
     }
-  }, [strategyId]);
+  };
+
+  const removeFromWatchlist = (sym: string) => {
+    saveWatchlist(watchlist.filter((s) => s !== sym));
+  };
+
+  // 1. Initial Connection Status Check
+  const checkStatus = useCallback(async () => {
+    setCheckingConnection(true);
+    try {
+      const status = await getAlpacaStatus();
+      setIsConnected(status.connected);
+      if (status.keyIdHint) setKeyHint(status.keyIdHint);
+      return status.connected;
+    } catch {
+      setIsConnected(false);
+      return false;
+    } finally {
+      setCheckingConnection(false);
+    }
+  }, []);
+
+  // 2. Load Alpaca Account, Positions, Orders, Assets
+  const loadAlpacaData = useCallback(async () => {
+    setLoadingData(true);
+    setErrorMsg(null);
+    try {
+      const [acc, posList, ordList] = await Promise.all([
+        getAlpacaAccount().catch((err) => {
+          console.warn('Account load error:', err);
+          return null;
+        }),
+        getAlpacaPositions().catch(() => []),
+        getAlpacaOrders('all', 100).catch(() => []),
+      ]);
+
+      if (acc) setAccount(acc);
+      setPositions(posList);
+      setOrders(ordList);
+
+      // Lazy load assets in background if empty
+      getAlpacaAssets()
+        .then((items) => {
+          if (items && items.length > 0) setAssets(items);
+        })
+        .catch(() => {});
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to retrieve Alpaca account data.');
+    } finally {
+      setLoadingData(false);
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    checkStatus().then((connected) => {
+      if (connected) {
+        loadAlpacaData();
+      }
+    });
+  }, [checkStatus, loadAlpacaData]);
+
+  // 3. Load Candlestick Bars for Selected Symbol
+  const loadBars = useCallback(async (sym: string, tf: string) => {
+    setChartLoading(true);
+    try {
+      const res = await getAlpacaBars(sym, tf, 100);
+      if (res.bars && res.bars.length > 0) {
+        setChartBars(res.bars);
+        setChartDataStatus('Alpaca Paper (IEX Feed)');
+        // Pre-fill limit price with current close
+        const last = res.bars[res.bars.length - 1];
+        if (last) setLimitPrice(last.c.toFixed(2));
+      } else {
+        // Fallback: generate realistic price points around recent quotes if Alpaca market data feed is offline
+        const now = Date.now();
+        const fallback: CandleBar[] = [];
+        let price = 175.0;
+        const step = tf.includes('Min') ? 60 * 1000 : 24 * 3600 * 1000;
+        for (let i = 40; i >= 0; i--) {
+          const t = now - i * step;
+          const delta = (Math.random() - 0.48) * (price * 0.015);
+          const c = Math.max(1, price + delta);
+          const o = price;
+          const h = Math.max(o, c) + Math.random() * (price * 0.005);
+          const l = Math.min(o, c) - Math.random() * (price * 0.005);
+          fallback.push({
+            t,
+            o: Math.round(o * 100) / 100,
+            h: Math.round(h * 100) / 100,
+            l: Math.round(l * 100) / 100,
+            c: Math.round(c * 100) / 100,
+            v: Math.floor(100000 + Math.random() * 400000),
+          });
+          price = c;
+        }
+        setChartBars(fallback);
+        setChartDataStatus('Market Data Delayed / Simulated');
+      }
+    } catch {
+      setChartBars([]);
+    } finally {
+      setChartLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const handleSyncBroker = async () => {
-    setActionLoading(true);
-    setStatusMsg(null);
-    try {
-      const res = await syncPaperOrders(strategyId);
-      setStatusMsg(`Synced ${res.orders_synced} orders from broker (${res.source}).`);
-      await loadData();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Broker sync failed');
-    } finally {
-      setActionLoading(false);
+    if (isConnected) {
+      loadBars(selectedSymbol, chartTimeframe);
     }
-  };
+  }, [isConnected, selectedSymbol, chartTimeframe, loadBars]);
 
-  const handleReconcile = async () => {
-    setActionLoading(true);
-    setStatusMsg(null);
-    try {
-      const res = await reconcilePaperPositions();
-      setReconciliation(res);
-      setStatusMsg(
-        res.reconciled
-          ? 'Positions fully reconciled with broker.'
-          : `Discrepancy detected: ${res.mismatches_count} mismatch(es).`
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Position reconciliation failed');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleResetAccount = async () => {
-    if (!confirm('Are you sure you want to reset this paper trading account to $100,000 cash?')) return;
-    setActionLoading(true);
-    try {
-      const res = await resetPaperAccount(strategyId, 100_000);
-      setAccount(res);
-      setStatusMsg('Paper account reset to $100,000.00 cash.');
-      await loadData();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Account reset failed');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleSendOrder = async (e: React.FormEvent) => {
+  // 4. Handle Connect Alpaca
+  const handleConnect = async (e: React.FormEvent) => {
     e.preventDefault();
-    const qty = parseFloat(orderQty);
-    if (!orderSymbol.trim() || isNaN(qty) || qty <= 0) {
-      setError('Please provide a valid symbol and quantity');
+    if (!inputKeyId.trim() || !inputSecretKey.trim()) {
+      setConnectError('Both Alpaca API Key ID and Secret Key are required.');
       return;
     }
-    const px = parseFloat(orderPrice);
-    setSubmittingOrder(true);
-    setError(null);
-    setStatusMsg(null);
+
+    setConnecting(true);
+    setConnectError(null);
     try {
-      const res = await createPaperOrder({
-        strategy_id: strategyId,
-        symbol: orderSymbol.toUpperCase().trim(),
+      const res = await connectAlpaca(inputKeyId, inputSecretKey);
+      if (!res.ok) {
+        setConnectError(res.error || 'Failed to authenticate with Alpaca paper trading API.');
+        return;
+      }
+
+      setIsConnected(true);
+      setKeyHint(res.keyIdHint || inputKeyId.slice(-4));
+      setInputKeyId('');
+      setInputSecretKey('');
+      setSuccessMsg('Successfully connected to Alpaca Paper Trading account.');
+      await loadAlpacaData();
+    } catch (err) {
+      setConnectError(err instanceof Error ? err.message : 'Connection failed. Check your network.');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  // 5. Handle Disconnect Alpaca
+  const handleDisconnect = async () => {
+    if (!confirm('Are you sure you want to disconnect your Alpaca paper trading account?')) return;
+    try {
+      await disconnectAlpaca();
+      setIsConnected(false);
+      setAccount(null);
+      setPositions([]);
+      setOrders([]);
+      setKeyHint('');
+      setSuccessMsg('Alpaca credentials removed from this workspace.');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to disconnect account.');
+    }
+  };
+
+  // 6. Handle Direct Order Placement
+  const handleOrderSubmit = async () => {
+    const qtyNum = parseFloat(orderQty);
+    if (!selectedSymbol || isNaN(qtyNum) || qtyNum <= 0) {
+      setErrorMsg('Please specify a valid symbol and positive order quantity.');
+      return;
+    }
+
+    const limitPx = orderType === 'limit' ? parseFloat(limitPrice) : undefined;
+    if (orderType === 'limit' && (isNaN(limitPx!) || limitPx! <= 0)) {
+      setErrorMsg('Please specify a valid limit price.');
+      return;
+    }
+
+    setSubmittingOrder(true);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+    setConfirmModalOpen(false);
+
+    try {
+      const newOrder = await createAlpacaOrder({
+        symbol: selectedSymbol,
+        qty: qtyNum,
         side: orderSide,
-        order_type: orderType,
-        qty,
-        limit_price: orderType === 'limit' && !isNaN(px) ? px : undefined,
-        stop_price: orderType === 'stop' && !isNaN(px) ? px : undefined,
-        fill_now: orderType === 'market',
-        fill_price: orderType === 'market' && !isNaN(px) ? px : undefined,
+        type: orderType,
+        limit_price: limitPx,
       });
 
-      if (res.status === 'rejected') {
-        setError(`Order rejected by pre-trade risk checker: ${res.reject_reason || 'Risk limit breach'}`);
-      } else {
-        setStatusMsg(`Order ${res.id.slice(0, 8)} accepted (${res.status}). Filled: ${res.filled_qty}/${res.qty}`);
-      }
-      await loadData();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to submit order');
+      setSuccessMsg(
+        `Alpaca ${newOrder.side.toUpperCase()} order submitted! Order ID: ${newOrder.id.slice(0, 8)} (${newOrder.status}).`
+      );
+      // Reload account and orders
+      await loadAlpacaData();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Alpaca order submission failed.');
     } finally {
       setSubmittingOrder(false);
     }
   };
 
-  const totalPositionsValue = account?.positions.reduce((acc, p) => acc + p.market_value, 0) ?? 0;
-  const unrealizedPnl = account?.positions.reduce((acc, p) => acc + p.unrealized_pnl, 0) ?? 0;
+  // 7. Handle Order Cancellation
+  const handleCancelOrder = async (orderId: string) => {
+    try {
+      await cancelAlpacaOrder(orderId);
+      setSuccessMsg(`Order ${orderId.slice(0, 8)} cancellation sent to Alpaca.`);
+      await loadAlpacaData();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to cancel order on Alpaca.');
+    }
+  };
 
+  // 8. Handle Position Close
+  const handleClosePosition = async (pos: AlpacaPosition) => {
+    const closeSide = pos.side === 'long' ? 'sell' : 'buy';
+    const closeQty = Math.abs(parseFloat(pos.qty));
+    if (!confirm(`Submit market order to ${closeSide.toUpperCase()} ${closeQty} ${pos.symbol} to close position?`)) {
+      return;
+    }
+
+    try {
+      await createAlpacaOrder({
+        symbol: pos.symbol,
+        qty: closeQty,
+        side: closeSide,
+        type: 'market',
+      });
+      setSuccessMsg(`Closing market order placed for ${pos.symbol}.`);
+      await loadAlpacaData();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : `Failed to close position for ${pos.symbol}.`);
+    }
+  };
+
+  // Filtered symbols from search
+  const filteredAssets = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const query = searchQuery.toUpperCase().trim();
+    return assets
+      .filter((a) => a.tradable && (a.symbol.includes(query) || a.name.toUpperCase().includes(query)))
+      .slice(0, 10);
+  }, [assets, searchQuery]);
+
+  // Current Price & Calculations
+  const currentSymbolPrice = useMemo(() => {
+    const pos = positions.find((p) => p.symbol === selectedSymbol);
+    if (pos) return parseFloat(pos.current_price);
+    if (chartBars.length > 0) return chartBars[chartBars.length - 1].c;
+    return parseFloat(limitPrice) || 150.0;
+  }, [positions, selectedSymbol, chartBars, limitPrice]);
+
+  const estimatedOrderTotal = useMemo(() => {
+    const q = parseFloat(orderQty) || 0;
+    const px = orderType === 'limit' ? parseFloat(limitPrice) || currentSymbolPrice : currentSymbolPrice;
+    return q * px;
+  }, [orderQty, orderType, limitPrice, currentSymbolPrice]);
+
+  const buyingPower = account ? parseFloat(account.buying_power) : 0;
+  const totalEquity = account ? parseFloat(account.equity) : 0;
+  const cashBalance = account ? parseFloat(account.cash) : 0;
+
+  const totalUnrealizedPl = positions.reduce((sum, p) => sum + parseFloat(p.unrealized_pl || '0'), 0);
+  const openOrders = orders.filter((o) =>
+    ['new', 'accepted', 'pending_new', 'partially_filled'].includes(o.status)
+  );
+
+  // -------------------------------------------------------------
+  // RENDERING: 1. Loading State
+  // -------------------------------------------------------------
+  if (checkingConnection) {
+    return (
+      <div className="flex min-h-[450px] items-center justify-center">
+        <div className="text-center">
+          <Spinner className="mx-auto h-8 w-8 text-cyan-400" />
+          <p className="mt-3 text-sm text-slate-400">Verifying Alpaca paper account configuration...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // RENDERING: 2. Not Connected -> Alpaca Connection Screen
+  // -------------------------------------------------------------
+  if (!isConnected) {
+    return (
+      <div className="mx-auto max-w-2xl py-8">
+        <GlassCard className="relative overflow-hidden p-8 border border-white/10 shadow-2xl">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+              <Wallet className="h-6 w-6" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-white">Connect Alpaca Paper Trading</h1>
+              <p className="text-xs text-slate-400">
+                Direct execution on Alpaca Paper Trading API with per-user AES-256 encrypted credential storage.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4 text-xs text-slate-300">
+            <div className="flex items-center gap-2 font-semibold text-cyan-400">
+              <ShieldCheck className="h-4 w-4" />
+              <span>Paper Trading Environment Only</span>
+            </div>
+            <p className="mt-1 leading-relaxed text-slate-400">
+              Your credentials are encrypted at rest with envelope encryption and routed exclusively to{' '}
+              <code className="text-cyan-300">https://paper-api.alpaca.markets</code>. Orders never touch live capital.
+            </p>
+            <div className="mt-2.5 flex items-center gap-2">
+              <a
+                href="https://app.alpaca.markets/paper/dashboard/overview"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-medium text-cyan-400 hover:underline"
+              >
+                <span>Generate paper keys on Alpaca</span>
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
+          </div>
+
+          {connectError && (
+            <div className="mt-4">
+              <ErrorNote>{connectError}</ErrorNote>
+            </div>
+          )}
+
+          <form onSubmit={handleConnect} className="mt-6 space-y-4">
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wider text-slate-400">
+                Alpaca API Key ID
+              </label>
+              <input
+                type="text"
+                required
+                value={inputKeyId}
+                onChange={(e) => setInputKeyId(e.target.value)}
+                placeholder="e.g. PK0123456789ABCDEF"
+                className="mt-1.5 w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 font-mono text-sm text-white placeholder-slate-600 outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wider text-slate-400">
+                Alpaca Secret Key
+              </label>
+              <div className="relative mt-1.5">
+                <input
+                  type={showSecret ? 'text' : 'password'}
+                  required
+                  value={inputSecretKey}
+                  onChange={(e) => setInputSecretKey(e.target.value)}
+                  placeholder="Your 40-character Alpaca paper secret key"
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 pr-10 font-mono text-sm text-white placeholder-slate-600 outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/50"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecret(!showSecret)}
+                  className="absolute right-3 top-3 text-slate-400 hover:text-white"
+                  aria-label="Toggle secret visibility"
+                >
+                  {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={connecting}
+              className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 via-sky-500 to-blue-600 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition hover:brightness-110 disabled:opacity-50"
+            >
+              {connecting ? (
+                <>
+                  <Spinner className="h-4 w-4 text-slate-950" />
+                  <span>Validating with Alpaca...</span>
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>Connect to Alpaca</span>
+                </>
+              )}
+            </button>
+          </form>
+        </GlassCard>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // RENDERING: 3. Connected Dashboard & TradingView-Style Studio
+  // -------------------------------------------------------------
   return (
     <div className="space-y-6">
-      {/* Header and Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      {/* Header Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold tracking-tight text-ink">Paper Trading & Live Execution (M9 & M10)</h1>
-            <Badge tone="profit" className="text-[10px] uppercase tracking-wider">
-              Simulation & Broker Sync
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight text-white">Paper Trading & Execution</h1>
+            <Badge tone="profit" className="flex items-center gap-1.5 text-[11px] font-semibold">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              Alpaca Paper Connected
             </Badge>
+            {keyHint && (
+              <span className="font-mono text-xs text-slate-400">
+                Key: ••••{keyHint}
+              </span>
+            )}
           </div>
-          <p className="mt-1 text-xs text-ink/60">
-            Real-time paper trading ledger, M8 pre-trade risk enforcement, Alpaca order sync, and backtest-to-paper gap analytics.
+          <p className="mt-1 text-xs text-slate-400">
+            Real-time direct paper order execution, interactive candlestick charts, live position tracking, and portfolio balances.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {strategies.length > 0 && (
-            <div className="flex items-center gap-1.5 rounded-lg border border-ink/10 bg-canvas/60 px-2 py-1 text-xs">
-              <span className="text-ink/50">Strategy:</span>
-              <select
-                value={strategyId}
-                onChange={(e) => setStrategyId(e.target.value)}
-                className="bg-transparent font-medium text-ink outline-none"
-              >
-                {strategies.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            className="btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
-            onClick={handleSyncBroker}
-            disabled={actionLoading}
-            title="Sync open orders and executions with Alpaca paper broker"
+            onClick={loadAlpacaData}
+            disabled={loadingData}
+            className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+            title="Refresh Account Data"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5', actionLoading && 'animate-spin')} />
-            Sync Broker
+            <RefreshCw className={cn('h-3.5 w-3.5', loadingData && 'animate-spin')} />
+            Sync Alpaca
           </button>
           <button
             type="button"
-            className="btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
-            onClick={handleReconcile}
-            disabled={actionLoading}
-            title="Reconcile local database positions against broker portfolio"
+            onClick={handleDisconnect}
+            className="flex items-center gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-400 transition hover:bg-rose-500/20"
+            title="Disconnect Credentials"
           >
-            <ShieldCheck className="h-3.5 w-3.5 text-accent" />
-            Reconcile
-          </button>
-          <button
-            type="button"
-            className="btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs text-loss hover:border-loss/30"
-            onClick={handleResetAccount}
-            disabled={actionLoading}
-            title="Reset paper balance and clear open positions"
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-            Reset Ledger
+            <Lock className="h-3.5 w-3.5" />
+            Disconnect
           </button>
         </div>
       </div>
 
-      {error && <ErrorNote>{error}</ErrorNote>}
-      {statusMsg && (
-        <div className="flex items-center gap-2 rounded-lg border border-accent/20 bg-accent/5 px-3.5 py-2 text-xs text-accent">
+      {/* Status Messages */}
+      {errorMsg && <ErrorNote>{errorMsg}</ErrorNote>}
+      {successMsg && (
+        <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-400">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{statusMsg}</span>
+          <span>{successMsg}</span>
         </div>
       )}
 
-      {/* Reconciliation Status Alert */}
-      {reconciliation && !reconciliation.reconciled && (
-        <div className="flex items-start gap-3 rounded-xl border border-loss/30 bg-loss/10 p-3 text-xs text-loss">
-          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
-            <span className="font-semibold">Broker Position Mismatch Detected:</span> Local ledger positions do not match broker records ({reconciliation.mismatches_count} discrepancies).
-            <ul className="mt-1 list-disc pl-4 text-[11px]">
-              {reconciliation.mismatches.map((m) => (
-                <li key={m.symbol}>
-                  {m.symbol}: Broker holds {m.broker_qty}, local ledger has {m.local_qty} (diff: {m.discrepancy})
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {/* KPI Cards */}
+      {/* Top Portfolio Metric Cards */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <GlassCard className="p-4">
-          <div className="flex items-center justify-between text-ink/50">
+        <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
+          <div className="flex items-center justify-between text-slate-400">
             <span className="font-mono text-[10px] uppercase tracking-wider">Total Equity</span>
-            <Wallet className="h-4 w-4 text-profit" />
+            <Wallet className="h-4 w-4 text-cyan-400" />
           </div>
-          <p className="mt-2 text-xl font-bold tracking-tight text-ink">
-            {account ? formatCurrency(account.equity) : '$100,000.00'}
+          <p className="mt-2 font-mono text-2xl font-bold text-white">
+            {formatCurrency(totalEquity)}
           </p>
-          <p className="mt-1 text-[11px] text-ink/50">
-            Cash: {account ? formatCurrency(account.cash) : '$100,000.00'} · Positions: {formatCurrency(totalPositionsValue)}
+          <p className="mt-1 text-[11px] text-slate-400">
+            Account #{account?.account_number || 'Paper'}
           </p>
         </GlassCard>
 
-        <GlassCard className="p-4">
-          <div className="flex items-center justify-between text-ink/50">
+        <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="font-mono text-[10px] uppercase tracking-wider">Cash Balance</span>
+            <DollarSign className="h-4 w-4 text-emerald-400" />
+          </div>
+          <p className="mt-2 font-mono text-2xl font-bold text-white">
+            {formatCurrency(cashBalance)}
+          </p>
+          <p className="mt-1 text-[11px] text-slate-400">Available settle funds</p>
+        </GlassCard>
+
+        <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="font-mono text-[10px] uppercase tracking-wider">Buying Power</span>
+            <Activity className="h-4 w-4 text-purple-400" />
+          </div>
+          <p className="mt-2 font-mono text-2xl font-bold text-white">
+            {formatCurrency(buyingPower)}
+          </p>
+          <p className="mt-1 text-[11px] text-slate-400">Margin & Daytrading power</p>
+        </GlassCard>
+
+        <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
+          <div className="flex items-center justify-between text-slate-400">
             <span className="font-mono text-[10px] uppercase tracking-wider">Unrealized P&L</span>
-            {unrealizedPnl >= 0 ? <TrendingUp className="h-4 w-4 text-profit" /> : <TrendingDown className="h-4 w-4 text-loss" />}
+            {totalUnrealizedPl >= 0 ? (
+              <TrendingUp className="h-4 w-4 text-emerald-400" />
+            ) : (
+              <TrendingDown className="h-4 w-4 text-rose-400" />
+            )}
           </div>
-          <p className={cn('mt-2 text-xl font-bold tracking-tight', unrealizedPnl >= 0 ? 'text-profit' : 'text-loss')}>
-            {unrealizedPnl >= 0 ? '+' : ''}
-            {formatCurrency(unrealizedPnl)}
+          <p
+            className={cn(
+              'mt-2 font-mono text-2xl font-bold',
+              totalUnrealizedPl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+            )}
+          >
+            {totalUnrealizedPl >= 0 ? '+' : ''}
+            {formatCurrency(totalUnrealizedPl)}
           </p>
-          <p className="mt-1 text-[11px] text-ink/50">
-            Peak Equity: {account ? formatCurrency(account.peak_equity) : '$100,000.00'}
-          </p>
-        </GlassCard>
-
-        <GlassCard className="p-4">
-          <div className="flex items-center justify-between text-ink/50">
-            <span className="font-mono text-[10px] uppercase tracking-wider">M7 Copula VaR (99% 1d)</span>
-            <ShieldAlert className="h-4 w-4 text-accent" />
-          </div>
-          <p className="mt-2 text-xl font-bold tracking-tight text-ink">
-            {account ? formatCurrency(account.var_dollar) : '$0.00'}
-          </p>
-          <p className="mt-1 text-[11px] text-ink/50">
-            {account ? formatPercent(account.var_pct, 2) : '0.00%'} of equity (Student-t Copula)
-          </p>
-        </GlassCard>
-
-        <GlassCard className="p-4">
-          <div className="flex items-center justify-between text-ink/50">
-            <span className="font-mono text-[10px] uppercase tracking-wider">Copula CVaR (Expected Shortfall)</span>
-            <Activity className="h-4 w-4 text-ink/40" />
-          </div>
-          <p className="mt-2 text-xl font-bold tracking-tight text-ink">
-            {account ? formatCurrency(account.cvar_dollar) : '$0.00'}
-          </p>
-          <p className="mt-1 text-[11px] text-ink/50">Tail risk beyond 99th percentile</p>
+          <p className="mt-1 text-[11px] text-slate-400">Across {positions.length} active positions</p>
         </GlassCard>
       </div>
 
-      {/* Main Content Area */}
-      <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
-        {/* Left Tabs View */}
-        <div className="space-y-4">
-          {/* Real-time Interactive Market Chart */}
-          <MarketChart
-            currentSymbol={orderSymbol}
-            onSelectSymbol={(sym, px) => {
-              setOrderSymbol(sym);
-              setOrderPrice(px.toFixed(2));
-            }}
-            onQuickOrder={handleQuickOrder}
-          />
+      {/* Main TradingView-Style 3-Column Dashboard */}
+      <div className="grid gap-4 lg:grid-cols-[240px_1fr_320px]">
+        {/* LEFT PANEL: Stock Search & Watchlist */}
+        <div className="flex flex-col rounded-2xl border border-white/10 bg-[#090d14] p-3 text-white">
+          <div className="mb-2 font-mono text-[11px] uppercase tracking-wider text-slate-400">
+            Symbol Search
+          </div>
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search ticker..."
+              className="w-full rounded-xl border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 font-mono text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-500"
+            />
+          </div>
 
-          <div className="flex items-center gap-1 border-b border-ink/10 pb-2">
+          {/* Search Results Dropdown */}
+          {filteredAssets.length > 0 && (
+            <div className="mb-3 max-h-40 overflow-y-auto rounded-xl border border-white/10 bg-slate-900/90 p-1">
+              {filteredAssets.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex items-center justify-between rounded-lg px-2 py-1 text-xs hover:bg-white/10"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSymbol(a.symbol);
+                      setSearchQuery('');
+                    }}
+                    className="flex flex-col text-left truncate flex-1"
+                  >
+                    <span className="font-mono font-bold text-cyan-400">{a.symbol}</span>
+                    <span className="truncate text-[10px] text-slate-400">{a.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => addToWatchlist(a.symbol)}
+                    className="ml-2 text-slate-400 hover:text-white"
+                    title="Add to Watchlist"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Watchlist Header */}
+          <div className="flex items-center justify-between border-b border-white/10 pb-1.5 font-mono text-[11px] uppercase tracking-wider text-slate-400">
+            <span>Watchlist</span>
+            <span>{watchlist.length}</span>
+          </div>
+
+          {/* Watchlist Items */}
+          <div className="mt-2 space-y-1 overflow-y-auto max-h-[380px]">
+            {watchlist.map((sym) => {
+              const pos = positions.find((p) => p.symbol === sym);
+              const isSelected = selectedSymbol === sym;
+              return (
+                <div
+                  key={sym}
+                  className={cn(
+                    'group flex items-center justify-between rounded-xl px-2.5 py-2 text-xs transition cursor-pointer',
+                    isSelected
+                      ? 'bg-cyan-500/15 border border-cyan-500/30 text-white'
+                      : 'hover:bg-white/5 text-slate-300'
+                  )}
+                  onClick={() => setSelectedSymbol(sym)}
+                >
+                  <div className="min-w-0">
+                    <span className="font-mono font-bold">{sym}</span>
+                    {pos && (
+                      <span className="ml-1.5 rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] text-emerald-300">
+                        {pos.qty} sh
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {pos && (
+                      <span className="font-mono text-[11px] text-slate-300">
+                        {formatCurrency(parseFloat(pos.current_price))}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFromWatchlist(sym);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400"
+                      title="Remove from watchlist"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* CENTER PANEL: Interactive Candlestick Chart */}
+        <div className="flex flex-col">
+          <TradingChart
+            symbol={selectedSymbol}
+            bars={chartBars}
+            currentPrice={currentSymbolPrice}
+            timeframe={chartTimeframe}
+            onTimeframeChange={(tf) => setChartTimeframe(tf)}
+            dataStatus={chartDataStatus}
+            loading={chartLoading}
+            onRefresh={() => loadBars(selectedSymbol, chartTimeframe)}
+            className="flex-1 min-h-[460px]"
+          />
+        </div>
+
+        {/* RIGHT PANEL: Order Ticket */}
+        <div className="flex flex-col rounded-2xl border border-white/10 bg-[#090d14] p-4 text-white">
+          <div className="mb-3 font-mono text-[11px] uppercase tracking-wider text-slate-400">
+            Order Ticket · {selectedSymbol}
+          </div>
+
+          {/* Buy / Sell Toggle */}
+          <div className="grid grid-cols-2 gap-2 rounded-xl bg-white/5 p-1 mb-4">
             <button
               type="button"
-              onClick={() => setActiveTab('positions')}
+              onClick={() => setOrderSide('buy')}
               className={cn(
-                'rounded-lg px-3 py-1.5 text-xs font-medium transition',
-                activeTab === 'positions'
-                  ? 'bg-accent/10 text-accent font-semibold'
-                  : 'text-ink/60 hover:bg-ink/5 hover:text-ink'
+                'rounded-lg py-1.5 text-xs font-bold transition',
+                orderSide === 'buy'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
+                  : 'text-slate-400 hover:text-white'
               )}
             >
-              Active Positions ({account?.positions.length ?? 0})
+              Buy
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab('orders')}
+              onClick={() => setOrderSide('sell')}
               className={cn(
-                'rounded-lg px-3 py-1.5 text-xs font-medium transition',
-                activeTab === 'orders'
-                  ? 'bg-accent/10 text-accent font-semibold'
-                  : 'text-ink/60 hover:bg-ink/5 hover:text-ink'
+                'rounded-lg py-1.5 text-xs font-bold transition',
+                orderSide === 'sell'
+                  ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
+                  : 'text-slate-400 hover:text-white'
               )}
             >
-              Order History ({orders.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('gap')}
-              className={cn(
-                'rounded-lg px-3 py-1.5 text-xs font-medium transition',
-                activeTab === 'gap'
-                  ? 'bg-accent/10 text-accent font-semibold'
-                  : 'text-ink/60 hover:bg-ink/5 hover:text-ink'
-              )}
-            >
-              Backtest-to-Paper Gap (M10)
+              Sell
             </button>
           </div>
 
-          {activeTab === 'positions' && (
-            <GlassCard className="overflow-hidden p-0">
-              <div className="border-b border-ink/10 px-4 py-3">
-                <h3 className="text-sm font-semibold text-ink">Portfolio Positions</h3>
-              </div>
-              {account?.positions && account.positions.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-ink/10 bg-ink/[0.02] text-ink/50">
-                      <tr>
-                        <th className="px-4 py-2.5 font-medium">Symbol</th>
-                        <th className="px-4 py-2.5 font-medium text-right">Quantity</th>
-                        <th className="px-4 py-2.5 font-medium text-right">Mark Price</th>
-                        <th className="px-4 py-2.5 font-medium text-right">Market Value</th>
-                        <th className="px-4 py-2.5 font-medium text-right">Weight</th>
-                        <th className="px-4 py-2.5 font-medium text-right">Unrealized P&L</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-ink/5 font-mono">
-                      {account.positions.map((p) => (
-                        <tr key={p.symbol} className="hover:bg-ink/[0.02]">
-                          <td className="px-4 py-2.5 font-semibold text-ink">{p.symbol}</td>
-                          <td className="px-4 py-2.5 text-right">{formatNumber(p.qty, 2)}</td>
-                          <td className="px-4 py-2.5 text-right">{formatCurrency(p.price)}</td>
-                          <td className="px-4 py-2.5 text-right">{formatCurrency(p.market_value)}</td>
-                          <td className="px-4 py-2.5 text-right">{formatPercent(p.weight, 1)}</td>
-                          <td
-                            className={cn(
-                              'px-4 py-2.5 text-right font-semibold',
-                              p.unrealized_pnl >= 0 ? 'text-profit' : 'text-loss'
-                            )}
-                          >
-                            {p.unrealized_pnl >= 0 ? '+' : ''}
-                            {formatCurrency(p.unrealized_pnl)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-8 text-center text-xs text-ink/40">
-                  No active paper positions. Submit an order using the ticket on the right.
-                </div>
-              )}
-            </GlassCard>
-          )}
-
-          {activeTab === 'orders' && (
-            <GlassCard className="overflow-hidden p-0">
-              <div className="border-b border-ink/10 px-4 py-3">
-                <h3 className="text-sm font-semibold text-ink">Order Execution Log</h3>
-              </div>
-              {orders.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="border-b border-ink/10 bg-ink/[0.02] text-ink/50">
-                      <tr>
-                        <th className="px-4 py-2.5 font-medium">Time</th>
-                        <th className="px-4 py-2.5 font-medium">Symbol</th>
-                        <th className="px-4 py-2.5 font-medium">Side</th>
-                        <th className="px-4 py-2.5 font-medium">Type</th>
-                        <th className="px-4 py-2.5 font-medium text-right">Qty</th>
-                        <th className="px-4 py-2.5 font-medium text-right">Filled</th>
-                        <th className="px-4 py-2.5 font-medium">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-ink/5 font-mono text-[11px]">
-                      {orders.map((o) => (
-                        <tr key={o.id} className="hover:bg-ink/[0.02]">
-                          <td className="px-4 py-2 text-ink/60">{new Date(o.created_at).toLocaleTimeString()}</td>
-                          <td className="px-4 py-2 font-semibold text-ink">{o.symbol}</td>
-                          <td className="px-4 py-2">
-                            <span
-                              className={cn(
-                                'rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase',
-                                o.side === 'buy' ? 'bg-profit/10 text-profit' : 'bg-loss/10 text-loss'
-                              )}
-                            >
-                              {o.side}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 uppercase text-ink/70">{o.order_type}</td>
-                          <td className="px-4 py-2 text-right">{formatNumber(o.qty, 2)}</td>
-                          <td className="px-4 py-2 text-right">
-                            {formatNumber(o.filled_qty, 2)} {o.filled_avg_price ? `@ ${formatCurrency(o.filled_avg_price)}` : ''}
-                          </td>
-                          <td className="px-4 py-2">
-                            <Badge
-                              tone={
-                                o.status === 'filled'
-                                  ? 'profit'
-                                  : o.status === 'rejected'
-                                  ? 'loss'
-                                  : 'neutral'
-                              }
-                            >
-                              {o.status}
-                            </Badge>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="p-8 text-center text-xs text-ink/40">No orders recorded in this session.</div>
-              )}
-            </GlassCard>
-          )}
-
-          {activeTab === 'gap' && (
-            <BacktestToPaperGap strategyId={strategyId} />
-          )}
-        </div>
-
-        {/* Right Panel: Order Entry Ticket with Pre-Trade Risk Checker */}
-        <div>
-          <GlassCard as="section" className="p-4">
-            <div className="flex items-center gap-2 border-b border-ink/10 pb-3">
-              <Send className="h-4 w-4 text-accent" />
-              <h3 className="text-sm font-semibold text-ink">Order Entry Ticket</h3>
-            </div>
-            <p className="mt-1 text-[11px] text-ink/50">
-              Orders pass through M8 pre-trade checks before entering the ledger.
-            </p>
-
-            <form onSubmit={handleSendOrder} className="mt-4 space-y-3.5 text-xs">
-              <div>
-                <label className="block text-[11px] font-medium text-ink/60">Symbol</label>
-                <input
-                  type="text"
-                  value={orderSymbol}
-                  onChange={(e) => setOrderSymbol(e.target.value.toUpperCase())}
-                  className="mt-1 w-full rounded-md border border-ink/10 bg-transparent px-3 py-1.5 font-mono uppercase text-ink focus:border-accent focus:outline-none"
-                  placeholder="e.g. AAPL"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[11px] font-medium text-ink/60">Side</label>
-                  <select
-                    value={orderSide}
-                    onChange={(e) => setOrderSide(e.target.value as 'buy' | 'sell')}
-                    className="mt-1 w-full rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-ink focus:border-accent focus:outline-none"
-                  >
-                    <option value="buy">BUY / LONG</option>
-                    <option value="sell">SELL / SHORT</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-ink/60">Order Type</label>
-                  <select
-                    value={orderType}
-                    onChange={(e) => setOrderType(e.target.value as 'market' | 'limit' | 'stop')}
-                    className="mt-1 w-full rounded-md border border-ink/10 bg-canvas px-2.5 py-1.5 text-ink focus:border-accent focus:outline-none"
-                  >
-                    <option value="market">Market</option>
-                    <option value="limit">Limit</option>
-                    <option value="stop">Stop</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[11px] font-medium text-ink/60">Quantity</label>
-                  <input
-                    type="number"
-                    step="1"
-                    min="1"
-                    value={orderQty}
-                    onChange={(e) => setOrderQty(e.target.value)}
-                    className="mt-1 w-full rounded-md border border-ink/10 bg-transparent px-3 py-1.5 font-mono text-ink focus:border-accent focus:outline-none"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-medium text-ink/60">Price ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    value={orderPrice}
-                    onChange={(e) => setOrderPrice(e.target.value)}
-                    className="mt-1 w-full rounded-md border border-ink/10 bg-transparent px-3 py-1.5 font-mono text-ink focus:border-accent focus:outline-none"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-ink/10 bg-ink/[0.02] p-2.5 text-[11px] text-ink/60">
-                <div className="flex justify-between">
-                  <span>Estimated Value:</span>
-                  <span className="font-mono font-semibold text-ink">
-                    {formatCurrency((parseFloat(orderQty) || 0) * (parseFloat(orderPrice) || 0))}
-                  </span>
-                </div>
-                <div className="mt-1 flex justify-between">
-                  <span>Pre-Trade Check:</span>
-                  <span className="text-profit">Active</span>
-                </div>
-              </div>
-
+          {/* Order Type: Market vs Limit */}
+          <div className="mb-4">
+            <label className="block text-[11px] font-medium text-slate-400 mb-1">Order Type</label>
+            <div className="grid grid-cols-2 gap-2">
               <button
-                type="submit"
-                disabled={submittingOrder}
+                type="button"
+                onClick={() => setOrderType('market')}
                 className={cn(
-                  'w-full rounded-lg py-2 font-medium text-white transition shadow-sm',
-                  orderSide === 'buy'
-                    ? 'bg-emerald-600 hover:bg-emerald-700'
-                    : 'bg-rose-600 hover:bg-rose-700'
+                  'rounded-lg border px-3 py-1.5 text-xs font-medium transition',
+                  orderType === 'market'
+                    ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400'
+                    : 'border-white/10 bg-white/5 text-slate-400 hover:text-white'
                 )}
               >
-                {submittingOrder ? 'Submitting...' : `${orderSide.toUpperCase()} ${orderSymbol}`}
+                Market
               </button>
-            </form>
-          </GlassCard>
+              <button
+                type="button"
+                onClick={() => setOrderType('limit')}
+                className={cn(
+                  'rounded-lg border px-3 py-1.5 text-xs font-medium transition',
+                  orderType === 'limit'
+                    ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-400'
+                    : 'border-white/10 bg-white/5 text-slate-400 hover:text-white'
+                )}
+              >
+                Limit
+              </button>
+            </div>
+          </div>
+
+          {/* Quantity Input */}
+          <div className="mb-4">
+            <div className="flex justify-between items-center text-[11px] font-medium text-slate-400 mb-1">
+              <span>Quantity (Shares)</span>
+              <span>Est: {formatCurrency(estimatedOrderTotal)}</span>
+            </div>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={orderQty}
+              onChange={(e) => setOrderQty(e.target.value)}
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-500"
+            />
+            {/* Quick Quantity Buttons */}
+            <div className="flex gap-1.5 mt-2">
+              {['1', '5', '10', '25', '100'].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => setOrderQty(q)}
+                  className="flex-1 rounded-lg border border-white/10 bg-white/5 py-1 font-mono text-[11px] text-slate-300 hover:bg-white/10"
+                >
+                  +{q}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Limit Price Input */}
+          {orderType === 'limit' && (
+            <div className="mb-4">
+              <label className="block text-[11px] font-medium text-slate-400 mb-1">Limit Price (USD)</label>
+              <input
+                type="number"
+                min="0.01"
+                step="0.01"
+                value={limitPrice}
+                onChange={(e) => setLimitPrice(e.target.value)}
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-500"
+              />
+            </div>
+          )}
+
+          {/* Order Summary Information */}
+          <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 text-xs space-y-1.5 mb-4">
+            <div className="flex justify-between text-slate-400">
+              <span>Market Price:</span>
+              <span className="font-mono text-white">{formatCurrency(currentSymbolPrice)}</span>
+            </div>
+            <div className="flex justify-between text-slate-400">
+              <span>Buying Power:</span>
+              <span className="font-mono text-white">{formatCurrency(buyingPower)}</span>
+            </div>
+            <div className="flex justify-between border-t border-white/10 pt-1.5 font-semibold">
+              <span className="text-slate-300">Total Value:</span>
+              <span className="font-mono text-cyan-400">{formatCurrency(estimatedOrderTotal)}</span>
+            </div>
+          </div>
+
+          {/* Place Order Button */}
+          <button
+            type="button"
+            onClick={() => setConfirmModalOpen(true)}
+            disabled={submittingOrder || estimatedOrderTotal <= 0}
+            className={cn(
+              'w-full rounded-xl py-2.5 text-xs font-bold uppercase tracking-wider transition shadow-lg disabled:opacity-50',
+              orderSide === 'buy'
+                ? 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-emerald-500/20'
+                : 'bg-rose-500 text-white hover:bg-rose-400 shadow-rose-500/20'
+            )}
+          >
+            {submittingOrder ? (
+              <span className="flex items-center justify-center gap-1.5">
+                <Spinner className="h-3.5 w-3.5 text-current" />
+                Submitting to Alpaca...
+              </span>
+            ) : (
+              `Review ${orderSide.toUpperCase()} ${orderQty} ${selectedSymbol}`
+            )}
+          </button>
         </div>
+      </div>
+
+      {/* Confirmation Modal */}
+      {confirmModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f172a] p-6 text-white shadow-2xl">
+            <h3 className="text-lg font-bold">Confirm Paper Order</h3>
+            <p className="mt-1 text-xs text-slate-400">
+              This order will be submitted directly to your Alpaca paper trading account.
+            </p>
+
+            <div className="my-4 rounded-xl border border-white/10 bg-white/5 p-4 text-xs space-y-2 font-mono">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Symbol:</span>
+                <span className="font-bold text-white">{selectedSymbol}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Action:</span>
+                <span className={orderSide === 'buy' ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                  {orderSide.toUpperCase()}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Quantity:</span>
+                <span className="text-white">{orderQty} shares</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Order Type:</span>
+                <span className="text-white">{orderType.toUpperCase()}</span>
+              </div>
+              {orderType === 'limit' && (
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Limit Price:</span>
+                  <span className="text-white">{formatCurrency(parseFloat(limitPrice))}</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-white/10 pt-2 font-semibold text-sm">
+                <span className="text-slate-300">Estimated Total:</span>
+                <span className="text-cyan-400">{formatCurrency(estimatedOrderTotal)}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmModalOpen(false)}
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleOrderSubmit}
+                disabled={submittingOrder}
+                className={cn(
+                  'rounded-xl px-4 py-2 text-xs font-bold text-slate-950 transition',
+                  orderSide === 'buy' ? 'bg-emerald-400 hover:bg-emerald-300' : 'bg-rose-500 text-white hover:bg-rose-400'
+                )}
+              >
+                Submit to Alpaca
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BOTTOM PANEL: Positions, Open Orders, Order History, Performance */}
+      <div className="rounded-2xl border border-white/10 bg-[#090d14] p-4 text-white">
+        {/* Tab Headers */}
+        <div className="flex items-center gap-2 border-b border-white/10 pb-3">
+          <button
+            type="button"
+            onClick={() => setBottomTab('positions')}
+            className={cn(
+              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+              bottomTab === 'positions'
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+            )}
+          >
+            Current Positions ({positions.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setBottomTab('open-orders')}
+            className={cn(
+              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+              bottomTab === 'open-orders'
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+            )}
+          >
+            Open Orders ({openOrders.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setBottomTab('history')}
+            className={cn(
+              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+              bottomTab === 'history'
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+            )}
+          >
+            Order History ({orders.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setBottomTab('performance')}
+            className={cn(
+              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+              bottomTab === 'performance'
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+            )}
+          >
+            Portfolio Metrics
+          </button>
+        </div>
+
+        {/* Tab 1: Current Positions */}
+        {bottomTab === 'positions' && (
+          <div className="mt-4 overflow-x-auto">
+            {positions.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-500">
+                No open positions in your Alpaca paper trading account.
+              </div>
+            ) : (
+              <table className="w-full text-left font-mono text-xs">
+                <thead>
+                  <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-slate-400">
+                    <th className="py-2">Symbol</th>
+                    <th className="py-2">Side</th>
+                    <th className="py-2 text-right">Shares</th>
+                    <th className="py-2 text-right">Avg Entry</th>
+                    <th className="py-2 text-right">Current Price</th>
+                    <th className="py-2 text-right">Market Value</th>
+                    <th className="py-2 text-right">Unrealized P&L</th>
+                    <th className="py-2 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {positions.map((pos) => {
+                    const pl = parseFloat(pos.unrealized_pl || '0');
+                    const plPct = parseFloat(pos.unrealized_plpc || '0') * 100;
+                    return (
+                      <tr key={pos.symbol} className="hover:bg-white/[0.02]">
+                        <td className="py-2.5 font-bold text-white">{pos.symbol}</td>
+                        <td className="py-2.5">
+                          <span
+                            className={cn(
+                              'rounded px-1.5 py-0.5 text-[10px] font-bold uppercase',
+                              pos.side === 'long'
+                                ? 'bg-emerald-500/20 text-emerald-300'
+                                : 'bg-rose-500/20 text-rose-300'
+                            )}
+                          >
+                            {pos.side}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-right text-slate-200">{pos.qty}</td>
+                        <td className="py-2.5 text-right text-slate-200">
+                          {formatCurrency(parseFloat(pos.avg_entry_price))}
+                        </td>
+                        <td className="py-2.5 text-right font-bold text-white">
+                          {formatCurrency(parseFloat(pos.current_price))}
+                        </td>
+                        <td className="py-2.5 text-right text-slate-200">
+                          {formatCurrency(parseFloat(pos.market_value))}
+                        </td>
+                        <td
+                          className={cn(
+                            'py-2.5 text-right font-semibold',
+                            pl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                          )}
+                        >
+                          {pl >= 0 ? '+' : ''}
+                          {formatCurrency(pl)} ({plPct >= 0 ? '+' : ''}
+                          {plPct.toFixed(2)}%)
+                        </td>
+                        <td className="py-2.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => handleClosePosition(pos)}
+                            className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-1 text-[11px] font-semibold text-rose-300 hover:bg-rose-500/20"
+                          >
+                            Close
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Tab 2: Open Orders */}
+        {bottomTab === 'open-orders' && (
+          <div className="mt-4 overflow-x-auto">
+            {openOrders.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-500">
+                No active open orders on Alpaca.
+              </div>
+            ) : (
+              <table className="w-full text-left font-mono text-xs">
+                <thead>
+                  <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-slate-400">
+                    <th className="py-2">Time</th>
+                    <th className="py-2">Symbol</th>
+                    <th className="py-2">Side</th>
+                    <th className="py-2">Type</th>
+                    <th className="py-2 text-right">Qty</th>
+                    <th className="py-2 text-right">Filled</th>
+                    <th className="py-2 text-right">Limit Price</th>
+                    <th className="py-2">Status</th>
+                    <th className="py-2 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {openOrders.map((ord) => (
+                    <tr key={ord.id} className="hover:bg-white/[0.02]">
+                      <td className="py-2.5 text-slate-400">
+                        {new Date(ord.created_at).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
+                      <td className="py-2.5 font-bold text-white">{ord.symbol}</td>
+                      <td className="py-2.5">
+                        <span
+                          className={cn(
+                            'rounded px-1.5 py-0.5 text-[10px] font-bold uppercase',
+                            ord.side === 'buy'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-rose-500/20 text-rose-300'
+                          )}
+                        >
+                          {ord.side}
+                        </span>
+                      </td>
+                      <td className="py-2.5 uppercase text-slate-300">{ord.type}</td>
+                      <td className="py-2.5 text-right text-slate-200">{ord.qty}</td>
+                      <td className="py-2.5 text-right text-slate-400">{ord.filled_qty}</td>
+                      <td className="py-2.5 text-right text-slate-200">
+                        {ord.limit_price ? formatCurrency(parseFloat(ord.limit_price)) : '-'}
+                      </td>
+                      <td className="py-2.5">
+                        <Badge tone="accent" className="text-[10px] uppercase">
+                          {ord.status}
+                        </Badge>
+                      </td>
+                      <td className="py-2.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleCancelOrder(ord.id)}
+                          className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-[10px] text-rose-300 hover:bg-rose-500/20"
+                        >
+                          Cancel
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Tab 3: Order History */}
+        {bottomTab === 'history' && (
+          <div className="mt-4 overflow-x-auto">
+            {orders.length === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-500">
+                No orders found on Alpaca paper account.
+              </div>
+            ) : (
+              <table className="w-full text-left font-mono text-xs">
+                <thead>
+                  <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-slate-400">
+                    <th className="py-2">Date / Time</th>
+                    <th className="py-2">Symbol</th>
+                    <th className="py-2">Side</th>
+                    <th className="py-2">Type</th>
+                    <th className="py-2 text-right">Qty</th>
+                    <th className="py-2 text-right">Avg Fill Price</th>
+                    <th className="py-2">Status</th>
+                    <th className="py-2">Order ID</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {orders.map((ord) => (
+                    <tr key={ord.id} className="hover:bg-white/[0.02]">
+                      <td className="py-2.5 text-slate-400">
+                        {new Date(ord.created_at).toLocaleString(undefined, {
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
+                      <td className="py-2.5 font-bold text-white">{ord.symbol}</td>
+                      <td className="py-2.5">
+                        <span
+                          className={cn(
+                            'rounded px-1.5 py-0.5 text-[10px] font-bold uppercase',
+                            ord.side === 'buy'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : 'bg-rose-500/20 text-rose-300'
+                          )}
+                        >
+                          {ord.side}
+                        </span>
+                      </td>
+                      <td className="py-2.5 uppercase text-slate-300">{ord.type}</td>
+                      <td className="py-2.5 text-right text-slate-200">
+                        {ord.filled_qty}/{ord.qty}
+                      </td>
+                      <td className="py-2.5 text-right text-slate-200">
+                        {ord.filled_avg_price ? formatCurrency(parseFloat(ord.filled_avg_price)) : '-'}
+                      </td>
+                      <td className="py-2.5">
+                        <Badge
+                          tone={
+                            ord.status === 'filled'
+                              ? 'profit'
+                              : ord.status === 'canceled'
+                              ? 'neutral'
+                              : ord.status === 'rejected'
+                              ? 'loss'
+                              : 'accent'
+                          }
+                          className="text-[10px] uppercase"
+                        >
+                          {ord.status}
+                        </Badge>
+                      </td>
+                      <td className="py-2.5 font-mono text-[11px] text-slate-500">
+                        {ord.id.slice(0, 8)}…
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Tab 4: Performance & Account Metrics */}
+        {bottomTab === 'performance' && (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 text-xs">
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 space-y-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                Balances & Equity
+              </span>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Portfolio Value:</span>
+                <span className="font-mono text-white">{formatCurrency(totalEquity)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Cash Balance:</span>
+                <span className="font-mono text-white">{formatCurrency(cashBalance)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Last Equity:</span>
+                <span className="font-mono text-white">
+                  {account?.last_equity ? formatCurrency(parseFloat(account.last_equity)) : '-'}
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 space-y-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                Margin & Buying Power
+              </span>
+              <div className="flex justify-between">
+                <span className="text-slate-400">RegT Buying Power:</span>
+                <span className="font-mono text-white">
+                  {account?.regt_buying_power ? formatCurrency(parseFloat(account.regt_buying_power)) : '-'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Daytrading Power:</span>
+                <span className="font-mono text-white">
+                  {account?.daytrading_buying_power
+                    ? formatCurrency(parseFloat(account.daytrading_buying_power))
+                    : '-'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Maintenance Margin:</span>
+                <span className="font-mono text-white">
+                  {account?.maintenance_margin
+                    ? formatCurrency(parseFloat(account.maintenance_margin))
+                    : '-'}
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 space-y-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                Regulatory & Trading Stats
+              </span>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Pattern Day Trader:</span>
+                <span className="font-mono text-white">
+                  {account?.pattern_day_trader ? 'Yes' : 'No'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Daytrade Count:</span>
+                <span className="font-mono text-white">{account?.daytrade_count ?? 0} / 3</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Account Currency:</span>
+                <span className="font-mono text-white">{account?.currency || 'USD'}</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

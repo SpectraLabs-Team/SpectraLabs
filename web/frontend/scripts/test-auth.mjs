@@ -2051,6 +2051,9 @@ const ROUTE_RULES = {
   'engine-upload/sessions/[id] PUT': 'editor',
   'invites/[token] GET': 'public',
   'invites/[token] POST': 'session',
+  'paper/alpaca/connect POST': 'editor',
+  'paper/alpaca/disconnect POST': 'editor',
+  'paper/alpaca/status GET': 'viewer',
   'secrets GET': 'viewer',
   'secrets/[kind] PUT': 'owner',
   'secrets/[kind] DELETE': 'owner',
@@ -2587,7 +2590,7 @@ test('uploads: spooled to a temp file while hashed, refused past the limit, name
     assert.equal(s.size, data.length);
     assert.equal(s.sha256, crypto.createHash('sha256').update(data).digest('hex'));
     assert.deepEqual(fs.readFileSync(s.file), data);
-    assert.equal(fs.statSync(s.file).mode & 0o077, 0, 'temp file is private');
+    if (process.platform !== 'win32') assert.equal(fs.statSync(s.file).mode & 0o077, 0, 'temp file is private');
   } finally {
     fs.rmSync(s.file, { force: true });
   }

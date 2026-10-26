@@ -29,7 +29,22 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/risk': { method: 'POST', minRole: 'editor', timeoutMs: 60_000 },
   'api/stress': { method: 'POST', minRole: 'editor', timeoutMs: 60_000 },
   'api/benchmark': { method: 'POST', minRole: 'editor', timeoutMs: 130_000, heavy: true },
-  'api/alpaca/account': { method: 'GET', minRole: 'editor', timeoutMs: 10_000 },
+  'api/alpaca/account': { method: 'GET', minRole: 'editor', timeoutMs: 15_000 },
+  'api/alpaca/positions': { method: 'GET', minRole: 'editor', timeoutMs: 15_000 },
+  'api/alpaca/orders': { method: ['GET', 'POST'], minRole: 'editor', timeoutMs: 20_000 },
+  'api/alpaca/orders/{id}': { method: 'DELETE', minRole: 'editor', timeoutMs: 15_000 },
+  'api/alpaca/sync': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  'api/alpaca/reconcile': { method: 'GET', minRole: 'editor', timeoutMs: 20_000 },
+  'api/alpaca/assets': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/alpaca/stocks/{symbol}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/alpaca/account': { method: 'GET', minRole: 'editor', timeoutMs: 15_000 },
+  'api/v1/alpaca/positions': { method: 'GET', minRole: 'editor', timeoutMs: 15_000 },
+  'api/v1/alpaca/orders': { method: ['GET', 'POST'], minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/alpaca/orders/{id}': { method: 'DELETE', minRole: 'editor', timeoutMs: 15_000 },
+  'api/v1/alpaca/sync': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
+  'api/v1/alpaca/reconcile': { method: 'GET', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/alpaca/assets': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/alpaca/stocks/{symbol}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/jobs': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/jobs/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/jobs/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
@@ -159,6 +174,12 @@ const REGISTRY_PATTERNS: [RegExp, string][] = [
 export function routePolicyKey(path: string): string {
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}\/cancel$/i.test(path)) return 'api/v1/jobs/{id}/cancel';
   if (/^api\/v1\/jobs\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/jobs/{id}';
+  if (/^api\/(?:v1\/)?alpaca\/orders\/[^/]+$/i.test(path)) {
+    return path.startsWith('api/v1/') ? 'api/v1/alpaca/orders/{id}' : 'api/alpaca/orders/{id}';
+  }
+  if (/^api\/(?:v1\/)?alpaca\/stocks\/[^/]+\/bars$/i.test(path)) {
+    return path.startsWith('api/v1/') ? 'api/v1/alpaca/stocks/{symbol}/bars' : 'api/alpaca/stocks/{symbol}/bars';
+  }
   if (/^api\/v1\/paper\/orders\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/orders/{id}';
   if (/^api\/v1\/paper\/gap\/reports\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/gap/reports/{id}';
   for (const [pattern, key] of REGISTRY_PATTERNS) if (pattern.test(path)) return key;

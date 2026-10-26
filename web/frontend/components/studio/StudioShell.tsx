@@ -80,8 +80,8 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
               <button type="button" role="radio" aria-checked className="flex w-full items-center gap-2.5 rounded-lg border border-profit/40 bg-profit/10 px-3 py-2 text-left">
                 <span className="h-2 w-2 rounded-full bg-profit shadow-[0_0_8px_rgb(var(--profit))]" />
                 <span className="min-w-0">
-                  <span className="block text-[13px] font-medium text-ink">Paper Trading</span>
-                  <span className="block text-[10.5px] text-ink/50">Simulated ledger in this browser</span>
+                  <span className="block text-[13px] font-medium text-ink">Alpaca Paper Trading</span>
+                  <span className="block text-[10.5px] text-ink/50">Broker execution & real market data</span>
                 </span>
               </button>
               <button

@@ -152,6 +152,13 @@ export const MAIN_TOUR: TourStep[] = [
     side: 'right',
   },
   {
+    id: 'account',
+    title: 'Account settings',
+    body: 'Your name and initials at the top of the sidebar open your account: profile, password, two-factor sign-in, signed-in devices and account deletion. It also explains the activity data Spectra keeps about your use of the platform.',
+    targets: ['account-link', 'studio-main'],
+    side: 'right',
+  },
+  {
     id: 'admin',
     role: 'admin',
     title: 'Admin console',

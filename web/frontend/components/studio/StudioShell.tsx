@@ -58,6 +58,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
         {/* Profile → Account page */}
         <Link
           href="/account"
+          data-tour="account-link"
           onClick={onNavigate}
           className={cn('flex items-center gap-3 rounded-xl border border-ink/[0.07] bg-ink/[0.02] p-2.5 transition hover:border-accent/30 hover:bg-accent/[0.05]', collapsed && 'justify-center p-2')}
           title={user ? `${displayName(user)} · ${user.email} · Account settings` : 'Account settings'}

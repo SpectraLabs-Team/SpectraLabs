@@ -14,6 +14,12 @@ const activity = t.load('lib/server/activity.js');
 const analytics = t.load('lib/server/adminAnalytics.js');
 const client = t.load('lib/activityClient.js');
 
+describe('retention disclosure', () => {
+  it('tells users the same retention period the purge job uses', () => {
+    assert.equal(client.ACTIVITY_RETENTION_DAYS_CLIENT, activity.ACTIVITY_RETENTION_DAYS);
+  });
+});
+
 describe('heartbeat credit', () => {
   it('credits nothing without a previous heartbeat, or for a gap that is zero, negative or not a number', () => {
     assert.equal(activity.heartbeatCredit(null), 0);

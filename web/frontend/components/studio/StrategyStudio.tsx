@@ -88,7 +88,6 @@ export function StrategyStudio() {
 
   // Modals / Dialogs
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const [versionNotes, setVersionNotes] = useState('');
   const [showNewStrategyModal, setShowNewStrategyModal] = useState(false);
   const [newStrategyName, setNewStrategyName] = useState('');
   const [newStrategyDesc, setNewStrategyDesc] = useState('');
@@ -261,9 +260,8 @@ export function StrategyStudio() {
     setIsSavingVersion(true);
     setVersionSavedNotice(null);
     try {
-      const v = await saveVersion(selectedStrategy.id, code, parameters, versionNotes);
+      const v = await saveVersion(selectedStrategy.id, code, parameters);
       setShowSaveModal(false);
-      setVersionNotes('');
       setVersionSavedNotice(`Saved as Version ${v.version_num} (Hash: ${v.code_sha256.slice(0, 10)}...)`);
 
       // Refresh versions
@@ -730,7 +728,6 @@ export function StrategyStudio() {
                 <tr>
                   <th className="px-4 py-3">Version</th>
                   <th className="px-4 py-3">Code Fingerprint</th>
-                  <th className="px-4 py-3">Notes</th>
                   <th className="px-4 py-3">Parameters</th>
                   <th className="px-4 py-3">Created</th>
                   <th className="px-4 py-3 text-right">Actions</th>
@@ -750,7 +747,6 @@ export function StrategyStudio() {
                       <td className="px-4 py-3 text-ink/70" title={v.code_sha256}>
                         {v.code_sha256.slice(0, 12)}...
                       </td>
-                      <td className="px-4 py-3 font-sans text-ink">{v.notes || '—'}</td>
                       <td className="px-4 py-3 text-ink/60">
                         {JSON.stringify(v.parameters || {})}
                       </td>
@@ -958,18 +954,6 @@ export function StrategyStudio() {
               since the last version, the existing version will be returned.
             </p>
 
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="text-xs font-medium text-ink">Version Notes / Description</label>
-                <textarea
-                  value={versionNotes}
-                  onChange={(e) => setVersionNotes(e.target.value)}
-                  placeholder="e.g. Tuned fast/slow window ratios for SPY regime shift"
-                  rows={3}
-                  className="mt-1 w-full rounded-lg border border-ink/15 bg-white/70 p-2.5 text-xs text-ink dark:bg-ink/5"
-                />
-              </div>
-            </div>
 
             <div className="mt-6 flex justify-end gap-2">
               <button
@@ -1076,7 +1060,7 @@ export function StrategyStudio() {
                 >
                   {versions.map((v) => (
                     <option key={v.id} value={v.id}>
-                      v{v.version_num} ({v.code_sha256.slice(0, 8)}) {v.notes ? `— ${v.notes}` : ''}
+                      v{v.version_num} ({v.code_sha256.slice(0, 8)})
                     </option>
                   ))}
                 </select>

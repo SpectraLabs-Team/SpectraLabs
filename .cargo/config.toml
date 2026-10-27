@@ -1,6 +1,6 @@
 [target.aarch64-apple-darwin]
 linker = "clang"
 
-[target.'cfg(not(target_os = "windows"))'.env]
+[env]
 CC = { value = "clang", force = true }
 CXX = { value = "clang++", force = true }

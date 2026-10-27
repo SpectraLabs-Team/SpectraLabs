@@ -10,7 +10,7 @@ rust-version.workspace = true
 [dependencies]
 spectra-core = { path = "../spectra-core" }
 spectra-data = { path = "../spectra-data" }
-parquet = { version = "54", default-features = false, features = ["arrow", "snap"] }
+parquet = { version = "60", default-features = false, features = ["arrow", "snap"] }
 arrow-schema = { version = "54" }
 arrow-array = { version = "54" }
 arrow-cast = { version = "60" }

@@ -176,14 +176,15 @@ export function StrategyStudio() {
         }
         if (vers.length > 0) {
           setSelectedVersionForRun(vers[vers.length - 1].id);
+          // Parameter sets belong to a saved version: load the latest one's presets.
+          listParameterSets(stratId, vers[vers.length - 1].id)
+            .then((ps) => setParamSets(ps))
+            .catch(() => setParamSets([]));
+        } else {
+          setParamSets([]);
         }
       })
       .catch(() => setVersions([]));
-
-    // Load parameter sets
-    listParameterSets(stratId)
-      .then((ps) => setParamSets(ps))
-      .catch(() => setParamSets([]));
 
     // Load datasets for quick backtest
     listDatasets()
@@ -305,11 +306,15 @@ export function StrategyStudio() {
   // Handle Create Preset
   const handleCreatePreset = async () => {
     if (!selectedStrategy || !newPresetName.trim()) return;
+    const latest = versions[versions.length - 1];
+    if (!latest) {
+      alert('Save a version of this strategy first: presets are stored against a saved version.');
+      return;
+    }
     try {
-      const created = await createParameterSet(selectedStrategy.id, {
+      const created = await createParameterSet(selectedStrategy.id, latest.id, {
         name: newPresetName.trim(),
         parameters,
-        strategy_version_id: versions.length > 0 ? versions[versions.length - 1].id : undefined,
       });
       setParamSets((prev) => [created, ...prev]);
       setNewPresetName('');

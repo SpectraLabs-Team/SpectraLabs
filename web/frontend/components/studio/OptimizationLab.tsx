@@ -855,7 +855,7 @@ export function OptimizationLab() {
               <>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="rounded-xl border border-ink/[0.08] bg-surface p-4">
-                    <span className="text-xs text-ink/50">Walk-Forward Efficiency (WFE)</span>
+                    <MetricLabel metric="walk_forward_efficiency" className="text-xs text-ink/50">Walk-Forward Efficiency (WFE)</MetricLabel>
                     <p className="mt-1 text-2xl font-bold text-accent">
                       {selectedReport.efficiency_ratio !== undefined ? `${(selectedReport.efficiency_ratio * 100).toFixed(1)}%` : '—'}
                     </p>
@@ -911,8 +911,8 @@ export function OptimizationLab() {
                           <div className="flex items-center justify-between">
                             <span className="font-semibold text-ink">Window / Fold #{f.fold}</span>
                             <div className="flex items-center gap-4">
-                              <span className="text-ink/60">IS Sharpe: <strong className="text-ink">{f.in_sample_objective.toFixed(2)}</strong></span>
-                              <span className="text-ink/60">OOS Sharpe: <strong className="text-emerald-600 font-bold">{f.out_of_sample_objective.toFixed(2)}</strong></span>
+                              <span className="text-ink/60"><MetricLabel metric="is_oos_sharpe" className="text-ink/60">IS Sharpe</MetricLabel>: <strong className="text-ink">{f.in_sample_objective.toFixed(2)}</strong></span>
+                              <span className="text-ink/60"><MetricLabel metric="is_oos_sharpe" className="text-ink/60">OOS Sharpe</MetricLabel>: <strong className="text-emerald-600 font-bold">{f.out_of_sample_objective.toFixed(2)}</strong></span>
                             </div>
                           </div>
 

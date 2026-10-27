@@ -116,7 +116,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
             <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink/40">Paper account</p>
             <dl className="mt-2.5 space-y-2 text-[12.5px]">
               <div className="flex justify-between gap-2">
-                <dt className="text-ink/55">Cash balance</dt>
+                <dt className="text-ink/55"><MetricLabel metric="cash_balance" className="text-ink/55">Cash balance</MetricLabel></dt>
                 <dd className={cn('num', account.cash < 0 ? 'text-loss' : 'text-ink')}>{formatCurrency(account.cash)}</dd>
               </div>
               <div className="flex justify-between gap-2">

@@ -5,7 +5,6 @@ import { Header } from '@/components/landing/Header';
 import { Hero } from '@/components/landing/Hero';
 import { AuthRedirectPrompt, PendingSectionScroll } from '@/components/landing/NavLink';
 import { Taxonomy } from '@/components/landing/Taxonomy';
-import { TrustBar } from '@/components/landing/TrustBar';
 
 export default function LandingPage() {
   return (
@@ -18,7 +17,6 @@ export default function LandingPage() {
         <Capabilities />
         <Taxonomy />
         <Benchmarks />
-        <TrustBar />
       </main>
       <Footer />
     </>

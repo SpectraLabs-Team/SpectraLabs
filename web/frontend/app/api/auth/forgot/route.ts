@@ -37,14 +37,7 @@ export async function POST(req: Request) {
       await sendOtpEmail({ to: cleanEmail, code, type: 'reset' });
     } catch (err) {
       console.error('[FORGOT SMTP ERROR]', err);
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`[DEV FALLBACK RESET CODE FOR ${cleanEmail}]: ${code}`);
-        return NextResponse.json({ ok: true, message: 'Password reset code sent (dev mode).', devCode: code });
-      }
       return NextResponse.json({ ok: false, error: 'Could not send the reset email. Please try again.' }, { status: 500 });
-    }
-    if (process.env.NODE_ENV !== 'production') {
-      return NextResponse.json({ ok: true, message: 'Password reset code sent.', devCode: code });
     }
     return generic;
   } catch (err) {

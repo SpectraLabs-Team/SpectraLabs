@@ -35,12 +35,7 @@ async function deliverMail(opts: { from?: string; to: string; subject: string; t
   try {
     return await transporter.sendMail(opts);
   } catch (err) {
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn(`[AUTH SMTP DEV FALLBACK] Failed to send email via SMTP, logging fallback:`, err);
-      console.log(`📧 [FALLBACK DEV EMAIL] To: ${opts.to} | Subject: ${opts.subject}`);
-      console.log(`Text: ${opts.text}`);
-      return { messageId: `fallback-dev-${Date.now()}` };
-    }
+    console.error(`[AUTH SMTP ERROR] Failed to deliver mail:`, err);
     throw err;
   }
 }

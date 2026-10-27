@@ -14,6 +14,7 @@ import { displayName, initials, useAuth } from '@/lib/auth';
 import { cn, formatCompactCurrency, formatCurrency } from '@/lib/utils';
 import { usePortfolio } from './PortfolioContext';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { WorkspaceGuide } from './WorkspaceGuide';
 
 export type StudioTab = 'overview' | 'risk' | 'risk-center' | 'paper' | 'portfolio' | 'data' | 'strategies' | 'backtests' | 'optimization' | 'benchmark' | 'registry' | 'settings';
 
@@ -251,7 +252,7 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
         )}
       </AnimatePresence>
 
-      <div className={cn('relative transition-[padding] duration-300', collapsed ? 'lg:pl-[68px]' : 'lg:pl-[264px]')}>
+      <div className={cn('relative min-w-0 transition-[padding] duration-300', collapsed ? 'lg:pl-[68px]' : 'lg:pl-[264px]')}>
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-ink/[0.06] bg-canvas/80 px-4 backdrop-blur-xl sm:px-6">
           <button type="button" data-tour="mobile-menu" onClick={() => setMobileOpen(true)} className="-ml-1 rounded-md p-1.5 text-ink/60 lg:hidden" aria-label="Open menu">
             <Menu className="h-5 w-5" />
@@ -273,6 +274,7 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
             {user?.role === 'admin' && (
               <Link
                 href="/admin"
+                data-tour="admin-link"
                 className="hidden items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-ink/65 transition hover:bg-ink/[0.05] hover:text-ink md:inline-flex"
               >
                 <LayoutDashboard className="h-4 w-4" /> Admin Dashboard
@@ -299,6 +301,7 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
         )}
 
         <main data-tour="studio-main" className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 sm:py-8">
+          <WorkspaceGuide tab={tab} />
           {children}
         </main>
       </div>

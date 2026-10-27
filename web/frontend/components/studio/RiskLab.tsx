@@ -269,9 +269,9 @@ export function RiskLab() {
   const days = ran ? ran.horizon : horizon;
 
   return (
-    <div className="grid gap-5 xl:grid-cols-[340px_1fr]">
+    <div className="grid gap-5 xl:grid-cols-[340px_1fr] [&>*]:min-w-0">
       {/* Controls */}
-      <GlassCard as="section" className="h-fit p-5 xl:sticky xl:top-20">
+      <GlassCard as="section" className="h-fit p-5 xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto overscroll-contain">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink">Simulation</h2>
           <label className="flex cursor-pointer items-center gap-2 text-[11px] text-ink/60">

@@ -17,6 +17,8 @@ export interface TourStep {
   side?: 'top' | 'right' | 'bottom' | 'left';
   /** Only include this step when the given Studio tab exists (features that may be absent). */
   requiresTab?: StudioTab;
+  /** Only include this step for accounts with this role (the admin console). */
+  role?: 'admin';
 }
 
 export const MAIN_TOUR: TourStep[] = [
@@ -56,6 +58,78 @@ export const MAIN_TOUR: TourStep[] = [
     side: 'top',
   },
   {
+    id: 'risk',
+    tab: 'risk',
+    requiresTab: 'risk',
+    title: 'Risk & Stress Lab',
+    body: 'Stress-test a strategy with Monte Carlo simulation, historical scenarios and regime and volatility models. Each workspace starts with a How to use panel that explains its steps and controls.',
+    targets: ['nav-risk', 'studio-main'],
+    side: 'right',
+  },
+  {
+    id: 'risk-center',
+    tab: 'risk-center',
+    requiresTab: 'risk-center',
+    title: 'Risk Center & controls',
+    body: 'Set pre-trade limits for exposure, leverage, drawdown, daily loss and VaR, watch their utilization, and use the kill switch to block new orders.',
+    targets: ['nav-risk-center', 'studio-main'],
+    side: 'right',
+  },
+  {
+    id: 'portfolio',
+    tab: 'portfolio',
+    requiresTab: 'portfolio',
+    title: 'Portfolio Studio',
+    body: 'Combine positions or strategies into one portfolio and check how their risk and concentration add up.',
+    targets: ['nav-portfolio', 'studio-main'],
+    side: 'right',
+  },
+  {
+    id: 'data',
+    tab: 'data',
+    requiresTab: 'data',
+    title: 'Data',
+    body: 'Upload price files or connect a provider, check the quality report, and save dataset versions so every run records exactly which data it used.',
+    targets: ['nav-data', 'studio-main'],
+    side: 'right',
+  },
+  {
+    id: 'optimization',
+    tab: 'optimization',
+    requiresTab: 'optimization',
+    title: 'Optimization Lab',
+    body: 'Walk-forward analysis tests parameters on data they were not fitted to. Read the out-of-sample results and the overfitting statistics before trusting the best parameters.',
+    targets: ['nav-optimization', 'studio-main'],
+    side: 'right',
+  },
+  {
+    id: 'benchmark',
+    tab: 'benchmark',
+    requiresTab: 'benchmark',
+    title: 'Hardware benchmarks',
+    body: 'Time the engine on this machine so you know which simulation sizes are practical.',
+    targets: ['nav-benchmark', 'studio-main'],
+    side: 'right',
+  },
+  {
+    id: 'registry',
+    tab: 'registry',
+    requiresTab: 'registry',
+    title: 'Experiment registry',
+    body: 'Every run, its inputs and its results, kept as a record that cannot be edited after it is written. Use it to reproduce an earlier result.',
+    targets: ['nav-registry', 'studio-main'],
+    side: 'right',
+  },
+  {
+    id: 'settings',
+    tab: 'settings',
+    requiresTab: 'settings',
+    title: 'Market data & Alpaca settings',
+    body: 'Connect your Alpaca paper account and choose the market data source. Keys are stored encrypted for this workspace.',
+    targets: ['nav-settings', 'studio-main'],
+    side: 'right',
+  },
+  {
     id: 'engine',
     title: 'The trading engine',
     body: 'Everything runs on the Spectra Rust engine: an event-driven backtester with no look-ahead, an exact accounting ledger, cost models and a Monte Carlo risk engine. Its status is shown here. Pre-trade risk limits and kill switches live in the Risk Center.',
@@ -73,9 +147,17 @@ export const MAIN_TOUR: TourStep[] = [
   {
     id: 'learn',
     title: 'The Learning Center',
-    body: 'Study trading concepts, how simulations work and what every metric means, at your own pace. Open it from here or from the Help menu, where you can also take this tour again.',
+    body: 'Lessons on trading concepts and how simulations work, plus the Metric library: every metric in the Studio, with its formula, example and limitations. Open it from here or from the Help menu, where you can also take this tour again.',
     targets: ['nav-learn', 'help-menu'],
     side: 'right',
+  },
+  {
+    id: 'admin',
+    role: 'admin',
+    title: 'Admin console',
+    body: 'Platform admins see the Admin console: overview figures, the user directory, analytics, engine workers and the audit log. Every view of the directory, analytics and an account is recorded.',
+    targets: ['admin-link'],
+    side: 'bottom',
   },
 ];
 

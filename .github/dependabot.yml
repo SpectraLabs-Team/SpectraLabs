@@ -15,11 +15,38 @@ updates:
       # any build error. Upgrade both together.
       - dependency-name: tailwind-merge
         update-types: [version-update:semver-major]
+      # eslint-config-next 16 requires eslint >= 9; repo uses eslint 8.
+      - dependency-name: eslint-config-next
+        update-types: [version-update:semver-major]
+      # TypeScript 7 major bump requires manual review and peer dependency alignment.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      arrow-and-parquet:
+        patterns:
+          - "arrow*"
+          - "parquet*"
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # sqlx 0.9 has breaking query checking changes requiring code migration.
+      - dependency-name: sqlx
+        update-types: [version-update:semver-major]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
+    ignore:
+      # dtolnay/rust-toolchain channel is strictly pinned in rust-toolchain.toml and docker/engine.Dockerfile.
+      - dependency-name: dtolnay/rust-toolchain

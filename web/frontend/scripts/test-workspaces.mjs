@@ -97,6 +97,14 @@ describe('guided tour coverage', () => {
     assert.ok(MAIN_TOUR.filter((s) => s.role !== 'admin').every((s) => s.role === undefined));
   });
 
+  it('covers account settings for every user, pointing at the sidebar account link', () => {
+    const step = MAIN_TOUR.find((s) => s.id === 'account');
+    assert.ok(step, 'no account step');
+    assert.equal(step.role, undefined);
+    assert.equal(step.targets[0], 'account-link');
+    assert.match(t.source('components/studio/StudioShell.tsx'), /href="\/account"\s+data-tour="account-link"/);
+  });
+
   it('has page tours for the complex pages that have them', () => {
     assert.ok(PAGE_TOURS.backtests?.length >= 3);
     assert.ok(PAGE_TOURS.paper?.length >= 3);

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { headers } from 'next/headers';
 import { AuthModal } from '@/components/auth/AuthModal';
 import { AuthProvider } from '@/lib/auth';
+import { ActivityTracker } from '@/components/activity/ActivityTracker';
 import { ThemeProvider, themeInitScript } from '@/lib/theme';
 import './globals.css';
 
@@ -37,6 +38,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <AuthProvider>
             {children}
             <AuthModal />
+            <ActivityTracker />
           </AuthProvider>
         </ThemeProvider>
       </body>

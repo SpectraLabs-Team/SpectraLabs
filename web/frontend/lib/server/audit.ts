@@ -37,6 +37,8 @@ export const AUDIT_ACTIONS = [
   'admin.user.disabled',
   'admin.user.enabled',
   'admin.user.viewed',
+  'admin.directory.viewed',
+  'admin.analytics.viewed',
   // Workspaces and membership
   'workspace.created',
   'workspace.renamed',

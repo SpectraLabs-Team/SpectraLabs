@@ -1,263 +1,463 @@
 'use client';
 
 import Link from 'next/link';
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { motion, useReducedMotion } from 'framer-motion';
-import { Activity, ArrowRight, Check, Copy, Cpu, RefreshCw, ScrollText, Search, Server, Users, Workflow, X } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { ArrowRight, BarChart3, ChevronLeft, ChevronRight, LayoutGrid, ScrollText, Server, Users } from 'lucide-react';
 import { AuditLog } from '@/components/audit/AuditLog';
 import { AdminUserPanel } from './AdminUserPanel';
 import { StatusPills } from '@/components/ui/StatusPills';
 import { getCpuTelemetry } from '@/lib/api';
 import type { CpuTelemetry } from '@/lib/types';
-import { displayName, initials, useAuth, type Role } from '@/lib/auth';
+import { displayName, useAuth } from '@/lib/auth';
 import { useEngineHealth } from '@/lib/useEngineHealth';
 import { cn } from '@/lib/utils';
+import type { AdminOverview, AdminAnalytics, DirectoryRow } from '@/lib/adminTypes';
 
-// Skeleton data: placeholders until admin telemetry endpoints exist.
-const WORKERS = [
-  { id: 'mc-01', job: 'Monte Carlo · 100k paths', pct: 72 },
-  { id: 'mc-02', job: 'Stress · 2008 replay', pct: 41 },
-  { id: 'bt-01', job: 'Backtest sweep · 48 trials', pct: 88 },
-  { id: 'rs-01', job: 'PBO / DSR validation', pct: 15 },
-];
+// ── Data hooks ──
 
-function Card({ title, icon, className, children, i, demo }: { title: string; icon: ReactNode; className?: string; children: ReactNode; i: number; demo?: boolean }) {
-  const reduce = useReducedMotion();
-  return (
-    <motion.section
-      initial={reduce ? false : { opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: i * 0.06, duration: 0.4 }}
-      className={cn('glass flex flex-col p-5 sm:p-6', className)}
-    >
-      <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-        <span className="text-accent">{icon}</span>
-        {title}
-        {demo && (
-          <span title="Placeholder figures until this metric has an engine endpoint" className="ml-auto rounded-full border border-amber-500/35 bg-amber-500/10 px-2 py-0.5 font-mono text-[9.5px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300">
-            Demo data
-          </span>
-        )}
-      </div>
-      <div className="mt-4 flex-1">{children}</div>
-    </motion.section>
-  );
+/** GET a JSON endpoint; re-reads every `intervalMs` (if set) and whenever `url` changes. */
+function useJson<T>(url: string | null, intervalMs?: number) {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState('');
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!url) return;
+    let cancelled = false;
+    const load = () =>
+      fetch(url, { cache: 'no-store', credentials: 'same-origin' })
+        .then(async (res) => {
+          const body = await res.json().catch(() => ({}));
+          if (cancelled) return;
+          if (!res.ok || body.ok === false) setError(body.error || `Could not load (${res.status}).`);
+          else {
+            setError('');
+            setData(body as T);
+          }
+        })
+        .catch(() => !cancelled && setError('Could not reach the server.'));
+    void load();
+    const timer = intervalMs ? window.setInterval(load, intervalMs) : undefined;
+    return () => {
+      cancelled = true;
+      if (timer) window.clearInterval(timer);
+    };
+  }, [url, intervalMs, tick]);
+  return { data, error, reload: () => setTick((t) => t + 1) };
 }
 
-function Bar({ pct, tone = 'accent' }: { pct: number; tone?: 'accent' | 'profit' | 'caution' }) {
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded-full bg-ink/[0.08]">
-      <div className={cn('h-full rounded-full', tone === 'profit' ? 'bg-profit' : tone === 'caution' ? 'bg-caution' : 'bg-accent')} style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink/45">{label}</p>
-      <p className="mt-1 font-mono text-xl font-semibold tabular-nums text-ink">{value}</p>
-    </div>
-  );
-}
-
-/** Live host load from the engine (GET /api/telemetry/cpu via the signed-in proxy), every 5s. */
 function useHostTelemetry(intervalMs = 5_000) {
   const [host, setHost] = useState<CpuTelemetry | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
-    let live = true;
+    let alive = true;
     const tick = () =>
       getCpuTelemetry()
-        .then((t) => live && (setHost(t), setFailed(false)))
-        .catch(() => live && setFailed(true));
+        .then((t) => alive && (setHost(t), setFailed(false)))
+        .catch(() => alive && setFailed(true));
     tick();
     const id = window.setInterval(tick, intervalMs);
     return () => {
-      live = false;
+      alive = false;
       window.clearInterval(id);
     };
   }, [intervalMs]);
   return { host, failed };
 }
 
-const pct = (n: number) => `${n.toFixed(n < 10 ? 1 : 0)}%`;
+// ── Small pieces ──
 
-type Account = { id: string; email: string; name: string; role: Role; status: 'active' | 'disabled'; createdAt: number; twoFactor?: boolean; lastActiveAt: number | null };
+const utcDay = (d: Date) => d.toISOString().slice(0, 10);
+const shortDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+const shortDateTime = (ms: number) => new Date(ms).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
-const joined = new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-
-/** Live list from /api/admin/users (admin-checked on the server). */
-/** Copies an email to the clipboard and confirms with a tick for a moment. */
-function CopyEmail({ email }: { email: string }) {
-  const [done, setDone] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(email);
-      setDone(true);
-      setTimeout(() => setDone(false), 1500);
-    } catch {
-      /* clipboard blocked (insecure context): the email is still selectable */
-    }
-  };
+function Kpi({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: string; tone?: 'loss' | 'profit' }) {
   return (
-    <button
-      type="button"
-      onClick={copy}
-      aria-label={done ? `Copied ${email}` : `Copy ${email}`}
-      title={done ? 'Copied' : 'Copy email'}
-      className={cn('rounded-md p-1.5 transition', done ? 'text-profit' : 'text-ink/40 hover:bg-ink/[0.06] hover:text-ink')}
-    >
-      {done ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-    </button>
+    <div className="glass-subtle p-4">
+      <p className="text-[12px] text-ink/55">{label}</p>
+      <p className={cn('mt-1.5 font-mono text-2xl font-semibold tabular-nums text-ink', tone === 'loss' && 'text-loss', tone === 'profit' && 'text-profit')}>{value}</p>
+      {sub && <p className="mt-1 text-[11.5px] text-ink/45">{sub}</p>}
+    </div>
   );
 }
 
-function RegisteredUsers() {
-  const { user: me } = useAuth();
-  const [open, setOpen] = useState<string | null>(null);
-  const [users, setUsers] = useState<Account[] | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [query, setQuery] = useState('');
+function Notice({ children }: { children: ReactNode }) {
+  return <p className="rounded-xl border border-ink/[0.08] bg-ink/[0.02] p-4 text-[13px] leading-6 text-ink/65">{children}</p>;
+}
 
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!users || !q) return users ?? [];
-    return users.filter((u) => u.email.includes(q) || displayName(u).toLowerCase().includes(q));
-  }, [users, query]);
+// ── Overview ──
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/admin/users', { cache: 'no-store', credentials: 'same-origin' });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Could not load accounts.');
-      setUsers(data.users);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load accounts.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+function OverviewPanel() {
+  const { data, error } = useJson<AdminOverview>('/api/admin/overview', 15_000);
+  if (error) return <Notice>{error}</Notice>;
+  if (!data) return <Notice>Loading the overview…</Notice>;
+  const workersOnline = data.workers?.filter((w) => w.online).length ?? null;
+  return (
+    <div className="space-y-6">
+      <section aria-labelledby="kpi-accounts">
+        <h2 id="kpi-accounts" className="text-sm font-semibold text-ink">Accounts</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Kpi label="Registered accounts" value={data.users.total} sub={`${data.users.admins} admin · ${data.users.disabled} disabled`} />
+          <Kpi label="New in the last 30 days" value={data.users.registeredLast30Days} />
+          <Kpi label="Active today" value={data.activity.activeToday} sub="Distinct accounts with active time (UTC day)" />
+          <Kpi label="Active in 7 / 30 days" value={`${data.activity.activeLast7Days} / ${data.activity.activeLast30Days}`} sub={`Weekly / monthly active accounts`} />
+        </div>
+      </section>
+      <section aria-labelledby="kpi-engine">
+        <h2 id="kpi-engine" className="text-sm font-semibold text-ink">Simulations and trading, last 24 hours</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {data.simulations ? (
+            <>
+              <Kpi label="Backtests started" value={data.simulations.runsLast24h} />
+              <Kpi label="Backtests failed" value={data.simulations.runsFailedLast24h} tone={data.simulations.runsFailedLast24h > 0 ? 'loss' : undefined} />
+              <Kpi label="Background jobs failed" value={data.simulations.jobsFailedLast24h} tone={data.simulations.jobsFailedLast24h > 0 ? 'loss' : undefined} />
+            </>
+          ) : (
+            <Notice>Simulation counts need the engine tables. They are not in this database yet.</Notice>
+          )}
+          {data.paperOrders ? (
+            <Kpi label="Paper orders" value={data.paperOrders.placedLast24h} sub={`${data.paperOrders.rejectedLast24h} rejected`} />
+          ) : null}
+        </div>
+      </section>
+      <section aria-labelledby="kpi-security">
+        <h2 id="kpi-security" className="text-sm font-semibold text-ink">Security, last 24 hours</h2>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Kpi label="Failed sign-ins" value={data.security.failedLoginsLast24h} tone={data.security.failedLoginsLast24h > 0 ? 'loss' : undefined} />
+          <Kpi label="Security alerts" value={data.security.alertsLast24h} tone={data.security.alertsLast24h > 0 ? 'loss' : undefined} />
+          <Kpi label="Workers online" value={workersOnline === null ? '—' : `${workersOnline} / ${data.workers?.length ?? 0}`} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ── Users ──
+
+const PAGE_SIZE = 25;
+
+function UsersPanel() {
+  const { user } = useAuth();
+  const [search, setSearch] = useState('');
+  const [q, setQ] = useState('');
+  const [role, setRole] = useState<'all' | 'admin' | 'user'>('all');
+  const [status, setStatus] = useState<'all' | 'active' | 'disabled'>('all');
+  const [sort, setSort] = useState('email');
+  const [dir, setDir] = useState<'asc' | 'desc'>('asc');
+  const [page, setPage] = useState(1);
+  const [open, setOpen] = useState<{ id: string; email: string } | null>(null);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    const t = window.setTimeout(() => {
+      setQ(search.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  const params = new URLSearchParams({ q, role, status, sort, dir, page: String(page), pageSize: String(PAGE_SIZE) });
+  const { data, error, reload } = useJson<{ items: DirectoryRow[]; total: number; page: number; pageSize: number }>(`/api/admin/users?${params}`);
+  const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+
+  const th = (key: string, label: string) => (
+    <th scope="col" className="px-3 py-2 text-left font-medium" aria-sort={sort === key ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button
+        type="button"
+        onClick={() => {
+          if (sort === key) setDir(dir === 'asc' ? 'desc' : 'asc');
+          else {
+            setSort(key);
+            setDir('asc');
+          }
+          setPage(1);
+        }}
+        className="inline-flex items-center gap-1 hover:text-ink"
+      >
+        {label}
+        {sort === key && <span aria-hidden>{dir === 'asc' ? '▲' : '▼'}</span>}
+      </button>
+    </th>
+  );
 
   return (
-    <>
-      <div className="-mt-1 mb-3 flex flex-wrap items-center gap-3">
-        <label className="relative min-w-[200px] flex-1 sm:max-w-xs">
-          <span className="sr-only">Search accounts</span>
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink/40" />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search name or email"
-            className="w-full rounded-lg border border-ink/10 bg-canvas/60 py-1.5 pl-8 pr-7 text-[12.5px] text-ink outline-none transition placeholder:text-ink/35 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 [&::-webkit-search-cancel-button]:hidden"
-          />
-          {query && (
-            <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-ink/40 hover:text-ink">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </label>
-        <p className="text-[12px] text-ink/50" aria-live="polite">
-          {users
-            ? query.trim()
-              ? `Showing ${shown.length} of ${users.length} registered quant${users.length === 1 ? '' : 's'}`
-              : `${users.length} registered quant${users.length === 1 ? '' : 's'}`
-            : loading
-              ? 'Loading…'
-              : ''}
-        </p>
-        <button type="button" onClick={load} disabled={loading} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-ink/55 transition hover:bg-ink/5 hover:text-ink disabled:opacity-50">
-          <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} /> Refresh
-        </button>
+    <div className="space-y-4">
+      <div className="grid gap-2.5 md:grid-cols-[1fr_auto_auto]">
+        <label className="sr-only" htmlFor="user-search">Search accounts</label>
+        <input
+          id="user-search"
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by email or name"
+          className="input h-10"
+        />
+        <label className="sr-only" htmlFor="user-role">Role</label>
+        <select id="user-role" value={role} onChange={(e) => { setRole(e.target.value as typeof role); setPage(1); }} className="input h-10">
+          <option value="all">All roles</option>
+          <option value="admin">Admins</option>
+          <option value="user">Users</option>
+        </select>
+        <label className="sr-only" htmlFor="user-status">Status</label>
+        <select id="user-status" value={status} onChange={(e) => { setStatus(e.target.value as typeof status); setPage(1); }} className="input h-10">
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="disabled">Disabled</option>
+        </select>
       </div>
-      {error ? (
-        <p className="rounded-lg border border-rose-500/25 bg-rose-500/[0.06] px-3 py-2 text-[12.5px] text-rose-600 dark:text-rose-300">{error}</p>
-      ) : users && users.length === 0 ? (
-        <p className="py-6 text-center text-sm text-ink/50">No accounts registered yet.</p>
-      ) : users && shown.length === 0 ? (
-        <p className="py-6 text-center text-sm text-ink/50">No accounts match &ldquo;{query.trim()}&rdquo;.</p>
-      ) : (
-        <div className="-mx-1 overflow-x-auto">
-          <table className="w-full min-w-[640px] text-left text-[12.5px]">
-            <thead>
-              <tr className="border-b border-ink/[0.08] font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink/45">
-                <th className="px-1 pb-2 font-medium">Name</th>
-                <th className="px-1 pb-2 font-medium">Email</th>
-                <th className="px-1 pb-2 font-medium">Role</th>
-                <th className="px-1 pb-2 font-medium">Login</th>
-                <th className="px-1 pb-2 font-medium">Status</th>
-                <th className="px-1 pb-2 text-right font-medium">Joined</th>
-                <th className="px-1 pb-2" aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink/[0.06]">
-              {shown.map((u) => (
-                <Fragment key={u.id}>
+
+      {error && <Notice>{error}</Notice>}
+      {!data && !error && <Notice>Loading accounts…</Notice>}
+
+      {data && (
+        <>
+          <p className="text-[12.5px] text-ink/55" aria-live="polite">
+            {data.total} {data.total === 1 ? 'account' : 'accounts'}
+            {q || role !== 'all' || status !== 'all' ? ' match these filters' : ''}
+          </p>
+          <div className="overflow-x-auto rounded-xl border border-ink/[0.08]">
+            <table className="w-full min-w-[760px] text-[13px]">
+              <thead className="bg-ink/[0.03] text-[11.5px] uppercase tracking-wide text-ink/55">
                 <tr>
-                  <td className="px-1 py-2.5">
-                    <span className="flex items-center gap-2.5">
-                      <span aria-hidden className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-accent-gradient font-mono text-[10px] font-bold text-onaccent">{initials(u)}</span>
-                      <span className="truncate font-medium text-ink/90">{displayName(u)}</span>
-                    </span>
-                  </td>
-                  <td className="px-1 py-1.5 text-ink/65">
-                    <span className="flex items-center gap-1">
-                      <span className="truncate">{u.email}</span>
-                      <CopyEmail email={u.email} />
-                    </span>
-                  </td>
-                  <td className="px-1 py-2.5">
-                    <span className={cn('rounded-full px-2 py-0.5 text-[10.5px] font-semibold', u.role === 'admin' ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300' : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300')}>
-                      {u.role === 'admin' ? 'Admin' : 'User'}
-                    </span>
-                  </td>
-                  <td className="px-1 py-2.5 font-mono text-[11px]">
-                    {u.twoFactor ? <span className="text-profit">2FA</span> : <span className="text-caution">Password only</span>}
-                  </td>
-                  <td className="px-1 py-2.5">
-                    <span className={cn('rounded-full px-2 py-0.5 text-[10.5px] font-semibold', u.status === 'active' ? 'bg-ink/[0.05] text-ink/60' : 'bg-rose-500/15 text-rose-700 dark:text-rose-300')}>
-                      {u.status === 'active' ? 'Active' : 'Disabled'}
-                    </span>
-                  </td>
-                  <td className="px-1 py-2.5 text-right font-mono tabular-nums text-ink/55" title={u.lastActiveAt ? `Last active ${new Date(u.lastActiveAt).toLocaleString()}` : 'No activity recorded'}>
-                    {joined.format(new Date(u.createdAt))}
-                  </td>
-                  <td className="px-1 py-2.5 text-right">
-                    <button type="button" className="btn-ghost border border-ink/10" aria-expanded={open === u.id} onClick={() => setOpen((o) => (o === u.id ? null : u.id))}>
-                      {open === u.id ? 'Close' : 'Manage'}
-                    </button>
-                  </td>
+                  {th('email', 'Email')}
+                  {th('name', 'Name')}
+                  {th('role', 'Role')}
+                  {th('status', 'Status')}
+                  {th('created', 'Joined')}
+                  {th('active', 'Active, 30 days')}
+                  {th('lastSeen', 'Last seen')}
                 </tr>
-                {open === u.id && (
+              </thead>
+              <tbody>
+                {data.items.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-1 pb-3">
-                      <AdminUserPanel userId={u.id} self={u.email === me?.email} onChanged={load} />
-                    </td>
+                    <td colSpan={7} className="px-3 py-6 text-center text-ink/55">No accounts match.</td>
                   </tr>
                 )}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
+                {data.items.map((u) => (
+                  <tr key={u.id} className={cn('border-t border-ink/[0.06]', open?.id === u.id && 'bg-accent/[0.05]')}>
+                    <td className="px-3 py-2.5">
+                      <button type="button" onClick={() => setOpen(open?.id === u.id ? null : { id: u.id, email: u.email })} className="text-left font-medium text-ink hover:text-accent" aria-expanded={open?.id === u.id}>
+                        {u.email}
+                      </button>
+                    </td>
+                    <td className="px-3 py-2.5 text-ink/75">{u.name || '—'}</td>
+                    <td className="px-3 py-2.5 text-ink/75">{u.role === 'admin' ? 'Admin' : 'User'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={cn('rounded-full px-2 py-0.5 text-[11.5px]', u.status === 'active' ? 'bg-profit/10 text-profit' : 'bg-loss/10 text-loss')}>
+                        {u.status === 'active' ? 'Active' : 'Disabled'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-ink/65">{shortDate(u.createdAt)}</td>
+                    <td className="px-3 py-2.5 font-mono tabular-nums text-ink/75">{u.activeMinutes30d} min</td>
+                    <td className="px-3 py-2.5 text-ink/65">{u.lastSeenAt ? shortDateTime(u.lastSeenAt) : 'Never'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <nav className="flex items-center justify-between text-[12.5px] text-ink/65" aria-label="Pagination">
+            <button type="button" className="btn-ghost" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              <ChevronLeft className="h-4 w-4" /> Previous
+            </button>
+            <span>Page {page} of {pages}</span>
+            <button type="button" className="btn-ghost" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
+              Next <ChevronRight className="h-4 w-4" />
+            </button>
+          </nav>
+        </>
+      )}
+
+      {open && (
+        <div className="rounded-xl border border-ink/[0.08] p-4">
+          <AdminUserPanel userId={open.id} self={open.email === user?.email} onChanged={reload} />
         </div>
       )}
-    </>
+    </div>
   );
 }
+
+// ── Analytics ──
+
+function AnalyticsPanel() {
+  const today = utcDay(new Date());
+  const [from, setFrom] = useState(() => utcDay(new Date(Date.now() - 29 * 86_400_000)));
+  const [to, setTo] = useState(today);
+  const url = `/api/admin/analytics?from=${from}&to=${to}`;
+  const { data, error } = useJson<AdminAnalytics>(url);
+
+  const preset = (days: number) => {
+    setTo(today);
+    setFrom(utcDay(new Date(Date.now() - (days - 1) * 86_400_000)));
+  };
+  const maxMinutes = Math.max(1, ...(data?.series.map((d) => d.activeMinutes) ?? [1]));
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end gap-3">
+        <div role="group" aria-label="Date range presets" className="flex gap-1.5">
+          {[7, 30, 90].map((d) => (
+            <button key={d} type="button" onClick={() => preset(d)} className="btn-ghost text-[12.5px]">
+              Last {d} days
+            </button>
+          ))}
+        </div>
+        <label className="text-[12.5px] text-ink/65">
+          From
+          <input type="date" value={from} max={to} onChange={(e) => e.target.value && setFrom(e.target.value)} className="input ml-2 h-9" />
+        </label>
+        <label className="text-[12.5px] text-ink/65">
+          To
+          <input type="date" value={to} min={from} max={today} onChange={(e) => e.target.value && setTo(e.target.value)} className="input ml-2 h-9" />
+        </label>
+        <p className="text-[11.5px] text-ink/45">UTC days, inclusive. Up to one year.</p>
+      </div>
+
+      {error && <Notice>{error}</Notice>}
+      {!data && !error && <Notice>Loading analytics…</Notice>}
+
+      {data && (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Kpi label="Active time" value={`${data.totals.activeMinutes.toLocaleString()} min`} sub="Summed over the range" />
+            <Kpi label="Peak daily active accounts" value={data.totals.activeUsers} />
+            <Kpi label="New accounts" value={data.totals.signups} />
+            <Kpi label="Sign-ins" value={data.totals.logins} sub={`${data.totals.loginFailures} failed`} tone={data.totals.loginFailures > 0 ? 'loss' : undefined} />
+            <Kpi label="Backtests" value={data.totals.runs} sub={`${data.totals.runsFailed} failed`} tone={data.totals.runsFailed > 0 ? 'loss' : undefined} />
+            <Kpi label="Paper orders" value={data.totals.paperOrders} sub={`${data.totals.paperRejected} rejected`} />
+            <Kpi label="Background jobs failed" value={data.totals.jobsFailed} tone={data.totals.jobsFailed > 0 ? 'loss' : undefined} />
+          </div>
+
+          <figure className="glass-subtle p-4">
+            <figcaption className="mb-3 text-[12.5px] text-ink/60">Active minutes per day</figcaption>
+            <div className="flex h-36 items-end gap-[3px]" aria-hidden>
+              {data.series.map((d) => (
+                <div key={d.day} className="flex-1 rounded-t bg-accent/35" style={{ height: `${(d.activeMinutes / maxMinutes) * 100}%`, minHeight: d.activeMinutes > 0 ? 2 : 0 }} title={`${d.day}: ${d.activeMinutes} min`} />
+              ))}
+            </div>
+            <p className="mt-2 flex justify-between font-mono text-[10.5px] text-ink/40">
+              <span>{data.range.from}</span>
+              <span>{data.range.to}</span>
+            </p>
+          </figure>
+
+          <div className="max-h-[480px] overflow-auto rounded-xl border border-ink/[0.08]">
+            <table className="w-full min-w-[860px] text-[12.5px]">
+              <caption className="sr-only">Daily figures for the selected range</caption>
+              <thead className="sticky top-0 bg-panel/95 text-[11px] uppercase tracking-wide text-ink/55 backdrop-blur">
+                <tr>
+                  {['Day', 'Active min', 'Active accounts', 'New', 'Sign-ins', 'Failed sign-ins', 'Backtests', 'Failed', 'Paper orders', 'Rejected', 'Jobs failed'].map((h) => (
+                    <th key={h} scope="col" className="px-2.5 py-2 text-left font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[...data.series].reverse().map((d) => (
+                  <tr key={d.day} className="border-t border-ink/[0.06] font-mono tabular-nums">
+                    <td className="px-2.5 py-1.5 text-ink/80">{d.day}</td>
+                    <td className="px-2.5 py-1.5">{d.activeMinutes}</td>
+                    <td className="px-2.5 py-1.5">{d.activeUsers}</td>
+                    <td className="px-2.5 py-1.5">{d.signups}</td>
+                    <td className="px-2.5 py-1.5">{d.logins}</td>
+                    <td className={cn('px-2.5 py-1.5', d.loginFailures > 0 && 'text-loss')}>{d.loginFailures}</td>
+                    <td className="px-2.5 py-1.5">{d.runs}</td>
+                    <td className={cn('px-2.5 py-1.5', d.runsFailed > 0 && 'text-loss')}>{d.runsFailed}</td>
+                    <td className="px-2.5 py-1.5">{d.paperOrders}</td>
+                    <td className={cn('px-2.5 py-1.5', d.paperRejected > 0 && 'text-loss')}>{d.paperRejected}</td>
+                    <td className={cn('px-2.5 py-1.5', d.jobsFailed > 0 && 'text-loss')}>{d.jobsFailed}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-[11.5px] leading-5 text-ink/45">
+            Active time comes from browser heartbeats: about one minute per heartbeat while the page is visible and used in the last five minutes. Daily totals are kept for 400 days.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Engine ──
+
+function EnginePanel() {
+  const health = useEngineHealth();
+  const { host, failed } = useHostTelemetry();
+  const { data, error } = useJson<AdminOverview>('/api/admin/overview', 15_000);
+  const online = health.status === 'online';
+  const pct = (n: number) => `${n.toFixed(n < 10 ? 1 : 0)}%`;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-3 md:grid-cols-3">
+        <Kpi label="Rust engine" value={online ? 'Online' : health.status === 'checking' ? 'Checking…' : 'Offline'} tone={online ? 'profit' : 'loss'} />
+        <Kpi label="CPU" value={host ? pct(host.cpu_utilization) : '—'} sub={host ? `${host.cpu_cores} cores · ${host.cpu_threads} threads` : failed ? 'Unavailable on this host' : undefined} />
+        <Kpi label="Memory" value={host ? `${host.memory_used_gb.toFixed(1)} / ${host.memory_total_gb.toFixed(0)} GB` : '—'} />
+      </div>
+
+      <section aria-labelledby="workers-h">
+        <h2 id="workers-h" className="text-sm font-semibold text-ink">Simulation workers</h2>
+        <div className="mt-3">
+          {error && <Notice>{error}</Notice>}
+          {!error && !data && <Notice>Loading workers…</Notice>}
+          {data && data.workers === null && <Notice>Worker status needs the engine tables. Run the database migrations (npm run db:migrate) and start a worker.</Notice>}
+          {data && data.workers && data.workers.length === 0 && <Notice>No workers have registered yet. Start one with the engine worker binary.</Notice>}
+          {data && data.workers && data.workers.length > 0 && (
+            <div className="overflow-x-auto rounded-xl border border-ink/[0.08]">
+              <table className="w-full min-w-[640px] text-[13px]">
+                <thead className="bg-ink/[0.03] text-[11.5px] uppercase tracking-wide text-ink/55">
+                  <tr>
+                    {['Worker', 'Host', 'Version', 'Job kinds', 'Concurrency', 'Running', 'Status', 'Last heartbeat'].map((h) => (
+                      <th key={h} scope="col" className="px-3 py-2 text-left font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.workers.map((w) => (
+                    <tr key={w.id} className="border-t border-ink/[0.06]">
+                      <td className="px-3 py-2.5 font-mono text-accent">{w.id}</td>
+                      <td className="px-3 py-2.5 text-ink/75">{w.hostname || '—'}</td>
+                      <td className="px-3 py-2.5 font-mono text-ink/65">{w.version || '—'}</td>
+                      <td className="px-3 py-2.5 text-ink/65">{w.kinds.join(', ') || '—'}</td>
+                      <td className="px-3 py-2.5 tabular-nums">{w.concurrency}</td>
+                      <td className="px-3 py-2.5 tabular-nums">{w.runningJobs}</td>
+                      <td className="px-3 py-2.5">
+                        <span className={cn('rounded-full px-2 py-0.5 text-[11.5px]', w.online ? 'bg-profit/10 text-profit' : 'bg-ink/[0.06] text-ink/60')}>
+                          {w.online ? 'Online' : 'Offline'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2.5 text-ink/65">{shortDateTime(w.heartbeatAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {data && data.engine && (
+            <p className="mt-3 text-[12.5px] text-ink/60">
+              Queue: {data.engine.runningJobs} running, {data.engine.queuedJobs} waiting.
+            </p>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ── Shell ──
+
+const SECTIONS = [
+  { id: 'overview', label: 'Overview', icon: LayoutGrid },
+  { id: 'users', label: 'Users', icon: Users },
+  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'engine', label: 'Engine & workers', icon: Server },
+  { id: 'audit', label: 'Audit log', icon: ScrollText },
+] as const;
+type SectionId = (typeof SECTIONS)[number]['id'];
 
 export function AdminDashboard() {
   const { user } = useAuth();
-  const health = useEngineHealth();
-  const online = health.status === 'online';
-  const { host, failed } = useHostTelemetry();
+  const [section, setSection] = useState<SectionId>('overview');
 
   return (
     <>
@@ -274,83 +474,43 @@ export function AdminDashboard() {
             Open Quant Studio <ArrowRight className="h-4 w-4" />
           </Link>
           <StatusPills />
-          <span className="flex items-center gap-3 rounded-full border border-slate-300/80 bg-slate-100/90 px-4 py-1.5 font-mono text-[12px] text-slate-700 dark:border-white/10 dark:bg-white/5 dark:text-slate-200">
-            <span className="flex items-center gap-1.5"><Cpu className="h-3.5 w-3.5 text-accent" /> CPU {host ? pct(host.cpu_utilization) : '—'}</span>
-            <span className="h-3 w-px bg-slate-300 dark:bg-white/15" />
-            <span>MEM {host ? `${host.memory_used_gb.toFixed(1)}/${host.memory_total_gb.toFixed(0)} GB` : '—'}</span>
-          </span>
         </div>
       </div>
       <p className="mt-3 text-sm text-ink/60">
-        Signed in as <span className="font-medium text-ink/85">{user ? displayName(user) : ''}</span>. Engine health, CPU/memory and accounts are live; cards marked Demo data are placeholders.
+        Signed in as <span className="font-medium text-ink/85">{user ? displayName(user) : ''}</span>. Every figure is read from the database. Views of the directory, analytics and individual accounts are recorded in the audit log.
       </p>
 
-      <div className="mt-10 grid auto-rows-[minmax(180px,auto)] gap-5 md:grid-cols-2 lg:grid-cols-4">
-        <Card i={0} demo title="System Telemetry" icon={<Activity className="h-4 w-4" />} className="lg:col-span-2">
-          <div className="grid grid-cols-3 gap-4">
-            <Stat label="Req / min" value="1,284" />
-            <Stat label="p50 latency" value="0.42ms" />
-            <Stat label="p99 latency" value="3.9ms" />
-          </div>
-          <div className="mt-5 flex h-16 items-end gap-1">
-            {[38, 52, 44, 61, 57, 70, 48, 66, 74, 59, 81, 63, 72, 55, 68, 77, 62, 85, 71, 64].map((h, k) => (
-              <div key={k} className="flex-1 rounded-t bg-accent/30" style={{ height: `${h}%` }} />
-            ))}
-          </div>
-        </Card>
+      <div role="tablist" aria-label="Admin sections" className="mt-7 flex gap-1 overflow-x-auto border-b border-ink/[0.08]">
+        {SECTIONS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            role="tab"
+            id={`admin-tab-${s.id}`}
+            aria-selected={section === s.id}
+            aria-controls="admin-panel"
+            onClick={() => setSection(s.id)}
+            className={cn(
+              '-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-3 py-2.5 text-[13px] transition',
+              section === s.id ? 'border-accent text-ink' : 'border-transparent text-ink/55 hover:text-ink',
+            )}
+          >
+            <s.icon className="h-4 w-4" /> {s.label}
+          </button>
+        ))}
+      </div>
 
-        <Card i={1} title="Rust Engine Health" icon={<Server className="h-4 w-4" />}>
-          <div className="flex items-center gap-2.5">
-            <span className={cn('h-2.5 w-2.5 rounded-full', online ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.9)]')} />
-            <span className="text-sm font-semibold text-ink">{online ? 'Online' : health.status === 'checking' ? 'Checking…' : 'Offline'}</span>
-          </div>
-          <dl className="mt-4 space-y-2 font-mono text-[12px]">
-            <div className="flex justify-between"><dt className="text-ink/50">Version</dt><dd className="text-ink/85">v0.7.0</dd></div>
-            <div className="flex justify-between"><dt className="text-ink/50">Kernel</dt><dd className="text-ink/85">Parallel</dd></div>
-            <div className="flex justify-between"><dt className="text-ink/50">unsafe</dt><dd className="text-profit">forbid</dd></div>
-          </dl>
-        </Card>
-
-        <Card i={2} title="Memory & CPU" icon={<Cpu className="h-4 w-4" />}>
-          {host ? (
-            <div className="space-y-4">
-              <div>
-                <div className="mb-1.5 flex justify-between text-[12px]"><span className="text-ink/60">CPU</span><span className="font-mono text-ink/85">{pct(host.cpu_utilization)}</span></div>
-                <Bar pct={Math.min(100, host.cpu_utilization)} tone={host.cpu_utilization > 85 ? 'caution' : 'accent'} />
-              </div>
-              <div>
-                <div className="mb-1.5 flex justify-between text-[12px]"><span className="text-ink/60">Memory</span><span className="font-mono text-ink/85">{host.memory_used_gb.toFixed(1)} / {host.memory_total_gb.toFixed(1)} GB</span></div>
-                <Bar pct={Math.min(100, host.memory_utilization)} tone={host.memory_utilization > 85 ? 'caution' : 'profit'} />
-              </div>
-              <p className="font-mono text-[10.5px] text-ink/45">{host.cpu_cores} cores · {host.cpu_threads} threads · {host.source}</p>
-            </div>
-          ) : (
-            <p className="text-[12.5px] leading-5 text-ink/50">{failed ? 'Telemetry unavailable: the engine is offline or does not report host load on this OS.' : 'Reading host telemetry…'}</p>
-          )}
-        </Card>
-
-        <Card i={3} demo title="Active Simulation Workers" icon={<Workflow className="h-4 w-4" />} className="lg:col-span-2">
-          <ul className="space-y-3">
-            {WORKERS.map((w) => (
-              <li key={w.id} className="grid grid-cols-[52px_1fr_44px] items-center gap-3 text-[12px]">
-                <span className="font-mono text-accent">{w.id}</span>
-                <div className="min-w-0">
-                  <p className="truncate text-ink/80">{w.job}</p>
-                  <div className="mt-1"><Bar pct={w.pct} /></div>
-                </div>
-                <span className="text-right font-mono tabular-nums text-ink/60">{w.pct}%</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        <Card i={4} title="Audit Log" icon={<ScrollText className="h-4 w-4" />} className="md:col-span-2 lg:col-span-4">
-          <AuditLog endpoint="/api/admin/audit" admin />
-        </Card>
-
-        <Card i={5} title="Registered Quants & Fund Accounts" icon={<Users className="h-4 w-4" />} className="md:col-span-2 lg:col-span-4">
-          <RegisteredUsers />
-        </Card>
+      <div id="admin-panel" role="tabpanel" aria-labelledby={`admin-tab-${section}`} className="mt-6 min-w-0">
+        {section === 'overview' && <OverviewPanel />}
+        {section === 'users' && <UsersPanel />}
+        {section === 'analytics' && <AnalyticsPanel />}
+        {section === 'engine' && <EnginePanel />}
+        {section === 'audit' && (
+          <section aria-labelledby="audit-h" className="glass p-5">
+            <h2 id="audit-h" className="mb-4 text-sm font-semibold text-ink">Audit log</h2>
+            <AuditLog endpoint="/api/admin/audit" admin />
+          </section>
+        )}
       </div>
     </>
   );

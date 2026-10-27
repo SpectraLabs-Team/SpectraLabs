@@ -153,17 +153,16 @@ export function AnimatedValue({ value, className }: { value: string; className?:
 }
 
 /**
- * Brand logo. logo-full.png already contains the S mark, so it is shown on its own; `compact`
- * (the collapsed sidebar) shows only the S icon. Never render both, or the S appears twice.
+ * Brand logo. Shows only the standalone S ribbon icon (`logo-icon.png`).
  */
-export function Logo({ className, compact = false }: { className?: string; compact?: boolean }) {
+export function Logo({ className, compact }: { className?: string; compact?: boolean }) {
   return (
-    <span className={cn('flex items-center', className)}>
-      {compact ? (
-        <img src="/images/logo-icon.png" alt="SpectraLabs" className="h-8 w-8 shrink-0 object-contain" />
-      ) : (
-        <img src="/images/logo-full.png" alt="SpectraLabs" className="h-10 w-auto shrink-0 object-contain" />
-      )}
+    <span className={cn('flex items-center justify-center', className)}>
+      <img
+        src="/images/logo-icon.png"
+        alt="SpectraLabs"
+        className="h-8 w-8 shrink-0 object-contain"
+      />
     </span>
   );
 }

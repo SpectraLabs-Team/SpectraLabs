@@ -213,7 +213,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
               </div>
 
               <div className="rounded-lg border border-ink/[0.08] bg-ink/[0.02] p-3">
-                <span className="text-[11px] font-medium text-ink/60">Slippage & Spread</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/60">Slippage & Spread <InfoTip metric="slippage" label="Slippage & Spread" /></span>
                 <div className="mt-1 text-base font-semibold font-mono text-ink">
                   {formatCurrency(selectedReport.slippage_gap)}
                 </div>
@@ -221,7 +221,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
               </div>
 
               <div className="rounded-lg border border-ink/[0.08] bg-ink/[0.02] p-3">
-                <span className="text-[11px] font-medium text-ink/60">Execution Latency</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/60">Execution Latency <InfoTip metric="timing_latency" label="Execution Latency" /></span>
                 <div className="mt-1 text-base font-semibold font-mono text-ink">
                   {formatCurrency(selectedReport.timing_delay_gap)}
                 </div>
@@ -254,9 +254,9 @@ export function BacktestToPaperGap({ strategyId }: Props) {
                       <th className="px-4 py-2.5 font-medium text-right">Qty</th>
                       <th className="px-4 py-2.5 font-medium text-right">Paper Price</th>
                       <th className="px-4 py-2.5 font-medium text-right">Backtest Price</th>
-                      <th className="px-4 py-2.5 font-medium text-right">Price Delta</th>
-                      <th className="px-4 py-2.5 font-medium text-right">Latency</th>
-                      <th className="px-4 py-2.5 font-medium text-right">P&L Gap</th>
+                      <th className="px-4 py-2.5 font-medium text-right"><span className="inline-flex items-center gap-1">Price Delta <InfoTip metric="slippage_drift" label="Price Delta" /></span></th>
+                      <th className="px-4 py-2.5 font-medium text-right"><span className="inline-flex items-center gap-1">Latency <InfoTip metric="timing_latency" label="Latency" /></span></th>
+                      <th className="px-4 py-2.5 font-medium text-right"><span className="inline-flex items-center gap-1">P&L Gap <InfoTip metric="pnl_gap" label="P&L Gap" /></span></th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-ink/[0.04]">

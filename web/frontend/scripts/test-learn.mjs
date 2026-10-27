@@ -198,7 +198,7 @@ describe('Metric registry', () => {
     const used = new Map();
     for (const f of files) {
       const text = fs.readFileSync(f, 'utf8');
-      for (const m of text.matchAll(/metric(?:=|: )["']([a-z_]+)["']|(?:undefined|\)), '([a-z_]+)'\]/g)) {
+      for (const m of text.matchAll(/metric(?:=|: )["']([a-z0-9_]+)["']|(?:undefined|\)), '([a-z0-9_]+)'\]/g)) {
         const id = m[1] ?? m[2];
         if (!id) continue;
         used.set(path.relative(root, f), [...(used.get(path.relative(root, f)) ?? []), id]);
@@ -213,6 +213,13 @@ describe('Metric registry', () => {
     for (const f of ['components/studio/OptimizationLab.tsx', 'components/studio/StressPanel.tsx', 'components/studio/BacktestToPaperGap.tsx', 'components/studio/StudioShell.tsx']) {
       assert.match(src(f), /InfoTip|MetricLabel/, `${f} uses the registry`);
     }
+    const has = (f, ids) => {
+      for (const id of ids) assert.ok((used.get(f) ?? []).includes(id), `${f}: no ⓘ for ${id}`);
+    };
+    has('components/studio/BenchmarkLab.tsx', ['latency_p50', 'parallel_speedup', 'paths_per_second']);
+    has('components/studio/OptimizationLab.tsx', ['psr', 'dsr', 'expected_max_sharpe', 'sharpe_variance', 'num_trials']);
+    has('components/studio/BacktestToPaperGap.tsx', ['slippage', 'timing_latency', 'slippage_drift', 'pnl_gap']);
+    has('components/studio/OverviewDashboard.tsx', ['gross_exposure_utilization', 'net_exposure_utilization', 'leverage_utilization', 'drawdown_utilization', 'daily_loss_utilization']);
   });
 
   it('tooltips render from the registry, keyboard- and screen-reader-accessible', () => {

@@ -4,6 +4,41 @@ const RISK = [{ label: 'Open Risk & Stress Lab', href: '/studio?tab=risk' }];
 
 export const modelMetrics = [
   metricLesson({
+    slug: 'engine-benchmark',
+    title: 'Engine Benchmark: Latency, Throughput and Speed-up',
+    level: 'Intermediate',
+    summary: 'How fast the risk engine runs a Monte Carlo VaR calculation on this machine, measured as median latency, paths per second and the parallel speed-up.',
+    keywords: ['benchmark', 'latency', 'p50', 'median', 'throughput', 'paths per second', 'speed-up', 'parallel', 'performance'],
+    what: [
+      'The Benchmark Lab times the risk engine running a full **99% Monte Carlo VaR** calculation on the sample portfolio, at several path counts and on two backends: **CPU** (single-threaded reference) and **Parallel** (all cores). Each size runs a few warm-up passes that are discarded, then a number of timed repetitions.',
+      'From the timed runs it reports the **median latency (p50)**, the **throughput** in paths per second, and the **speed-up** of Parallel over CPU.',
+    ],
+    why: [
+      'Latency tells you how long you wait for a risk number; throughput tells you how many paths you can afford for a given wait. More paths give a more stable VaR estimate, so faster runs buy accuracy.',
+    ],
+    formulas: [
+      { tex: String.raw`\text{latency}_{p50} = \operatorname{median}(t_1, \dots, t_R)`, caption: 'R timed repetitions, warm-ups excluded' },
+      { tex: String.raw`\text{throughput} = \frac{N_{\text{paths}} \times 1000}{\text{latency}_{p50}\ (\text{ms})}` },
+      { tex: String.raw`\text{speed-up} = \frac{\text{latency}_{p50}(\text{CPU})}{\text{latency}_{p50}(\text{Parallel})}` },
+    ],
+    where: ['\(t_i\) is the wall-clock time of one complete VaR run in milliseconds.'],
+    engine:
+      '`spectra_risk` `benchmark`: for each backend it runs the warm-ups, then the repetitions, sorts the run times and reports min, mean, p50, p95, p99 and max, plus `paths_per_second` computed from the median. If a backend is unavailable the engine falls back and marks the row as a fallback.',
+    example: {
+      intro: 'At 1,000,000 paths the CPU backend has a median of 400 ms and the Parallel backend a median of 80 ms.',
+      steps: ['CPU throughput: 1,000,000 × 1000 / 400 = 2.5 million paths per second.', 'Parallel throughput: 1,000,000 × 1000 / 80 = 12.5 million paths per second.', 'Speed-up: 400 / 80 = 5.0×.'],
+      result: 'Parallel is **5× faster**, running **12.5 million paths per second**.',
+    },
+    high: 'High throughput and a speed-up well above 1×: large simulations are cheap on this machine.',
+    low: 'A speed-up below 1× at small path counts is normal: starting threads costs more than the work saved.',
+    misconceptions: [
+      'These figures depend on the hardware and on what else the machine is doing; compare runs on the same host only.',
+      'A faster engine does not make VaR more accurate by itself; it lets you afford more paths.',
+    ],
+    related: ['simulations/monte-carlo-risk-simulation'],
+    platformLinks: [{ label: 'Open Benchmark Lab', href: '/studio?tab=benchmark' }],
+  }),
+  metricLesson({
     slug: 'garch-volatility',
     title: 'GARCH Volatility Forecast',
     level: 'Advanced',

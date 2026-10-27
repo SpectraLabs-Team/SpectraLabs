@@ -7,7 +7,7 @@
  * definitions: see each lesson's "How Spectra calculates it" note for the exact formula.
  */
 
-export type MetricCategory = 'returns' | 'risk' | 'risk-adjusted' | 'trades' | 'costs' | 'exposure' | 'benchmark' | 'validation' | 'account';
+export type MetricCategory = 'returns' | 'risk' | 'risk-adjusted' | 'trades' | 'costs' | 'exposure' | 'benchmark' | 'validation' | 'account' | 'engine';
 
 export interface MetricDefinition {
   /** Display name. */
@@ -542,6 +542,28 @@ export const metricDefinitions = {
     learnPath: m('probabilistic-sharpe-ratio'),
     category: 'validation',
   },
+  expected_max_sharpe: {
+    name: 'Expected Max Sharpe',
+    shortDescription: 'The best per-period Sharpe ratio you would expect from this many trials if none had any real skill. DSR asks whether your best trial beats it.',
+    learnPath: m('deflated-sharpe-ratio'),
+    category: 'validation',
+    formula: '√V × ((1−γ)·Φ⁻¹(1−1/N) + γ·Φ⁻¹(1−1/(N·e)))',
+    interpretation: 'Grows with the number of trials and their spread: the more you search, the higher the bar.',
+  },
+  sharpe_variance: {
+    name: 'Sharpe Variance Across Trials',
+    shortDescription: 'Sample variance of the per-period Sharpe ratios of every trial in the sweep (0 with fewer than two trials). It sets how high a lucky best trial can reach.',
+    learnPath: m('deflated-sharpe-ratio'),
+    category: 'validation',
+    formula: 'V = Σ (SRᵢ − mean SR)² / (N − 1)',
+  },
+  num_trials: {
+    name: 'Total Trials Tested',
+    shortDescription: 'How many parameter sets the sweep evaluated. The deflated Sharpe ratio corrects for this many attempts.',
+    learnPath: m('deflated-sharpe-ratio'),
+    category: 'validation',
+    interpretation: 'Count every attempt, including earlier sweeps and manual tweaks, or DSR will be too optimistic.',
+  },
   dsr: {
     name: 'Deflated Sharpe Ratio',
     shortDescription: 'PSR measured against the Sharpe ratio expected from the best of N skill-less trials: corrects for searching.',
@@ -613,6 +635,28 @@ export const metricDefinitions = {
     learnPath: '/learn/simulations/monte-carlo-risk-simulation',
     category: 'account',
   },
+  latency_p50: {
+    name: 'Median Latency (p50)',
+    shortDescription: 'Median wall-clock time of one complete Monte Carlo VaR run at this path count, across the timed repetitions (warm-up runs excluded).',
+    learnPath: m('engine-benchmark'),
+    category: 'engine',
+    interpretation: 'Lower is faster. The median ignores one-off slow runs; compare p95 for consistency.',
+  },
+  paths_per_second: {
+    name: 'Paths per Second',
+    shortDescription: 'Simulated paths divided by the median run time: the engine’s Monte Carlo throughput on this machine.',
+    learnPath: m('engine-benchmark'),
+    category: 'engine',
+    formula: 'paths × 1000 / median latency (ms)',
+  },
+  parallel_speedup: {
+    name: 'Parallel Speed-up',
+    shortDescription: 'CPU median latency divided by Parallel median latency at the same path count. Above 1× the multi-threaded backend is faster.',
+    learnPath: m('engine-benchmark'),
+    category: 'engine',
+    formula: 'p50(CPU) / p50(Parallel)',
+    interpretation: 'Small runs can show below 1×, because starting threads costs more than it saves.',
+  },
   pnl_gap: {
     name: 'Backtest-to-Paper P&L Gap',
     shortDescription: 'Paper-trading P&L minus the backtest\u2019s P&L on matched trades: how far live execution departed from the simulation.',
@@ -661,4 +705,5 @@ export const METRIC_CATEGORY_LABELS: Record<MetricCategory, string> = {
   benchmark: 'Benchmark',
   validation: 'Overfitting & validation',
   account: 'Account',
+  engine: 'Engine performance',
 };

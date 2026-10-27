@@ -1,5 +1,7 @@
 'use client';
 
+import type { MetricId } from '@/lib/learn/metrics';
+import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowUpDown, CheckCircle2, ChevronDown, ChevronUp, ClipboardPaste, Download, FileUp, Plus, RotateCcw, Trash2 } from 'lucide-react';
@@ -121,12 +123,13 @@ export function PortfolioStudio() {
 
   const band = hhiBand(stats.hhi);
   const hhiMatch = engineHhi !== null && Math.abs(engineHhi - stats.hhi) < 1e-9;
-  const header = (key: SortKey, label: string, align: 'left' | 'right' = 'right') => (
+  const header = (key: SortKey, label: string, align: 'left' | 'right' = 'right', metric?: MetricId) => (
     <th className={cn('px-3 py-2.5 font-medium', align === 'right' ? 'text-right' : 'text-left')}>
       <button type="button" onClick={() => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : key === 'symbol' ? 1 : -1 }))} className={cn('inline-flex items-center gap-1 transition hover:text-ink/90', sort.key === key && 'text-ink/90')}>
         {label}
         {sort.key === key ? sort.dir === 1 ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" /> : <ArrowUpDown className="h-3 w-3 opacity-40" />}
       </button>
+      {metric && <InfoTip metric={metric} className="ml-1" />}
     </th>
   );
 
@@ -135,18 +138,18 @@ export function PortfolioStudio() {
       {/* KPIs */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <GlassCard className="p-5">
-          <p className="text-xs text-ink/60">Net market value</p>
+          <p className="text-xs text-ink/60"><MetricLabel metric="portfolio_value">Net market value</MetricLabel></p>
           <p className="num mt-2 text-2xl font-semibold text-ink">{formatCurrency(stats.netValue)}</p>
           <p className="num mt-1 text-[11.5px] text-ink/50">{positions.length} positions</p>
         </GlassCard>
         <GlassCard className="p-5">
-          <p className="text-xs text-ink/60">Gross exposure</p>
+          <p className="text-xs text-ink/60"><MetricLabel metric="gross_exposure">Gross exposure</MetricLabel></p>
           <p className="num mt-2 text-2xl font-semibold text-ink">{formatCurrency(stats.grossExposure)}</p>
           <p className="num mt-1 text-[11.5px] text-ink/50">Σ |quantity × price|</p>
         </GlassCard>
         <GlassCard className="p-5">
           <div className="flex items-center justify-between">
-            <p className="text-xs text-ink/60">HHI concentration</p>
+            <p className="text-xs text-ink/60"><MetricLabel metric="hhi">HHI concentration</MetricLabel></p>
             <Badge tone={band.tone}>{band.label}</Badge>
           </div>
           <p className="num mt-2 text-2xl font-semibold text-ink">{formatNumber(stats.hhi, 4)}</p>
@@ -160,7 +163,7 @@ export function PortfolioStudio() {
           </p>
         </GlassCard>
         <GlassCard className="p-5">
-          <p className="text-xs text-ink/60">Model volatility</p>
+          <p className="text-xs text-ink/60"><MetricLabel metric="risk_volatility">Model volatility</MetricLabel></p>
           <p className="num mt-2 text-2xl font-semibold text-ink">{formatPercent(stats.modelVolatility)}</p>
           <p className="num mt-1 text-[11.5px] text-ink/50">average of asset σ · 20% default</p>
         </GlassCard>
@@ -248,7 +251,7 @@ export function PortfolioStudio() {
                 {header('symbol', 'Symbol', 'left')}
                 {header('quantity', 'Quantity')}
                 {header('price', 'Price')}
-                {header('volatility', 'Volatility')}
+                {header('volatility', 'Volatility', 'right', 'annualized_volatility')}
                 {header('value', 'Value')}
                 {header('weight', 'Gross weight')}
                 <th className="w-10" />

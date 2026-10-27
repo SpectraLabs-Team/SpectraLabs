@@ -1,5 +1,6 @@
 'use client';
 
+import { MetricLabel } from '@/components/ui/MetricInfo';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -909,7 +910,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
                       <p className={cn('num text-xs font-semibold', tone(ret) === 'profit' ? 'text-profit' : tone(ret) === 'loss' ? 'text-loss' : 'text-ink')}>
                         {signedPct(ret, 1)}
                       </p>
-                      <p className="text-[10px] text-ink/45">Return</p>
+                      <p className="text-[10px] text-ink/45"><span onClick={(e) => e.stopPropagation()}><MetricLabel metric="total_return">Return</MetricLabel></span></p>
                     </div>
                   )}
                   {sharpe !== undefined && sharpe !== null && (
@@ -917,7 +918,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
                       <p className="num text-xs font-medium text-ink/80">
                         {ratio(sharpe, 2)}
                       </p>
-                      <p className="text-[10px] text-ink/45">Sharpe</p>
+                      <p className="text-[10px] text-ink/45"><span onClick={(e) => e.stopPropagation()}><MetricLabel metric="sharpe_ratio">Sharpe</MetricLabel></span></p>
                     </div>
                   )}
                   <ArrowRight className="h-3.5 w-3.5 text-ink/30 transition group-hover:translate-x-0.5 group-hover:text-accent" />

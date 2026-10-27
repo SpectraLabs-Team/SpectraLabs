@@ -48,7 +48,7 @@ import {
 import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import { TradingChart } from './TradingChart';
-import { InfoTip } from '@/components/ui/MetricInfo';
+import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 
 // Default initial watchlist symbols
 const INITIAL_WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'AMZN', 'GOOGL', 'META'];
@@ -1257,11 +1257,11 @@ export function PaperLab() {
                 Balances & Equity
               </span>
               <div className="flex justify-between">
-                <span className="text-slate-400">Portfolio Value:</span>
+                <span className="text-slate-400"><MetricLabel metric="total_equity">Portfolio Value</MetricLabel>:</span>
                 <span className="font-mono text-white">{formatCurrency(totalEquity)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Cash Balance:</span>
+                <span className="text-slate-400"><MetricLabel metric="cash_balance">Cash Balance</MetricLabel>:</span>
                 <span className="font-mono text-white">{formatCurrency(cashBalance)}</span>
               </div>
               <div className="flex justify-between">

@@ -1,5 +1,7 @@
 'use client';
 
+import type { MetricId } from '@/lib/learn/metrics';
+import { InfoTip } from '@/components/ui/MetricInfo';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Download, LoaderCircle, ShieldAlert } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -33,9 +35,9 @@ const asObject = (value: unknown): Record<string, unknown> => value !== null && 
 const asRows = (value: unknown): Record<string, unknown>[] => Array.isArray(value) ? value.map(asObject) : [];
 const asSeries = (value: unknown): number[] => Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item)) : [];
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({ title, info, children }: { title: string; info?: MetricId; children: React.ReactNode }) {
   return <div className="rounded-xl border border-ink/[0.08] bg-surface/60 p-3">
-    <h4 className="mb-2 text-xs font-semibold text-ink/70">{title}</h4>
+    <h4 className="mb-2 flex items-center gap-1 text-xs font-semibold text-ink/70">{title}{info && <InfoTip metric={info} />}</h4>
     <div className="h-40 w-full">{children}</div>
   </div>;
 }
@@ -77,19 +79,19 @@ function SurvivalCharts({ results }: { results: Record<string, unknown> }) {
   const grid = <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,120,140,.16)" />;
   const zero = <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />;
   return <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-    <ChartCard title="Costs · Sharpe and total return vs extra slippage">
+    <ChartCard title="Costs · Sharpe and total return vs extra slippage" info="sharpe_ratio">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={costs}>{grid}<XAxis dataKey="x" tick={label} /><YAxis yAxisId="left" tick={label} width={32} /><YAxis yAxisId="right" orientation="right" tick={label} width={32} /><Tooltip /><ReferenceLine x={5} stroke="#f59e0b" strokeDasharray="4 3" /><Line yAxisId="left" dataKey="sharpe" stroke="#8b5cf6" dot={false} /><Line yAxisId="right" dataKey="return" stroke="#14b8a6" dot={false} /></LineChart></ResponsiveContainer>
     </ChartCard>
     <ChartCard title="Execution costs · borrow, volume impact and partial fills">
       <ResponsiveContainer width="100%" height="100%"><BarChart data={executionCosts}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip labelFormatter={(value) => executionCosts.find((item) => item.x === value)?.scenario ?? String(value)} /><Bar dataKey="sharpe" fill="#f97316" /></BarChart></ResponsiveContainer>
     </ChartCard>
-    <ChartCard title="Execution delay · Sharpe by bars">
+    <ChartCard title="Execution delay · Sharpe by bars" info="sharpe_ratio">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={delays}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip /><Line dataKey="sharpe" stroke="#8b5cf6" dot /></LineChart></ResponsiveContainer>
     </ChartCard>
-    <ChartCard title="Parameter stability · neighbor Sharpe">
+    <ChartCard title="Parameter stability · neighbor Sharpe" info="sharpe_ratio">
       <ResponsiveContainer width="100%" height="100%"><BarChart data={neighbours}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip labelFormatter={(value) => neighbours.find((item) => item.x === value)?.label ?? String(value)} /><Bar dataKey="sharpe" fill="#8b5cf6" /></BarChart></ResponsiveContainer>
     </ChartCard>
-    <ChartCard title="Time-period robustness · sub-period Sharpe">
+    <ChartCard title="Time-period robustness · sub-period Sharpe" info="sharpe_ratio">
       <ResponsiveContainer width="100%" height="100%"><BarChart data={periods}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip labelFormatter={(value) => periods.find((item) => item.x === value)?.label ?? String(value)} /><Bar dataKey="sharpe" fill="#14b8a6" /></BarChart></ResponsiveContainer>
     </ChartCard>
     <ChartCard title="Trade bootstrap · terminal P&L histogram">
@@ -98,16 +100,16 @@ function SurvivalCharts({ results }: { results: Record<string, unknown> }) {
     <ChartCard title="Concentration · sorted closed-trade P&L">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={tradePnls}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={42} />{zero}<Tooltip /><Line dataKey="pnl" stroke="#f59e0b" dot={false} /></LineChart></ResponsiveContainer>
     </ChartCard>
-    <ChartCard title="Regime sensitivity · Sharpe per bucket">
+    <ChartCard title="Regime sensitivity · Sharpe per bucket" info="sharpe_ratio">
       <ResponsiveContainer width="100%" height="100%"><BarChart data={regimes}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip /><Bar dataKey="sharpe" fill="#0ea5e9" /></BarChart></ResponsiveContainer>
     </ChartCard>
-    <ChartCard title="Trend, range and crisis · Sharpe by market state">
+    <ChartCard title="Trend, range and crisis · Sharpe by market state" info="sharpe_ratio">
       <ResponsiveContainer width="100%" height="100%"><BarChart data={marketStates}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={32} />{zero}<Tooltip /><Bar dataKey="sharpe" fill="#0ea5e9" /></BarChart></ResponsiveContainer>
     </ChartCard>
     <ChartCard title="Benchmark · rebased equity">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={benchmarkCurve}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={42} /><Tooltip /><Line dataKey="strategy" stroke="#8b5cf6" dot={false} /><Line dataKey="benchmark" stroke="#14b8a6" dot={false} /></LineChart></ResponsiveContainer>
     </ChartCard>
-    <ChartCard title="Risk · drawdown path">
+    <ChartCard title="Risk · drawdown path" info="max_drawdown">
       <ResponsiveContainer width="100%" height="100%"><LineChart data={drawdowns}>{grid}<XAxis dataKey="x" tick={label} /><YAxis tick={label} width={42} /><ReferenceLine y={0.2} stroke="#f59e0b" strokeDasharray="4 3" /><ReferenceLine y={0.4} stroke="#ef4444" strokeDasharray="4 3" /><Tooltip /><Line dataKey="drawdown" stroke="#ef4444" dot={false} /></LineChart></ResponsiveContainer>
     </ChartCard>
     <ChartCard title="Return block bootstrap · empirical 5th/50th/95th percentiles">

@@ -427,4 +427,36 @@ export const riskMetrics = [
     related: ['exposure', 'engine/risk-management', 'paper-trading/account-balances'],
     platformLinks: [{ label: 'Open Risk Center', href: '/studio?tab=risk-center' }, ...BT],
   }),
+  metricLesson({
+    slug: 'concentration-hhi',
+    title: 'Concentration (HHI)',
+    level: 'Intermediate',
+    summary: 'How much of the portfolio sits in a few positions: the Herfindahl index of its gross weights, and the effective number of holdings it implies.',
+    keywords: ['hhi', 'herfindahl', 'concentration', 'diversification', 'effective n', 'position weight'],
+    what: [
+      'The Herfindahl–Hirschman index (HHI) squares each position’s share of the portfolio’s gross exposure and adds the squares. It is 1 when one position holds everything and falls toward 0 as the exposure spreads over more positions.',
+      'The Portfolio Studio shows HHI in points (HHI × 10,000) and the effective number of holdings, 1 / HHI.',
+    ],
+    why: ['A concentrated portfolio can lose heavily on one bad name even when it holds many tickers. HHI shows that in one number, and the Monte Carlo risk simulation is only as informative as the positions it is given.'],
+    formulas: [
+      { tex: String.raw`w_i = \frac{|q_i\,p_i|}{\sum_j |q_j\,p_j|}` },
+      { tex: String.raw`\text{HHI} = \sum_i w_i^2, \qquad N_{\text{eff}} = \frac{1}{\text{HHI}}` },
+    ],
+    where: ['Positions with zero value add nothing; the sums run over the positions that have exposure.'],
+    engine:
+      'Computed by `Portfolio::hhi` in `spectra-risk` from the gross weights (the Risk Lab metric `hhi`). The Portfolio Studio computes the same value in the browser and shows whether the two agree. Bands: below 1,000 points unconcentrated, 1,000 to 1,800 moderate, above 1,800 highly concentrated.',
+    example: {
+      intro: 'Three positions with market values $50,000, $30,000 and $20,000 (gross exposure $100,000).',
+      steps: ['Weights: 0.50, 0.30 and 0.20.', 'Squares: 0.25 + 0.09 + 0.04 = 0.38.', 'Effective holdings: 1 / 0.38 = 2.63.'],
+      result: 'HHI is **0.38** (3,800 points), which is highly concentrated, and the portfolio behaves like **2.6** equal holdings. Three equal positions would give 0.33, so this book is more concentrated than an equal split.',
+    },
+    high: 'Exposure sits in a few names, so one position dominates the risk.',
+    low: 'Exposure is spread over many names. The lowest possible value for N positions is 1/N.',
+    misconceptions: [
+      'HHI uses gross weights, so a short position counts as much as a long one of the same size.',
+      'A low HHI does not mean the positions are unrelated: ten stocks that move together are still one concentrated risk.',
+    ],
+    related: ['leverage', 'exposure', 'value-at-risk'],
+    platformLinks: [{ label: 'Open Portfolio Studio', href: '/studio?tab=portfolio' }, { label: 'Open Risk & Stress Lab', href: '/studio?tab=risk' }],
+  }),
 ];

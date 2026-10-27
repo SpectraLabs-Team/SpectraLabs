@@ -152,23 +152,18 @@ export function AnimatedValue({ value, className }: { value: string; className?:
   );
 }
 
-export function Logo({ className }: { className?: string }) {
+/**
+ * Brand logo. logo-full.png already contains the S mark, so it is shown on its own; `compact`
+ * (the collapsed sidebar) shows only the S icon. Never render both, or the S appears twice.
+ */
+export function Logo({ className, compact = false }: { className?: string; compact?: boolean }) {
   return (
-    <span className={cn('flex items-center gap-2.5', className)}>
-      {/* S ribbon icon — always visible */}
-      <img
-        src="/images/logo-icon.png"
-        alt="SpectraLabs icon"
-        className="h-8 w-8 shrink-0 object-contain"
-      />
-      {/* Full wordmark — hidden in collapsed sidebar via [&>span:last-child]:hidden passed from StudioShell */}
-      <span className="whitespace-nowrap">
-        <img
-          src="/images/logo-full.png"
-          alt="SpectraLabs"
-          className="h-7 object-contain"
-        />
-      </span>
+    <span className={cn('flex items-center', className)}>
+      {compact ? (
+        <img src="/images/logo-icon.png" alt="SpectraLabs" className="h-8 w-8 shrink-0 object-contain" />
+      ) : (
+        <img src="/images/logo-full.png" alt="SpectraLabs" className="h-10 w-auto shrink-0 object-contain" />
+      )}
     </span>
   );
 }

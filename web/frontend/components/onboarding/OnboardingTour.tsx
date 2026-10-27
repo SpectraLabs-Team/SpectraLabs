@@ -122,7 +122,8 @@ export function OnboardingProvider({ tab, tabs, onTab, children }: { tab: Studio
       setFinished(false);
       // Only features this Studio actually has.
       const tabExists = (t?: StudioTab) => !t || tabs.includes(t);
-      let steps = all.filter((s) => tabExists(s.requiresTab) && tabExists(s.tab));
+      // Role-gated steps (the admin console) are only described to admins.
+      let steps = all.filter((s) => tabExists(s.requiresTab) && tabExists(s.tab) && (!s.role || user?.role === s.role));
       if (kind === 'page') steps = steps.filter((s) => findTarget(s.targets));
       if (!steps.length) return;
 
@@ -221,7 +222,7 @@ export function OnboardingProvider({ tab, tabs, onTab, children }: { tab: Studio
       setActive(true);
       await go(0);
     },
-    [onTab, stop, tabs],
+    [onTab, stop, tabs, user?.role],
   );
 
   const startTour = useCallback(() => void run('main', MAIN_TOUR), [run]);

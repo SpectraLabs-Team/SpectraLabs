@@ -89,7 +89,7 @@ export function BacktestLab() {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
+      <div className="grid gap-5 lg:grid-cols-[1fr_340px] [&>*]:min-w-0">
         <div ref={formRef} data-tour="backtest-form" className="min-w-0 scroll-mt-20">
           {catalog ? (
             <BacktestForm catalog={catalog} datasets={datasets} canRun={canRun} onCreated={created} prefill={prefill} />

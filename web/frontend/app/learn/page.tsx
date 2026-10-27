@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowRight, Gauge } from 'lucide-react';
-import { CategoryIcon, LearnFrame, LessonCard } from '@/components/learn/LearnChrome';
+import { CategoryIcon, LearnFrame, LessonCard, WithLearnNav } from '@/components/learn/LearnChrome';
 import { LearnSearch } from '@/components/learn/LearnSearch';
 import { TourLauncher } from '@/components/onboarding/TourLauncher';
 import { CATEGORIES, LESSONS, lessonsIn, searchIndex } from '@/lib/learn';
@@ -34,6 +34,7 @@ export default function LearnHome() {
 
   return (
     <LearnFrame>
+      <WithLearnNav>
       <section className="mx-auto max-w-3xl pt-6 text-center">
         <p className="eyebrow">Learning Center</p>
         <h1 className="mt-3 text-balance text-3xl font-bold tracking-tight text-ink sm:text-[40px] sm:leading-[1.15]">Learn Trading &amp; Understand Your Results</h1>
@@ -122,6 +123,7 @@ export default function LearnHome() {
           ))}
         </div>
       </section>
+      </WithLearnNav>
     </LearnFrame>
   );
 }

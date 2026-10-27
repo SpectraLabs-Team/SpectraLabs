@@ -1,5 +1,6 @@
 'use client';
 
+import { MetricLabel } from '@/components/ui/MetricInfo';
 import { useState, useEffect, useCallback, useId } from 'react';
 import {
   ShieldAlert,
@@ -452,7 +453,7 @@ export function RiskCenter() {
             {/* Gross Exposure Gauge */}
             <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
               <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-                <span>Gross Exposure</span>
+                <span><MetricLabel metric="gross_exposure_utilization">Gross Exposure</MetricLabel></span>
                 <span className="font-mono text-ink/90">
                   {metrics?.gross_exposure_utilization_pct?.toFixed(1) ?? '0.0'}%
                 </span>
@@ -483,7 +484,7 @@ export function RiskCenter() {
             {/* Net Exposure Gauge */}
             <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
               <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-                <span>Net Exposure</span>
+                <span><MetricLabel metric="net_exposure_utilization">Net Exposure</MetricLabel></span>
                 <span className="font-mono text-ink/90">
                   {metrics?.net_exposure_utilization_pct?.toFixed(1) ?? '0.0'}%
                 </span>
@@ -514,7 +515,7 @@ export function RiskCenter() {
             {/* Leverage Gauge */}
             <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
               <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-                <span>Leverage</span>
+                <span><MetricLabel metric="leverage_utilization">Leverage</MetricLabel></span>
                 <span className="font-mono text-ink/90">
                   {metrics?.leverage_utilization_pct?.toFixed(1) ?? '0.0'}%
                 </span>
@@ -545,7 +546,7 @@ export function RiskCenter() {
             {/* Drawdown Gauge */}
             <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
               <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-                <span>Drawdown</span>
+                <span><MetricLabel metric="drawdown_utilization">Drawdown</MetricLabel></span>
                 <span className="font-mono text-ink/90">
                   {metrics?.drawdown_utilization_pct?.toFixed(1) ?? '0.0'}%
                 </span>
@@ -576,7 +577,7 @@ export function RiskCenter() {
             {/* Daily Loss Gauge */}
             <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
               <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-                <span>Daily Loss</span>
+                <span><MetricLabel metric="daily_loss_utilization">Daily Loss</MetricLabel></span>
                 <span className="font-mono text-ink/90">
                   {metrics?.daily_loss_utilization_pct?.toFixed(1) ?? '0.0'}%
                 </span>
@@ -607,7 +608,7 @@ export function RiskCenter() {
             {/* VaR Gauge */}
             <div className="rounded-xl border border-ink/10 bg-surface p-5 shadow-sm">
               <div className="flex items-center justify-between text-xs font-semibold text-ink/60 uppercase tracking-wider">
-                <span>Value at Risk (95% 1-Day)</span>
+                <span><MetricLabel metric="var_utilization">Value at Risk (99% 1-Day)</MetricLabel></span>
                 <span className="font-mono text-ink/90">
                   {metrics?.var_utilization_pct?.toFixed(1) ?? '0.0'}%
                 </span>
@@ -683,7 +684,7 @@ export function RiskCenter() {
                       <th className="px-3 py-2 font-medium">Symbol</th>
                       <th className="px-3 py-2 font-medium">Quantity</th>
                       <th className="px-3 py-2 font-medium">Mark Price</th>
-                      <th className="px-3 py-2 font-medium">Market Value</th>
+                      <th className="px-3 py-2 font-medium"><MetricLabel metric="market_value">Market Value</MetricLabel></th>
                       <th className="px-3 py-2 font-medium">Last Updated</th>
                     </tr>
                   </thead>

@@ -1265,7 +1265,7 @@ export function PaperLab() {
                 <span className="font-mono text-white">{formatCurrency(cashBalance)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Last Equity:</span>
+                <MetricLabel metric="last_equity" className="text-slate-400">Last Equity:</MetricLabel>
                 <span className="font-mono text-white">
                   {account?.last_equity ? formatCurrency(parseFloat(account.last_equity)) : '-'}
                 </span>
@@ -1311,7 +1311,7 @@ export function PaperLab() {
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Daytrade Count:</span>
+                <MetricLabel metric="daytrade_count" className="text-slate-400">Daytrade Count:</MetricLabel>
                 <span className="font-mono text-white">{account?.daytrade_count ?? 0} / 3</span>
               </div>
               <div className="flex justify-between">

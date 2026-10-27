@@ -28,7 +28,7 @@ const CARDS: { title: string; body: ReactNode; icon: typeof Activity; tile: stri
     body: 'Deflated Sharpe Ratio (DSR), Combinatorially Symmetric Cross-Validation (CSCV), PBO, walk-forward and strategy survival analysis, with every trial ledgered.',
     icon: BarChart3,
     tile: 'from-violet-500/30 to-fuchsia-500/10 text-violet-500 ring-violet-500/30 dark:text-violet-400',
-    href: '/studio?tab=survival',
+    href: '/studio?tab=backtests',
   },
   {
     title: 'Brokerage & Execution Layer',

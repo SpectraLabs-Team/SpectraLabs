@@ -128,7 +128,7 @@ export interface CreateOrderParams {
   symbol: string;
   qty: number | string;
   side: 'buy' | 'sell';
-  type: 'market' | 'limit' | 'stop';
+  type: 'market' | 'limit' | 'stop' | 'stop_limit';
   time_in_force?: 'day' | 'gtc';
   limit_price?: number | string;
   stop_price?: number | string;

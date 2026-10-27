@@ -40,6 +40,8 @@ import type { BackendRequest } from '@/lib/types';
 import { parseCsv, portfolioStats } from '@/lib/portfolio';
 import { cn, confidenceLabel, formatCompact, formatCurrency, formatDuration, formatPercent } from '@/lib/utils';
 import { AnimatedValue, Badge, ErrorNote, GlassCard, RangeSlider, Spinner } from '@/components/ui/primitives';
+import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
+import type { MetricId } from '@/lib/learn/metrics';
 import { LossHistogram } from './LossHistogram';
 import { usePortfolio, type RiskRun } from './PortfolioContext';
 import { StressPanel } from './StressPanel';
@@ -106,12 +108,12 @@ function exportRiskReport(run: RiskRun, matchesCurrentInputs: boolean) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function MetricCard({ icon: Icon, label, value, sub, tone = 'neutral', loading }: { icon: typeof Activity; label: string; value: string; sub: React.ReactNode; tone?: 'neutral' | 'loss' | 'accent'; loading?: boolean }) {
+function MetricCard({ icon: Icon, label, value, sub, tone = 'neutral', loading, metric }: { icon: typeof Activity; label: string; value: string; sub: React.ReactNode; tone?: 'neutral' | 'loss' | 'accent'; loading?: boolean; metric?: MetricId }) {
   return (
     <GlassCard className="relative overflow-hidden p-4 sm:p-5">
       {loading && <div className="absolute inset-x-0 top-0 h-px animate-shimmer bg-[linear-gradient(90deg,transparent,#22D3EE,transparent)] bg-[length:200%_100%]" />}
       <div className="flex items-center justify-between">
-        <span className="text-xs text-ink/60">{label}</span>
+        <span className="text-xs text-ink/60">{metric ? <MetricLabel metric={metric}>{label}</MetricLabel> : label}</span>
         <Icon className={cn('h-4 w-4', tone === 'loss' ? 'text-loss' : tone === 'accent' ? 'text-accent' : 'text-ink/50')} />
       </div>
       <p className={cn('num mt-3 text-2xl font-semibold tracking-tight sm:text-[26px]', tone === 'loss' ? 'text-loss' : 'text-ink')}>
@@ -391,10 +393,10 @@ export function RiskLab() {
       <div className="min-w-0 space-y-5">
         {/* Metric cards */}
         <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-          <MetricCard icon={Wallet} label="Portfolio value" value={results ? formatCurrency(results.var.portfolio_value) : '—'} sub={results ? `gross ${formatCurrency(runGross)}` : 'Run a simulation'} loading={loading} />
-          <MetricCard icon={ShieldAlert} tone="loss" label={`Value at Risk · ${label}`} value={results ? formatCurrency(results.var.value) : '—'} sub={results ? `${formatPercent(results.var.value / results.var.portfolio_value)} of book · ${days}d` : `${days}d horizon`} loading={loading} />
-          <MetricCard icon={TrendingDown} tone="loss" label="Expected shortfall (CVaR)" value={results ? formatCurrency(results.cvar.value) : '—'} sub={results ? `${formatPercent(results.cvar.value / results.var.portfolio_value)} · mean of worst ${formatPercent(1 - ran!.confidence, ran!.confidence > 0.99 ? 1 : 0)}` : 'mean loss beyond VaR'} loading={loading} />
-          <MetricCard icon={Sigma} tone="accent" label="Annualized volatility" value={results ? formatPercent(results.var.model_volatility) : '—'} sub={results ? `σ of ${days}d P&L ${formatCurrency(results.vol.value)}` : 'model volatility'} loading={loading} />
+          <MetricCard icon={Wallet} metric="portfolio_value" label="Portfolio value" value={results ? formatCurrency(results.var.portfolio_value) : '—'} sub={results ? `gross ${formatCurrency(runGross)}` : 'Run a simulation'} loading={loading} />
+          <MetricCard icon={ShieldAlert} tone="loss" metric="var_monte_carlo" label={`Value at Risk · ${label}`} value={results ? formatCurrency(results.var.value) : '—'} sub={results ? `${formatPercent(results.var.value / results.var.portfolio_value)} of book · ${days}d` : `${days}d horizon`} loading={loading} />
+          <MetricCard icon={TrendingDown} tone="loss" metric="cvar_monte_carlo" label="Expected shortfall (CVaR)" value={results ? formatCurrency(results.cvar.value) : '—'} sub={results ? `${formatPercent(results.cvar.value / results.var.portfolio_value)} · mean of worst ${formatPercent(1 - ran!.confidence, ran!.confidence > 0.99 ? 1 : 0)}` : 'mean loss beyond VaR'} loading={loading} />
+          <MetricCard icon={Sigma} tone="accent" metric="risk_volatility" label="Annualized volatility" value={results ? formatPercent(results.var.model_volatility) : '—'} sub={results ? `σ of ${days}d P&L ${formatCurrency(results.vol.value)}` : 'model volatility'} loading={loading} />
         </div>
 
         {/* M7 EVT Heavy-Tail Alert / Metrics */}
@@ -422,21 +424,21 @@ export function RiskLab() {
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 font-mono text-xs">
               <div className="rounded-lg border border-ink/[0.08] bg-ink/[0.02] p-2.5">
-                <span className="text-[10px] uppercase text-ink/40">Monte Carlo VaR</span>
+                <span className="inline-flex items-center gap-1 text-[10px] uppercase text-ink/40">Monte Carlo VaR <InfoTip metric="var_monte_carlo" /></span>
                 <p className="mt-1 font-semibold text-ink">{formatCurrency(results.var.value)}</p>
               </div>
               <div className="rounded-lg border border-loss/20 bg-loss/[0.04] p-2.5">
-                <span className="text-[10px] uppercase text-loss/70">EVT GPD VaR ({label})</span>
+                <span className="inline-flex items-center gap-1 text-[10px] uppercase text-loss/70">EVT GPD VaR ({label}) <InfoTip metric="evt_var" /></span>
                 <p className="mt-1 font-semibold text-loss">{formatCurrency(results.var.evt_var)}</p>
               </div>
               <div className="rounded-lg border border-loss/20 bg-loss/[0.04] p-2.5">
-                <span className="text-[10px] uppercase text-loss/70">EVT Expected Shortfall</span>
+                <span className="inline-flex items-center gap-1 text-[10px] uppercase text-loss/70">EVT Expected Shortfall <InfoTip metric="evt_var" label="EVT expected shortfall" /></span>
                 <p className="mt-1 font-semibold text-loss">
                   {results.var.evt_cvar != null ? formatCurrency(results.var.evt_cvar) : '—'}
                 </p>
               </div>
               <div className="rounded-lg border border-ink/[0.08] bg-ink/[0.02] p-2.5">
-                <span className="text-[10px] uppercase text-ink/40">Tail Ratio (EVT / MC)</span>
+                <span className="inline-flex items-center gap-1 text-[10px] uppercase text-ink/40">Tail Ratio (EVT / MC) <InfoTip metric="evt_tail_ratio" /></span>
                 <p className="mt-1 font-semibold text-accent">
                   {(results.var.evt_var / results.var.value).toFixed(2)}x
                 </p>
@@ -618,7 +620,7 @@ export function RiskLab() {
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold uppercase text-ink">Detected Regime:</span>
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase text-ink">Detected Regime: <InfoTip metric="regime" /></span>
                           <span
                             className={cn(
                               'font-mono text-sm font-bold uppercase',
@@ -641,7 +643,7 @@ export function RiskLab() {
                     </div>
                     {regimeData.current_regime_var != null && (
                       <div className="text-right">
-                        <span className="text-[10.5px] uppercase text-ink/50">Regime-Conditional VaR</span>
+                        <span className="inline-flex items-center gap-1 text-[10.5px] uppercase text-ink/50">Regime-Conditional VaR <InfoTip metric="regime_var" /></span>
                         <p className="num text-lg font-bold text-loss">
                           {formatCurrency(regimeData.current_regime_var)}
                         </p>
@@ -825,7 +827,7 @@ export function RiskLab() {
                   {regimeData.transitions && regimeData.transitions.length > 0 && (
                     <div className="rounded-xl border border-ink/[0.08] bg-canvas/40 p-4">
                       <div className="flex items-center justify-between border-b border-ink/10 pb-2">
-                        <span className="text-xs font-semibold uppercase text-ink">Markov Transition Probability Matrix (P_ij)</span>
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold uppercase text-ink">Markov Transition Probability Matrix (P_ij) <InfoTip metric="regime_transitions" /></span>
                         <span className="text-[11px] text-ink/50">Likelihood of regime persistence vs switching</span>
                       </div>
                       <div className="mt-3 overflow-x-auto">
@@ -915,26 +917,26 @@ export function RiskLab() {
                 <div className="space-y-4">
                   <div className="grid gap-3 sm:grid-cols-4 font-mono text-xs">
                     <div className="rounded-lg border border-accent/20 bg-accent/[0.03] p-3">
-                      <span className="text-[10px] uppercase text-accent">1-Day Vol Forecast (Ann.)</span>
+                      <span className="inline-flex items-center gap-1 text-[10px] uppercase text-accent">1-Day Vol Forecast (Ann.) <InfoTip metric="garch_forecast_vol" /></span>
                       <p className="mt-1 text-lg font-bold text-ink">
                         {formatPercent(garchData.forecast_1d_volatility_annualized)}
                       </p>
                     </div>
                     <div className="rounded-lg border border-ink/[0.08] bg-ink/[0.02] p-3">
-                      <span className="text-[10px] uppercase text-ink/40">Unconditional Vol (Ann.)</span>
+                      <span className="inline-flex items-center gap-1 text-[10px] uppercase text-ink/40">Unconditional Vol (Ann.) <InfoTip metric="garch_unconditional_vol" /></span>
                       <p className="mt-1 text-lg font-semibold text-ink">
                         {formatPercent(garchData.annualized_volatility)}
                       </p>
                     </div>
                     <div className="rounded-lg border border-ink/[0.08] bg-ink/[0.02] p-3">
-                      <span className="text-[10px] uppercase text-ink/40">Volatility Persistence (α+β)</span>
+                      <span className="inline-flex items-center gap-1 text-[10px] uppercase text-ink/40">Volatility Persistence (α+β) <InfoTip metric="garch_persistence" /></span>
                       <p className="mt-1 text-lg font-semibold text-accent">
                         {garchData.persistence.toFixed(4)}
                       </p>
                     </div>
                     {garchData.gamma != null && (
                       <div className="rounded-lg border border-loss/20 bg-loss/[0.03] p-3">
-                        <span className="text-[10px] uppercase text-loss/70">Asymmetric Leverage (γ)</span>
+                        <span className="inline-flex items-center gap-1 text-[10px] uppercase text-loss/70">Asymmetric Leverage (γ) <InfoTip metric="garch_leverage" /></span>
                         <p className="mt-1 text-lg font-bold text-loss">
                           {garchData.gamma.toFixed(4)}
                         </p>

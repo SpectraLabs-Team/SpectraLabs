@@ -3,6 +3,7 @@ export const NAV: { href: string; label: string; external?: boolean }[] = [
   { href: '/#taxonomy', label: 'Taxonomy' },
   { href: '/#benchmarks', label: 'Benchmarks' },
   { href: '/architecture', label: 'Architecture' },
+  { href: '/learn', label: 'Learn' },
 ];
 
 /** Developer references: footer only, kept out of the product header. */

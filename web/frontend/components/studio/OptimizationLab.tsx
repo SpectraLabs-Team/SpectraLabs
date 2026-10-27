@@ -41,6 +41,7 @@ import {
 import { listDatasets, type DatasetVersion } from '@/lib/backtests';
 import { listStrategies, type StrategySummary } from '@/lib/strategies';
 import { cn } from '@/lib/utils';
+import { InfoTip } from '@/components/ui/MetricInfo';
 
 export function OptimizationLab() {
   const [activeTab, setActiveTab] = useState<'sweeps' | 'walkforward' | 'overfitting' | 'holdout'>('sweeps');
@@ -506,28 +507,28 @@ export function OptimizationLab() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 flex-1">
                     <div className="rounded-xl border border-ink/[0.08] bg-surface p-3.5">
-                      <span className="text-[11px] font-medium text-ink/50 uppercase">Best Sharpe</span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/50 uppercase">Best Sharpe <InfoTip metric="best_sharpe" /></span>
                       <p className="mt-1 text-lg font-bold text-ink">
                         {selectedSweepDetail.sweep.best_objective?.toFixed(2) ?? '—'}
                       </p>
                       <span className="text-[10px] text-emerald-600">Trial #{selectedSweepDetail.sweep.best_trial_num ?? 1}</span>
                     </div>
                     <div className="rounded-xl border border-ink/[0.08] bg-surface p-3.5">
-                      <span className="text-[11px] font-medium text-ink/50 uppercase">Deflated Sharpe (DSR)</span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/50 uppercase">Deflated Sharpe (DSR) <InfoTip metric="dsr" /></span>
                       <p className="mt-1 text-lg font-bold text-accent">
                         {selectedSweepDetail.sweep.dsr !== undefined ? `${(selectedSweepDetail.sweep.dsr * 100).toFixed(1)}%` : '—'}
                       </p>
                       <span className="text-[10px] text-ink/50">Multi-testing penalized</span>
                     </div>
                     <div className="rounded-xl border border-ink/[0.08] bg-surface p-3.5">
-                      <span className="text-[11px] font-medium text-ink/50 uppercase">Probabilistic SR (PSR)</span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/50 uppercase">Probabilistic SR (PSR) <InfoTip metric="psr" /></span>
                       <p className="mt-1 text-lg font-bold text-ink">
                         {selectedSweepDetail.sweep.psr !== undefined ? `${(selectedSweepDetail.sweep.psr * 100).toFixed(1)}%` : '—'}
                       </p>
                       <span className="text-[10px] text-ink/50">Non-normal confidence</span>
                     </div>
                     <div className="rounded-xl border border-ink/[0.08] bg-surface p-3.5">
-                      <span className="text-[11px] font-medium text-ink/50 uppercase">CSCV PBO</span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/50 uppercase">CSCV PBO <InfoTip metric="pbo" /></span>
                       <p className="mt-1 text-lg font-bold text-rose-500">
                         {selectedSweepDetail.sweep.pbo !== undefined ? `${(selectedSweepDetail.sweep.pbo * 100).toFixed(1)}%` : '—'}
                       </p>
@@ -863,14 +864,14 @@ export function OptimizationLab() {
                     </span>
                   </div>
                   <div className="rounded-xl border border-ink/[0.08] bg-surface p-4">
-                    <span className="text-xs text-ink/50">In-Sample Mean Sharpe</span>
+                    <span className="inline-flex items-center gap-1 text-xs text-ink/50">In-Sample Mean Sharpe <InfoTip metric="is_oos_sharpe" /></span>
                     <p className="mt-1 text-2xl font-bold text-ink">
                       {selectedReport.in_sample_sharpe?.toFixed(2) ?? '—'}
                     </p>
                     <span className="text-[10px] text-ink/50">Training optimum</span>
                   </div>
                   <div className="rounded-xl border border-ink/[0.08] bg-surface p-4">
-                    <span className="text-xs text-ink/50">Out-of-Sample Mean Sharpe</span>
+                    <span className="inline-flex items-center gap-1 text-xs text-ink/50">Out-of-Sample Mean Sharpe <InfoTip metric="is_oos_sharpe" /></span>
                     <p className="mt-1 text-2xl font-bold text-emerald-600">
                       {selectedReport.out_of_sample_sharpe?.toFixed(2) ?? '—'}
                     </p>
@@ -1021,7 +1022,7 @@ export function OptimizationLab() {
               <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                   <div className="rounded-xl border border-ink/[0.08] bg-surface p-4">
-                    <span className="text-[11px] text-ink/50 uppercase">DSR (Deflated Sharpe)</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-ink/50 uppercase">DSR (Deflated Sharpe) <InfoTip metric="dsr" /></span>
                     <p className="mt-1 text-2xl font-bold text-accent">{(overfittingResult.dsr * 100).toFixed(1)}%</p>
                     <span className="text-[10px] text-emerald-600">Confidence above zero</span>
                   </div>
@@ -1031,12 +1032,12 @@ export function OptimizationLab() {
                     <span className="text-[10px] text-ink/50">Higher moments adjusted</span>
                   </div>
                   <div className="rounded-xl border border-ink/[0.08] bg-surface p-4">
-                    <span className="text-[11px] text-ink/50 uppercase">Min Track Record (MinTRL)</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-ink/50 uppercase">Min Track Record (MinTRL) <InfoTip metric="min_trl" /></span>
                     <p className="mt-1 text-2xl font-bold text-ink">{overfittingResult.min_trl.toFixed(1)}</p>
                     <span className="text-[10px] text-ink/50">Obs periods required</span>
                   </div>
                   <div className="rounded-xl border border-ink/[0.08] bg-surface p-4">
-                    <span className="text-[11px] text-ink/50 uppercase">CSCV PBO</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-ink/50 uppercase">CSCV PBO <InfoTip metric="pbo" /></span>
                     <p className="mt-1 text-2xl font-bold text-rose-500">{(overfittingResult.pbo * 100).toFixed(1)}%</p>
                     <span className="text-[10px] text-rose-500 font-medium">Overfitting risk</span>
                   </div>
@@ -1046,7 +1047,7 @@ export function OptimizationLab() {
                   <h3 className="text-sm font-semibold text-ink">Statistical Diagnostics Summary</h3>
                   <div className="grid grid-cols-2 gap-4 text-xs font-mono">
                     <div className="rounded-lg bg-ink/[0.02] p-3">
-                      <span className="text-ink/50 block text-[10px] uppercase font-sans">Best Observed Sharpe</span>
+                      <span className="flex items-center gap-1 text-ink/50 text-[10px] uppercase font-sans">Best Observed Sharpe <InfoTip metric="best_sharpe" /></span>
                       <strong className="text-base text-ink">{overfittingResult.best_sharpe.toFixed(3)}</strong>
                     </div>
                     <div className="rounded-lg bg-ink/[0.02] p-3">

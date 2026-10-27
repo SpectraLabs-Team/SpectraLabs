@@ -48,6 +48,7 @@ import {
 import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import { TradingChart } from './TradingChart';
+import { InfoTip } from '@/components/ui/MetricInfo';
 
 // Default initial watchlist symbols
 const INITIAL_WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'AMZN', 'GOOGL', 'META'];
@@ -408,7 +409,7 @@ export function PaperLab() {
   if (!isConnected) {
     return (
       <div className="mx-auto max-w-2xl py-8">
-        <GlassCard className="relative overflow-hidden p-8 border border-white/10 shadow-2xl">
+        <GlassCard data-tour="paper-connect" className="relative overflow-hidden p-8 border border-white/10 shadow-2xl">
           <div className="flex items-center gap-3">
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
               <Wallet className="h-6 w-6" />
@@ -569,10 +570,10 @@ export function PaperLab() {
       )}
 
       {/* Top Portfolio Metric Cards */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div data-tour="paper-account" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="font-mono text-[10px] uppercase tracking-wider">Total Equity</span>
+            <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider">Total Equity <InfoTip metric="total_equity" className="text-slate-500" /></span>
             <Wallet className="h-4 w-4 text-cyan-400" />
           </div>
           <p className="mt-2 font-mono text-2xl font-bold text-white">
@@ -585,7 +586,7 @@ export function PaperLab() {
 
         <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="font-mono text-[10px] uppercase tracking-wider">Cash Balance</span>
+            <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider">Cash Balance <InfoTip metric="cash_balance" className="text-slate-500" /></span>
             <DollarSign className="h-4 w-4 text-emerald-400" />
           </div>
           <p className="mt-2 font-mono text-2xl font-bold text-white">
@@ -596,7 +597,7 @@ export function PaperLab() {
 
         <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="font-mono text-[10px] uppercase tracking-wider">Buying Power</span>
+            <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider">Buying Power <InfoTip metric="buying_power" className="text-slate-500" /></span>
             <Activity className="h-4 w-4 text-purple-400" />
           </div>
           <p className="mt-2 font-mono text-2xl font-bold text-white">
@@ -607,7 +608,7 @@ export function PaperLab() {
 
         <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
           <div className="flex items-center justify-between text-slate-400">
-            <span className="font-mono text-[10px] uppercase tracking-wider">Unrealized P&L</span>
+            <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider">Unrealized P&L <InfoTip metric="unrealized_pnl" className="text-slate-500" /></span>
             {totalUnrealizedPl >= 0 ? (
               <TrendingUp className="h-4 w-4 text-emerald-400" />
             ) : (
@@ -630,7 +631,7 @@ export function PaperLab() {
       {/* Main TradingView-Style 3-Column Dashboard */}
       <div className="grid gap-4 lg:grid-cols-[240px_1fr_320px]">
         {/* LEFT PANEL: Stock Search & Watchlist */}
-        <div className="flex flex-col rounded-2xl border border-white/10 bg-[#090d14] p-3 text-white">
+        <div data-tour="paper-search" className="flex flex-col rounded-2xl border border-white/10 bg-[#090d14] p-3 text-white">
           <div className="mb-2 font-mono text-[11px] uppercase tracking-wider text-slate-400">
             Symbol Search
           </div>
@@ -732,7 +733,7 @@ export function PaperLab() {
         </div>
 
         {/* CENTER PANEL: Interactive Candlestick Chart */}
-        <div className="flex flex-col">
+        <div data-tour="paper-chart" className="flex flex-col">
           <TradingChart
             symbol={selectedSymbol}
             bars={chartBars}
@@ -747,7 +748,7 @@ export function PaperLab() {
         </div>
 
         {/* RIGHT PANEL: Order Ticket */}
-        <div className="flex flex-col rounded-2xl border border-white/10 bg-[#090d14] p-4 text-white">
+        <div data-tour="paper-ticket" className="flex flex-col rounded-2xl border border-white/10 bg-[#090d14] p-4 text-white">
           <div className="mb-3 font-mono text-[11px] uppercase tracking-wider text-slate-400">
             Order Ticket · {selectedSymbol}
           </div>
@@ -960,7 +961,7 @@ export function PaperLab() {
       )}
 
       {/* BOTTOM PANEL: Positions, Open Orders, Order History, Performance */}
-      <div className="rounded-2xl border border-white/10 bg-[#090d14] p-4 text-white">
+      <div data-tour="paper-positions" className="rounded-2xl border border-white/10 bg-[#090d14] p-4 text-white">
         {/* Tab Headers */}
         <div className="flex items-center gap-2 border-b border-white/10 pb-3">
           <button
@@ -1030,7 +1031,9 @@ export function PaperLab() {
                     <th className="py-2 text-right">Avg Entry</th>
                     <th className="py-2 text-right">Current Price</th>
                     <th className="py-2 text-right">Market Value</th>
-                    <th className="py-2 text-right">Unrealized P&L</th>
+                    <th className="py-2 text-right">
+                      <span className="inline-flex items-center gap-1">Unrealized P&L <InfoTip metric="unrealized_pnl" className="text-slate-500" /></span>
+                    </th>
                     <th className="py-2 text-center">Action</th>
                   </tr>
                 </thead>
@@ -1109,7 +1112,9 @@ export function PaperLab() {
                     <th className="py-2 text-right">Qty</th>
                     <th className="py-2 text-right">Filled</th>
                     <th className="py-2 text-right">Limit Price</th>
-                    <th className="py-2">Status</th>
+                    <th className="py-2">
+                      <span className="inline-flex items-center gap-1">Status <InfoTip metric="order_status" className="text-slate-500" /></span>
+                    </th>
                     <th className="py-2 text-center">Action</th>
                   </tr>
                 </thead>
@@ -1180,7 +1185,9 @@ export function PaperLab() {
                     <th className="py-2">Type</th>
                     <th className="py-2 text-right">Qty</th>
                     <th className="py-2 text-right">Avg Fill Price</th>
-                    <th className="py-2">Status</th>
+                    <th className="py-2">
+                      <span className="inline-flex items-center gap-1">Status <InfoTip metric="order_status" className="text-slate-500" /></span>
+                    </th>
                     <th className="py-2">Order ID</th>
                   </tr>
                 </thead>
@@ -1270,7 +1277,7 @@ export function PaperLab() {
                 Margin & Buying Power
               </span>
               <div className="flex justify-between">
-                <span className="text-slate-400">RegT Buying Power:</span>
+                <span className="inline-flex items-center gap-1 text-slate-400">RegT Buying Power: <InfoTip metric="buying_power" className="text-slate-500" /></span>
                 <span className="font-mono text-white">
                   {account?.regt_buying_power ? formatCurrency(parseFloat(account.regt_buying_power)) : '-'}
                 </span>

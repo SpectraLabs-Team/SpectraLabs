@@ -3,8 +3,10 @@
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Briefcase, ChevronsLeft, ChevronsRight, Cpu, Database, FileCode2, LayoutDashboard, LineChart, Lock, LogOut, Menu, PlugZap, ShieldAlert, ShieldCheck, Sliders, TrendingUp, X } from 'lucide-react';
+import { BookOpen, Briefcase, ChevronsLeft, ChevronsRight, Cpu, Database, FileCode2, LayoutDashboard, LineChart, Lock, LogOut, Menu, PlugZap, ShieldAlert, ShieldCheck, Sliders, TrendingUp, X } from 'lucide-react';
 import { RolePill } from '@/components/landing/Header';
+import { HelpMenu } from '@/components/onboarding/HelpMenu';
+import { MetricLabel } from '@/components/ui/MetricInfo';
 import { StatusPills } from '@/components/ui/StatusPills';
 import { Logo } from '@/components/ui/primitives';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
@@ -118,12 +120,16 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
                 <dd className={cn('num', account.cash < 0 ? 'text-loss' : 'text-ink')}>{formatCurrency(account.cash)}</dd>
               </div>
               <div className="flex justify-between gap-2">
-                <dt className="text-ink/55">Buying power</dt>
+                <dt className="text-ink/55">
+                  <MetricLabel metric="buying_power">Buying power</MetricLabel>
+                </dt>
                 <dd className="num text-ink">{formatCurrency(account.buyingPower)}</dd>
               </div>
               <div>
                 <div className="flex justify-between gap-2">
-                  <dt className="text-ink/55">Gross leverage</dt>
+                  <dt className="text-ink/55">
+                    <MetricLabel metric="gross_leverage">Gross leverage</MetricLabel>
+                  </dt>
                   <dd className={cn('num', account.withinLimit ? 'text-profit' : 'text-loss')}>
                     {account.grossLeverage.toFixed(2)}× <span className="text-ink/40">/ {paper.leverageLimit.toFixed(1)}×</span>
                   </dd>
@@ -151,6 +157,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
                   onNavigate?.();
                 }}
                 aria-current={active ? 'page' : undefined}
+                data-tour={`nav-${t.id}`}
                 title={collapsed ? t.label : undefined}
                 className={cn(
                   'relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] transition-colors',
@@ -164,11 +171,21 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
               </button>
             );
           })}
+          <Link
+            href="/learn"
+            onClick={onNavigate}
+            data-tour="nav-learn"
+            title={collapsed ? 'Learning Center' : undefined}
+            className={cn('mt-2 flex w-full items-center gap-3 rounded-lg border border-dashed border-ink/[0.09] px-3 py-2 text-left text-[13px] text-ink/60 transition-colors hover:border-accent/30 hover:bg-accent/[0.04] hover:text-ink', collapsed && 'justify-center px-0')}
+          >
+            <BookOpen className="h-4 w-4 shrink-0" />
+            {!collapsed && <span className="leading-tight">Learning Center</span>}
+          </Link>
         </nav>
       </div>
 
       <div className={cn('flex items-center gap-2 border-t border-ink/[0.06] p-3', collapsed ? 'flex-col' : 'justify-between')}>
-        <span className="flex items-center gap-2 text-[11px] text-ink/50" title={online ? 'Engine online' : 'Engine offline'}>
+        <span data-tour="engine-status" className="flex items-center gap-2 text-[11px] text-ink/50" title={online ? 'Engine online' : 'Engine offline'}>
           <span className={cn('h-2 w-2 rounded-full', online ? 'bg-profit' : engine.status === 'offline' ? 'bg-loss' : 'bg-ink/30')} />
           {!collapsed && (online ? 'Rust engine online' : engine.status === 'offline' ? 'Engine offline' : 'Connecting…')}
         </span>
@@ -236,7 +253,7 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
 
       <div className={cn('relative transition-[padding] duration-300', collapsed ? 'lg:pl-[68px]' : 'lg:pl-[264px]')}>
         <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-ink/[0.06] bg-canvas/80 px-4 backdrop-blur-xl sm:px-6">
-          <button type="button" onClick={() => setMobileOpen(true)} className="-ml-1 rounded-md p-1.5 text-ink/60 lg:hidden" aria-label="Open menu">
+          <button type="button" data-tour="mobile-menu" onClick={() => setMobileOpen(true)} className="-ml-1 rounded-md p-1.5 text-ink/60 lg:hidden" aria-label="Open menu">
             <Menu className="h-5 w-5" />
           </button>
           <WorkspaceSwitcher className="shrink-0" />
@@ -251,6 +268,7 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
               <span className="num text-ink/90">{formatCompactCurrency(stats.netValue)}</span>· {positions.length} positions · {source}
             </span>
             <StatusPills className="hidden xl:flex" />
+            <HelpMenu tab={tab} />
             {user && <RolePill user={user} className="hidden sm:flex" />}
             {user?.role === 'admin' && (
               <Link
@@ -280,7 +298,9 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
           </div>
         )}
 
-        <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 sm:py-8">{children}</main>
+        <main data-tour="studio-main" className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 sm:py-8">
+          {children}
+        </main>
       </div>
     </div>
   );

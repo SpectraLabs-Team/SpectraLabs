@@ -1,0 +1,241 @@
+import { lesson } from '../build';
+import type { Lesson } from '../types';
+
+const L = (l: Omit<Lesson, 'category'>) => lesson('fundamentals', l);
+
+export const fundamentals: Lesson[] = [
+  L({
+    slug: 'what-is-trading',
+    title: 'What Is Trading?',
+    level: 'Beginner',
+    featured: true,
+    summary: 'Trading is buying and selling financial instruments to profit from price changes. This lesson covers the core ideas every other lesson builds on.',
+    keywords: ['introduction', 'basics', 'investing', 'long', 'short'],
+    blocks: [
+      { type: 'p', text: 'Trading means buying and selling financial instruments (shares, ETFs, futures, currencies) with the aim of profiting from changes in their price. Where investing usually means holding for years, trading focuses on shorter horizons and on *when* to enter and exit.' },
+      { type: 'h', text: 'Long and short' },
+      { type: 'list', items: ['**Going long**: buy first, sell later. You profit if the price rises.', '**Going short**: borrow shares and sell them, buy them back later. You profit if the price falls, and pay a borrow fee while short.', '**Flat**: no position; your money sits in cash.'] },
+      { type: 'h', text: 'Where profit and loss come from' },
+      { type: 'p', text: 'A position’s profit is the quantity times the price change, minus costs. Buying 100 shares at $50 and selling at $53 makes 100 × $3 = $300 before costs. Costs include commissions, the bid-ask spread and slippage; they are certain, while the price change is not.' },
+      { type: 'h', text: 'Discretionary and systematic trading' },
+      { type: 'p', text: 'A discretionary trader decides each trade by judgement. A **systematic** trader writes the decision down as rules (“buy when the 10-day average crosses above the 30-day average”) so that a computer can apply them consistently and, crucially, so that they can be tested on historical data first. Spectra is built for systematic trading: you define rules in the Strategy Studio, test them in Backtests, check their robustness in the Optimization and Survival labs, then practise with paper trading.' },
+      { type: 'callout', tone: 'warning', title: 'Risk', text: 'Trading can lose money quickly, and past performance (including backtests) does not guarantee future results. Nothing in the Learning Center is investment advice.' },
+    ],
+    related: ['fundamentals/how-stock-markets-work', 'fundamentals/buy-and-sell-orders', 'simulations/what-is-a-trading-simulation', 'paper-trading/what-is-paper-trading'],
+    platformLinks: [{ label: 'Open the Studio', href: '/studio' }],
+  }),
+
+  L({
+    slug: 'how-stock-markets-work',
+    title: 'How Stock Markets Work',
+    level: 'Beginner',
+    summary: 'Exchanges match buyers and sellers through order books. Prices move when the balance of orders changes.',
+    keywords: ['exchange', 'nasdaq', 'nyse', 'broker', 'market maker'],
+    blocks: [
+      { type: 'p', text: 'A stock market is a set of venues (exchanges such as NYSE and Nasdaq, plus other trading systems) where shares of companies change hands. You do not trade with the exchange directly: you send orders to a **broker**, such as Alpaca, which routes them to a venue.' },
+      { type: 'h', text: 'Who is on the other side' },
+      { type: 'p', text: 'Every trade has a buyer and a seller. Many orders are provided by **market makers**, firms that continuously quote prices to buy (bid) and sell (ask) and earn the difference. When you buy with a market order, you usually buy from the lowest ask that is available.' },
+      { type: 'h', text: 'How prices move' },
+      { type: 'p', text: 'Each venue keeps an **order book**: resting buy orders sorted by price from high to low, and resting sell orders from low to high. A trade happens when a buy and a sell agree on a price. If more traders want to buy at the current ask than sell, buyers consume the asks and the price rises to the next level.' },
+      { type: 'diagram', id: 'order-book', caption: 'An order book: bids (buyers) below, asks (sellers) above, the spread between them.' },
+      { type: 'h', text: 'Bars: how price history is stored' },
+      { type: 'p', text: 'Trades are summarized into **bars**: for each interval (one minute, one day) the open, high, low and close prices and the volume traded. Spectra’s backtester runs on bars uploaded in the Data tab; paper trading charts use bars from Alpaca’s market data.' },
+    ],
+    related: ['fundamentals/market-depth', 'fundamentals/bid-and-ask', 'engine/order-book-fundamentals', 'paper-trading/reading-candlestick-charts'],
+    platformLinks: [{ label: 'Open Data', href: '/studio?tab=data' }],
+  }),
+
+  L({
+    slug: 'market-and-limit-orders',
+    title: 'Market Orders and Limit Orders',
+    level: 'Beginner',
+    featured: true,
+    summary: 'A market order trades now at the best available price; a limit order trades only at your price or better, and may never fill.',
+    keywords: ['market order', 'limit order', 'stop order', 'stop limit', 'order types'],
+    blocks: [
+      { type: 'p', text: 'The order type decides the trade-off between **certainty of execution** and **certainty of price**.' },
+      { type: 'table', head: ['Order type', 'You control', 'Risk'], rows: [
+        ['Market', 'That it fills, now', 'The price: you pay the spread and any slippage'],
+        ['Limit', 'The worst price you accept', 'Not filling at all if the price never reaches your limit'],
+        ['Stop', 'When it becomes a market order', 'Gaps: it can fill well past the stop'],
+        ['Stop-limit', 'Trigger and worst price', 'May trigger and then not fill'],
+      ] },
+      { type: 'h', text: 'How the Spectra backtester fills them' },
+      { type: 'list', items: [
+        '**Market**: at the next bar’s open, moved against you by the configured slippage (and half the spread).',
+        '**Limit buy**: at the open if the open is at or below the limit, otherwise at the limit if the bar’s low reaches it. Limit sells are symmetric. No slippage on limits.',
+        '**Stop**: becomes a market order when the bar trades through the stop (a buy stop when the high reaches it, a sell stop when the low does), filling at the stop or at a gapped open, plus slippage.',
+        '**Stop-limit**: becomes a limit order when triggered; on the trigger bar it fills at the trigger price if that is within the limit, otherwise it rests.',
+      ] },
+      { type: 'h', text: 'Time in force' },
+      { type: 'p', text: '**GTC** (good till cancelled) orders stay open until filled or cancelled. **Day** orders expire if not completely filled on the first bar (or session) they can fill on. In paper trading you choose between day and GTC when placing an order.' },
+      { type: 'callout', tone: 'tip', text: 'A limit order placed at the current bid on a rising stock may never fill. Backtests that assume every limit fills are a common source of unrealistic results.' },
+    ],
+    related: ['fundamentals/buy-and-sell-orders', 'fundamentals/order-execution', 'engine/order-lifecycle', 'paper-trading/placing-orders'],
+    platformLinks: [{ label: 'Open Paper Trading', href: '/studio?tab=paper' }],
+  }),
+
+  L({
+    slug: 'buy-and-sell-orders',
+    title: 'Buy and Sell Orders',
+    level: 'Beginner',
+    summary: 'What happens to your position, cash and buying power when you buy, sell, short or cover.',
+    keywords: ['buy', 'sell', 'short', 'cover', 'position'],
+    blocks: [
+      { type: 'p', text: 'Every order has a **side** (buy or sell), a **quantity** and a **type**. What it does depends on the position you already hold.' },
+      { type: 'table', head: ['Current position', 'Buy order', 'Sell order'], rows: [
+        ['Flat (0)', 'Opens a long', 'Opens a short (if shorting is allowed)'],
+        ['Long', 'Adds to the long', 'Reduces or closes it; selling more than you hold flips you short'],
+        ['Short', 'Covers (reduces or closes) the short', 'Adds to the short'],
+      ] },
+      { type: 'h', text: 'Cash effects' },
+      { type: 'list', items: ['A buy fill removes quantity × price plus fees from cash.', 'A sell fill adds quantity × price minus fees to cash.', 'Equity does not change at the moment of a fill except by the costs: you swap cash for shares of equal value.'] },
+      { type: 'p', text: 'In a backtest, shorting needs `allow_short` in the configuration, and spending more than your cash needs `allow_negative_cash` (margin). The ledger also rejects fills beyond the gross leverage limit.' },
+    ],
+    related: ['fundamentals/market-and-limit-orders', 'engine/position-management', 'metrics/realized-unrealized-pnl'],
+  }),
+
+  L({
+    slug: 'bid-and-ask',
+    title: 'Bid Price and Ask Price',
+    level: 'Beginner',
+    summary: 'The bid is the highest price a buyer will pay right now; the ask is the lowest price a seller will accept.',
+    keywords: ['bid', 'ask', 'offer', 'quote', 'nbbo'],
+    blocks: [
+      { type: 'p', text: 'At any moment a stock has two prices, not one. The **bid** is the best (highest) price someone is willing to pay; the **ask** (or offer) is the best (lowest) price someone is willing to sell at. The “last price” you see on a chart is simply where the most recent trade happened.' },
+      { type: 'list', items: ['You **buy at the ask** with a market order.', 'You **sell at the bid** with a market order.', 'The **mid price** is halfway between them.'] },
+      { type: 'diagram', id: 'spread' },
+      { type: 'p', text: 'Because you buy at the ask and sell at the bid, a round trip at market costs you the spread even if the price does not move. That is why Spectra charges half the configured spread on each market or stop fill.' },
+    ],
+    related: ['fundamentals/bid-ask-spread', 'fundamentals/market-depth', 'metrics/slippage'],
+  }),
+
+  L({
+    slug: 'bid-ask-spread',
+    title: 'The Bid-Ask Spread',
+    level: 'Beginner',
+    featured: true,
+    summary: 'The gap between bid and ask is a cost you pay every time you trade at market. It is usually measured in basis points.',
+    keywords: ['spread', 'basis points', 'bps', 'trading cost', 'half spread'],
+    blocks: [
+      { type: 'p', text: 'The spread is ask minus bid. Expressed relative to the mid price in **basis points** (1 bp = 0.01%), it lets you compare costs across stocks with very different prices.' },
+      { type: 'formula', tex: String.raw`\text{Spread (bps)} = \frac{\text{Ask} - \text{Bid}}{\text{Mid}} \times 10{,}000` },
+      { type: 'p', text: 'Example: bid $99.98, ask $100.02. The spread is $0.04 on a mid of $100, so 4 bps. A market buy pays half of it (2 bps) above mid, and a market sell receives 2 bps below mid: a round trip costs the full 4 bps.' },
+      { type: 'interactive', id: 'spread-cost' },
+      { type: 'h', text: 'What makes spreads wide' },
+      { type: 'list', items: ['Low trading volume and few market makers.', 'High volatility (quoting is riskier).', 'The open and close of the session, and news events.', 'Low share prices: a one-cent minimum tick is a large fraction of a $2 stock.'] },
+      { type: 'callout', tone: 'info', title: 'In Spectra backtests', text: 'Set `spread_bps` in the backtest configuration. Half of it is added to the slippage of every market and stop fill; limit orders do not pay it.' },
+    ],
+    related: ['fundamentals/bid-and-ask', 'fundamentals/liquidity', 'metrics/slippage', 'metrics/transaction-costs'],
+    platformLinks: [{ label: 'Open Backtests', href: '/studio?tab=backtests' }],
+  }),
+
+  L({
+    slug: 'liquidity',
+    title: 'Liquidity',
+    level: 'Beginner',
+    summary: 'How easily you can trade a size without moving the price. Liquid markets have tight spreads and deep order books.',
+    keywords: ['liquidity', 'volume', 'adv', 'capacity', 'participation'],
+    blocks: [
+      { type: 'p', text: 'A market is **liquid** when large quantities can be bought or sold quickly at prices close to the current one. Large-cap stocks such as major index members are very liquid; small caps and thinly traded ETFs are not.' },
+      { type: 'h', text: 'Signs of liquidity' },
+      { type: 'list', items: ['High average daily volume.', 'Tight bid-ask spreads.', 'Deep order books: lots of size at each price level.', 'Small price impact from your own orders.'] },
+      { type: 'h', text: 'Why it matters for a strategy' },
+      { type: 'p', text: 'A backtest that trades 50% of a bar’s volume is not realistic: in practice your order would move the price or not fill. Spectra models this two ways: `volume_slippage_bps` charges more slippage as your share of the bar’s volume grows, and `max_participation` caps how much of a bar’s volume one order may take, leaving the rest open as a partial fill.' },
+      { type: 'formula', tex: String.raw`\text{Participation} = \frac{\text{order quantity}}{\text{bar volume}}` },
+      { type: 'callout', tone: 'tip', text: 'A good rule of thumb is to keep participation below a few percent of volume. The Survival Lab’s execution-costs test shows how results change with volume impact and partial fills.' },
+    ],
+    related: ['fundamentals/market-depth', 'fundamentals/slippage', 'fundamentals/bid-ask-spread', 'metrics/slippage'],
+  }),
+
+  L({
+    slug: 'volatility',
+    title: 'Volatility',
+    level: 'Beginner',
+    summary: 'How much and how fast prices move. Volatility drives risk, position size and option prices.',
+    keywords: ['volatility', 'risk', 'standard deviation', 'vix', 'range'],
+    blocks: [
+      { type: 'p', text: 'Volatility describes the size of price swings. A stock that moves 3% on a typical day is more volatile than one that moves 0.5%. It is usually measured as the standard deviation of returns and quoted per year.' },
+      { type: 'formula', tex: String.raw`\sigma_{\text{annual}} \approx \sigma_{\text{daily}} \times \sqrt{252}` },
+      { type: 'p', text: 'A daily standard deviation of 1% is about 16% a year. Volatility scales with the square root of time because independent daily moves partly cancel out.' },
+      { type: 'h', text: 'Why traders care' },
+      { type: 'list', items: ['**Risk**: higher volatility means larger possible losses over any horizon (see Value at Risk).', '**Position sizing**: many strategies hold less of a volatile stock so each position carries similar risk.', '**Costs**: spreads widen and slippage rises when volatility is high.', '**Regimes**: volatility clusters; calm and turbulent periods tend to persist.'] },
+      { type: 'interactive', id: 'position-sizing' },
+    ],
+    related: ['metrics/volatility', 'metrics/value-at-risk', 'fundamentals/liquidity'],
+    platformLinks: [{ label: 'Open Risk & Stress Lab', href: '/studio?tab=risk' }],
+  }),
+
+  L({
+    slug: 'slippage',
+    title: 'Slippage',
+    level: 'Beginner',
+    summary: 'The difference between the price you expected and the price you actually got.',
+    keywords: ['slippage', 'execution', 'market impact', 'fill price'],
+    blocks: [
+      { type: 'p', text: 'You see a stock at $50.00, send a market buy, and get filled at $50.03. The three cents are **slippage**. It comes from crossing the spread, from the price moving between your decision and the fill, and from your own order consuming the order book.' },
+      { type: 'h', text: 'Sources of slippage' },
+      { type: 'list', items: ['**Spread**: buying at the ask, selling at the bid.', '**Latency**: the price moves while your order travels.', '**Market impact**: large orders eat through several price levels.', '**Gaps**: stop orders triggered by an overnight gap fill at the open, far beyond the stop.'] },
+      { type: 'p', text: 'In Spectra backtests, a market order decided on bar T fills at the open of bar T+1 (never at T’s close, which would be look-ahead), and that open is then moved by the configured slippage. The metric lesson shows the exact formula.' },
+      { type: 'callout', tone: 'warning', text: 'Strategies with many small trades are the most sensitive. Always re-run with higher slippage before believing a result; the Survival Lab does this for you.' },
+    ],
+    related: ['metrics/slippage', 'fundamentals/bid-ask-spread', 'fundamentals/liquidity', 'simulations/simulation-assumptions'],
+  }),
+
+  L({
+    slug: 'market-depth',
+    title: 'Market Depth',
+    level: 'Intermediate',
+    summary: 'How much quantity is waiting at each price level of the order book, and what it tells you about the cost of larger orders.',
+    keywords: ['depth', 'level 2', 'order book', 'size', 'impact'],
+    blocks: [
+      { type: 'p', text: 'The best bid and ask show only the top of the book. **Market depth** (level 2 data) shows the quantity resting at the next prices as well. Deep books absorb large orders with little price change; thin books do not.' },
+      { type: 'diagram', id: 'order-book' },
+      { type: 'h', text: 'Walking the book' },
+      { type: 'p', text: 'Suppose the asks are 200 shares at $10.00, 300 at $10.01 and 500 at $10.03. A market buy for 600 shares takes 200 at $10.00, 300 at $10.01 and 100 at $10.03, for an average price of $10.01: 10 bps above the best ask.' },
+      { type: 'formula', tex: String.raw`\bar{p} = \frac{200 \times 10.00 + 300 \times 10.01 + 100 \times 10.03}{600} = 10.01` },
+      { type: 'p', text: 'Spectra’s backtester works from bars, not full order books, so it approximates this effect with volume-based slippage and the participation cap rather than simulating each level.' },
+    ],
+    related: ['engine/order-book-fundamentals', 'fundamentals/liquidity', 'fundamentals/slippage'],
+  }),
+
+  L({
+    slug: 'order-execution',
+    title: 'Order Execution',
+    level: 'Intermediate',
+    summary: 'What happens between sending an order and seeing a fill: routing, matching, partial fills and confirmations.',
+    keywords: ['execution', 'routing', 'fill', 'partial fill', 'confirmation'],
+    blocks: [
+      { type: 'list', ordered: true, items: [
+        '**Submit**: your order goes to the broker, which checks buying power and risk rules.',
+        '**Route**: the broker sends it to a venue or market maker.',
+        '**Match**: the venue matches it against resting orders by price, then time priority.',
+        '**Fill**: you receive one or more fills, each with a quantity and price. Large orders often fill in pieces.',
+        '**Settle**: the trade settles (T+1 for US equities); for most traders this only matters for cash availability.',
+      ] },
+      { type: 'p', text: 'Execution quality is judged by the average fill price against a reference (the mid when you decided, or the open for a backtest). The difference is your slippage.' },
+      { type: 'callout', tone: 'info', title: 'In Spectra', text: 'In backtests the engine is the venue: it fills orders against the next bar using the rules in the order-types lesson. In paper trading, Alpaca’s simulator executes the order against live market quotes, and the Paper Trading tab shows each order’s status, filled quantity and average fill price.' },
+    ],
+    related: ['engine/order-execution-engine', 'engine/order-lifecycle', 'paper-trading/order-statuses'],
+  }),
+
+  L({
+    slug: 'trading-sessions',
+    title: 'Trading Sessions',
+    level: 'Beginner',
+    summary: 'US stocks trade in a regular session from 9:30 to 16:00 Eastern time, with thinner pre-market and after-hours sessions around it.',
+    keywords: ['market hours', 'pre market', 'after hours', 'session', 'open', 'close', 'eastern time'],
+    blocks: [
+      { type: 'table', head: ['Session', 'Time (US Eastern)', 'Character'], rows: [
+        ['Pre-market', '4:00 – 9:30', 'Thin volume, wide spreads, reacts to overnight news'],
+        ['Regular', '9:30 – 16:00', 'Most volume; opening and closing auctions'],
+        ['After-hours', '16:00 – 20:00', 'Thin volume, earnings reactions'],
+      ] },
+      { type: 'p', text: 'Volume is highest near the open and the close. Overnight, prices can **gap**: the next open can be far from the last close, which is why stop orders can fill well beyond their stop price.' },
+      { type: 'h', text: 'Sessions and bars' },
+      { type: 'p', text: 'A daily bar covers one regular session. Annualizing metrics assumes about **252** trading days a year, which is Spectra’s default periods-per-year. For hourly bars of the regular session use about 252 × 6.5 ≈ 1,638; set it in the backtest configuration so Sharpe, volatility and CAGR are annualized correctly.' },
+      { type: 'callout', tone: 'tip', text: 'Paper orders placed outside regular hours are queued by Alpaca (as accepted or new) until the market opens, unless the order is eligible for extended hours.' },
+    ],
+    related: ['fundamentals/how-stock-markets-work', 'metrics/annualized-return', 'paper-trading/order-statuses'],
+  }),
+];

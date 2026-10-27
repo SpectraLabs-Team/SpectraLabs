@@ -90,7 +90,7 @@ export function BacktestLab() {
   return (
     <div className="space-y-5">
       <div className="grid gap-5 lg:grid-cols-[1fr_340px]">
-        <div ref={formRef} className="min-w-0 scroll-mt-20">
+        <div ref={formRef} data-tour="backtest-form" className="min-w-0 scroll-mt-20">
           {catalog ? (
             <BacktestForm catalog={catalog} datasets={datasets} canRun={canRun} onCreated={created} prefill={prefill} />
           ) : (
@@ -115,7 +115,7 @@ export function BacktestLab() {
         <RunList catalog={catalog} selectedId={selected} onSelect={select} refreshKey={refreshKey} />
       </div>
 
-      <div ref={detailRef} className="scroll-mt-20">
+      <div ref={detailRef} data-tour="backtest-results" className="scroll-mt-20">
         {selected ? (
           <RunDetail key={selected} backtestId={selected} catalog={catalog} datasets={datasets} canRun={canRun} onRerun={rerun} onChanged={changed} />
         ) : (

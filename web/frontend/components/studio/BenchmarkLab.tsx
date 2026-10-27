@@ -11,6 +11,7 @@ import { cn, formatBytes, formatCompact, formatDuration } from '@/lib/utils';
 import { Badge, ErrorNote, GlassCard, Segmented, Spinner } from '@/components/ui/primitives';
 import { chartColors, useTheme } from '@/lib/theme';
 import { usePortfolio } from './PortfolioContext';
+import { InfoTip } from '@/components/ui/MetricInfo';
 
 const SIZES = [10_000, 50_000, 100_000, 250_000, 500_000, 1_000_000];
 const WARMUPS = 1;
@@ -52,7 +53,7 @@ function ThroughputGauge({ label, value, max, color, detail }: { label: string; 
           paths / sec
         </text>
       </svg>
-      <p className="mt-1 text-sm font-medium text-ink/90">{label}</p>
+      <p className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-ink/90">{label} <InfoTip metric="paths_per_second" label={`${label} paths per second`} /></p>
       <p className="text-[11px] text-ink/50">{detail}</p>
     </div>
   );
@@ -288,9 +289,9 @@ export function BenchmarkLab() {
                 <thead>
                   <tr className="text-[10px] uppercase tracking-wider text-ink/40">
                     <th className="py-1.5 text-left font-medium">Paths</th>
-                    <th className="py-1.5 text-right font-medium">CPU p50</th>
-                    <th className="py-1.5 text-right font-medium">Parallel p50</th>
-                    <th className="py-1.5 text-right font-medium">Speed-up</th>
+                    <th className="py-1.5 text-right font-medium"><span className="inline-flex items-center gap-1">CPU p50 <InfoTip metric="latency_p50" label="CPU p50" /></span></th>
+                    <th className="py-1.5 text-right font-medium"><span className="inline-flex items-center gap-1">Parallel p50 <InfoTip metric="latency_p50" label="Parallel p50" /></span></th>
+                    <th className="py-1.5 text-right font-medium"><span className="inline-flex items-center gap-1">Speed-up <InfoTip metric="parallel_speedup" label="Speed-up" /></span></th>
                   </tr>
                 </thead>
                 <tbody className="num">

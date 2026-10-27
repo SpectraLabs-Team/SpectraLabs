@@ -1027,7 +1027,7 @@ export function OptimizationLab() {
                     <span className="text-[10px] text-emerald-600">Confidence above zero</span>
                   </div>
                   <div className="rounded-xl border border-ink/[0.08] bg-surface p-4">
-                    <span className="text-[11px] text-ink/50 uppercase">PSR (Probabilistic SR)</span>
+                    <span className="inline-flex items-center gap-1 text-[11px] text-ink/50 uppercase">PSR (Probabilistic SR) <InfoTip metric="psr" /></span>
                     <p className="mt-1 text-2xl font-bold text-ink">{(overfittingResult.psr * 100).toFixed(1)}%</p>
                     <span className="text-[10px] text-ink/50">Higher moments adjusted</span>
                   </div>
@@ -1051,15 +1051,15 @@ export function OptimizationLab() {
                       <strong className="text-base text-ink">{overfittingResult.best_sharpe.toFixed(3)}</strong>
                     </div>
                     <div className="rounded-lg bg-ink/[0.02] p-3">
-                      <span className="text-ink/50 block text-[10px] uppercase font-sans">Expected Max Sharpe (E[max])</span>
+                      <span className="flex items-center gap-1 text-ink/50 text-[10px] uppercase font-sans">Expected Max Sharpe (E[max]) <InfoTip metric="expected_max_sharpe" /></span>
                       <strong className="text-base text-ink">{overfittingResult.expected_max_sharpe.toFixed(3)}</strong>
                     </div>
                     <div className="rounded-lg bg-ink/[0.02] p-3">
-                      <span className="text-ink/50 block text-[10px] uppercase font-sans">Sharpe Estimator Variance</span>
+                      <span className="flex items-center gap-1 text-ink/50 text-[10px] uppercase font-sans">Sharpe Variance Across Trials <InfoTip metric="sharpe_variance" /></span>
                       <strong className="text-base text-ink">{overfittingResult.sharpe_variance.toFixed(4)}</strong>
                     </div>
                     <div className="rounded-lg bg-ink/[0.02] p-3">
-                      <span className="text-ink/50 block text-[10px] uppercase font-sans">Total Trials Tested</span>
+                      <span className="flex items-center gap-1 text-ink/50 text-[10px] uppercase font-sans">Total Trials Tested <InfoTip metric="num_trials" /></span>
                       <strong className="text-base text-ink">{overfittingResult.num_trials}</strong>
                     </div>
                   </div>

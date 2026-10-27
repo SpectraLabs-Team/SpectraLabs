@@ -1,6 +1,7 @@
 'use client';
 
 import { MetricLabel } from '@/components/ui/MetricInfo';
+import type { MetricId } from '@/lib/learn/metrics';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -525,6 +526,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
   const limitItems = [
     {
       id: 'gross',
+      metric: 'gross_exposure_utilization' as MetricId,
       name: 'Gross Exposure',
       current: metrics?.gross_exposure ?? 0,
       limit: metrics?.gross_exposure_limit ?? 1_000_000,
@@ -534,6 +536,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
     },
     {
       id: 'net',
+      metric: 'net_exposure_utilization' as MetricId,
       name: 'Net Exposure',
       current: metrics?.net_exposure ?? 0,
       limit: metrics?.net_exposure_limit ?? 500_000,
@@ -543,6 +546,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
     },
     {
       id: 'leverage',
+      metric: 'leverage_utilization' as MetricId,
       name: 'Leverage',
       current: metrics?.leverage ?? 0,
       limit: metrics?.leverage_limit ?? 3.0,
@@ -552,6 +556,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
     },
     {
       id: 'drawdown',
+      metric: 'drawdown_utilization' as MetricId,
       name: 'Max Drawdown',
       current: metrics?.drawdown_pct ?? 0,
       limit: metrics?.drawdown_limit_pct ?? 0.15,
@@ -561,6 +566,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
     },
     {
       id: 'daily_loss',
+      metric: 'daily_loss_utilization' as MetricId,
       name: 'Daily Loss',
       current: metrics?.daily_loss ?? 0,
       limit: metrics?.daily_loss_limit ?? 50_000,
@@ -715,7 +721,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
               )}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-ink/60">{item.name}</span>
+                <span className="text-[11px] font-medium text-ink/60"><MetricLabel metric={item.metric}>{item.name}</MetricLabel></span>
                 <span
                   className={cn(
                     'font-mono text-xs font-bold',

@@ -11,6 +11,7 @@ import {
   Layers,
   LineChart as LineChartIcon,
   Play,
+  Plus,
   RefreshCw,
   ShieldAlert,
   Sigma,
@@ -42,6 +43,8 @@ import { cn, confidenceLabel, formatCompact, formatCurrency, formatDuration, for
 import { AnimatedValue, Badge, ErrorNote, GlassCard, RangeSlider, Spinner } from '@/components/ui/primitives';
 import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 import type { MetricId } from '@/lib/learn/metrics';
+import { PRESETS } from '@/lib/presets';
+import { useToast } from '@/components/ui/StudioToast';
 import { LossHistogram } from './LossHistogram';
 import { usePortfolio, type RiskRun } from './PortfolioContext';
 import { StressPanel } from './StressPanel';
@@ -146,7 +149,8 @@ function generateCalibratedReturns(annualizedVol: number, count: number = 252): 
 }
 
 export function RiskLab() {
-  const { csv, revision, engine, riskParams, setRiskParams, riskRun: results, setRiskRun: setResults } = usePortfolio();
+  const { csv, revision, engine, riskParams, setRiskParams, riskRun: results, setRiskRun: setResults, positions, loadPreset, loadSample } = usePortfolio();
+  const { success, error: toastError } = useToast();
   const online = engine.status === 'online';
   // Inputs and the last run live in PortfolioContext, so they survive switching Studio tabs.
   // `auto` (Live mode) is off by default: the engine only runs on an explicit click.
@@ -227,13 +231,20 @@ export function RiskLab() {
         calculateRisk({ ...base, metric: 'cvar' }),
         calculateRisk({ ...base, metric: 'volatility' }),
       ]);
-      if (id === reqId.current) setResults({ var: v, cvar: c, vol, rev: revision, simulations, backend, at: Date.now(), csv });
+      if (id === reqId.current) {
+        setResults({ var: v, cvar: c, vol, rev: revision, simulations, backend, at: Date.now(), csv });
+        success('Monte Carlo simulation completed', `${simulations.toLocaleString()} paths · ${formatCurrency(v.value)} VaR (${confidenceLabel(confidence)})`);
+      }
     } catch (e) {
-      if (id === reqId.current) setError(e instanceof Error ? e.message : 'Risk calculation failed');
+      if (id === reqId.current) {
+        const msg = e instanceof Error ? e.message : 'Risk calculation failed';
+        setError(msg);
+        toastError('Simulation failed', msg);
+      }
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [csv, confidence, simulations, horizon, backend, dependence, revision, setResults]);
+  }, [csv, confidence, simulations, horizon, backend, dependence, revision, setResults, success, toastError]);
 
   // Live mode (opt-in): re-run (debounced) whenever an input or the portfolio changes.
   // Nothing runs on mount; the first run is always an explicit click or switching Live on.
@@ -363,6 +374,27 @@ export function RiskLab() {
             </div>
           </div>
 
+          {/* Active Book Presets */}
+          <div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-xs font-medium text-ink/60">Portfolio Presets</label>
+              <span className="text-[11px] font-mono text-ink/40">{positions.length} pos</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-ink/[0.08] bg-ink/[0.03] p-1 text-[11px]">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => loadPreset(p.id)}
+                  title={`${p.name}: ${p.blurb}`}
+                  className="truncate rounded px-2 py-1 text-left font-medium text-ink/70 transition hover:bg-ink/[0.06] hover:text-ink focus:outline-none"
+                >
+                  {p.name.split('·')[0].trim()}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <p className="flex items-start gap-2 rounded-lg border border-ink/[0.07] bg-ink/[0.02] px-3 py-2 text-[11px] leading-4 text-ink/50">
             <Cpu className="mt-px h-3.5 w-3.5 shrink-0 text-accent" />
             <span>
@@ -391,6 +423,35 @@ export function RiskLab() {
       </GlassCard>
 
       <div className="min-w-0 space-y-5">
+        {positions.length === 0 && (
+          <GlassCard className="border-accent/30 bg-accent/[0.03] p-6 text-center">
+            <Sparkles className="mx-auto h-7 w-7 text-accent" />
+            <h3 className="mt-2.5 text-sm font-semibold text-ink">No Positions in Active Portfolio</h3>
+            <p className="mx-auto mt-1 max-w-md text-xs text-ink/60">
+              Monte Carlo simulation requires active positions. Select an institutional demo portfolio below or load the engine sample with 1 click:
+            </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => loadPreset(p.id)}
+                  className="btn-secondary px-3 py-1.5 text-xs"
+                >
+                  <Plus className="h-3 w-3 text-accent" /> {p.name.split('·')[0].trim()}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => loadSample(true)}
+                className="btn-secondary px-3 py-1.5 text-xs"
+              >
+                <RefreshCw className="h-3 w-3 text-accent" /> Engine Sample
+              </button>
+            </div>
+          </GlassCard>
+        )}
+
         {/* Metric cards */}
         <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
           <MetricCard icon={Wallet} metric="portfolio_value" label="Portfolio value" value={results ? formatCurrency(results.var.portfolio_value) : '—'} sub={results ? `gross ${formatCurrency(runGross)}` : 'Run a simulation'} loading={loading} />

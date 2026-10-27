@@ -4,6 +4,7 @@ import { AuthModal } from '@/components/auth/AuthModal';
 import { AuthProvider } from '@/lib/auth';
 import { ActivityTracker } from '@/components/activity/ActivityTracker';
 import { ThemeProvider, themeInitScript } from '@/lib/theme';
+import { ToastProvider } from '@/components/ui/StudioToast';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -36,9 +37,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="min-h-screen">
         <ThemeProvider>
           <AuthProvider>
-            {children}
-            <AuthModal />
-            <ActivityTracker />
+            <ToastProvider>
+              {children}
+              <AuthModal />
+              <ActivityTracker />
+            </ToastProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

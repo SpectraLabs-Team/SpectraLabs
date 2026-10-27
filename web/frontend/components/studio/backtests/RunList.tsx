@@ -72,7 +72,7 @@ export function RunList({ catalog, selectedId, onSelect, refreshKey }: { catalog
   };
 
   return (
-    <GlassCard as="section" className="flex max-h-[760px] flex-col overflow-hidden">
+    <GlassCard as="section" data-tour="backtest-runs" className="flex max-h-[760px] flex-col overflow-hidden">
       <div className="flex items-center justify-between border-b border-ink/[0.06] px-4 py-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
           <History className="h-4 w-4 text-accent" /> Runs

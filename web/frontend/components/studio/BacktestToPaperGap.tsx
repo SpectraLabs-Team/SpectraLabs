@@ -17,6 +17,7 @@ import {
 import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { cn, formatCurrency, formatNumber, formatPercent } from '@/lib/utils';
 import type { paths } from '@/lib/generated/engine-api';
+import { InfoTip } from '@/components/ui/MetricInfo';
 
 type GapReportDetail = paths['/api/v1/paper/gap/reports/{id}']['get']['responses']['200']['content']['application/json'];
 type GapReportSummary = paths['/api/v1/paper/gap/reports']['get']['responses']['200']['content']['application/json'][number];
@@ -165,7 +166,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
 
             <GlassCard className="p-4">
               <div className="flex items-center justify-between text-xs text-ink/60">
-                <span>Total P&L Gap</span>
+                <span className="inline-flex items-center gap-1">Total P&L Gap <InfoTip metric="pnl_gap" /></span>
                 <DollarSign className="h-4 w-4 text-ink/40" />
               </div>
               <div className={cn('mt-2 text-xl font-bold font-mono', selectedReport.total_pnl_gap >= 0 ? 'text-profit' : 'text-loss')}>
@@ -176,7 +177,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
 
             <GlassCard className="p-4">
               <div className="flex items-center justify-between text-xs text-ink/60">
-                <span>Mean Slippage Drift</span>
+                <span className="inline-flex items-center gap-1">Mean Slippage Drift <InfoTip metric="slippage_drift" /></span>
                 <TrendingDown className="h-4 w-4 text-ink/40" />
               </div>
               <div className="mt-2 text-xl font-bold font-mono text-ink">
@@ -187,7 +188,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
 
             <GlassCard className="p-4">
               <div className="flex items-center justify-between text-xs text-ink/60">
-                <span>Mean Timing Latency</span>
+                <span className="inline-flex items-center gap-1">Mean Timing Latency <InfoTip metric="timing_latency" /></span>
                 <Clock className="h-4 w-4 text-ink/40" />
               </div>
               <div className="mt-2 text-xl font-bold font-mono text-ink">
@@ -204,7 +205,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
 
             <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
               <div className="rounded-lg border border-ink/[0.08] bg-ink/[0.02] p-3">
-                <span className="text-[11px] font-medium text-ink/60">Transaction Costs</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/60">Transaction Costs <InfoTip metric="fees" label="Transaction Costs" /></span>
                 <div className="mt-1 text-base font-semibold font-mono text-ink">
                   {formatCurrency(selectedReport.cost_gap)}
                 </div>
@@ -228,7 +229,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
               </div>
 
               <div className="rounded-lg border border-ink/[0.08] bg-ink/[0.02] p-3">
-                <span className="text-[11px] font-medium text-ink/60">Missed / Unfilled</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/60">Missed / Unfilled <InfoTip metric="missed_fills" label="Missed / Unfilled" /></span>
                 <div className="mt-1 text-base font-semibold font-mono text-ink">
                   {formatCurrency(selectedReport.missed_fills_gap)}
                 </div>

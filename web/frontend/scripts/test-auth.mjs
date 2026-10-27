@@ -55,7 +55,7 @@ const build = path.join(root, 'node_modules', '.cache', 'spectra-auth-test');
 fs.rmSync(build, { recursive: true, force: true });
 fs.mkdirSync(build, { recursive: true });
 fs.writeFileSync(path.join(build, 'package.json'), '{"type":"commonjs"}');
-for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts', 'lib/server/engineSign.ts', 'lib/server/engineUpload.ts', 'lib/api.ts', 'lib/jobs.ts', 'lib/datasets.ts']) {
+for (const rel of ['lib/auth-shared.ts', 'lib/server/db.ts', 'lib/server/authStore.ts', 'lib/server/sessions.ts', 'lib/server/workspaces.ts', 'lib/server/engineIdentity.ts', 'lib/server/authz.ts', 'lib/server/engineRoutes.ts', 'lib/server/lockout.ts', 'lib/server/vault.ts', 'lib/server/audit.ts', 'lib/server/totp.ts', 'lib/server/mfa.ts', 'lib/userAgent.ts', 'lib/server/devices.ts', 'lib/server/team.ts', 'lib/server/appUrl.ts', 'lib/server/adminUsers.ts', 'lib/csp.ts', 'lib/sessionEdge.ts', 'lib/server/rateLimit.ts', 'lib/server/breached.ts', 'lib/server/qr.ts', 'lib/server/spikes.ts', 'lib/server/apiTokens.ts', 'lib/server/engineSign.ts', 'lib/server/engineUpload.ts', 'lib/api.ts', 'lib/jobs.ts', 'lib/datasets.ts', 'lib/onboarding.ts', 'lib/server/onboardingStore.ts']) {
   const { outputText } = ts.transpileModule(fs.readFileSync(path.join(root, rel), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
   });
@@ -141,7 +141,7 @@ test('password rules', () => {
 
 test('migrations: tables exist, re-running is a no-op', async () => {
   const tables = (await sql.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY 1`, [schema])).rows.map((r) => r.table_name);
-  assert.deepEqual(tables, ['api_tokens', 'audit_events', 'email_codes', 'known_devices', 'rate_limits', 'recovery_codes', 'schema_migrations', 'secrets', 'sessions', 'user_totp', 'users', 'workspace_invites', 'workspace_keys', 'workspace_layouts', 'workspace_members', 'workspaces']);
+  assert.deepEqual(tables, ['api_tokens', 'audit_events', 'email_codes', 'known_devices', 'rate_limits', 'recovery_codes', 'schema_migrations', 'secrets', 'sessions', 'user_onboarding', 'user_totp', 'users', 'workspace_invites', 'workspace_keys', 'workspace_layouts', 'workspace_members', 'workspaces']);
   assert.deepEqual(await migrate(sql), [], 'nothing left to apply');
 });
 
@@ -2007,6 +2007,66 @@ test('audit: the routes that change security state write events', () => {
   }
 });
 
+// ── Guided tour: per-user onboarding state ──
+
+test('onboarding: state is per user, survives restarts, never regresses, and goes with the account', async () => {
+  const onboarding = load('lib/onboarding.js');
+  let ob = load('lib/server/onboardingStore.js');
+  const a = await store.createUser('tour-a@x.com', 'h', 'A');
+  const b = await store.createUser('tour-b@x.com', 'h', 'B');
+  assert.deepEqual(await ob.getOnboarding(a.id), onboarding.EMPTY_ONBOARDING, 'a new user has no state');
+  assert.equal(onboarding.shouldAutoStart(await ob.getOnboarding(a.id)), true, 'so the tour starts');
+
+  assert.equal((await ob.recordOnboarding(a.id, 'progress', 'simulations', 1)).lastCompletedStep, 'simulations');
+  assert.equal(onboarding.shouldAutoStart(await ob.getOnboarding(a.id)), true, 'a tour left half way is offered again');
+  const done = await ob.recordOnboarding(a.id, 'complete', null, 1);
+  assert.deepEqual(done, { onboardingCompleted: true, onboardingSkipped: false, onboardingVersion: 1, lastCompletedStep: 'finish' });
+  assert.equal(onboarding.shouldAutoStart(done), false, 'a finished tour does not start again');
+  assert.equal(onboarding.shouldAutoStart(done, 2), true, 'but a new tour version does');
+
+  // Restarting the finished tour and leaving early keeps it finished.
+  await ob.recordOnboarding(a.id, 'progress', 'dashboard', 1);
+  const skipped = await ob.recordOnboarding(a.id, 'skip', 'dashboard', 1);
+  assert.equal(skipped.onboardingCompleted, true);
+  assert.equal(skipped.onboardingSkipped, true);
+  assert.equal((await ob.recordOnboarding(a.id, 'complete', null, 2)).onboardingVersion, 2);
+  assert.equal((await ob.recordOnboarding(a.id, 'skip', null, 1)).onboardingVersion, 2, 'version never goes down');
+
+  // B is untouched by everything A did.
+  assert.deepEqual(await ob.getOnboarding(b.id), onboarding.EMPTY_ONBOARDING);
+  const bSkip = await ob.recordOnboarding(b.id, 'skip', 'welcome', 1);
+  assert.equal(bSkip.onboardingSkipped, true);
+  assert.equal(onboarding.shouldAutoStart(bSkip), false, 'Skip for Now is remembered');
+  assert.equal((await ob.getOnboarding(a.id)).onboardingCompleted, true);
+
+  // The database rejects junk step ids even if a caller skipped validation.
+  await assert.rejects(ob.recordOnboarding(b.id, 'progress', 'Robert"); DROP TABLE users;--', 1));
+
+  // State is in Postgres, not memory.
+  await restart();
+  ob = load('lib/server/onboardingStore.js');
+  assert.equal((await ob.getOnboarding(a.id)).onboardingCompleted, true);
+
+  // Deleting the account deletes its tour state.
+  await sql.query('DELETE FROM users WHERE id = $1', [b.id]);
+  assert.equal((await sql.query('SELECT count(*)::int AS n FROM user_onboarding WHERE user_id = $1', [b.id])).rows[0].n, 0);
+  await sql.query('DELETE FROM users WHERE id = $1', [a.id]);
+});
+
+test('onboarding: the API validates its input and only ever touches the caller', () => {
+  const onboarding = load('lib/onboarding.js');
+  const p = onboarding.parseOnboardingRequest;
+  assert.deepEqual(p({ action: 'skip', step: 'welcome' }), { action: 'skip', step: 'welcome', version: onboarding.TOUR_VERSION });
+  assert.deepEqual(p({ action: 'complete', version: 3 }), { action: 'complete', step: null, version: 3 });
+  for (const bad of [null, {}, { action: 'reset' }, { action: 'skip', step: 'Has Spaces' }, { action: 'skip', step: 'x'.repeat(65) }, { action: 'skip', version: 0 }, { action: 'skip', version: 1.5 }]) {
+    assert.ok('error' in p(bad), JSON.stringify(bad));
+  }
+  const route = fs.readFileSync(path.join(root, 'app/api/auth/onboarding/route.ts'), 'utf8');
+  assert.equal(route.match(/requireUser\(\)/g)?.length, 2, 'both handlers require a signed-in user');
+  assert.match(route, /recordOnboarding\(record\.id,/, 'writes are keyed by the caller\'s own id');
+  assert.doesNotMatch(route, /body\.(userId|user_id)|params/, 'no way to name another user');
+});
+
 // ── M19 task 18: permission rules for every API route ──
 
 /**
@@ -2031,6 +2091,8 @@ const ROUTE_RULES = {
   'auth/login POST': 'public',
   'auth/login/verify POST': 'public',
   'auth/logout POST': 'session',
+  'auth/onboarding GET': 'user',
+  'auth/onboarding PUT': 'user',
   'auth/password POST': 'user',
   'auth/reauth POST': 'user',
   'auth/reset POST': 'public',

@@ -10,6 +10,7 @@ import type { BackendRequest } from '@/lib/types';
 import { cn, formatCurrency, formatDuration, formatPercent } from '@/lib/utils';
 import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { usePortfolio, type StressOutcome } from './PortfolioContext';
+import { InfoTip } from '@/components/ui/MetricInfo';
 
 type Outcome = StressOutcome;
 
@@ -125,7 +126,7 @@ export function StressPanel({ simulations, horizonDays, backend }: { simulations
                 <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }}>
                   <div className="mt-3 grid grid-cols-3 gap-2">
                     <div>
-                      <p className="text-[10px] uppercase tracking-wider text-ink/45">P&amp;L</p>
+                      <p className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-ink/45">P&amp;L <InfoTip metric="stress_pnl" label="Stress P&L" /></p>
                       <p className="num mt-0.5 text-sm font-semibold text-loss">−{formatCurrency(r.immediateLoss)}</p>
                     </div>
                     <div>
@@ -133,7 +134,7 @@ export function StressPanel({ simulations, horizonDays, backend }: { simulations
                       <p className="num mt-0.5 text-sm text-ink/90">{formatCurrency(r.valueAfter)}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] uppercase tracking-wider text-ink/45">Post VaR</p>
+                      <p className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-ink/45">Post VaR <InfoTip metric="stress_post_var" /></p>
                       <p className="num mt-0.5 text-sm text-rose-600 dark:text-rose-300">{formatCurrency(r.postVaR)}</p>
                     </div>
                   </div>

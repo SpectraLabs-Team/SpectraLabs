@@ -16,7 +16,10 @@ import { PortfolioStudio } from './PortfolioStudio';
 import { RiskCenter } from './RiskCenter';
 import { RiskLab } from './RiskLab';
 import { StrategyStudio } from './StrategyStudio';
+import { OnboardingProvider } from '@/components/onboarding/OnboardingTour';
 import { StudioShell, TABS, type StudioTab } from './StudioShell';
+
+const TAB_IDS = TABS.map((t) => t.id);
 
 export function StudioApp() {
   const params = useSearchParams();
@@ -30,6 +33,7 @@ export function StudioApp() {
 
   return (
     <PortfolioProvider>
+      <OnboardingProvider tab={tab} tabs={TAB_IDS} onTab={setTab}>
       <StudioShell tab={tab} onTab={setTab}>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.18 }}>
@@ -48,6 +52,7 @@ export function StudioApp() {
           </motion.div>
         </AnimatePresence>
       </StudioShell>
+      </OnboardingProvider>
     </PortfolioProvider>
   );
 }

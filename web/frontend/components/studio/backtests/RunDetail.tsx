@@ -27,6 +27,8 @@ import {
   type Summary,
 } from '@/lib/backtests';
 import { ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
+import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
+import type { MetricId } from '@/lib/learn/metrics';
 import { cn } from '@/lib/utils';
 import { DrawdownChart, EquityChart, MonthlyHeatmap, StrategyCurvesChart } from './Charts';
 import { ago, cash, dash, int, pct, ratio, shortHash, signedPct, tone } from './format';
@@ -34,16 +36,16 @@ import { StatusBadge } from './RunList';
 import { SurvivalLabPanel } from '../SurvivalLabPanel';
 import { BacktestToPaperGap } from '../BacktestToPaperGap';
 
-type Row = [label: string, value: string, tone?: 'profit' | 'loss' | 'neutral'];
+type Row = [label: string, value: string, tone?: 'profit' | 'loss' | 'neutral', metric?: MetricId];
 
 function StatCard({ title, rows, note }: { title: string; rows: Row[]; note?: string }) {
   return (
     <GlassCard as="section" className="p-4">
       <h3 className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink/45">{title}</h3>
       <dl className="mt-3 space-y-1.5 text-[12.5px]">
-        {rows.map(([k, v, t]) => (
+        {rows.map(([k, v, t, metric]) => (
           <div key={k} className="flex justify-between gap-3">
-            <dt className="text-ink/55">{k}</dt>
+            <dt className="text-ink/55">{metric ? <MetricLabel metric={metric}>{k}</MetricLabel> : k}</dt>
             <dd className={cn('num text-right', t === 'profit' ? 'text-profit' : t === 'loss' ? 'text-loss' : 'text-ink/90')}>{v}</dd>
           </div>
         ))}
@@ -53,13 +55,38 @@ function StatCard({ title, rows, note }: { title: string; rows: Row[]; note?: st
   );
 }
 
-function Kpi({ label, value, sub, t }: { label: string; value: string; sub?: string; t?: 'profit' | 'loss' | 'neutral' }) {
+function Kpi({ label, value, sub, t, metric }: { label: string; value: string; sub?: string; t?: 'profit' | 'loss' | 'neutral'; metric?: MetricId }) {
   return (
     <div className="rounded-xl border border-ink/[0.07] bg-ink/[0.02] px-3.5 py-3">
-      <p className="text-[10.5px] font-medium uppercase tracking-wider text-ink/45">{label}</p>
+      <p className="text-[10.5px] font-medium uppercase tracking-wider text-ink/45">{metric ? <MetricLabel metric={metric}>{label}</MetricLabel> : label}</p>
       <p className={cn('num mt-1 text-lg font-semibold', t === 'profit' ? 'text-profit' : t === 'loss' ? 'text-loss' : 'text-ink')}>{value}</p>
       {sub && <p className="num mt-0.5 text-[10.5px] text-ink/45">{sub}</p>}
     </div>
+  );
+}
+
+/** Table column headers that are metrics get an ⓘ. */
+const HEADER_METRICS: Partial<Record<string, MetricId>> = {
+  Return: 'total_return',
+  Contribution: 'contribution',
+  Sharpe: 'sharpe_ratio',
+  'Max DD': 'max_drawdown',
+  Fees: 'fees',
+  Financing: 'financing',
+  Realized: 'realized_pnl',
+  Unrealized: 'unrealized_pnl',
+  Borrow: 'borrow_fees',
+  'Net P&L': 'net_pnl',
+};
+
+function HeaderLabel({ h }: { h: string }) {
+  const metric = HEADER_METRICS[h];
+  if (!metric) return <>{h}</>;
+  return (
+    <span className="inline-flex items-center justify-end gap-1">
+      {h}
+      <InfoTip metric={metric} label={h} />
+    </span>
   );
 }
 
@@ -214,17 +241,19 @@ function Results({
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6">
-        <Kpi label="Total return" value={signedPct(m.total_return)} t={tone(m.total_return)} sub={`${int(m.periods)} periods`} />
-        <Kpi label="CAGR" value={signedPct(p.cagr)} t={tone(p.cagr)} sub={`vol ${pct(m.annualized_volatility)}`} />
-        <Kpi label="Sharpe" value={ratio(m.sharpe)} sub={`Sortino ${ratio(p.sortino)}`} />
-        <Kpi label="Max drawdown" value={pct(m.max_drawdown)} t={m.max_drawdown ? 'loss' : 'neutral'} sub={`Calmar ${ratio(p.calmar)}`} />
-        <Kpi label="Final equity" value={cash(a.final_equity, 0)} sub={`from ${cash(start, 0)}`} />
-        <Kpi label="Trades" value={int(tr.count)} sub={`win rate ${pct(tr.win_rate, 0)} · ${int(a.fill_count)} fills`} />
+        <Kpi metric="total_return" label="Total return" value={signedPct(m.total_return)} t={tone(m.total_return)} sub={`${int(m.periods)} periods`} />
+        <Kpi metric="cagr" label="CAGR" value={signedPct(p.cagr)} t={tone(p.cagr)} sub={`vol ${pct(m.annualized_volatility)}`} />
+        <Kpi metric="sharpe_ratio" label="Sharpe" value={ratio(m.sharpe)} sub={`Sortino ${ratio(p.sortino)}`} />
+        <Kpi metric="max_drawdown" label="Max drawdown" value={pct(m.max_drawdown)} t={m.max_drawdown ? 'loss' : 'neutral'} sub={`Calmar ${ratio(p.calmar)}`} />
+        <Kpi metric="final_equity" label="Final equity" value={cash(a.final_equity, 0)} sub={`from ${cash(start, 0)}`} />
+        <Kpi metric="trade_count" label="Trades" value={int(tr.count)} sub={`win rate ${pct(tr.win_rate, 0)} · ${int(a.fill_count)} fills`} />
       </div>
 
       <GlassCard as="section" className="p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-semibold text-ink">Equity</h3>
+          <h3 className="text-sm font-semibold text-ink">
+            <MetricLabel metric="equity_curve">Equity</MetricLabel>
+          </h3>
           <p className="num text-[11px] text-ink/45">
             {equity ? `${int(equity.total_points)} points${equity.downsampled ? ', downsampled for the chart (the extremes are kept)' : ''}` : 'loading…'}
           </p>
@@ -232,12 +261,16 @@ function Results({
         <div className="mt-3">
           <EquityChart series={equity} start={start} />
         </div>
-        <h3 className="mt-4 text-xs font-semibold text-ink/70">Drawdown</h3>
+        <h3 className="mt-4 text-xs font-semibold text-ink/70">
+          <MetricLabel metric="max_drawdown">Drawdown</MetricLabel>
+        </h3>
         <div className="mt-2">
           <DrawdownChart series={drawdown} />
         </div>
         <div className="mt-5 border-t border-ink/[0.06] pt-4">
-          <h3 className="text-xs font-semibold text-ink/70">Monthly returns</h3>
+          <h3 className="text-xs font-semibold text-ink/70">
+            <MetricLabel metric="monthly_returns">Monthly returns</MetricLabel>
+          </h3>
           <div className="mt-2.5">
             <MonthlyHeatmap months={monthly} />
           </div>
@@ -269,8 +302,8 @@ function Results({
               <thead>
                 <tr className="text-left text-[10.5px] uppercase tracking-wider text-ink/45">
                   {['Strategy', 'Weight', 'Allocation', 'Final equity', 'Return', 'Contribution', 'Sharpe', 'Max DD', 'Fills', 'Fees', 'Financing'].map((h, i) => (
-                    <th key={h} className={cn('px-3 py-2.5 font-medium', i === 0 ? 'pl-5 text-left' : 'text-right', i === 10 && 'pr-5')}>
-                      {h}
+                    <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 ? 'pl-5 text-left' : 'text-right', i === 10 && 'pr-5')}>
+                      <HeaderLabel h={h} />
                     </th>
                   ))}
                 </tr>
@@ -303,54 +336,54 @@ function Results({
         <StatCard
           title="Performance"
           rows={[
-            ['Annualized return', signedPct(m.annualized_return), tone(m.annualized_return)],
-            ['Annualized volatility', pct(m.annualized_volatility)],
-            ['Sharpe', ratio(m.sharpe)],
-            ['Sortino', ratio(p.sortino)],
-            ['Calmar', ratio(p.calmar)],
-            ['Omega', ratio(p.omega)],
-            ['Skewness', ratio(p.skewness)],
-            ['Excess kurtosis', ratio(p.excess_kurtosis)],
+            ['Annualized return', signedPct(m.annualized_return), tone(m.annualized_return), 'annualized_return'],
+            ['Annualized volatility', pct(m.annualized_volatility), undefined, 'annualized_volatility'],
+            ['Sharpe', ratio(m.sharpe), undefined, 'sharpe_ratio'],
+            ['Sortino', ratio(p.sortino), undefined, 'sortino_ratio'],
+            ['Calmar', ratio(p.calmar), undefined, 'calmar_ratio'],
+            ['Omega', ratio(p.omega), undefined, 'omega_ratio'],
+            ['Skewness', ratio(p.skewness), undefined, 'skewness'],
+            ['Excess kurtosis', ratio(p.excess_kurtosis), undefined, 'excess_kurtosis'],
           ]}
         />
         <StatCard
           title="Risk"
           rows={[
-            ['Max drawdown', pct(summary.drawdown.max_drawdown)],
-            ['Current drawdown', pct(summary.drawdown.current_drawdown)],
-            ['Longest underwater', `${int(summary.drawdown.longest_underwater_periods)} periods`],
-            ['Drawdown episodes', int(p.drawdown_episodes)],
-            ['Ulcer index', ratio(summary.drawdown.ulcer_index, 4)],
-            [`VaR ${pct(summary.tail.level, 0)}`, pct(summary.tail.var)],
-            [`Expected shortfall`, pct(summary.tail.expected_shortfall)],
-            ['Worst period', signedPct(summary.tail.worst_return), tone(summary.tail.worst_return)],
+            ['Max drawdown', pct(summary.drawdown.max_drawdown), undefined, 'max_drawdown'],
+            ['Current drawdown', pct(summary.drawdown.current_drawdown), undefined, 'current_drawdown'],
+            ['Longest underwater', `${int(summary.drawdown.longest_underwater_periods)} periods`, undefined, 'longest_underwater'],
+            ['Drawdown episodes', int(p.drawdown_episodes), undefined, 'drawdown_episodes'],
+            ['Ulcer index', ratio(summary.drawdown.ulcer_index, 4), undefined, 'ulcer_index'],
+            [`VaR ${pct(summary.tail.level, 0)}`, pct(summary.tail.var), undefined, 'var_historical'],
+            [`Expected shortfall`, pct(summary.tail.expected_shortfall), undefined, 'expected_shortfall_historical'],
+            ['Worst period', signedPct(summary.tail.worst_return), tone(summary.tail.worst_return), 'worst_period'],
           ]}
         />
         <StatCard
           title="Trades"
           rows={[
-            ['Round trips', int(tr.count)],
-            ['Win rate', pct(tr.win_rate, 1)],
-            ['Profit factor', ratio(tr.profit_factor)],
-            ['Payoff ratio', ratio(tr.payoff_ratio)],
-            ['Expectancy', cash(tr.expectancy)],
-            ['Best / worst', `${cash(tr.best, 0)} / ${cash(tr.worst, 0)}`],
-            ['Average holding', tr.avg_holding_days == null ? dash : `${tr.avg_holding_days.toFixed(1)} days`],
-            ['Open positions', int(a.open_positions)],
+            ['Round trips', int(tr.count), undefined, 'trade_count'],
+            ['Win rate', pct(tr.win_rate, 1), undefined, 'win_rate'],
+            ['Profit factor', ratio(tr.profit_factor), undefined, 'profit_factor'],
+            ['Payoff ratio', ratio(tr.payoff_ratio), undefined, 'payoff_ratio'],
+            ['Expectancy', cash(tr.expectancy), undefined, 'expectancy'],
+            ['Best / worst', `${cash(tr.best, 0)} / ${cash(tr.worst, 0)}`, undefined, 'best_worst_trade'],
+            ['Average holding', tr.avg_holding_days == null ? dash : `${tr.avg_holding_days.toFixed(1)} days`, undefined, 'avg_holding'],
+            ['Open positions', int(a.open_positions), undefined, 'open_positions'],
           ]}
           note="Round trips from the fill journal, first in, first out."
         />
         <StatCard
           title="Activity and exposure"
           rows={[
-            ['Orders / fills', `${int(a.order_count)} / ${int(a.fill_count)}`],
-            ['Turnover (annual)', ratio(a.turnover_annualized)],
-            ['Fees', cash(a.total_fees)],
-            ['Financing', cash(a.financing), tone(money(a.financing))],
-            ['Realized P&L', cash(a.realized_pnl), tone(money(a.realized_pnl))],
-            ['Average gross', ex.valid ? pct(ex.average_gross, 0) : dash],
-            ['Average net', ex.valid ? pct(ex.average_net, 0) : dash],
-            ['Time in market', ex.valid ? pct(ex.time_in_market, 0) : dash],
+            ['Orders / fills', `${int(a.order_count)} / ${int(a.fill_count)}`, undefined, 'orders_fills'],
+            ['Turnover (annual)', ratio(a.turnover_annualized), undefined, 'turnover'],
+            ['Fees', cash(a.total_fees), undefined, 'fees'],
+            ['Financing', cash(a.financing), tone(money(a.financing)), 'financing'],
+            ['Realized P&L', cash(a.realized_pnl), tone(money(a.realized_pnl)), 'realized_pnl'],
+            ['Average gross', ex.valid ? pct(ex.average_gross, 0) : dash, undefined, 'average_gross_exposure'],
+            ['Average net', ex.valid ? pct(ex.average_net, 0) : dash, undefined, 'average_net_exposure'],
+            ['Time in market', ex.valid ? pct(ex.time_in_market, 0) : dash, undefined, 'time_in_market'],
           ]}
         />
       </div>
@@ -360,13 +393,13 @@ function Results({
           title="Against the benchmark"
           note={bm.name ? `Benchmark: ${bm.name}.` : undefined}
           rows={[
-            ['Benchmark return', signedPct(bm.total_return), tone(bm.total_return)],
-            ['Excess return', signedPct(bm.excess_total_return), tone(bm.excess_total_return)],
-            ['Beta', ratio(bm.beta)],
-            ['Alpha (annual)', signedPct(bm.alpha_annualized), tone(bm.alpha_annualized)],
-            ['Correlation', ratio(bm.correlation)],
-            ['Information ratio', ratio(bm.information_ratio)],
-            ['Up / down capture', `${ratio(bm.up_capture)} / ${ratio(bm.down_capture)}`],
+            ['Benchmark return', signedPct(bm.total_return), tone(bm.total_return), 'benchmark_return'],
+            ['Excess return', signedPct(bm.excess_total_return), tone(bm.excess_total_return), 'excess_return'],
+            ['Beta', ratio(bm.beta), undefined, 'beta'],
+            ['Alpha (annual)', signedPct(bm.alpha_annualized), tone(bm.alpha_annualized), 'alpha'],
+            ['Correlation', ratio(bm.correlation), undefined, 'correlation'],
+            ['Information ratio', ratio(bm.information_ratio), undefined, 'information_ratio'],
+            ['Up / down capture', `${ratio(bm.up_capture)} / ${ratio(bm.down_capture)}`, undefined, 'capture_ratios'],
           ]}
         />
       )}
@@ -382,8 +415,8 @@ function Results({
               <thead className="sticky top-0 bg-panel/95 backdrop-blur">
                 <tr className="text-left text-[10.5px] uppercase tracking-wider text-ink/45">
                   {['Instrument', 'Fills', 'Traded', 'Final qty', 'Market value', 'Realized', 'Unrealized', 'Fees', 'Borrow', 'Net P&L'].map((h, i) => (
-                    <th key={h} className={cn('px-3 py-2.5 font-medium', i === 0 ? 'pl-5 text-left' : 'text-right', i === 9 && 'pr-5')}>
-                      {h}
+                    <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 ? 'pl-5 text-left' : 'text-right', i === 9 && 'pr-5')}>
+                      <HeaderLabel h={h} />
                     </th>
                   ))}
                 </tr>

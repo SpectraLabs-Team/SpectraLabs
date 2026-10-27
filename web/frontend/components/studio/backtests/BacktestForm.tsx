@@ -257,7 +257,7 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
 
         {/* Strategy or strategies */}
         {mode === 'single' ? (
-          <div className="space-y-3">
+          <div className="space-y-3" data-tour="strategy-picker">
             <Field label="strategy" error={errors.strategy ?? errors.strategy_version_id} hint={usingSaved ? detail?.strategy.description || current?.description : current?.description}>
               <select
                 className="input py-1.5 text-[13px]"

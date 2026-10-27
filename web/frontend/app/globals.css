@@ -199,3 +199,108 @@ input[type='range'].range::-moz-range-thumb {
   z-index: 9999;
 }
 
+
+/* Guided tour (driver.js): cards in the app's theme tokens, so light and dark both work. */
+.driver-popover.spectra-tour {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+  background: rgb(var(--panel));
+  color: rgb(var(--ink) / 0.8);
+  border: 1px solid rgb(var(--ink) / 0.12);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px -16px rgb(0 0 0 / 0.55);
+  padding: 16px 16px 14px;
+  min-width: 260px;
+  max-width: min(360px, calc(100vw - 24px));
+  transition: opacity 150ms ease;
+}
+.driver-popover.spectra-tour.spectra-tour-busy {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.spectra-tour .driver-popover-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: rgb(var(--ink));
+  padding-right: 22px;
+}
+.spectra-tour .driver-popover-description {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: rgb(var(--ink) / 0.72);
+}
+.spectra-tour .driver-popover-close-btn {
+  color: rgb(var(--ink) / 0.45);
+  top: 6px;
+  right: 6px;
+  border-radius: 6px;
+}
+.spectra-tour .driver-popover-close-btn:hover,
+.spectra-tour .driver-popover-close-btn:focus-visible {
+  color: rgb(var(--ink));
+  background: rgb(var(--ink) / 0.06);
+}
+.spectra-tour .driver-popover-footer {
+  margin-top: 14px;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.spectra-tour .driver-popover-progress-text {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: rgb(var(--ink) / 0.5);
+  margin-right: auto;
+}
+.spectra-tour .driver-popover-navigation-btns {
+  gap: 6px;
+}
+.spectra-tour .driver-popover-footer button.driver-popover-prev-btn,
+.spectra-tour .driver-popover-footer button.driver-popover-next-btn {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-shadow: none;
+}
+.spectra-tour .driver-popover-footer button.driver-popover-prev-btn {
+  color: rgb(var(--ink) / 0.85);
+  border: 1px solid rgb(var(--ink) / 0.15);
+  background: rgb(var(--ink) / 0.03);
+}
+.spectra-tour .driver-popover-footer button.driver-popover-next-btn {
+  color: #03131a;
+  background: linear-gradient(135deg, #00f2fe 0%, #38bdf8 55%, #4f8bff 100%);
+}
+.spectra-tour .driver-popover-footer button:focus-visible,
+.spectra-tour .spectra-tour-skip:focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 2px;
+}
+.spectra-tour .spectra-tour-skip {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  order: 3;
+  width: 100%;
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: rgb(var(--ink) / 0.5);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.spectra-tour .spectra-tour-skip:hover {
+  color: rgb(var(--ink));
+}
+.spectra-tour .driver-popover-arrow-side-left { border-left-color: rgb(var(--panel)); }
+.spectra-tour .driver-popover-arrow-side-right { border-right-color: rgb(var(--panel)); }
+.spectra-tour .driver-popover-arrow-side-top { border-top-color: rgb(var(--panel)); }
+.spectra-tour .driver-popover-arrow-side-bottom { border-bottom-color: rgb(var(--panel)); }
+@media (prefers-reduced-motion: reduce) {
+  .driver-popover.spectra-tour { transition: none; }
+}

@@ -43,6 +43,28 @@ export const PRESETS: PortfolioPreset[] = [
     ].join('\n'),
   },
   {
+    id: 'all-weather',
+    name: 'All-Weather Classic · Risk Parity',
+    blurb: 'Multi-asset weather-proofing: equities, intermediate & long treasuries, physical gold and commodities.',
+    csv: [
+      'symbol,quantity,price,volatility',
+      'SPY,1500,600.00,0.16',
+      'TLT,4500,90.00,0.15',
+      'IEF,3000,95.00,0.08',
+      'GLD,750,300.00,0.14',
+      'DBC,3000,22.00,0.20',
+    ].join('\n'),
+  },
+  {
+    id: 'benchmark-sp500',
+    name: 'S&P 500 Benchmark · Core Equity',
+    blurb: 'Pure broad-market benchmark exposure for relative VaR and alpha backtesting.',
+    csv: [
+      'symbol,quantity,price,volatility',
+      'SPY,2500,600.00,0.17',
+    ].join('\n'),
+  },
+  {
     id: 'tail-risk',
     name: 'Tail-Risk · High-Beta Volatile',
     blurb: 'Crypto proxies and AI semis: fat tails, vols of 55–90%.',

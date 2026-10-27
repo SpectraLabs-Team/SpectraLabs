@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowRight, Check, KeyRound, LogOut, MonitorSmartphone, Pencil, Trash2, User, X } from 'lucide-react';
+import { Activity, ArrowRight, Check, KeyRound, LogOut, MonitorSmartphone, Pencil, Trash2, User, X } from 'lucide-react';
+import { ACTIVITY_RETENTION_DAYS_CLIENT } from '@/lib/activityClient';
 import { AccountSecurity } from '@/components/studio/AccountSecurity';
 import { AuthenticatorApp } from './AuthenticatorApp';
 import { GlassCard, Spinner } from '@/components/ui/primitives';
@@ -384,6 +385,29 @@ function DeleteAccount({ profile }: { profile: Profile }) {
 }
 
 // ── Page ────────────────────────────────────────────────────────────────────
+/** What usage data the platform keeps about this account (see ActivityTracker and lib/server/activity.ts). */
+function UsageData() {
+  return (
+    <Section
+      icon={<Activity className="h-4 w-4" />}
+      title="Usage data we keep"
+      desc="So platform admins can see how Spectra is used and spot problems, we keep a small amount of activity data about your account."
+    >
+      <ul className="mt-3 list-disc space-y-1.5 pl-5 text-[13px] leading-relaxed text-ink/75" data-testid="usage-disclosure">
+        <li>Sign-ins and your last active time.</li>
+        <li>
+          Approximate active time per day. While a Spectra tab is visible and you have used it in the last few minutes, the page
+          sends a signal about once a minute. Time with the tab hidden or idle is not counted, so the figure is an estimate.
+        </li>
+        <li>Counts of what you run, such as simulations, backtests and paper orders, taken from your workspace history.</li>
+        <li>We do not record the pages you view, your clicks or what you type.</li>
+        <li>Daily activity totals are deleted after {ACTIVITY_RETENTION_DAYS_CLIENT} days. Deleting your account removes them immediately.</li>
+        <li>Admins can see these figures for your account, and every time they open them is recorded in the audit log.</li>
+      </ul>
+    </Section>
+  );
+}
+
 export function AccountPage() {
   const { user, login } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -437,6 +461,7 @@ export function AccountPage() {
           <AccountSecurity />
           <AuthenticatorApp />
           <Sessions />
+          <UsageData />
           <DeleteAccount profile={profile} />
         </div>
       )}

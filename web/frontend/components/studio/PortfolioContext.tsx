@@ -8,6 +8,7 @@ import { SAMPLE_CSV, parseCsv, portfolioStats, toCsv, type PortfolioStats } from
 import { PRESETS } from '@/lib/presets';
 import type { BackendRequest, Position, RiskResult } from '@/lib/types';
 import { useEngineHealth, type EngineState } from '@/lib/useEngineHealth';
+import { useToast } from '@/components/ui/StudioToast';
 
 type Source = 'engine sample' | 'bundled sample' | 'uploaded' | 'pasted' | 'edited' | 'preset';
 
@@ -65,7 +66,7 @@ interface PortfolioCtx {
   account: PaperAccount;
   setPaper: (p: PaperSettings) => void;
   setPositions: (p: Position[], source: Source) => void;
-  loadSample: () => Promise<void>;
+  loadSample: (notify?: boolean) => Promise<void>;
   importCsv: (text: string, source: 'uploaded' | 'pasted') => string[];
   loadPreset: (id: string) => void;
   riskParams: RiskLabParams;
@@ -80,12 +81,14 @@ const Ctx = createContext<PortfolioCtx | null>(null);
 /** Per-account storage keys, so two people on one browser never see each other's book. */
 const portfolioKey = (email?: string) => `spectra-portfolio-${email || 'guest'}`;
 const paperKey = (email?: string) => `spectra-paper-${email || 'guest'}`;
+const riskParamsKey = (email?: string) => `spectra-risk-params-${email || 'guest'}`;
 const SOURCES: Source[] = ['engine sample', 'bundled sample', 'uploaded', 'pasted', 'edited', 'preset'];
 
 export function PortfolioProvider({ children }: { children: ReactNode }) {
   const engine = useEngineHealth();
   const { user } = useAuth();
   const email = user?.email;
+  const { success, info } = useToast();
   const [positions, setPos] = useState<Position[]>(() => parseCsv(SAMPLE_CSV).positions);
   const [source, setSource] = useState<Source>('bundled sample');
   const [revision, setRevision] = useState(0);
@@ -101,13 +104,14 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
    */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
-  // Load this account's saved book and paper settings. Runs again when the account changes
+  // Load this account's saved book, risk parameters, and paper settings. Runs again when the account changes
   // (sign-out, or another user signing in), and always starts from a clean in-memory state
   // so nothing from the previous account survives.
   useEffect(() => {
     let next = parseCsv(SAMPLE_CSV).positions;
     let nextSource: Source = 'bundled sample';
     let nextPaper: PaperSettings = DEFAULT_PAPER;
+    let nextRiskParams: RiskLabParams = DEFAULT_RISK_PARAMS;
     try {
       const raw = localStorage.getItem(portfolioKey(email));
       if (raw) {
@@ -130,11 +134,27 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     } catch {
       /* defaults */
     }
+    try {
+      const raw = localStorage.getItem(riskParamsKey(email));
+      if (raw) {
+        const rp = JSON.parse(raw) as Partial<RiskLabParams>;
+        if (typeof rp.confidence === 'number' && Number.isFinite(rp.confidence)) {
+          nextRiskParams = {
+            confidence: Math.min(0.999, Math.max(0.9, rp.confidence)),
+            simulations: typeof rp.simulations === 'number' && rp.simulations > 0 ? rp.simulations : DEFAULT_RISK_PARAMS.simulations,
+            horizon: typeof rp.horizon === 'number' && rp.horizon > 0 ? rp.horizon : DEFAULT_RISK_PARAMS.horizon,
+            auto: Boolean(rp.auto),
+            dependence: rp.dependence === 'gaussian_copula' || rp.dependence === 't_copula' ? rp.dependence : 'aggregate',
+          };
+        }
+      }
+    } catch {
+      /* defaults */
+    }
     setPos(next);
     setSource(nextSource);
     setPaperState(nextPaper);
-    // Session results belong to the previous account: never carry them across a switch.
-    setRiskParamsState(DEFAULT_RISK_PARAMS);
+    setRiskParamsState(nextRiskParams);
     setRiskRun(null);
     setStressState(EMPTY_STRESS);
     setRevision((r) => r + 1);
@@ -170,41 +190,62 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     setRevision((r) => r + 1);
   }, []);
 
-  const loadSample = useCallback(async () => {
+  const loadSample = useCallback(async (notify = false) => {
     try {
       setPositions(parseCsv(await getSamplePortfolio()).positions, 'engine sample');
+      if (notify) info('Sample portfolio loaded', 'Synchronized from live engine sample');
     } catch {
       setPositions(parseCsv(SAMPLE_CSV).positions, 'bundled sample');
+      if (notify) info('Sample portfolio loaded', 'Loaded bundled benchmark portfolio');
     }
-  }, [setPositions]);
+  }, [setPositions, info]);
 
   // Swap in the engine's sample once it is reachable, unless the user already changed the book.
   const online = engine.status === 'online';
   useEffect(() => {
-    if (online && source === 'bundled sample') loadSample();
+    if (online && source === 'bundled sample') loadSample(false);
   }, [online, source, loadSample]);
 
   const importCsv = useCallback(
     (text: string, s: 'uploaded' | 'pasted') => {
       const { positions: p, errors } = parseCsv(text);
-      if (!errors.length && p.length) setPositions(p, s);
-      else if (!p.length && !errors.length) return ['No positions found. Expected a header row, then symbol,quantity,price[,volatility].'];
+      if (!errors.length && p.length) {
+        setPositions(p, s);
+        success(`Imported ${p.length} positions`, `Successfully parsed and loaded via ${s} CSV`);
+      } else if (!p.length && !errors.length) {
+        return ['No positions found. Expected a header row, then symbol,quantity,price[,volatility].'];
+      }
       return errors;
     },
-    [setPositions],
+    [setPositions, success],
   );
 
   const loadPreset = useCallback(
     (id: string) => {
       const preset = PRESETS.find((p) => p.id === id);
-      if (preset) setPositions(parseCsv(preset.csv).positions, 'preset');
+      if (preset) {
+        const parsed = parseCsv(preset.csv);
+        setPositions(parsed.positions, 'preset');
+        success(`Loaded preset: ${preset.name}`, `${parsed.positions.length} positions staged in active book`);
+      }
     },
-    [setPositions],
+    [setPositions, success],
   );
 
-  const setRiskParams = useCallback((update: Partial<RiskLabParams> | ((p: RiskLabParams) => Partial<RiskLabParams>)) => {
-    setRiskParamsState((p) => ({ ...p, ...(typeof update === 'function' ? update(p) : update) }));
-  }, []);
+  const setRiskParams = useCallback(
+    (update: Partial<RiskLabParams> | ((p: RiskLabParams) => Partial<RiskLabParams>)) => {
+      setRiskParamsState((prev) => {
+        const next = { ...prev, ...(typeof update === 'function' ? update(prev) : update) };
+        try {
+          localStorage.setItem(riskParamsKey(email), JSON.stringify(next));
+        } catch {
+          /* not persisted */
+        }
+        return next;
+      });
+    },
+    [email],
+  );
   const setStress = useCallback((update: (s: StressCache) => StressCache) => setStressState(update), []);
 
   const value = useMemo<PortfolioCtx>(() => {

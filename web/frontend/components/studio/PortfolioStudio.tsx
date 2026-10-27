@@ -4,13 +4,15 @@ import type { MetricId } from '@/lib/learn/metrics';
 import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowUpDown, CheckCircle2, ChevronDown, ChevronUp, ClipboardPaste, Download, FileUp, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { ArrowUpDown, CheckCircle2, ChevronDown, ChevronUp, ClipboardPaste, Download, FileUp, Plus, RotateCcw, Sparkles, Trash2 } from 'lucide-react';
 import { calculateRisk } from '@/lib/api';
 import { DEFAULT_VOLATILITY } from '@/lib/model';
 import { positionValue } from '@/lib/portfolio';
+import { PRESETS } from '@/lib/presets';
 import type { Position } from '@/lib/types';
 import { cn, formatCurrency, formatNumber, formatPercent } from '@/lib/utils';
 import { Badge, ErrorNote, GlassCard } from '@/components/ui/primitives';
+import { useToast } from '@/components/ui/StudioToast';
 import { PresetMenu } from './PresetMenu';
 import { usePortfolio } from './PortfolioContext';
 
@@ -58,6 +60,7 @@ function NumberCell({ value, onCommit, placeholder, decimals, className }: { val
 
 export function PortfolioStudio() {
   const { positions, stats, csv, source, engine, setPositions, loadSample, loadPreset, importCsv, revision } = usePortfolio();
+  const { success } = useToast();
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'value', dir: -1 });
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
@@ -119,6 +122,7 @@ export function PortfolioStudio() {
     const a = Object.assign(document.createElement('a'), { href: url, download: 'portfolio.csv' });
     a.click();
     URL.revokeObjectURL(url);
+    success('Portfolio exported', 'Downloaded portfolio.csv');
   };
 
   const band = hhiBand(stats.hhi);
@@ -198,7 +202,7 @@ export function PortfolioStudio() {
             <p className="mt-0.5 text-xs text-ink/50">Click a cell to edit. Leave volatility blank for the 20% default. Changes flow into the Risk Lab.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => { setErrors([]); loadSample(); }}>
+            <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={() => { setErrors([]); loadSample(true); }}>
               <RotateCcw className="h-3.5 w-3.5" /> Load sample
             </button>
             <PresetMenu onSelect={(id) => { setErrors([]); loadPreset(id); }} />
@@ -322,7 +326,68 @@ export function PortfolioStudio() {
             </tfoot>
           </table>
         </div>
-        {!positions.length && <p className="p-8 text-center text-sm text-ink/50">No positions. Load the sample, upload a CSV, or add a row.</p>}
+        {!positions.length && (
+          <div className="p-8 text-center sm:p-12">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-accent/30 bg-accent/10 text-accent shadow-glow">
+              <Sparkles className="h-6 w-6" />
+            </div>
+            <h3 className="mt-4 text-base font-semibold text-ink">No Positions in Active Portfolio</h3>
+            <p className="mx-auto mt-1 max-w-md text-xs text-ink/60">
+              Get started instantly with one of our institutional demo books, load the live engine sample, or upload your custom CSV.
+            </p>
+
+            <div className="mx-auto mt-6 grid max-w-4xl gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => {
+                    setErrors([]);
+                    loadPreset(p.id);
+                  }}
+                  className="group flex flex-col items-start rounded-xl border border-ink/10 bg-panel/60 p-4 text-left transition hover:border-accent/40 hover:bg-accent/[0.04] hover:shadow-lg focus:outline-none"
+                >
+                  <div className="flex w-full items-center justify-between">
+                    <span className="font-mono text-[10px] uppercase tracking-wider text-accent">Demo Preset</span>
+                    <Plus className="h-3.5 w-3.5 text-ink/40 transition group-hover:text-accent group-hover:rotate-90" />
+                  </div>
+                  <span className="mt-2 text-sm font-semibold text-ink">{p.name}</span>
+                  <span className="mt-1 line-clamp-2 text-[11.5px] leading-relaxed text-ink/55">{p.blurb}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                className="btn-secondary px-4 py-2 text-xs"
+                onClick={() => {
+                  setErrors([]);
+                  loadSample(true);
+                }}
+              >
+                <RotateCcw className="h-3.5 w-3.5 text-accent" /> Load Engine Sample
+              </button>
+              <button
+                type="button"
+                className="btn-secondary px-4 py-2 text-xs"
+                onClick={() => fileRef.current?.click()}
+              >
+                <FileUp className="h-3.5 w-3.5" /> Upload CSV
+              </button>
+              <button
+                type="button"
+                className="btn-secondary px-4 py-2 text-xs"
+                onClick={() => {
+                  setPasteText('');
+                  setPasteOpen(true);
+                }}
+              >
+                <ClipboardPaste className="h-3.5 w-3.5" /> Paste Raw CSV
+              </button>
+            </div>
+          </div>
+        )}
       </GlassCard>
     </div>
   );

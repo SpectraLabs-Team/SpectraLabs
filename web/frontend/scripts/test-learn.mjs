@@ -404,7 +404,7 @@ describe('Guided tour', () => {
   });
 
   it('introduces the features that exist, in the requested order, with targets that are in the UI', () => {
-    assert.deepEqual(MAIN_TOUR.map((s) => s.id), ['dashboard', 'simulations', 'strategies', 'results', 'risk', 'risk-center', 'portfolio', 'data', 'optimization', 'benchmark', 'registry', 'settings', 'engine', 'paper', 'learn', 'admin']);
+    assert.deepEqual(MAIN_TOUR.map((s) => s.id), ['dashboard', 'simulations', 'strategies', 'results', 'risk', 'risk-center', 'portfolio', 'data', 'optimization', 'benchmark', 'registry', 'settings', 'engine', 'paper', 'learn', 'account', 'admin']);
     const ids = [...MAIN_TOUR, ...Object.values(PAGE_TOURS).flat()].map((s) => s.id);
     assert.equal(new Set(ids).size, ids.length, 'unique step ids');
     const ui = walk(path.join(root, 'components')).filter((f) => f.endsWith('.tsx')).map((f) => fs.readFileSync(f, 'utf8')).join('\n');

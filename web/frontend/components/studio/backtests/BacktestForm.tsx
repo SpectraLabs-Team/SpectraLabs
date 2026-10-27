@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookmarkCheck, Check, ChevronDown, ChevronUp, Database, Layers, Pencil, Play, Plus, SlidersHorizontal, Trash2 } from 'lucide-react';
+import { BookmarkCheck, Check, ChevronDown, ChevronUp, Copy, Database, ExternalLink, FileSpreadsheet, Layers, Pencil, Play, Plus, SlidersHorizontal, Sparkles, Trash2 } from 'lucide-react';
 import { ApiError } from '@/lib/api';
 import {
   createBacktest,
@@ -23,10 +23,20 @@ import {
   type UserConfig,
 } from '@/lib/backtests';
 import { Badge, ErrorNote, GlassCard, Segmented, Spinner } from '@/components/ui/primitives';
+import { useToast } from '@/components/ui/StudioToast';
 import { cn } from '@/lib/utils';
 import { ConfigFields, Field, NumberInput, ParamFields } from './Fields';
 import { int } from './format';
 import { SaveVersion } from './SaveVersion';
+
+const SAMPLE_OHLCV_CSV = `timestamp,open,high,low,close,volume
+2024-01-02T09:30:00Z,185.20,186.40,184.80,185.90,1250000
+2024-01-02T10:30:00Z,185.90,187.10,185.50,186.75,980000
+2024-01-02T11:30:00Z,186.75,188.00,186.50,187.60,850000
+2024-01-02T12:30:00Z,187.60,188.20,187.10,187.40,620000
+2024-01-02T13:30:00Z,187.40,188.50,187.20,188.10,710000
+2024-01-02T14:30:00Z,188.10,189.30,188.00,189.05,1100000
+2024-01-02T15:30:00Z,189.05,189.80,188.70,189.50,1950000`;
 
 /** Option values in the strategy picker: a built-in's name, or `saved:<strategy id>`. */
 const SAVED = 'saved:';
@@ -47,6 +57,7 @@ function slotFor(catalog: Catalog, name: string, weightPct: number, params?: Par
 const toWeight = (pct: number) => Math.round(pct * 1e6) / 1e8;
 
 export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: { catalog: Catalog; datasets: DatasetVersion[]; canRun: boolean; onCreated: (b: Backtest) => void; prefill?: Prefill | null }) {
+  const { success } = useToast();
   const first = catalog.strategies[0]?.name ?? '';
   const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '');
   const [mode, setMode] = useState<'single' | 'multi'>('single');
@@ -245,12 +256,42 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
               </select>
             </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-ink/15 p-3 text-[11.5px] leading-5 text-ink/55">
-              No datasets in this workspace yet.{' '}
-              <a className="text-accent hover:underline" href="/studio?tab=data">
-                Upload a CSV in the Data tab
-              </a>
-              , then come back to run a backtest on it.
+            <div className="rounded-xl border border-dashed border-accent/30 bg-accent/[0.03] p-4 text-xs text-ink/75">
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent/10 text-accent">
+                  <Database className="h-4 w-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-ink">No Historical OHLCV Datasets Registered</p>
+                    <span className="font-mono text-[10px] uppercase tracking-wider text-accent">Schema: OHLCV</span>
+                  </div>
+                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink/60">
+                    Backtests simulate order execution against tick or bar series without look-ahead bias. Expected CSV columns:
+                    <code className="mx-1 rounded bg-ink/10 px-1 py-0.5 font-mono text-[10.5px] text-ink">timestamp,open,high,low,close,volume</code>
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <a
+                      href="/studio?tab=data"
+                      className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs no-underline"
+                    >
+                      <FileSpreadsheet className="h-3.5 w-3.5" /> Upload CSV in Data Lab <ExternalLink className="h-3 w-3 opacity-60" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                          navigator.clipboard.writeText(SAMPLE_OHLCV_CSV);
+                          success('OHLCV template copied', 'Standard 1-hour bar CSV schema ready to paste in Data Lab');
+                        }
+                      }}
+                      className="btn-secondary px-3 py-1.5 text-xs"
+                    >
+                      <Copy className="h-3.5 w-3.5" /> Copy Sample CSV Format
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </Field>

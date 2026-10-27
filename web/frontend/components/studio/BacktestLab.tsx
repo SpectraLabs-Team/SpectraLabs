@@ -112,7 +112,10 @@ export function BacktestLab() {
             </GlassCard>
           )}
         </div>
-        <RunList catalog={catalog} selectedId={selected} onSelect={select} refreshKey={refreshKey} />
+        {/* Desktop: the run list stays in view beside the long form and scrolls on its own (same rule as the Risk Lab panel). */}
+        <div className="min-w-0 lg:sticky lg:top-20 lg:self-start">
+          <RunList catalog={catalog} selectedId={selected} onSelect={select} refreshKey={refreshKey} />
+        </div>
       </div>
 
       <div ref={detailRef} data-tour="backtest-results" className="scroll-mt-20">

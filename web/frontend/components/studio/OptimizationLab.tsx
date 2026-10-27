@@ -41,7 +41,7 @@ import {
 import { listDatasets, type DatasetVersion } from '@/lib/backtests';
 import { listStrategies, type StrategySummary } from '@/lib/strategies';
 import { cn } from '@/lib/utils';
-import { InfoTip } from '@/components/ui/MetricInfo';
+import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 
 export function OptimizationLab() {
   const [activeTab, setActiveTab] = useState<'sweeps' | 'walkforward' | 'overfitting' | 'holdout'>('sweeps');
@@ -696,9 +696,9 @@ export function OptimizationLab() {
                             <tr className="border-b border-ink/[0.08] text-ink/50 text-[11px]">
                               <th className="py-2">#</th>
                               <th className="py-2">Parameters</th>
-                              <th className="py-2 text-right">Sharpe</th>
-                              <th className="py-2 text-right">Return</th>
-                              <th className="py-2 text-right">Max DD</th>
+                              <th className="py-2 text-right"><MetricLabel metric="sharpe_ratio" className="justify-end">Sharpe</MetricLabel></th>
+                              <th className="py-2 text-right"><MetricLabel metric="total_return" className="justify-end">Return</MetricLabel></th>
+                              <th className="py-2 text-right"><MetricLabel metric="max_drawdown" className="justify-end">Max DD</MetricLabel></th>
                               <th className="py-2 text-right">Mean Return</th>
                             </tr>
                           </thead>

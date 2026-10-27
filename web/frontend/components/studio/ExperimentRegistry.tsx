@@ -1,5 +1,6 @@
 'use client';
 
+import { MetricLabel } from '@/components/ui/MetricInfo';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Activity, Beaker, CircleAlert, CircleCheck, GitFork, LoaderCircle, Plus, RefreshCw, Square } from 'lucide-react';
@@ -446,8 +447,8 @@ export function ExperimentRegistry() {
                 <thead className="border-b border-ink/10 text-ink/45"><tr>
                   <th className="py-2 pr-3 font-medium">Status / ID</th><th className="py-2 pr-3 font-medium">Strategy</th>
                   <th className="py-2 pr-3 font-medium">Parameters</th><th className="py-2 pr-3 font-medium">Dataset</th>
-                  <th className="py-2 pr-3 font-medium">Sharpe</th><th className="py-2 pr-3 font-medium">Return</th>
-                  <th className="py-2 pr-3 font-medium">Drawdown</th><th className="py-2 font-medium">Date</th>
+                  <th className="py-2 pr-3 font-medium"><MetricLabel metric="sharpe_ratio">Sharpe</MetricLabel></th><th className="py-2 pr-3 font-medium"><MetricLabel metric="total_return">Return</MetricLabel></th>
+                  <th className="py-2 pr-3 font-medium"><MetricLabel metric="max_drawdown">Drawdown</MetricLabel></th><th className="py-2 font-medium">Date</th>
                 </tr></thead>
                 <tbody className="divide-y divide-ink/[0.06]">
                   {runs.map((run) => {

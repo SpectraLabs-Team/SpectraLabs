@@ -1,5 +1,7 @@
 'use client';
 
+import type { MetricId } from '@/lib/learn/metrics';
+import { MetricLabel } from '@/components/ui/MetricInfo';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle2, CircleSlash, Database, KeyRound, PlugZap, RefreshCw, ScrollText, Server, ShieldCheck, Terminal, Users, Wallet } from 'lucide-react';
@@ -92,14 +94,14 @@ export function MarketSettings() {
           </button>
         </div>
         <dl className="mt-5 grid grid-cols-2 gap-3 border-t border-ink/[0.06] pt-4 text-sm sm:grid-cols-4">
-          {[
-            ['Equity', formatCurrency(account.equity)],
-            ['Cash', formatCurrency(account.cash)],
-            ['Buying power', formatCurrency(account.buyingPower)],
-            ['Gross leverage', `${account.grossLeverage.toFixed(2)}×`],
-          ].map(([k, v]) => (
+          {([
+            { k: 'Equity', v: formatCurrency(account.equity), m: 'total_equity' },
+            { k: 'Cash', v: formatCurrency(account.cash), m: 'cash_balance' },
+            { k: 'Buying power', v: formatCurrency(account.buyingPower), m: 'buying_power' },
+            { k: 'Gross leverage', v: `${account.grossLeverage.toFixed(2)}×`, m: 'gross_leverage' },
+          ] as { k: string; v: string; m: MetricId }[]).map(({ k, v, m }) => (
             <div key={k}>
-              <dt className="text-[10.5px] uppercase tracking-wider text-ink/45">{k}</dt>
+              <dt className="text-[10.5px] uppercase tracking-wider text-ink/45"><MetricLabel metric={m}>{k}</MetricLabel></dt>
               <dd className="num mt-1 text-ink">{v}</dd>
             </div>
           ))}

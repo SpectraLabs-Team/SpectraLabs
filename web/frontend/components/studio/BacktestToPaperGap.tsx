@@ -17,7 +17,7 @@ import {
 import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { cn, formatCurrency, formatNumber, formatPercent } from '@/lib/utils';
 import type { paths } from '@/lib/generated/engine-api';
-import { InfoTip } from '@/components/ui/MetricInfo';
+import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 
 type GapReportDetail = paths['/api/v1/paper/gap/reports/{id}']['get']['responses']['200']['content']['application/json'];
 type GapReportSummary = paths['/api/v1/paper/gap/reports']['get']['responses']['200']['content']['application/json'][number];
@@ -161,7 +161,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
               <div className="mt-2 text-xl font-bold font-mono text-ink">
                 {selectedReport.alert_status.toUpperCase()}
               </div>
-              <p className="mt-1 text-[11px] text-ink/50">Tracking error {formatPercent(selectedReport.tracking_error_pct / 100)}</p>
+              <p className="mt-1 text-[11px] text-ink/50"><MetricLabel metric="tracking_error">Tracking error</MetricLabel> {formatPercent(selectedReport.tracking_error_pct / 100)}</p>
             </GlassCard>
 
             <GlassCard className="p-4">

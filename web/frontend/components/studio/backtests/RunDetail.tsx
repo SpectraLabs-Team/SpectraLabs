@@ -68,6 +68,8 @@ function Kpi({ label, value, sub, t, metric }: { label: string; value: string; s
 /** Table column headers that are metrics get an ⓘ. */
 const HEADER_METRICS: Partial<Record<string, MetricId>> = {
   Return: 'total_return',
+  'Final equity': 'final_equity',
+  Fills: 'orders_fills',
   Contribution: 'contribution',
   Sharpe: 'sharpe_ratio',
   'Max DD': 'max_drawdown',

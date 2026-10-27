@@ -514,9 +514,9 @@ export function RiskLab() {
                     <th className="pb-2">Asset</th>
                     <th className="pb-2">Position Value</th>
                     <th className="pb-2">Weight</th>
-                    <th className="pb-2">Component VaR</th>
-                    <th className="pb-2">Component CVaR</th>
-                    <th className="pb-2 text-right">CVaR Contribution</th>
+                    <th className="pb-2"><MetricLabel metric="var_monte_carlo">Component VaR</MetricLabel></th>
+                    <th className="pb-2"><MetricLabel metric="cvar_monte_carlo">Component CVaR</MetricLabel></th>
+                    <th className="pb-2 text-right"><MetricLabel metric="cvar_monte_carlo" className="justify-end">CVaR Contribution</MetricLabel></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-ink/[0.06]">

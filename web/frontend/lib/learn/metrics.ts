@@ -253,6 +253,21 @@ export const metricDefinitions = {
     learnPath: m('skewness-and-kurtosis'),
     category: 'risk',
   },
+  gross_exposure: {
+    name: 'Gross Exposure',
+    shortDescription: 'Total absolute market value of every open position, long and short, in currency.',
+    learnPath: m('exposure'),
+    category: 'exposure',
+    formula: 'Σ |quantity × price|',
+  },
+  hhi: {
+    name: 'Concentration (HHI)',
+    shortDescription: 'Herfindahl index of the portfolio’s gross weights: 1 means one position holds everything, 1/N means N equal positions.',
+    learnPath: m('concentration-hhi'),
+    category: 'risk',
+    formula: 'Σ wᵢ², where wᵢ = |vᵢ| / Σ|vⱼ|',
+    interpretation: 'Below 0.10 is unconcentrated, 0.10 to 0.18 moderately concentrated, above 0.18 highly concentrated (the Portfolio Studio bands).',
+  },
   gross_leverage: {
     name: 'Gross Leverage',
     shortDescription: 'Total absolute value of all positions divided by equity, shown against the account’s leverage limit.',
@@ -437,6 +452,13 @@ export const metricDefinitions = {
     shortDescription: 'How closely strategy and benchmark returns move together, from −1 to +1.',
     learnPath: m('correlation'),
     category: 'benchmark',
+  },
+  tracking_error: {
+    name: 'Tracking Error',
+    shortDescription: 'How far the strategy’s returns stray from the benchmark’s: the volatility of the return gap, annualized.',
+    learnPath: m('information-ratio'),
+    category: 'benchmark',
+    formula: 'σ(rₛ − r_b) · √ppy',
   },
   information_ratio: {
     name: 'Information Ratio',

@@ -279,7 +279,7 @@ function UsersPanel() {
 // ── Analytics ──
 
 function AnalyticsPanel() {
-  const today = utcDay(new Date());
+  const [today] = useState(() => utcDay(new Date()));
   const [from, setFrom] = useState(() => utcDay(new Date(Date.now() - 29 * 86_400_000)));
   const [to, setTo] = useState(today);
   const url = `/api/admin/analytics?from=${from}&to=${to}`;
@@ -386,13 +386,23 @@ function EnginePanel() {
   const { data, error } = useJson<AdminOverview>('/api/admin/overview', 15_000);
   const online = health.status === 'online';
   const pct = (n: number) => `${n.toFixed(n < 10 ? 1 : 0)}%`;
+  const hasMemory = Boolean(host && host.memory_total_gb > 0);
+  const isHostUnavailable = failed || (host && host.source === 'unavailable');
 
   return (
     <div className="space-y-6">
       <div className="grid gap-3 md:grid-cols-3">
         <Kpi label="Rust engine" value={online ? 'Online' : health.status === 'checking' ? 'Checking…' : 'Offline'} tone={online ? 'profit' : 'loss'} />
-        <Kpi label="CPU" value={host ? pct(host.cpu_utilization) : '—'} sub={host ? `${host.cpu_cores} cores · ${host.cpu_threads} threads` : failed ? 'Unavailable on this host' : undefined} />
-        <Kpi label="Memory" value={host ? `${host.memory_used_gb.toFixed(1)} / ${host.memory_total_gb.toFixed(0)} GB` : '—'} />
+        <Kpi
+          label="CPU"
+          value={host && !isHostUnavailable ? pct(host.cpu_utilization) : host ? 'Active' : '—'}
+          sub={host ? `${host.cpu_cores} cores · ${host.cpu_threads} threads` : failed ? 'Unavailable on this host' : undefined}
+        />
+        <Kpi
+          label="Memory"
+          value={hasMemory ? `${host!.memory_used_gb.toFixed(1)} / ${host!.memory_total_gb.toFixed(0)} GB` : isHostUnavailable ? 'Host metric unavailable' : '—'}
+          sub={!hasMemory && host ? 'Requires Linux /proc/meminfo' : undefined}
+        />
       </div>
 
       <section aria-labelledby="workers-h">

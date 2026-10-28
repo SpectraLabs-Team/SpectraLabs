@@ -198,10 +198,11 @@ describe('Metric registry', () => {
     const used = new Map();
     for (const f of files) {
       const text = fs.readFileSync(f, 'utf8');
+      const rel = path.relative(root, f).replace(/\\/g, '/');
       for (const m of text.matchAll(/metric(?:=|: )["']([a-z0-9_]+)["']|(?:undefined|\)), '([a-z0-9_]+)'\]/g)) {
         const id = m[1] ?? m[2];
         if (!id) continue;
-        used.set(path.relative(root, f), [...(used.get(path.relative(root, f)) ?? []), id]);
+        used.set(rel, [...(used.get(rel) ?? []), id]);
       }
     }
     const all = [...used.values()].flat();

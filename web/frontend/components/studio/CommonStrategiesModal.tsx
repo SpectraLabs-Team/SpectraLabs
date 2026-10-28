@@ -58,7 +58,7 @@ export function CommonStrategiesModal({
                   Common Quant Strategies
                 </h2>
                 <p className="text-xs text-ink/50">
-                  Battle-tested strategy templates written in Spectra's Restricted Safe DSL.
+                  Battle-tested strategy templates written in Spectra&apos;s Restricted Safe DSL.
                 </p>
               </div>
             </div>

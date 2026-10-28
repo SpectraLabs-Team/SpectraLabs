@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2 } from 'lucide-react';
 import { type ReactNode, useRef } from 'react';
@@ -158,9 +159,12 @@ export function AnimatedValue({ value, className }: { value: string; className?:
 export function Logo({ className, compact }: { className?: string; compact?: boolean }) {
   return (
     <span className={cn('flex items-center justify-center', className)}>
-      <img
+      <Image
         src="/images/logo-icon.png"
         alt="SpectraLabs"
+        width={32}
+        height={32}
+        priority
         className="h-8 w-8 shrink-0 object-contain"
       />
     </span>

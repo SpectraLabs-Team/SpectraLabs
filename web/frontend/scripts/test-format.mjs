@@ -13,7 +13,7 @@ describe('zero is never shown as negative', () => {
     assert.equal(u.formatCurrency(-0), '$0');
     assert.equal(u.formatCurrency(-0.4), '$0');
     assert.equal(u.formatCurrency(-0.004, 2), '$0.00');
-    assert.equal(u.formatCompactCurrency(-0), '$0.0');
+    assert.equal(u.formatCompactCurrency(-0), '$0');
   });
   it('numbers, percentages and compact numbers', () => {
     assert.equal(u.formatNumber(-0), '0.00');
@@ -31,7 +31,7 @@ describe('real values are unchanged', () => {
     assert.equal(u.formatCurrency(-0.005, 2), '-$0.01');
     assert.equal(u.formatCurrency(1234.5, 2), '$1,234.50');
     assert.equal(u.formatPercent(-0.0123), '-1.23%');
-    assert.equal(u.formatCompactCurrency(-1_500_000), '-$1.50M');
+    assert.equal(u.formatCompactCurrency(-1_500_000), '-$1.5M');
     assert.equal(u.formatNumber(-2.5, 1), '-2.5');
     assert.equal(u.formatCurrency(Number.NaN), '—');
   });

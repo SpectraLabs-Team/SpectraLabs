@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Beaker, Copy, Download, ExternalLink, Fingerprint, GitFork, Layers, Pencil, Square } from 'lucide-react';
+import { Beaker, Copy, Download, ExternalLink, Fingerprint, GitFork, Layers, Pencil, Scale, Square } from 'lucide-react';
 import { ApiError, request } from '@/lib/api';
 import {
   cancelBacktest,
@@ -512,7 +512,25 @@ function Results({
  * One backtest: follows it while it runs (progress, cancel), then shows its results. `onChanged`
  * is told when its status changes, so the run list can refresh.
  */
-export function RunDetail({ backtestId, catalog, datasets, canRun, onRerun, onChanged }: { backtestId: string; catalog: Catalog | null; datasets: DatasetVersion[]; canRun: boolean; onRerun: (r: StoredRequest) => void; onChanged: () => void }) {
+export function RunDetail({
+  backtestId,
+  catalog,
+  datasets,
+  canRun,
+  onRerun,
+  onChanged,
+  onAddToCompare,
+  isCompared = false,
+}: {
+  backtestId: string;
+  catalog: Catalog | null;
+  datasets: DatasetVersion[];
+  canRun: boolean;
+  onRerun: (r: StoredRequest) => void;
+  onChanged: () => void;
+  onAddToCompare?: (id: string) => void;
+  isCompared?: boolean;
+}) {
   const [b, setB] = useState<Backtest | null>(null);
   const [equity, setEquity] = useState<Series | null>(null);
   const [drawdown, setDrawdown] = useState<Series | null>(null);
@@ -631,6 +649,20 @@ export function RunDetail({ backtestId, catalog, datasets, canRun, onRerun, onCh
             >
               <Copy className="h-3.5 w-3.5" /> {copied ? 'Copied' : b.id.slice(0, 8)}
             </button>
+            {b.status === 'succeeded' && onAddToCompare && (
+              <button
+                type="button"
+                className={cn(
+                  'btn-secondary px-3 py-1.5 text-xs flex items-center gap-1.5',
+                  isCompared && 'bg-accent/15 text-accent border-accent/40 font-semibold'
+                )}
+                onClick={() => onAddToCompare(b.id)}
+                title={isCompared ? 'Remove from comparison' : 'Add to comparison list'}
+              >
+                <Scale className="h-3.5 w-3.5" />
+                <span>{isCompared ? 'In Comparison' : 'Compare'}</span>
+              </button>
+            )}
             {canRun && running && !b.cancel_requested && (
               <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={cancel}>
                 <Square className="h-3.5 w-3.5" /> Cancel

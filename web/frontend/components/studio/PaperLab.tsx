@@ -58,6 +58,13 @@ import { useToast } from '@/components/ui/StudioToast';
 import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import { TradingChart } from './TradingChart';
 import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
+import {
+  CURATED_WATCHLIST_ITEMS,
+  WATCHLIST_CATEGORY_LABELS,
+  getMarketSession,
+  getBaselineTickerPrice,
+  type CuratedAsset,
+} from '@/lib/marketStatus';
 
 // Default initial watchlist symbols
 const INITIAL_WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'AMZN', 'GOOGL', 'META'];
@@ -165,8 +172,10 @@ export function PaperLab() {
 
   // Watchlist & Search state
   const [watchlist, setWatchlist] = useState<string[]>(INITIAL_WATCHLIST);
+  const [watchlistCategory, setWatchlistCategory] = useState<'my' | 'tech' | 'etfs' | 'volatility'>('my');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSymbol, setSelectedSymbol] = useState('AAPL');
+  const [marketSession, setMarketSession] = useState(getMarketSession());
 
   // Chart data state
   const [chartBars, setChartBars] = useState<CandleBar[]>([]);
@@ -189,6 +198,14 @@ export function PaperLab() {
 
   // Bottom Tabs
   const [bottomTab, setBottomTab] = useState<BottomTab>('positions');
+
+  // Live Market Session Clock (Eastern Time)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setMarketSession(getMarketSession());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Load Sandbox state from LocalStorage
   useEffect(() => {
@@ -308,7 +325,7 @@ export function PaperLab() {
         // Fallback: generate realistic price points around recent quotes if Alpaca market data feed is offline
         const now = Date.now();
         const fallback: CandleBar[] = [];
-        let price = 175.0;
+        let price = getBaselineTickerPrice(sym);
         const step = tf.includes('Min') ? 60 * 1000 : 24 * 3600 * 1000;
         for (let i = 40; i >= 0; i--) {
           const t = now - i * step;
@@ -414,13 +431,36 @@ export function PaperLab() {
     : (account ? parseFloat(account.equity) : 0);
   const effectiveBuyingPower = isSandbox ? sandboxCash * 2 : (account ? parseFloat(account.buying_power) : 0);
 
-  // Filtered symbols from search
+  // Filtered symbols from search (combines Alpaca assets and curated stocks)
   const filteredAssets = useMemo(() => {
     if (!searchQuery.trim()) return [];
     const query = searchQuery.toUpperCase().trim();
-    return assets
-      .filter((a) => a.tradable && (a.symbol.includes(query) || a.name.toUpperCase().includes(query)))
-      .slice(0, 10);
+    const curatedMatches: AlpacaAsset[] = CURATED_WATCHLIST_ITEMS.filter(
+      (c) => c.symbol.includes(query) || c.name.toUpperCase().includes(query)
+    ).map((c) => ({
+      id: `curated-${c.symbol}`,
+      class: 'us_equity',
+      symbol: c.symbol,
+      name: c.name,
+      exchange: 'US',
+      asset_class: 'us_equity',
+      status: 'active',
+      tradable: true,
+      marginable: true,
+      shortable: true,
+      fractionable: true,
+    }));
+
+    const alpacaMatches = assets.filter(
+      (a) => a.tradable && (a.symbol.includes(query) || a.name.toUpperCase().includes(query))
+    );
+
+    const merged = [...curatedMatches];
+    alpacaMatches.forEach((a) => {
+      if (!merged.some((m) => m.symbol === a.symbol)) merged.push(a);
+    });
+
+    return merged.slice(0, 10);
   }, [assets, searchQuery]);
 
   // Current Price & Calculations
@@ -428,7 +468,7 @@ export function PaperLab() {
     const pos = effectivePositions.find((p) => p.symbol === selectedSymbol);
     if (pos) return parseFloat(pos.current_price);
     if (chartBars.length > 0) return chartBars[chartBars.length - 1].c;
-    return parseFloat(limitPrice) || 150.0;
+    return parseFloat(limitPrice) || getBaselineTickerPrice(selectedSymbol);
   }, [effectivePositions, selectedSymbol, chartBars, limitPrice]);
 
   // Sizing Calculations: Shares vs Notional ($)
@@ -742,6 +782,23 @@ export function PaperLab() {
                 {keyHint && <span className="font-mono text-[10px] opacity-75">••••{keyHint}</span>}
               </Badge>
             )}
+
+            {/* Live US Equities Market Session Indicator */}
+            <div
+              className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-slate-300"
+              title={`${marketSession.description} (${marketSession.formattedTimeEt})`}
+            >
+              <span
+                className={cn(
+                  'h-2 w-2 rounded-full',
+                  marketSession.badgeTone === 'profit' && 'bg-emerald-400 animate-pulse',
+                  marketSession.badgeTone === 'caution' && 'bg-amber-400 animate-pulse',
+                  marketSession.badgeTone === 'neutral' && 'bg-slate-400'
+                )}
+              />
+              <span className="font-semibold text-white">{marketSession.label}</span>
+              <span className="font-mono text-[10px] text-slate-400">{marketSession.formattedTimeEt}</span>
+            </div>
           </div>
           <p className="mt-1 text-xs text-slate-400">
             Real-time direct paper order execution, interactive candlestick charts, live position tracking, and portfolio balances.
@@ -943,57 +1000,163 @@ export function PaperLab() {
             </div>
           )}
 
-          {/* Watchlist Header */}
-          <div className="flex items-center justify-between border-b border-white/10 pb-1.5 font-mono text-[11px] uppercase tracking-wider text-slate-400">
-            <span>Watchlist</span>
-            <span>{watchlist.length}</span>
+          {/* Quick-Pick Watchlist Category Tabs */}
+          <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-1.5 font-mono text-[11px] uppercase tracking-wider text-slate-400">
+            <div className="flex gap-1">
+              {(['my', 'tech', 'etfs', 'volatility'] as const).map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setWatchlistCategory(cat)}
+                  className={cn(
+                    'rounded-lg px-2 py-0.5 text-[10px] font-semibold transition',
+                    watchlistCategory === cat
+                      ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  )}
+                >
+                  {cat === 'my' ? `My (${watchlist.length})` : cat === 'tech' ? 'Tech' : cat === 'etfs' ? 'ETFs' : 'Beta'}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Watchlist Items */}
-          <div className="mt-2 space-y-1 overflow-y-auto max-h-[380px]">
-            {watchlist.map((sym) => {
-              const pos = effectivePositions.find((p) => p.symbol === sym);
-              const isSelected = selectedSymbol === sym;
-              return (
-                <div
-                  key={sym}
-                  className={cn(
-                    'group flex items-center justify-between rounded-xl px-2.5 py-2 text-xs transition cursor-pointer',
-                    isSelected
-                      ? 'bg-cyan-500/15 border border-cyan-500/30 text-white'
-                      : 'hover:bg-white/5 text-slate-300'
-                  )}
-                  onClick={() => setSelectedSymbol(sym)}
-                >
-                  <div className="min-w-0">
-                    <span className="font-mono font-bold">{sym}</span>
-                    {pos && (
-                      <span className="ml-1.5 rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] text-emerald-300">
-                        {pos.qty} sh
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {pos && (
-                      <span className="font-mono text-[11px] text-slate-300">
-                        {formatCurrency(parseFloat(pos.current_price))}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeFromWatchlist(sym);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400"
-                      title="Remove from watchlist"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
+          <div className="mt-1 space-y-1 overflow-y-auto max-h-[380px]">
+            {watchlistCategory === 'my' ? (
+              watchlist.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-500">
+                  <Star className="mx-auto h-5 w-5 text-slate-600 mb-1" />
+                  Your watchlist is empty. Browse the tabs above or search to star assets.
                 </div>
-              );
-            })}
+              ) : (
+                watchlist.map((sym) => {
+                  const pos = effectivePositions.find((p) => p.symbol === sym);
+                  const curated = CURATED_WATCHLIST_ITEMS.find((c) => c.symbol === sym);
+                  const isSelected = selectedSymbol === sym;
+                  const price = pos ? parseFloat(pos.current_price) : curated?.defaultPrice ?? getBaselineTickerPrice(sym);
+                  const chg = curated?.changePct ?? 0;
+
+                  return (
+                    <div
+                      key={sym}
+                      className={cn(
+                        'group flex items-center justify-between rounded-xl px-2.5 py-2 text-xs transition cursor-pointer',
+                        isSelected
+                          ? 'bg-cyan-500/15 border border-cyan-500/30 text-white'
+                          : 'hover:bg-white/5 text-slate-300'
+                      )}
+                      onClick={() => setSelectedSymbol(sym)}
+                    >
+                      <div className="min-w-0 flex flex-col">
+                        <div className="flex items-center">
+                          <span className="font-mono font-bold">{sym}</span>
+                          {pos && (
+                            <span className="ml-1.5 rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] text-emerald-300">
+                              {pos.qty} sh
+                            </span>
+                          )}
+                        </div>
+                        {curated && (
+                          <span className="truncate text-[10px] text-slate-400">{curated.name}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          <p className="font-mono text-[11px] font-semibold text-slate-200">
+                            {formatCurrency(price)}
+                          </p>
+                          {curated && (
+                            <p className={cn(
+                              'flex items-center justify-end font-mono text-[9.5px]',
+                              chg >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            )}>
+                              {chg >= 0 ? <ArrowUpRight className="h-2.5 w-2.5 mr-0.5" /> : <ArrowDownRight className="h-2.5 w-2.5 mr-0.5" />}
+                              {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeFromWatchlist(sym);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400"
+                          title="Remove from watchlist"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )
+            ) : (
+              CURATED_WATCHLIST_ITEMS.filter((item) => item.category === watchlistCategory).map((item) => {
+                const isSelected = selectedSymbol === item.symbol;
+                const isStarred = watchlist.includes(item.symbol);
+                const pos = effectivePositions.find((p) => p.symbol === item.symbol);
+                const price = pos ? parseFloat(pos.current_price) : item.defaultPrice;
+
+                return (
+                  <div
+                    key={item.symbol}
+                    className={cn(
+                      'group flex items-center justify-between rounded-xl px-2.5 py-2 text-xs transition cursor-pointer',
+                      isSelected
+                        ? 'bg-cyan-500/15 border border-cyan-500/30 text-white'
+                        : 'hover:bg-white/5 text-slate-300'
+                    )}
+                    onClick={() => setSelectedSymbol(item.symbol)}
+                  >
+                    <div className="min-w-0 flex flex-col">
+                      <div className="flex items-center">
+                        <span className="font-mono font-bold">{item.symbol}</span>
+                        {pos && (
+                          <span className="ml-1.5 rounded-full bg-emerald-500/20 px-1.5 py-0.2 text-[9px] text-emerald-300">
+                            {pos.qty} sh
+                          </span>
+                        )}
+                      </div>
+                      <span className="truncate text-[10px] text-slate-400">{item.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <p className="font-mono text-[11px] font-semibold text-slate-200">
+                          {formatCurrency(price)}
+                        </p>
+                        <p className={cn(
+                          'flex items-center justify-end font-mono text-[9.5px]',
+                          item.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                        )}>
+                          {item.changePct >= 0 ? <ArrowUpRight className="h-2.5 w-2.5 mr-0.5" /> : <ArrowDownRight className="h-2.5 w-2.5 mr-0.5" />}
+                          {item.changePct >= 0 ? '+' : ''}{item.changePct.toFixed(2)}%
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (isStarred) {
+                            removeFromWatchlist(item.symbol);
+                          } else {
+                            addToWatchlist(item.symbol);
+                          }
+                        }}
+                        className={cn(
+                          'p-0.5 rounded transition',
+                          isStarred ? 'text-amber-400' : 'opacity-0 group-hover:opacity-100 text-slate-500 hover:text-amber-400'
+                        )}
+                        title={isStarred ? 'Remove from My Watchlist' : 'Add to My Watchlist'}
+                      >
+                        <Star className={cn('h-3.5 w-3.5', isStarred && 'fill-amber-400')} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 

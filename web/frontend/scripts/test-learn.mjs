@@ -219,6 +219,12 @@ describe('Metric registry', () => {
     has('components/studio/BenchmarkLab.tsx', ['latency_p50', 'parallel_speedup', 'paths_per_second']);
     has('components/studio/OptimizationLab.tsx', ['psr', 'dsr', 'expected_max_sharpe', 'sharpe_variance', 'num_trials']);
     has('components/studio/BacktestToPaperGap.tsx', ['slippage', 'timing_latency', 'slippage_drift', 'pnl_gap']);
+    has('components/studio/RiskCenter.tsx', ['gross_exposure', 'net_exposure']);
+    // Every registry metric is shown somewhere with its ⓘ.
+    const studio = files.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
+    for (const id of Object.keys(metricDefinitions)) {
+      assert.ok(new RegExp(`["']${id}["']`).test(studio), `${id} is in the registry but no component shows it`);
+    }
     has('components/studio/OverviewDashboard.tsx', ['gross_exposure_utilization', 'net_exposure_utilization', 'leverage_utilization', 'drawdown_utilization', 'daily_loss_utilization']);
   });
 

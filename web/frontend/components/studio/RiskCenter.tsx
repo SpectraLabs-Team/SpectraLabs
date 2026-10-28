@@ -1,6 +1,6 @@
 'use client';
 
-import { MetricLabel } from '@/components/ui/MetricInfo';
+import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 import { useState, useEffect, useCallback, useId } from 'react';
 import {
   ShieldAlert,
@@ -462,6 +462,7 @@ export function RiskCenter() {
                 <span className="text-2xl font-bold font-mono text-ink">
                   {formatCurrency(metrics?.gross_exposure ?? 0)}
                 </span>
+                <InfoTip metric="gross_exposure" label="Gross exposure" className="self-center" />
                 <span className="text-xs font-mono text-ink/40">
                   / {formatCurrency(metrics?.gross_exposure_limit ?? 1_000_000)}
                 </span>
@@ -493,6 +494,7 @@ export function RiskCenter() {
                 <span className="text-2xl font-bold font-mono text-ink">
                   {formatCurrency(metrics?.net_exposure ?? 0)}
                 </span>
+                <InfoTip metric="net_exposure" label="Net exposure" className="self-center" />
                 <span className="text-xs font-mono text-ink/40">
                   / {formatCurrency(metrics?.net_exposure_limit ?? 500_000)}
                 </span>

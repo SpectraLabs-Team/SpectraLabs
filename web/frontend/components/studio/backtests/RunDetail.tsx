@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Beaker, Copy, Download, ExternalLink, Fingerprint, GitFork, Layers, Pencil, Scale, Square } from 'lucide-react';
+import { Beaker, Copy, Download, ExternalLink, FileText, Fingerprint, GitFork, Layers, Pencil, Scale, Square } from 'lucide-react';
 import { ApiError, request } from '@/lib/api';
 import {
   cancelBacktest,
@@ -35,6 +35,7 @@ import { ago, cash, dash, int, pct, ratio, shortHash, signedPct, tone } from './
 import { StatusBadge } from './RunList';
 import { SurvivalLabPanel } from '../SurvivalLabPanel';
 import { BacktestToPaperGap } from '../BacktestToPaperGap';
+import { TearSheetModal } from '../TearSheetModal';
 
 type Row = [label: string, value: string, tone?: 'profit' | 'loss' | 'neutral', metric?: MetricId];
 
@@ -539,6 +540,7 @@ export function RunDetail({
   const [error, setError] = useState('');
   const [downloading, setDownloading] = useState<DownloadKind | null>(null);
   const [copied, setCopied] = useState(false);
+  const [tearSheetOpen, setTearSheetOpen] = useState(false);
 
   useEffect(() => {
     const ctl = new AbortController();
@@ -649,6 +651,17 @@ export function RunDetail({
             >
               <Copy className="h-3.5 w-3.5" /> {copied ? 'Copied' : b.id.slice(0, 8)}
             </button>
+            {b.status === 'succeeded' && b.summary && (
+              <button
+                type="button"
+                className="btn-secondary px-3 py-1.5 text-xs flex items-center gap-1.5 text-accent border-accent/30 hover:bg-accent/10"
+                onClick={() => setTearSheetOpen(true)}
+                title="Export executive tear-sheet PDF and audit reports"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                <span>Tear-Sheet & PDF</span>
+              </button>
+            )}
             {b.status === 'succeeded' && onAddToCompare && (
               <button
                 type="button"
@@ -717,6 +730,161 @@ export function RunDetail({
         <GlassCard className="p-5">
           <BacktestToPaperGap strategyId={b.request.strategy_version_id} />
         </GlassCard>
+      )}
+
+      {b.status === 'succeeded' && b.summary && (
+        <TearSheetModal
+          open={tearSheetOpen}
+          onClose={() => setTearSheetOpen(false)}
+          title="Quantitative Strategy Tear-Sheet"
+          subtitle={`${b.request.strategy ?? describeRequest(b.request, catalog)} · Started ${new Date(b.created_at).toLocaleDateString()}`}
+          reportType="Quantitative Backtest"
+          timestamp={new Date(b.created_at).toISOString()}
+          metadata={{
+            engine: 'Spectra Quantitative Backtest Engine',
+            engineVersion: '0.1.0',
+            commitSha: b.run_id ? b.run_id.slice(0, 8) : undefined,
+            seed: b.request.params?.seed != null ? String(b.request.params.seed) : undefined,
+            datasetOrBook: dataset ? `${dataset.dataset_name} v${dataset.version}` : (b.request.dataset_version_id ?? 'Market Dataset'),
+            duration: b.summary.run.wall_clock_seconds ? `${b.summary.run.wall_clock_seconds.toFixed(2)}s wall-clock` : undefined,
+          }}
+          sections={[
+            {
+              category: 'Return & Capital Dynamics',
+              items: [
+                {
+                  label: 'Total Return',
+                  value: signedPct(b.summary.metrics.total_return),
+                  sub: `${int(b.summary.metrics.periods)} trading periods`,
+                  tone: tone(b.summary.metrics.total_return),
+                },
+                {
+                  label: 'Compound Annual Growth (CAGR)',
+                  value: signedPct(b.summary.performance.cagr),
+                  sub: `Annualized σ ${pct(b.summary.metrics.annualized_volatility)}`,
+                  tone: tone(b.summary.performance.cagr),
+                },
+                {
+                  label: 'Initial Capital',
+                  value: cash(Number(b.summary.run.config.initial_cash), 0),
+                  sub: 'Starting cash',
+                },
+                {
+                  label: 'Final Equity',
+                  value: cash(b.summary.activity.final_equity, 0),
+                  sub: `Net profit ${cash(b.summary.performance.net_profit, 0)}`,
+                  tone: tone(b.summary.performance.net_profit),
+                },
+              ],
+            },
+            {
+              category: 'Risk-Adjusted Performance Ratios',
+              items: [
+                {
+                  label: 'Sharpe Ratio',
+                  value: ratio(b.summary.metrics.sharpe),
+                  sub: 'Annualized excess return / total risk',
+                },
+                {
+                  label: 'Sortino Ratio',
+                  value: ratio(b.summary.performance.sortino),
+                  sub: 'Excess return / downside deviation',
+                },
+                {
+                  label: 'Calmar Ratio',
+                  value: ratio(b.summary.performance.calmar),
+                  sub: 'CAGR / maximum drawdown',
+                },
+                {
+                  label: 'Maximum Drawdown',
+                  value: pct(b.summary.drawdown.max_drawdown),
+                  sub: `Longest underwater: ${int(b.summary.drawdown.longest_underwater_periods)} periods`,
+                  tone: 'loss',
+                },
+              ],
+            },
+            {
+              category: 'Trading Execution & Distribution',
+              items: [
+                {
+                  label: 'Total Completed Trades',
+                  value: int(b.summary.trades.count),
+                  sub: `${int(b.summary.activity.fill_count)} individual fills`,
+                },
+                {
+                  label: 'Win Rate',
+                  value: pct(b.summary.trades.win_rate, 1),
+                  sub: `Profit factor: ${ratio(b.summary.trades.profit_factor)}`,
+                },
+                {
+                  label: 'Payoff Ratio (Win / Loss)',
+                  value: ratio(b.summary.trades.payoff_ratio),
+                  sub: `Expectancy: ${cash(b.summary.trades.expectancy)}`,
+                },
+                {
+                  label: 'Commission & Fees Paid',
+                  value: cash(b.summary.activity.commission_paid, 2),
+                  sub: 'Transaction friction',
+                },
+              ],
+            },
+            {
+              category: 'Tail Risk & Statistical Moments',
+              items: [
+                {
+                  label: `Value at Risk (${pct(b.summary.tail.level, 0)})`,
+                  value: pct(b.summary.tail.var),
+                  sub: 'Historical simulation VaR',
+                  tone: 'loss',
+                },
+                {
+                  label: 'Expected Shortfall (CVaR)',
+                  value: pct(b.summary.tail.expected_shortfall),
+                  sub: 'Average loss in tail regime',
+                  tone: 'loss',
+                },
+                {
+                  label: 'Return Skewness',
+                  value: ratio(b.summary.performance.skewness),
+                  sub: 'Asymmetry of return distribution',
+                },
+                {
+                  label: 'Excess Kurtosis',
+                  value: ratio(b.summary.performance.excess_kurtosis),
+                  sub: 'Fat-tail indicator',
+                },
+              ],
+            },
+          ]}
+          table={
+            b.summary.strategies?.list && b.summary.strategies.list.length > 0
+              ? {
+                  title: 'Strategy Sub-Component Allocation & Attribution',
+                  headers: ['Strategy', 'Allocation', 'Final Equity', 'Return', 'Contribution', 'Sharpe', 'Max DD'],
+                  rows: b.summary.strategies.list.map((s) => [
+                    catalog?.strategies.find((strat) => strat.name === s.name)?.label ?? s.name,
+                    cash(s.allocation, 0),
+                    cash(s.final_equity, 0),
+                    signedPct(s.total_return),
+                    signedPct(s.contribution),
+                    ratio(s.sharpe),
+                    pct(s.max_drawdown),
+                  ]),
+                }
+              : undefined
+          }
+          rawJsonData={b.summary}
+          rawCsvData={
+            b.summary.strategies?.list
+              ? [
+                  'Strategy,Allocation,Final Equity,Total Return,Contribution,Sharpe,Max Drawdown',
+                  ...b.summary.strategies.list.map(
+                    (s) => `"${s.name}",${s.allocation},${s.final_equity},${s.total_return},${s.contribution},${s.sharpe},${s.max_drawdown}`
+                  ),
+                ].join('\n')
+              : undefined
+          }
+        />
       )}
     </div>
   );

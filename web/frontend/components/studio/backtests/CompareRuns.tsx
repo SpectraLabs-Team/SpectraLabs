@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Download,
   Eye,
+  FileText,
   Layers,
   Percent,
   RefreshCw,
@@ -46,6 +47,7 @@ import { Badge, GlassCard, Spinner } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/StudioToast';
 import { cn, formatCurrency } from '@/lib/utils';
 import { axisDate, cash, compactCash, fullDate, int, pct, ratio, signedPct, tone } from './format';
+import { TearSheetModal } from '../TearSheetModal';
 
 const PALETTE = [
   { stroke: '#06B6D4', bg: 'bg-cyan-500/10', text: 'text-cyan-400', border: 'border-cyan-500/30' },
@@ -78,6 +80,7 @@ export function CompareRuns({ runIds, catalog, onSelectRun, onRemoveRun, onClose
   const [loading, setLoading] = useState(true);
   const [runs, setRuns] = useState<LoadedRun[]>([]);
   const [chartMode, setChartMode] = useState<'normalized' | 'absolute'>('normalized');
+  const [tearSheetOpen, setTearSheetOpen] = useState(false);
 
   // Load all selected runs and their equity series in parallel
   const loadRuns = useCallback(async () => {
@@ -266,6 +269,15 @@ export function CompareRuns({ runIds, catalog, onSelectRun, onRemoveRun, onClose
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTearSheetOpen(true)}
+              disabled={validRuns.length === 0}
+              className="btn-secondary px-3 py-1.5 text-xs text-accent border-accent/30 hover:bg-accent/10"
+              title="Export comparative analysis tear-sheet and PDF report"
+            >
+              <FileText className="h-3.5 w-3.5" /> Tear-Sheet & PDF
+            </button>
             <button
               type="button"
               onClick={handleExportCsv}

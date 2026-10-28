@@ -7,6 +7,7 @@ import {
   BarChart3,
   Cpu,
   Download,
+  FileText,
   Info,
   Layers,
   LineChart as LineChartIcon,
@@ -48,6 +49,7 @@ import { useToast } from '@/components/ui/StudioToast';
 import { LossHistogram } from './LossHistogram';
 import { usePortfolio, type RiskRun } from './PortfolioContext';
 import { StressPanel } from './StressPanel';
+import { TearSheetModal } from './TearSheetModal';
 
 const SIMS = [10_000, 25_000, 50_000, 100_000, 250_000, 500_000, 1_000_000];
 const HORIZON_PRESETS = [
@@ -163,6 +165,7 @@ export function RiskLab() {
   const setAuto = (f: (a: boolean) => boolean) => setRiskParams((p) => ({ auto: f(p.auto) }));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [tearSheetOpen, setTearSheetOpen] = useState(false);
   const reqId = useRef(0);
 
   // M7: Regime detection & GARCH states
@@ -273,7 +276,13 @@ export function RiskLab() {
         model: { value: results.var.portfolio_value, volatility: results.var.model_volatility, horizonDays: Math.round(results.var.horizon_years * 252) },
       }
     : null;
-  const runGross = useMemo(() => (results ? portfolioStats(parseCsv(results.csv).positions).grossExposure : 0), [results]);
+  const runBook = useMemo(() => {
+    if (!results) return null;
+    const pos = parseCsv(results.csv).positions;
+    return { positions: pos, stats: portfolioStats(pos) };
+  }, [results]);
+  const runGross = runBook?.stats.grossExposure ?? 0;
+  const runNet = runBook?.stats.netExposure ?? 0;
   // Closed-form value of the same model and inputs: a sanity check on the Monte Carlo estimate.
   const mcErr = results && ran ? results.var.value / analyticVaR(ran.model, ran.confidence) - 1 : null;
   const label = ran ? confidenceLabel(ran.confidence) : confidenceLabel(confidence);
@@ -414,9 +423,23 @@ export function RiskLab() {
             </p>
           )}
           {results && (
-            <button type="button" onClick={() => exportRiskReport(results, fresh)} className="btn-ghost -mt-2 w-full justify-center border border-ink/10 text-xs">
-              <Download className="h-3.5 w-3.5" /> Export Risk Report
-            </button>
+            <div className="flex gap-2 -mt-2">
+              <button
+                type="button"
+                onClick={() => setTearSheetOpen(true)}
+                className="btn-secondary flex-1 justify-center text-xs font-medium border-accent/30 text-accent hover:bg-accent/10"
+              >
+                <FileText className="h-3.5 w-3.5" /> Tear-Sheet & PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => exportRiskReport(results, fresh)}
+                className="btn-ghost px-2.5 border border-ink/10 text-xs"
+                title="Download audit JSON"
+              >
+                <Download className="h-3.5 w-3.5" /> JSON
+              </button>
+            </div>
           )}
           {error && <ErrorNote>{error}</ErrorNote>}
         </div>
@@ -1089,6 +1112,139 @@ export function RiskLab() {
 
         </div>
       </div>
+
+      {results && runBook && (
+        <TearSheetModal
+          open={tearSheetOpen}
+          onClose={() => setTearSheetOpen(false)}
+          title="Monte Carlo Tail Risk Audit Report"
+          subtitle={`${runBook.positions.length} portfolio positions · ${results.simulations.toLocaleString()} simulated paths · ${Math.round(results.var.horizon_years * 252)}d horizon`}
+          reportType="Risk Audit"
+          timestamp={new Date(results.at).toISOString()}
+          metadata={{
+            engine: results.var.backend ?? 'AVX-512 / Rayon Engine',
+            engineVersion: results.var.library_version ?? '0.1.0',
+            commitSha: results.var.git_commit,
+            seed: results.var.seed ? String(results.var.seed) : undefined,
+            datasetOrBook: `${runBook.positions.length} Active Positions`,
+            duration: `${results.var.compute_ms.toFixed(1)} ms compute (${results.var.total_ms.toFixed(1)} ms wall)`,
+          }}
+          sections={[
+            {
+              category: 'Value at Risk & Capital Protection',
+              items: [
+                {
+                  label: `Value at Risk (${confidenceLabel(results.var.confidence)})`,
+                  value: formatCurrency(results.var.value),
+                  sub: `${formatPercent(results.var.value / results.var.portfolio_value)} of total book`,
+                  tone: 'loss',
+                },
+                {
+                  label: 'Conditional VaR (CVaR / ES)',
+                  value: formatCurrency(results.cvar.value),
+                  sub: 'Expected loss beyond VaR threshold',
+                  tone: 'loss',
+                },
+                {
+                  label: 'Model Volatility',
+                  value: formatPercent(results.var.model_volatility),
+                  sub: `Annualized σ (std dev ${formatCurrency(results.vol.value)})`,
+                },
+                {
+                  label: 'Portfolio Equity',
+                  value: formatCurrency(results.var.portfolio_value),
+                  sub: `Gross ${formatCurrency(runGross)}`,
+                },
+              ],
+            },
+            {
+              category: 'Concentration & Exposure Analytics',
+              items: [
+                {
+                  label: 'Gross Exposure',
+                  value: formatCurrency(runGross),
+                  sub: `Net: ${formatCurrency(runNet)}`,
+                },
+                {
+                  label: 'Net Exposure',
+                  value: formatCurrency(runNet),
+                  sub: `${formatPercent(runNet / Math.max(1, results.var.portfolio_value))} of equity`,
+                },
+                {
+                  label: 'Herfindahl-Hirschman (HHI)',
+                  value: runBook.stats.hhi.toFixed(4),
+                  sub: runBook.stats.hhi > 0.25 ? 'High concentration' : 'Well diversified',
+                },
+                {
+                  label: 'Effective Number of Assets',
+                  value: runBook.stats.effectiveN.toFixed(1),
+                  sub: `Out of ${runBook.positions.length} holdings`,
+                },
+              ],
+            },
+            ...(results.var.evt_var != null && results.var.evt_var > 0
+              ? [
+                  {
+                    category: 'Extreme Value Theory (EVT Heavy Tails)',
+                    items: [
+                      {
+                        label: 'EVT Generalized Pareto VaR',
+                        value: formatCurrency(results.var.evt_var),
+                        sub: 'Peaks-over-threshold EVT fit',
+                        tone: 'loss' as const,
+                      },
+                      {
+                        label: 'EVT Expected Shortfall',
+                        value: results.var.evt_cvar ? formatCurrency(results.var.evt_cvar) : '—',
+                        sub: 'Heavy-tail conditioned expected loss',
+                        tone: 'loss' as const,
+                      },
+                      {
+                        label: 'Tail Shape Parameter (ξ)',
+                        value: results.var.evt_tail_index ? results.var.evt_tail_index.toFixed(3) : '—',
+                        sub: results.var.evt_tail_index && results.var.evt_tail_index > 0 ? 'Heavy-tailed regime' : 'Thin tail',
+                      },
+                      {
+                        label: 'Tail Cutoff Threshold',
+                        value: results.var.evt_threshold ? formatCurrency(results.var.evt_threshold) : '—',
+                        sub: 'Threshold for EVT tail estimation',
+                      },
+                    ],
+                  },
+                ]
+              : []),
+          ]}
+          table={{
+            title: 'Constituent Positions Breakdown',
+            headers: ['Symbol', 'Shares / Units', 'Market Price', 'Position Value', 'Weight %'],
+            rows: runBook.positions.map((p) => {
+              const val = p.shares * p.price;
+              const weight = results.var.portfolio_value > 0 ? (val / results.var.portfolio_value) * 100 : 0;
+              return [
+                p.symbol,
+                p.shares.toLocaleString(),
+                formatCurrency(p.price),
+                formatCurrency(val),
+                `${weight.toFixed(1)}%`,
+              ];
+            }),
+          }}
+          rawJsonData={{
+            reportType: 'spectra-labs.risk-report',
+            timestamp: new Date(results.at).toISOString(),
+            portfolioValue: results.var.portfolio_value,
+            modelVolatility: results.var.model_volatility,
+            confidence: results.var.confidence,
+            simulations: results.var.simulations_run,
+            valueAtRisk: results.var.value,
+            conditionalVaR: results.cvar.value,
+            hhi: runBook.stats.hhi,
+            effectiveN: runBook.stats.effectiveN,
+            positions: runBook.positions,
+          }}
+          rawCsvData={results.csv}
+        />
+      )}
 
     </div>
   );

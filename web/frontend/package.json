@@ -16,7 +16,7 @@
     "admin": "node scripts/admin.mjs",
     "secrets:rotate": "node scripts/secrets-rotate.mjs",
     "audit:verify": "node scripts/audit-verify.mjs",
-    "test": "node scripts/test-auth.mjs && node scripts/test-alpaca-paper.mjs && node scripts/test-learn.mjs && node scripts/test-workspaces.mjs && node scripts/test-activity.mjs && node scripts/test-strategies.mjs && node scripts/test-backtest-compare.mjs && node scripts/test-tear-sheet.mjs && node scripts/test-csp-hardening.mjs",
+    "test": "node scripts/test-auth.mjs && node scripts/test-alpaca-paper.mjs && node scripts/test-learn.mjs && node scripts/test-workspaces.mjs && node scripts/test-activity.mjs && node scripts/test-strategies.mjs && node scripts/test-backtest-compare.mjs && node scripts/test-tear-sheet.mjs && node scripts/test-paper-watchlist.mjs && node scripts/test-csp-hardening.mjs",
     "test:learn": "node scripts/test-learn.mjs",
     "test:alpaca": "node scripts/test-alpaca-paper.mjs",
     "test:auth-fe": "node scripts/test-frontend-auth.mjs",

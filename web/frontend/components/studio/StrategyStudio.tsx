@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
+  BookOpen,
   CheckCircle2,
   ChevronRight,
   Code2,
@@ -21,6 +22,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
+import { COMMON_STRATEGY_TEMPLATES, type CommonStrategyTemplate } from './commonStrategies';
+import { CommonStrategiesModal } from './CommonStrategiesModal';
 import {
   createParameterSet,
   createStrategy,
@@ -89,6 +92,8 @@ export function StrategyStudio() {
   // Modals / Dialogs
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showNewStrategyModal, setShowNewStrategyModal] = useState(false);
+  const [showCommonStrategiesModal, setShowCommonStrategiesModal] = useState(false);
+  const [selectedTemplateForNew, setSelectedTemplateForNew] = useState<CommonStrategyTemplate | null>(null);
   const [newStrategyName, setNewStrategyName] = useState('');
   const [newStrategyDesc, setNewStrategyDesc] = useState('');
   const [isSavingVersion, setIsSavingVersion] = useState(false);
@@ -321,6 +326,28 @@ export function StrategyStudio() {
     }
   };
 
+  const handleSelectTemplate = async (template: CommonStrategyTemplate, mode: 'load' | 'create') => {
+    if (mode === 'load') {
+      setCode(template.code);
+      setParameters(template.defaultParams);
+      setActiveSubTab('code');
+    } else {
+      try {
+        const strat = await createStrategy({
+          name: template.name,
+          description: template.description,
+        });
+        setStrategies((prev) => [strat, ...prev]);
+        setSelectedStrategy(strat);
+        setCode(template.code);
+        setParameters(template.defaultParams);
+        await saveDraft(strat.id, template.code, template.defaultParams).catch(() => {});
+      } catch (e) {
+        alert(e instanceof Error ? e.message : 'Failed to create strategy from template.');
+      }
+    }
+  };
+
   // Handle Create New Strategy
   const handleCreateStrategy = async () => {
     if (!newStrategyName.trim()) return;
@@ -331,7 +358,13 @@ export function StrategyStudio() {
       });
       setStrategies((prev) => [strat, ...prev]);
       setSelectedStrategy(strat);
+      if (selectedTemplateForNew) {
+        setCode(selectedTemplateForNew.code);
+        setParameters(selectedTemplateForNew.defaultParams);
+        await saveDraft(strat.id, selectedTemplateForNew.code, selectedTemplateForNew.defaultParams).catch(() => {});
+      }
       setShowNewStrategyModal(false);
+      setSelectedTemplateForNew(null);
       setNewStrategyName('');
       setNewStrategyDesc('');
     } catch (e) {
@@ -412,6 +445,13 @@ export function StrategyStudio() {
                   className="inline-flex items-center gap-1 rounded-lg border border-ink/15 bg-ink/5 px-2.5 py-1.5 text-xs font-medium text-ink transition hover:bg-ink/10"
                 >
                   <Plus className="h-3.5 w-3.5" /> New Strategy
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCommonStrategiesModal(true)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-1.5 text-xs font-semibold text-accent transition hover:bg-accent/20"
+                >
+                  <BookOpen className="h-3.5 w-3.5" /> Common Strategies
                 </button>
               </div>
               <p className="mt-1 text-xs text-ink/60">
@@ -543,11 +583,29 @@ export function StrategyStudio() {
           <div className="space-y-4 lg:col-span-2">
             <div className="overflow-hidden rounded-xl border border-ink/15 bg-ink/[0.02] shadow-inner dark:bg-black/30">
               {/* Editor Bar */}
-              <div className="flex items-center justify-between border-b border-ink/10 bg-ink/[0.04] px-4 py-2 text-xs font-mono text-ink/60">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink/10 bg-ink/[0.04] px-4 py-2 text-xs font-mono text-ink/60">
                 <span className="flex items-center gap-2 font-medium">
                   <span className="h-2 w-2 rounded-full bg-emerald-500" /> main.dsl (Restricted Safe AST)
                 </span>
-                <span>{linesCount} lines · utf-8</span>
+                <div className="flex items-center gap-2.5">
+                  <select
+                    onChange={(e) => {
+                      const tmpl = COMMON_STRATEGY_TEMPLATES.find((t) => t.id === e.target.value);
+                      if (tmpl) handleSelectTemplate(tmpl, 'load');
+                      e.target.value = '';
+                    }}
+                    defaultValue=""
+                    className="rounded-md border border-ink/10 bg-panel px-2 py-0.5 text-[11px] font-sans text-ink/80 transition hover:border-accent/40 focus:outline-none"
+                  >
+                    <option value="" disabled>Load Strategy Template…</option>
+                    {COMMON_STRATEGY_TEMPLATES.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.category})
+                      </option>
+                    ))}
+                  </select>
+                  <span>{linesCount} lines · utf-8</span>
+                </div>
               </div>
 
               {/* Code input with line numbers */}
@@ -980,9 +1038,57 @@ export function StrategyStudio() {
       {/* New Strategy Modal */}
       {showNewStrategyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-ink/15 bg-white p-6 shadow-2xl dark:bg-zinc-900">
+          <div className="w-full max-w-lg rounded-2xl border border-ink/15 bg-panel p-6 shadow-2xl">
             <h3 className="text-base font-bold text-ink">Create New Strategy</h3>
-            <div className="mt-4 space-y-3">
+            <p className="mt-1 text-xs text-ink/60">
+              Start with a battle-tested common strategy template or build your own custom rule set.
+            </p>
+
+            <div className="mt-4 space-y-3.5">
+              <div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-ink/60">
+                  Choose Template (optional)
+                </label>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedTemplateForNew(null);
+                      setNewStrategyName('');
+                      setNewStrategyDesc('');
+                    }}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                      !selectedTemplateForNew
+                        ? 'bg-accent/20 text-accent font-semibold'
+                        : 'bg-ink/[0.04] text-ink/70 hover:text-ink'
+                    }`}
+                  >
+                    Blank Template
+                  </button>
+                  {COMMON_STRATEGY_TEMPLATES.map((tmpl) => {
+                    const isSel = selectedTemplateForNew?.id === tmpl.id;
+                    return (
+                      <button
+                        key={tmpl.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTemplateForNew(tmpl);
+                          setNewStrategyName(tmpl.name);
+                          setNewStrategyDesc(tmpl.description);
+                        }}
+                        className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                          isSel
+                            ? 'bg-accent/20 text-accent font-semibold'
+                            : 'bg-ink/[0.04] text-ink/70 hover:text-ink'
+                        }`}
+                      >
+                        {tmpl.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div>
                 <label className="text-xs font-medium text-ink">Strategy Name</label>
                 <input
@@ -1008,7 +1114,10 @@ export function StrategyStudio() {
             <div className="mt-6 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setShowNewStrategyModal(false)}
+                onClick={() => {
+                  setShowNewStrategyModal(false);
+                  setSelectedTemplateForNew(null);
+                }}
                 className="rounded-lg border border-ink/15 px-3 py-1.5 text-xs font-medium text-ink/70 hover:bg-ink/5"
               >
                 Cancel
@@ -1025,6 +1134,13 @@ export function StrategyStudio() {
           </div>
         </div>
       )}
+
+      {/* Common Strategies Modal */}
+      <CommonStrategiesModal
+        isOpen={showCommonStrategiesModal}
+        onClose={() => setShowCommonStrategiesModal(false)}
+        onSelectTemplate={handleSelectTemplate}
+      />
 
       {/* Quick Run Backtest Modal */}
       {showRunModal && (

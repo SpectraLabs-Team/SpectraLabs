@@ -15,6 +15,7 @@ import { Badge, ErrorNote, GlassCard } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/StudioToast';
 import { PresetMenu } from './PresetMenu';
 import { usePortfolio } from './PortfolioContext';
+import { AddPositionModal } from './AddPositionModal';
 
 const PALETTE = ['#22D3EE', '#38BDF8', '#818CF8', '#34D399', '#F472B6', '#FBBF24', '#A78BFA', '#2DD4BF'];
 
@@ -64,6 +65,7 @@ export function PortfolioStudio() {
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'value', dir: -1 });
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState('');
+  const [addModalOpen, setAddModalOpen] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [engineHhi, setEngineHhi] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -101,10 +103,22 @@ export function PortfolioStudio() {
     setPositions(next, 'edited');
   };
   const remove = (i: number) => setPositions(positions.filter((_, j) => j !== i), 'edited');
-  const add = () => {
-    let n = positions.length + 1;
-    while (positions.some((p) => p.symbol === `NEW${n}`)) n++;
-    setPositions([...positions, { symbol: `NEW${n}`, quantity: 100, price: 100 }], 'edited');
+  const handleAddPosition = (pos: Position) => {
+    const existingIndex = positions.findIndex((p) => p.symbol.toUpperCase() === pos.symbol.toUpperCase());
+    if (existingIndex >= 0) {
+      const next = [...positions];
+      next[existingIndex] = {
+        ...next[existingIndex],
+        quantity: next[existingIndex].quantity + pos.quantity,
+        price: pos.price,
+        volatility: pos.volatility ?? next[existingIndex].volatility,
+      };
+      setPositions(next, 'edited');
+      success('Position updated', `Added ${pos.quantity} shares of ${pos.symbol} at ${formatCurrency(pos.price)}`);
+    } else {
+      setPositions([...positions, pos], 'edited');
+      success('Position added', `Added ${pos.symbol} (${pos.quantity} @ ${formatCurrency(pos.price)}) to portfolio`);
+    }
   };
 
   const onFile = async (f: File | undefined) => {
@@ -315,7 +329,7 @@ export function PortfolioStudio() {
             <tfoot>
               <tr className="text-[12px]">
                 <td className="px-3 py-3" colSpan={4}>
-                  <button type="button" onClick={add} className="btn-ghost">
+                  <button type="button" onClick={() => setAddModalOpen(true)} className="btn-ghost">
                     <Plus className="h-3.5 w-3.5" /> Add position
                   </button>
                 </td>
@@ -360,6 +374,13 @@ export function PortfolioStudio() {
             <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
               <button
                 type="button"
+                className="btn-primary px-4 py-2 text-xs"
+                onClick={() => setAddModalOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5" /> Pick & Add Stock
+              </button>
+              <button
+                type="button"
                 className="btn-secondary px-4 py-2 text-xs"
                 onClick={() => {
                   setErrors([]);
@@ -389,6 +410,14 @@ export function PortfolioStudio() {
           </div>
         )}
       </GlassCard>
+
+      <AddPositionModal
+        isOpen={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onAdd={handleAddPosition}
+        existingPositions={positions}
+        currentNetValue={stats.netValue}
+      />
     </div>
   );
 }

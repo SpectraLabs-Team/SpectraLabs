@@ -5,12 +5,22 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * A value that would be displayed as zero, returned as +0. Without this, -0 and small negatives
+ * such as -0.004 format as "-$0", "-0.00%" or "-0".
+ */
+export function zeroIfRoundsToZero(value: number, decimals: number): number {
+  return Math.abs(value) < 0.5 * 10 ** -decimals ? 0 : value;
+}
+
 export function formatNumber(value: number, decimals = 2): string {
+  value = zeroIfRoundsToZero(value, decimals);
   return value.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
 export function formatCurrency(value: number, decimals = 0): string {
   if (!Number.isFinite(value)) return '—';
+  value = zeroIfRoundsToZero(value, decimals);
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -21,6 +31,7 @@ export function formatCurrency(value: number, decimals = 0): string {
 
 /** $478.5k, $1.24M */
 export function formatCompactCurrency(value: number): string {
+  value = zeroIfRoundsToZero(value, 1);
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -31,7 +42,7 @@ export function formatCompactCurrency(value: number): string {
 
 export function formatPercent(value: number, decimals = 2): string {
   if (!Number.isFinite(value)) return '—';
-  return `${(value * 100).toFixed(decimals)}%`;
+  return `${zeroIfRoundsToZero(value * 100, decimals).toFixed(decimals)}%`;
 }
 
 export function formatDuration(ms: number): string {
@@ -43,6 +54,7 @@ export function formatDuration(ms: number): string {
 
 /** 32.1M, 950k */
 export function formatCompact(value: number, digits = 1): string {
+  value = zeroIfRoundsToZero(value, digits);
   return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: digits }).format(value);
 }
 

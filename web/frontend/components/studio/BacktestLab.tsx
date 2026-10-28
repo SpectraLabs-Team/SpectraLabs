@@ -6,6 +6,7 @@ import { LineChart, RefreshCw } from 'lucide-react';
 import { getCatalog, listDatasets, type Backtest, type Catalog, type DatasetVersion, type StoredRequest } from '@/lib/backtests';
 import { ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { BacktestForm, type Prefill } from './backtests/BacktestForm';
+import { CompareRuns } from './backtests/CompareRuns';
 import { RunDetail } from './backtests/RunDetail';
 import { RunList } from './backtests/RunList';
 
@@ -26,6 +27,17 @@ export function BacktestLab() {
   const [selected, setSelected] = useState<string | null>(() => {
     const r = params.get('run');
     return r && UUID.test(r) ? r : null;
+  });
+  const [compareIds, setCompareIds] = useState<string[]>(() => {
+    const c = params.get('compare');
+    if (!c) return [];
+    return c.split(',').filter((id) => UUID.test(id)).slice(0, 4);
+  });
+  const [isComparing, setIsComparing] = useState<boolean>(() => {
+    const c = params.get('compare');
+    if (!c) return false;
+    const ids = c.split(',').filter((id) => UUID.test(id));
+    return ids.length >= 2;
   });
   const [refreshKey, setRefreshKey] = useState(0);
   const [prefill, setPrefill] = useState<Prefill | null>(null);
@@ -64,14 +76,63 @@ export function BacktestLab() {
 
   const select = useCallback((id: string) => {
     setSelected(id);
+    setIsComparing(false);
     try {
       const url = new URL(window.location.href);
       url.searchParams.set('tab', 'backtests');
       url.searchParams.set('run', id);
+      url.searchParams.delete('compare');
       window.history.replaceState(null, '', url.toString());
     } catch {
       /* the URL is a convenience */
     }
+  }, []);
+
+  const toggleCompareId = useCallback((id: string) => {
+    setCompareIds((prev) => {
+      const exists = prev.includes(id);
+      const next = exists ? prev.filter((x) => x !== id) : prev.length < 4 ? [...prev, id] : prev;
+      return next;
+    });
+  }, []);
+
+  const openComparison = useCallback(() => {
+    if (compareIds.length >= 2) {
+      setIsComparing(true);
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', 'backtests');
+        url.searchParams.set('compare', compareIds.join(','));
+        url.searchParams.delete('run');
+        window.history.replaceState(null, '', url.toString());
+      } catch {
+        /* url is a convenience */
+      }
+      requestAnimationFrame(() => detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    }
+  }, [compareIds]);
+
+  const clearComparison = useCallback(() => {
+    setCompareIds([]);
+    setIsComparing(false);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('compare');
+      if (selected) url.searchParams.set('run', selected);
+      window.history.replaceState(null, '', url.toString());
+    } catch {
+      /* url is a convenience */
+    }
+  }, [selected]);
+
+  const removeCompareId = useCallback((id: string) => {
+    setCompareIds((prev) => {
+      const next = prev.filter((x) => x !== id);
+      if (next.length < 2) {
+        setIsComparing(false);
+      }
+      return next;
+    });
   }, []);
 
   const created = (b: Backtest) => {
@@ -114,13 +175,41 @@ export function BacktestLab() {
         </div>
         {/* Desktop: the run list stays in view beside the long form and scrolls on its own (same rule as the Risk Lab panel). */}
         <div className="min-w-0 lg:sticky lg:top-20 lg:self-start">
-          <RunList catalog={catalog} selectedId={selected} onSelect={select} refreshKey={refreshKey} />
+          <RunList
+            catalog={catalog}
+            selectedId={selected}
+            onSelect={select}
+            refreshKey={refreshKey}
+            compareIds={compareIds}
+            onToggleCompareId={toggleCompareId}
+            isComparing={isComparing}
+            onOpenComparison={openComparison}
+            onClearComparison={clearComparison}
+          />
         </div>
       </div>
 
       <div ref={detailRef} data-tour="backtest-results" className="scroll-mt-20">
-        {selected ? (
-          <RunDetail key={selected} backtestId={selected} catalog={catalog} datasets={datasets} canRun={canRun} onRerun={rerun} onChanged={changed} />
+        {isComparing && compareIds.length >= 2 ? (
+          <CompareRuns
+            runIds={compareIds}
+            catalog={catalog}
+            onSelectRun={(id) => select(id)}
+            onRemoveRun={removeCompareId}
+            onClose={() => setIsComparing(false)}
+          />
+        ) : selected ? (
+          <RunDetail
+            key={selected}
+            backtestId={selected}
+            catalog={catalog}
+            datasets={datasets}
+            canRun={canRun}
+            onRerun={rerun}
+            onChanged={changed}
+            onAddToCompare={toggleCompareId}
+            isCompared={compareIds.includes(selected)}
+          />
         ) : (
           <GlassCard className="flex min-h-[160px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-ink/50">
             <LineChart className="h-5 w-5 text-ink/30" />

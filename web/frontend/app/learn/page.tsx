@@ -46,9 +46,6 @@ export default function LearnHome() {
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-[13px]">
           <TourLauncher />
-          <Link href="/learn/metrics" className="btn-ghost text-[13px]">
-            <Gauge className="h-3.5 w-3.5" /> Metric library
-          </Link>
         </div>
       </section>
 

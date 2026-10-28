@@ -3,9 +3,11 @@
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BookOpen, Briefcase, ChevronsLeft, ChevronsRight, Cpu, Database, FileCode2, LayoutDashboard, LineChart, Lock, LogOut, Menu, PlugZap, ShieldAlert, ShieldCheck, Sliders, TrendingUp, X } from 'lucide-react';
+import { BookOpen, Briefcase, ChevronsLeft, ChevronsRight, Compass, Cpu, Database, FileCode2, LayoutDashboard, LineChart, Lock, LogOut, Menu, PlugZap, ShieldAlert, ShieldCheck, Sliders, TrendingUp, X } from 'lucide-react';
 import { RolePill } from '@/components/landing/Header';
 import { HelpMenu } from '@/components/onboarding/HelpMenu';
+import { useTour } from '@/components/onboarding/OnboardingTour';
+import { SignOutConfirmModal } from '@/components/auth/SignOutConfirmModal';
 import { MetricLabel } from '@/components/ui/MetricInfo';
 import { StatusPills } from '@/components/ui/StatusPills';
 import { Logo } from '@/components/ui/primitives';
@@ -38,6 +40,7 @@ const COLLAPSE_KEY = 'spectra-sidebar-collapsed';
 function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: StudioTab; onTab: (t: StudioTab) => void; collapsed: boolean; onCollapse?: () => void; onNavigate?: () => void }) {
   const { account, paper, engine } = usePortfolio();
   const { user } = useAuth();
+  const { startTour } = useTour();
   const levPct = Math.min(1, account.grossLeverage / Math.max(paper.leverageLimit, 1e-9));
   const online = engine.status === 'online';
 
@@ -183,6 +186,19 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
             <BookOpen className="h-4 w-4 shrink-0" />
             {!collapsed && <span className="leading-tight">Learning Center</span>}
           </Link>
+          <button
+            type="button"
+            onClick={() => {
+              onNavigate?.();
+              startTour();
+            }}
+            data-tour="nav-tour"
+            title={collapsed ? 'Guided Tour' : undefined}
+            className={cn('mt-1.5 flex w-full items-center gap-3 rounded-lg border border-dashed border-accent/20 bg-accent/[0.02] px-3 py-2 text-left text-[13px] text-accent/80 transition-colors hover:border-accent/40 hover:bg-accent/[0.06] hover:text-accent', collapsed && 'justify-center px-0')}
+          >
+            <Compass className="h-4 w-4 shrink-0 text-accent" />
+            {!collapsed && <span className="leading-tight">Guided Tour</span>}
+          </button>
         </nav>
       </div>
 
@@ -208,6 +224,7 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
   const { stats, positions, source, engine } = usePortfolio();
   const { user, logout } = useAuth();
   const signOut = () => logout('/');
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const current = TABS.find((t) => t.id === tab)!;
@@ -283,13 +300,19 @@ export function StudioShell({ tab, onTab, children }: { tab: StudioTab; onTab: (
             )}
             <button
               type="button"
-              onClick={signOut}
+              onClick={() => setShowSignOutConfirm(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-ink/15 bg-ink/[0.03] px-3 py-1.5 text-[12.5px] font-semibold text-ink/80 transition hover:border-loss/40 hover:bg-loss/10 hover:text-loss"
             >
               <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Sign Out</span>
             </button>
           </div>
         </header>
+
+        <SignOutConfirmModal
+          isOpen={showSignOutConfirm}
+          onClose={() => setShowSignOutConfirm(false)}
+          onConfirm={signOut}
+        />
 
         {engine.status === 'offline' && (
           <div className="px-4 pt-4 sm:px-6">

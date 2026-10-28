@@ -1,6 +1,8 @@
+'use client';
+
 import Link from 'next/link';
-import { BookOpen, ChevronRight, Clock, Cpu, FlaskConical, Gauge, TrendingUp, Workflow } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { BookOpen, ChevronRight, ChevronsLeft, ChevronsRight, Clock, Cpu, FlaskConical, Gauge, PanelLeftClose, PanelLeftOpen, TrendingUp, Workflow } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Footer } from '@/components/landing/Footer';
 import { Header } from '@/components/landing/Header';
 import { CATEGORIES, lessonPath, lessonsIn, readingMinutes, type Category, type CategoryId, type Lesson, type Level } from '@/lib/learn';
@@ -33,12 +35,16 @@ export function ReadingTime({ minutes, className }: { minutes: number; className
 
 /** Page frame for every /learn page: the site header and footer around the content. */
 export function LearnFrame({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, []);
+
   return (
     <>
       <Header />
       <div className="relative min-h-screen">
         <div aria-hidden className="bg-dot-grid pointer-events-none absolute inset-x-0 top-0 h-[480px] opacity-50 mask-fade-b" />
-        <main id="learn-main" className="relative mx-auto max-w-[1320px] px-4 pb-20 pt-24 sm:px-8">
+        <main id="learn-main" className="relative mx-auto max-w-[1360px] px-4 pb-20 pt-20 sm:px-6 lg:px-8">
           {children}
         </main>
       </div>
@@ -132,15 +138,66 @@ export function LearnNav({ current, currentSlug }: { current?: CategoryId; curre
   );
 }
 
-/** Desktop: sticky side nav. Mobile: a collapsible "Browse lessons" panel above the content. */
+const COLLAPSE_KEY = 'spectra-learn-nav-collapsed';
+
+/** Desktop: sticky collapsible side nav with hide/show options. Mobile: collapsible "Browse lessons" panel. */
 export function WithLearnNav({ current, currentSlug, children }: { current?: CategoryId; currentSlug?: string; children: ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(COLLAPSE_KEY) === '1');
+    } catch {}
+  }, []);
+
+  const toggle = () => {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(COLLAPSE_KEY, next ? '1' : '0');
+      } catch {}
+      return next;
+    });
+  };
+
   return (
-    <div className="lg:grid lg:grid-cols-[250px_minmax(0,1fr)] lg:gap-10">
-      <aside className="hidden lg:block">
-        <div className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pb-6 pr-1">
-          <LearnNav current={current} currentSlug={currentSlug} />
+    <div className={cn('relative', collapsed ? 'block w-full' : 'lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-8')}>
+      {/* Desktop sidebar */}
+      {!collapsed ? (
+        <aside className="hidden lg:block">
+          <div className="sticky top-20 max-h-[calc(100vh-6rem)] overflow-y-auto pb-6 pr-1">
+            <div className="mb-2 flex items-center justify-between border-b border-ink/[0.06] pb-2 px-1">
+              <span className="font-mono text-[10.5px] uppercase tracking-wider text-ink/45">Navigation</span>
+              <button
+                type="button"
+                onClick={toggle}
+                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-ink/50 transition hover:bg-ink/5 hover:text-ink"
+                title="Hide sidebar"
+                aria-label="Hide sidebar"
+              >
+                <PanelLeftClose className="h-3.5 w-3.5" />
+                <span>Hide</span>
+              </button>
+            </div>
+            <LearnNav current={current} currentSlug={currentSlug} />
+          </div>
+        </aside>
+      ) : (
+        <div className="mb-4 hidden lg:flex items-center">
+          <button
+            type="button"
+            onClick={toggle}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-ink/10 bg-panel/80 px-2.5 py-1.5 text-xs font-medium text-ink/70 shadow-sm transition hover:border-accent/40 hover:bg-accent/[0.05] hover:text-ink"
+            title="Show sidebar"
+            aria-label="Show sidebar"
+          >
+            <PanelLeftOpen className="h-4 w-4 text-accent" />
+            <span>Show sidebar</span>
+          </button>
         </div>
-      </aside>
+      )}
+
+      {/* Main content column */}
       <div className="min-w-0">
         <details className="mb-6 rounded-xl border border-ink/[0.08] bg-panel/60 lg:hidden">
           <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-ink">Browse lessons</summary>

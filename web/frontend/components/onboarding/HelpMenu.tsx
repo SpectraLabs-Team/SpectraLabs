@@ -27,7 +27,7 @@ export function HelpMenu({ tab, className }: { tab: StudioTab; className?: strin
     };
     document.addEventListener('pointerdown', onDown);
     document.addEventListener('keydown', onKey);
-    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    ref.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
     return () => {
       document.removeEventListener('pointerdown', onDown);
       document.removeEventListener('keydown', onKey);
@@ -39,7 +39,7 @@ export function HelpMenu({ tab, className }: { tab: StudioTab; className?: strin
     e.preventDefault();
     const items = [...(ref.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
     const i = items.indexOf(document.activeElement as HTMLElement);
-    items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus();
+    items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus({ preventScroll: true });
   };
 
   const item = 'flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] text-ink/80 transition hover:bg-ink/[0.05] hover:text-ink focus-visible:bg-ink/[0.05]';
@@ -57,7 +57,12 @@ export function HelpMenu({ tab, className }: { tab: StudioTab; className?: strin
         aria-expanded={open}
         aria-controls={menuId}
         onClick={() => setOpen((o) => !o)}
-        className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium text-ink/65 transition hover:bg-ink/[0.05] hover:text-ink"
+        className={cn(
+          'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium transition',
+          open
+            ? 'border border-accent/40 bg-accent/15 text-accent shadow-sm'
+            : 'text-ink/65 hover:bg-ink/[0.05] hover:text-ink',
+        )}
       >
         <HelpCircle className="h-4 w-4" aria-hidden /> <span className="hidden md:inline">Help</span>
         <span className="sr-only md:hidden">Help</span>

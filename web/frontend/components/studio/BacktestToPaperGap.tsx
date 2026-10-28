@@ -106,7 +106,7 @@ export function BacktestToPaperGap({ strategyId }: Props) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-ink">Backtest-to-Paper Gap Analysis (M10)</h2>
+          <h2 className="text-lg font-semibold text-ink">Backtest-to-Paper Gap Analysis</h2>
           <p className="text-xs text-ink/60">
             Compare trade fills, slippage, timing latency and P&L between paper execution and backtests.
           </p>

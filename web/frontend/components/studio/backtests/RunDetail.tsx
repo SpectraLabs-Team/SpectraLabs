@@ -139,7 +139,7 @@ function ExperimentLineageCard({ runId }: { runId: string }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold text-ink">
-            <Beaker className="h-4 w-4 text-accent" /> M5 Research & Lineage
+            <Beaker className="h-4 w-4 text-accent" /> Research & Lineage
           </h3>
           <p className="mt-0.5 text-xs text-ink/50">
             Recorded in the experiment registry with lineage tracking.

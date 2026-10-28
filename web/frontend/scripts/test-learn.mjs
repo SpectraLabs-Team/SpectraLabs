@@ -201,7 +201,7 @@ describe('Metric registry', () => {
       for (const m of text.matchAll(/metric(?:=|: )["']([a-z0-9_]+)["']|(?:undefined|\)), '([a-z0-9_]+)'\]/g)) {
         const id = m[1] ?? m[2];
         if (!id) continue;
-        used.set(path.relative(root, f), [...(used.get(path.relative(root, f)) ?? []), id]);
+        used.set(path.relative(root, f).replace(/\\/g, '/'), [...(used.get(path.relative(root, f).replace(/\\/g, '/')) ?? []), id]);
       }
     }
     const all = [...used.values()].flat();

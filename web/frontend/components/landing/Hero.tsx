@@ -9,11 +9,7 @@ import { useLaunchStudio } from './Header';
 import { DustOverlay } from './HeroScene';
 import { TickerChips } from './HoloCards';
 
-const BADGES = [
-  { label: 'v0.7.0 Pure Rust', dot: 'bg-cyan-400 shadow-[0_0_8px_#22D3EE]' },
-  { label: 'Sub-millisecond Execution', dot: 'bg-violet-400 shadow-[0_0_8px_#A78BFA]' },
-  { label: 'Std-Only Core Engines', dot: 'bg-emerald-400 shadow-[0_0_8px_#34D399]' },
-];
+
 
 export function Hero() {
   const reduce = useReducedMotion();
@@ -94,17 +90,7 @@ export function Hero() {
             <motion.p {...rise(0.12)} className="mt-5 max-w-[500px] text-[16px] leading-[1.65] text-slate-300 lg:[@media(max-height:760px)]:mt-3">
               High-performance pure-Rust quantitative engine. Sub-millisecond Monte Carlo risk, zero look-ahead backtesting, and cryptographic auditability.
             </motion.p>
-            <motion.div {...rise(0.16)} className="mt-6 flex flex-wrap gap-2.5 lg:[@media(max-height:760px)]:mt-4">
-              {BADGES.map((b) => (
-                <span
-                  key={b.label}
-                  className="inline-flex items-center gap-2 rounded-full border border-cyan-500/25 bg-[#06122a]/80 px-3.5 py-1.5 text-[12px] font-medium text-slate-200 shadow-[0_0_12px_rgba(34,211,238,0.15)] backdrop-blur-md"
-                >
-                  <span className={`h-2 w-2 rounded-full ${b.dot}`} />
-                  {b.label}
-                </span>
-              ))}
-            </motion.div>
+
             <motion.div {...rise(0.22)} className="mt-8 flex flex-wrap items-center gap-3.5 lg:[@media(max-height:760px)]:mt-5">
               <button
                 type="button"

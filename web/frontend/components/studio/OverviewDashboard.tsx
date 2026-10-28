@@ -804,7 +804,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
         >
           <Beaker className="h-4 w-4 text-accent" />
           <span className="text-xs font-semibold text-ink">Experiment Registry</span>
-          <span className="text-[10.5px] text-ink/45">M5 hypotheses & lineage</span>
+          <span className="text-[10.5px] text-ink/45">Hypotheses & lineage</span>
         </button>
         <button
           type="button"
@@ -1115,7 +1115,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
               type="button"
               disabled
               className="inline-flex items-center gap-1.5 rounded-lg border border-ink/10 bg-ink/5 px-3 py-1.5 text-xs font-medium text-ink/40 cursor-not-allowed"
-              title={userRole === 'viewer' ? "Viewers have read-only access (M19)" : "Read-only view active. Exit shared view or save to customize."}
+              title={userRole === 'viewer' ? "Viewers have read-only access" : "Read-only view active. Exit shared view or save to customize."}
               aria-label="Layout customization locked in read-only mode"
             >
               <Lock className="h-3.5 w-3.5" />
@@ -1156,7 +1156,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
               type="button"
               disabled
               className="inline-flex items-center gap-1.5 rounded-xl border border-ink/10 bg-ink/5 px-3 py-1.5 text-xs font-medium text-ink/40 cursor-not-allowed"
-              title="Editor or Owner role needed to queue backtests (M19)"
+              title="Editor or Owner role needed to queue backtests"
             >
               <Lock className="h-3 w-3" />
               Read-Only

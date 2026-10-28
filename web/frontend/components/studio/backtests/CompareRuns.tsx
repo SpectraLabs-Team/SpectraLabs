@@ -931,6 +931,76 @@ export function CompareRuns({ runIds, catalog, onSelectRun, onRemoveRun, onClose
           ))}
         </div>
       </GlassCard>
+
+      {validRuns.length > 0 && (
+        <TearSheetModal
+          open={tearSheetOpen}
+          onClose={() => setTearSheetOpen(false)}
+          title="Comparative Strategy Performance Tear-Sheet"
+          subtitle={`${validRuns.length} strategies evaluated simultaneously`}
+          reportType="Comparative Analysis"
+          timestamp={new Date().toISOString()}
+          metadata={{
+            engine: 'Spectra Quantitative Backtest Engine',
+            engineVersion: '0.1.0',
+            seed: 'Multi-Run Comparison Matrix',
+            duration: `${validRuns.length} backtests benchmarked`,
+          }}
+          sections={[
+            {
+              category: 'Performance Champions',
+              items: [
+                {
+                  label: 'Top Return',
+                  value: signedPct(validRuns.reduce((best, r) => ((r.backtest.summary?.metrics.total_return ?? -Infinity) > (best.backtest.summary?.metrics.total_return ?? -Infinity) ? r : best), validRuns[0]).backtest.summary?.metrics.total_return),
+                  sub: describeRequest(validRuns.reduce((best, r) => ((r.backtest.summary?.metrics.total_return ?? -Infinity) > (best.backtest.summary?.metrics.total_return ?? -Infinity) ? r : best), validRuns[0]).backtest.request, catalog),
+                  tone: 'profit',
+                },
+                {
+                  label: 'Highest Sharpe Ratio',
+                  value: ratio(validRuns.reduce((best, r) => ((r.backtest.summary?.metrics.sharpe ?? -Infinity) > (best.backtest.summary?.metrics.sharpe ?? -Infinity) ? r : best), validRuns[0]).backtest.summary?.metrics.sharpe),
+                  sub: describeRequest(validRuns.reduce((best, r) => ((r.backtest.summary?.metrics.sharpe ?? -Infinity) > (best.backtest.summary?.metrics.sharpe ?? -Infinity) ? r : best), validRuns[0]).backtest.request, catalog),
+                  tone: 'profit',
+                },
+                {
+                  label: 'Lowest Drawdown',
+                  value: pct(validRuns.reduce((best, r) => ((r.backtest.summary?.metrics.max_drawdown ?? Infinity) < (best.backtest.summary?.metrics.max_drawdown ?? Infinity) ? r : best), validRuns[0]).backtest.summary?.metrics.max_drawdown),
+                  sub: describeRequest(validRuns.reduce((best, r) => ((r.backtest.summary?.metrics.max_drawdown ?? Infinity) < (best.backtest.summary?.metrics.max_drawdown ?? Infinity) ? r : best), validRuns[0]).backtest.request, catalog),
+                },
+                {
+                  label: 'Highest Win Rate',
+                  value: pct(validRuns.reduce((best, r) => ((r.backtest.summary?.trades.win_rate ?? -Infinity) > (best.backtest.summary?.trades.win_rate ?? -Infinity) ? r : best), validRuns[0]).backtest.summary?.trades.win_rate, 1),
+                  sub: describeRequest(validRuns.reduce((best, r) => ((r.backtest.summary?.trades.win_rate ?? -Infinity) > (best.backtest.summary?.trades.win_rate ?? -Infinity) ? r : best), validRuns[0]).backtest.request, catalog),
+                },
+              ],
+            },
+          ]}
+          table={{
+            title: 'Side-by-Side Strategy Comparison Scorecard',
+            headers: ['Metric', ...validRuns.map((r, i) => `#${i + 1} ${describeRequest(r.backtest.request, catalog)}`)],
+            rows: [
+              ['Total Return', ...validRuns.map((r) => signedPct(r.backtest.summary?.metrics.total_return))],
+              ['CAGR', ...validRuns.map((r) => signedPct(r.backtest.summary?.performance.cagr))],
+              ['Sharpe Ratio', ...validRuns.map((r) => ratio(r.backtest.summary?.metrics.sharpe))],
+              ['Sortino Ratio', ...validRuns.map((r) => ratio(r.backtest.summary?.performance.sortino))],
+              ['Calmar Ratio', ...validRuns.map((r) => ratio(r.backtest.summary?.performance.calmar))],
+              ['Max Drawdown', ...validRuns.map((r) => pct(r.backtest.summary?.metrics.max_drawdown))],
+              ['Annualized Volatility', ...validRuns.map((r) => pct(r.backtest.summary?.metrics.annualized_volatility))],
+              ['Win Rate', ...validRuns.map((r) => pct(r.backtest.summary?.trades.win_rate, 1))],
+              ['Profit Factor', ...validRuns.map((r) => ratio(r.backtest.summary?.trades.profit_factor))],
+              ['Total Trades', ...validRuns.map((r) => int(r.backtest.summary?.trades.count))],
+              ['Fills Count', ...validRuns.map((r) => int(r.backtest.summary?.activity.fill_count))],
+              ['Total Fees ($)', ...validRuns.map((r) => cash(r.backtest.summary?.activity.total_fees))],
+              ['Final Equity ($)', ...validRuns.map((r) => cash(r.backtest.summary?.activity.final_equity))],
+            ],
+          }}
+          rawJsonData={validRuns.map((r) => ({
+            id: r.backtest.id,
+            strategy: describeRequest(r.backtest.request, catalog),
+            summary: r.backtest.summary,
+          }))}
+        />
+      )}
     </div>
   );
 }

@@ -746,7 +746,7 @@ export function RunDetail({
             commitSha: b.run_id ? b.run_id.slice(0, 8) : undefined,
             seed: b.request.params?.seed != null ? String(b.request.params.seed) : undefined,
             datasetOrBook: dataset ? `${dataset.dataset_name} v${dataset.version}` : (b.request.dataset_version_id ?? 'Market Dataset'),
-            duration: b.summary.run.wall_clock_seconds ? `${b.summary.run.wall_clock_seconds.toFixed(2)}s wall-clock` : undefined,
+            duration: b.finished_at && b.started_at ? `${((new Date(b.finished_at).getTime() - new Date(b.started_at).getTime()) / 1000).toFixed(2)}s wall-clock` : undefined,
           }}
           sections={[
             {
@@ -772,8 +772,8 @@ export function RunDetail({
                 {
                   label: 'Final Equity',
                   value: cash(b.summary.activity.final_equity, 0),
-                  sub: `Net profit ${cash(b.summary.performance.net_profit, 0)}`,
-                  tone: tone(b.summary.performance.net_profit),
+                  sub: `Realized PnL ${cash(b.summary.activity.realized_pnl, 0)}`,
+                  tone: tone(Number(b.summary.activity.realized_pnl)),
                 },
               ],
             },
@@ -823,8 +823,8 @@ export function RunDetail({
                 },
                 {
                   label: 'Commission & Fees Paid',
-                  value: cash(b.summary.activity.commission_paid, 2),
-                  sub: 'Transaction friction',
+                  value: cash(b.summary.activity.total_fees, 2),
+                  sub: `Financing: ${cash(b.summary.activity.financing, 2)}`,
                 },
               ],
             },
@@ -862,7 +862,7 @@ export function RunDetail({
                   title: 'Strategy Sub-Component Allocation & Attribution',
                   headers: ['Strategy', 'Allocation', 'Final Equity', 'Return', 'Contribution', 'Sharpe', 'Max DD'],
                   rows: b.summary.strategies.list.map((s) => [
-                    catalog?.strategies.find((strat) => strat.name === s.name)?.label ?? s.name,
+                    catalog?.strategies.find((strat) => strat.name === s.strategy)?.label ?? s.strategy,
                     cash(s.allocation, 0),
                     cash(s.final_equity, 0),
                     signedPct(s.total_return),
@@ -879,7 +879,7 @@ export function RunDetail({
               ? [
                   'Strategy,Allocation,Final Equity,Total Return,Contribution,Sharpe,Max Drawdown',
                   ...b.summary.strategies.list.map(
-                    (s) => `"${s.name}",${s.allocation},${s.final_equity},${s.total_return},${s.contribution},${s.sharpe},${s.max_drawdown}`
+                    (s) => `"${s.strategy}",${s.allocation},${s.final_equity},${s.total_return},${s.contribution},${s.sharpe},${s.max_drawdown}`
                   ),
                 ].join('\n')
               : undefined

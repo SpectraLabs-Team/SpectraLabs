@@ -282,7 +282,7 @@ export function RiskLab() {
     return { positions: pos, stats: portfolioStats(pos) };
   }, [results]);
   const runGross = runBook?.stats.grossExposure ?? 0;
-  const runNet = runBook?.stats.netExposure ?? 0;
+  const runNet = runBook?.stats.netValue ?? 0;
   // Closed-form value of the same model and inputs: a sanity check on the Monte Carlo estimate.
   const mcErr = results && ran ? results.var.value / analyticVaR(ran.model, ran.confidence) - 1 : null;
   const label = ran ? confidenceLabel(ran.confidence) : confidenceLabel(confidence);
@@ -1199,16 +1199,6 @@ export function RiskLab() {
                         sub: 'Heavy-tail conditioned expected loss',
                         tone: 'loss' as const,
                       },
-                      {
-                        label: 'Tail Shape Parameter (ξ)',
-                        value: results.var.evt_tail_index ? results.var.evt_tail_index.toFixed(3) : '—',
-                        sub: results.var.evt_tail_index && results.var.evt_tail_index > 0 ? 'Heavy-tailed regime' : 'Thin tail',
-                      },
-                      {
-                        label: 'Tail Cutoff Threshold',
-                        value: results.var.evt_threshold ? formatCurrency(results.var.evt_threshold) : '—',
-                        sub: 'Threshold for EVT tail estimation',
-                      },
                     ],
                   },
                 ]
@@ -1218,11 +1208,11 @@ export function RiskLab() {
             title: 'Constituent Positions Breakdown',
             headers: ['Symbol', 'Shares / Units', 'Market Price', 'Position Value', 'Weight %'],
             rows: runBook.positions.map((p) => {
-              const val = p.shares * p.price;
+              const val = p.quantity * p.price;
               const weight = results.var.portfolio_value > 0 ? (val / results.var.portfolio_value) * 100 : 0;
               return [
                 p.symbol,
-                p.shares.toLocaleString(),
+                p.quantity.toLocaleString(),
                 formatCurrency(p.price),
                 formatCurrency(val),
                 `${weight.toFixed(1)}%`,

@@ -152,7 +152,7 @@ export function TearSheetModal({
                 <span>CSV</span>
               </button>
             )}
-            {rawJsonData && (
+            {rawJsonData != null && (
               <button
                 type="button"
                 onClick={handleDownloadJson}

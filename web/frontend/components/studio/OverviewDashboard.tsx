@@ -63,6 +63,7 @@ import {
 import { ago, cash, pct, ratio, signedPct, tone } from './backtests/format';
 import { StatusBadge } from './backtests/RunList';
 import { usePortfolio } from './PortfolioContext';
+import { RiskSourceNote } from './RiskSourceNote';
 import type { StudioTab } from './StudioShell';
 
 export interface OverviewDashboardProps {
@@ -697,6 +698,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
           <p className="text-xs text-ink/50">
             Real-time pre-trade risk thresholds. Any limit exceeding 100% blocks or throttles new orders.
           </p>
+          <RiskSourceNote grossExposure={metrics?.gross_exposure} className="mt-2" />
         </div>
         <button
           type="button"

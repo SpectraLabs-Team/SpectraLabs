@@ -153,7 +153,7 @@ export function BacktestLab() {
       <div className="grid gap-5 lg:grid-cols-[1fr_340px] [&>*]:min-w-0">
         <div ref={formRef} data-tour="backtest-form" className="min-w-0 scroll-mt-20">
           {catalog ? (
-            <BacktestForm catalog={catalog} datasets={datasets} canRun={canRun} onCreated={created} prefill={prefill} />
+            <BacktestForm catalog={catalog} datasets={datasets} canRun={canRun} onCreated={created} prefill={prefill} onDatasetsChanged={load} />
           ) : (
             <GlassCard as="section" className="flex min-h-[320px] flex-col items-center justify-center gap-3 p-6 text-center">
               {loading ? (

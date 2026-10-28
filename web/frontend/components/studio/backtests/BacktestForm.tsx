@@ -25,6 +25,7 @@ import {
 import { Badge, ErrorNote, GlassCard, Segmented, Spinner } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/StudioToast';
 import { cn } from '@/lib/utils';
+import { loadSampleDataset, SAMPLE_DATASET_NAME, type SamplePhase } from '@/lib/sampleData';
 import { ConfigFields, Field, NumberInput, ParamFields } from './Fields';
 import { int } from './format';
 import { SaveVersion } from './SaveVersion';
@@ -56,8 +57,25 @@ function slotFor(catalog: Catalog, name: string, weightPct: number, params?: Par
 /** Rounds away float noise from weights entered as percentages (33.3 → 0.333). */
 const toWeight = (pct: number) => Math.round(pct * 1e6) / 1e8;
 
-export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: { catalog: Catalog; datasets: DatasetVersion[]; canRun: boolean; onCreated: (b: Backtest) => void; prefill?: Prefill | null }) {
-  const { success } = useToast();
+export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill, onDatasetsChanged }: { catalog: Catalog; datasets: DatasetVersion[]; canRun: boolean; onCreated: (b: Backtest) => void; prefill?: Prefill | null; onDatasetsChanged?: () => void }) {
+  const { success, error: toastError } = useToast();
+  const [sampleBusy, setSampleBusy] = useState<SamplePhase | null>(null);
+  const loadSample = async () => {
+    setSampleBusy('upload');
+    try {
+      const job = await loadSampleDataset(setSampleBusy);
+      if (job?.status === 'succeeded') {
+        success('Sample data loaded', `${SAMPLE_DATASET_NAME}: three made-up symbols, two years of daily bars. Pick it as the dataset and run a backtest.`);
+        onDatasetsChanged?.();
+      } else {
+        toastError('Sample data was not loaded', job?.error ?? 'The ingest did not finish. Try again, or upload a CSV in Data Lab.');
+      }
+    } catch (e) {
+      toastError('Sample data was not loaded', e instanceof ApiError && e.status === 403 ? 'Adding data needs the editor role in this workspace.' : e instanceof Error ? e.message : 'Unknown error.');
+    } finally {
+      setSampleBusy(null);
+    }
+  };
   const first = catalog.strategies[0]?.name ?? '';
   const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '');
   const [mode, setMode] = useState<'single' | 'multi'>('single');
@@ -271,9 +289,20 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill }: 
                     <code className="mx-1 rounded bg-ink/10 px-1 py-0.5 font-mono text-[10.5px] text-ink">timestamp,open,high,low,close,volume</code>
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      data-testid="load-sample-data"
+                      onClick={loadSample}
+                      disabled={!canRun || sampleBusy !== null}
+                      title={canRun ? 'Adds a small synthetic dataset (made-up symbols, not real prices) so you can try a backtest now.' : 'Adding data needs the editor role in this workspace.'}
+                      className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-60"
+                    >
+                      {sampleBusy ? <Spinner className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+                      {sampleBusy === 'upload' ? 'Uploading sample…' : sampleBusy === 'ingest' ? 'Checking and storing…' : 'Load sample data'}
+                    </button>
                     <a
                       href="/studio?tab=data"
-                      className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs no-underline"
+                      className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs no-underline"
                     >
                       <FileSpreadsheet className="h-3.5 w-3.5" /> Upload CSV in Data Lab <ExternalLink className="h-3 w-3 opacity-60" />
                     </a>

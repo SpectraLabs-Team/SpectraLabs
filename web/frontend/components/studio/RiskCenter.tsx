@@ -1,6 +1,7 @@
 'use client';
 
 import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
+import { RiskSourceNote } from './RiskSourceNote';
 import { useState, useEffect, useCallback, useId } from 'react';
 import {
   ShieldAlert,
@@ -447,6 +448,8 @@ export function RiskCenter() {
               </div>
             </div>
           )}
+
+          <RiskSourceNote grossExposure={metrics?.gross_exposure} />
 
           {/* Metric Gauges Grid */}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

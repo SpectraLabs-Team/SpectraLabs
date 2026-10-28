@@ -115,7 +115,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
         {/* Account health */}
         {!collapsed && (
           <div className="rounded-xl border border-ink/[0.07] bg-ink/[0.02] p-3">
-            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink/40">Paper account</p>
+            <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink/40" title="A simulation of your loaded CSV portfolio, kept in this browser. Risk Center limits use paper orders on the server instead.">Portfolio account · this browser</p>
             <dl className="mt-2.5 space-y-2 text-[12.5px]">
               <div className="flex justify-between gap-2">
                 <dt className="text-ink/55"><MetricLabel metric="cash_balance" className="text-ink/55">Cash balance</MetricLabel></dt>
@@ -141,7 +141,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
                 </div>
               </div>
             </dl>
-            <p className="mt-2.5 text-[10.5px] leading-4 text-ink/40">Equity {formatCompactCurrency(account.equity)} · marked at CSV prices</p>
+            <p className="mt-2.5 text-[10.5px] leading-4 text-ink/40">Equity {formatCompactCurrency(account.equity)} · simulated from your CSV portfolio at its prices. Risk Center limits use server paper orders.</p>
           </div>
         )}
 

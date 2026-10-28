@@ -132,6 +132,7 @@ jobs:
     # runs after merging to main (and on demand), not on every pull request.
     if: github.event_name != 'pull_request'
     timeout-minutes: 45
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:

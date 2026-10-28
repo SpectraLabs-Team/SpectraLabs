@@ -54,8 +54,8 @@ export const MAIN_TOUR: TourStep[] = [
     requiresTab: 'backtests',
     title: 'Read simulation results',
     body: 'A finished run shows its equity and drawdown charts, monthly returns, performance, risk and trade statistics, and a benchmark comparison. Every metric has an ⓘ icon: hover or tap it for a short explanation and a link to the full lesson.',
-    targets: ['backtest-results', 'studio-main'],
-    side: 'top',
+    targets: ['backtest-results-header', 'backtest-results', 'studio-main'],
+    side: 'bottom',
   },
   {
     id: 'risk',

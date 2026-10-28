@@ -260,8 +260,12 @@ export function OnboardingProvider({ tab, tabs, onTab, children }: { tab: Studio
       if (cancelled) return;
       window.setTimeout(() => {
         if (cancelled) return;
-        setWelcome(state?.lastCompletedStep && state.lastCompletedStep !== 'welcome' ? 'resume' : 'new');
         setDecided(true);
+        if (state?.lastCompletedStep && state.lastCompletedStep !== 'welcome') {
+          setWelcome('resume');
+        } else {
+          startTour();
+        }
       }, 400);
     });
     return () => {

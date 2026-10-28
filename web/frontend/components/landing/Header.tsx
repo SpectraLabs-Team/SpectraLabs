@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { ArrowRight, LayoutDashboard, LogOut, Menu, X } from 'lucide-react';
 import { Logo } from '@/components/ui/primitives';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { SignOutConfirmModal } from '@/components/auth/SignOutConfirmModal';
 import { displayName, useAuth, type AuthUser } from '@/lib/auth';
 import { NAV } from '@/lib/site';
 import { cn } from '@/lib/utils';
@@ -55,6 +56,7 @@ export function RolePill({ user, className, onClick }: { user: AuthUser; classNa
 export function Header({ overHero = false }: { overHero?: boolean }) {
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const { user, isLoading, openAuthModal, logout } = useAuth();
 
   useEffect(() => {
@@ -107,7 +109,7 @@ export function Header({ overHero = false }: { overHero?: boolean }) {
               <Link href="/studio" className={primaryBtn}>
                 Quant Studio <ArrowRight className="h-4 w-4" />
               </Link>
-              <button type="button" onClick={() => logout()} className={cn(ghostBtn, 'inline-flex items-center gap-1.5')}>
+              <button type="button" onClick={() => setShowSignOutConfirm(true)} className={cn(ghostBtn, 'inline-flex items-center gap-1.5')}>
                 <LogOut className="h-3.5 w-3.5" /> Sign Out
               </button>
             </div>
@@ -161,7 +163,7 @@ export function Header({ overHero = false }: { overHero?: boolean }) {
               <Link href="/studio" onClick={close} className={cn(primaryBtn, 'justify-center py-3')}>
                 Quant Studio <ArrowRight className="h-4 w-4" />
               </Link>
-              <button type="button" onClick={() => { close(); logout(); }} className={cn(ghostBtn, 'inline-flex items-center justify-center gap-1.5')}>
+              <button type="button" onClick={() => { close(); setShowSignOutConfirm(true); }} className={cn(ghostBtn, 'inline-flex items-center justify-center gap-1.5')}>
                 <LogOut className="h-4 w-4" /> Sign Out
               </button>
             </div>
@@ -177,6 +179,12 @@ export function Header({ overHero = false }: { overHero?: boolean }) {
           )}
         </div>
       )}
+
+      <SignOutConfirmModal
+        isOpen={showSignOutConfirm}
+        onClose={() => setShowSignOutConfirm(false)}
+        onConfirm={() => logout()}
+      />
     </header>
   );
 }

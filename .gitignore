@@ -12,4 +12,5 @@ out/
 .data/
 .pgdata/
 artifacts/
+AGENTS.md
 

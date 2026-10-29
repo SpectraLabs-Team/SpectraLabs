@@ -25,7 +25,7 @@ import {
 import { Badge, ErrorNote, GlassCard, Segmented, Spinner } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/StudioToast';
 import { cn } from '@/lib/utils';
-import { loadSampleDataset, SAMPLE_DATASET_NAME, type SamplePhase } from '@/lib/sampleData';
+import { loadSampleDataset, SAMPLE_DATASETS, sampleInfo, type SampleKind, type SamplePhase } from '@/lib/sampleData';
 import { ConfigFields, Field, NumberInput, ParamFields } from './Fields';
 import { int } from './format';
 import { SaveVersion } from './SaveVersion';
@@ -60,12 +60,14 @@ const toWeight = (pct: number) => Math.round(pct * 1e6) / 1e8;
 export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill, onDatasetsChanged }: { catalog: Catalog; datasets: DatasetVersion[]; canRun: boolean; onCreated: (b: Backtest) => void; prefill?: Prefill | null; onDatasetsChanged?: () => void }) {
   const { success, error: toastError } = useToast();
   const [sampleBusy, setSampleBusy] = useState<SamplePhase | null>(null);
+  const [sampleKind, setSampleKind] = useState<SampleKind>('trend');
   const loadSample = async () => {
+    const info = sampleInfo(sampleKind);
     setSampleBusy('upload');
     try {
-      const job = await loadSampleDataset(setSampleBusy);
+      const job = await loadSampleDataset(setSampleBusy, undefined, sampleKind);
       if (job?.status === 'succeeded') {
-        success('Sample data loaded', `${SAMPLE_DATASET_NAME}: three made-up symbols, two years of daily bars. Pick it as the dataset and run a backtest.`);
+        success('Sample data loaded', `${info.name}: three made-up symbols, two years of daily bars. Pick it as the dataset and run a backtest.`);
         onDatasetsChanged?.();
       } else {
         toastError('Sample data was not loaded', job?.error ?? 'The ingest did not finish. Try again, or upload a CSV in Data Lab.');
@@ -265,13 +267,14 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill, on
           {datasets.length ? (
             <div className="relative">
               <Database className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink/40" />
-              <select className="input py-1.5 pl-8 text-[13px]" value={datasetId} onChange={(e) => setDatasetId(e.target.value)} disabled={disabled} aria-label="Dataset version">
+              <select className="input appearance-none py-1.5 !pl-9 pr-9 text-[13px]" value={datasetId} onChange={(e) => setDatasetId(e.target.value)} disabled={disabled} aria-label="Dataset version">
                 {datasets.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.dataset_name} · v{d.version} · {int(d.row_count)} bars
                   </option>
                 ))}
               </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink/40" />
             </div>
           ) : (
             <div className="rounded-xl border border-dashed border-accent/30 bg-accent/[0.03] p-4 text-xs text-ink/75">
@@ -289,12 +292,26 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill, on
                     <code className="mx-1 rounded bg-ink/10 px-1 py-0.5 font-mono text-[10.5px] text-ink">timestamp,open,high,low,close,volume</code>
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <select
+                      value={sampleKind}
+                      onChange={(e) => setSampleKind(e.target.value as SampleKind)}
+                      disabled={sampleBusy !== null}
+                      aria-label="Sample dataset"
+                      title={sampleInfo(sampleKind).description}
+                      className="rounded-lg border border-ink/10 bg-panel px-2 py-1.5 text-xs text-ink"
+                    >
+                      {SAMPLE_DATASETS.map((d) => (
+                        <option key={d.kind} value={d.kind}>
+                          {d.kind === 'trend' ? 'Uptrend' : d.kind === 'crash' ? 'Crash & recovery' : 'Sideways range'}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
                       data-testid="load-sample-data"
                       onClick={loadSample}
                       disabled={!canRun || sampleBusy !== null}
-                      title={canRun ? 'Adds a small synthetic dataset (made-up symbols, not real prices) so you can try a backtest now.' : 'Adding data needs the editor role in this workspace.'}
+                      title={canRun ? `Adds a small synthetic dataset (made-up symbols, not real prices): ${sampleInfo(sampleKind).description}` : 'Adding data needs the editor role in this workspace.'}
                       className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-60"
                     >
                       {sampleBusy ? <Spinner className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}

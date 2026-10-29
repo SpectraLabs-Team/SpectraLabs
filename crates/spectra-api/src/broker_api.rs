@@ -81,8 +81,8 @@ pub(crate) async fn alpaca_proxy(
     let Ok((pool, ws)) = context(&st, &identity) else {
         return error_response(
             501,
-            "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
-             has not been added.",
+            "The Alpaca brokerage proxy needs the database (workspace keys are stored there), and this API \
+             is running without one.",
         );
     };
 
@@ -162,8 +162,8 @@ async fn handle_get_account(_pool: &sqlx::PgPool, _ws: Uuid, creds: Option<&(Str
 
     error_response(
         501,
-        "The Alpaca brokerage proxy is not available in the Rust API yet: it needs an HTTPS client, which \
-         has not been added.",
+        "No Alpaca API keys are connected for this workspace, so there is no brokerage account to show. \
+         Connect Alpaca in Paper Trading to use one; the built-in paper sandbox works without keys.",
     )
 }
 

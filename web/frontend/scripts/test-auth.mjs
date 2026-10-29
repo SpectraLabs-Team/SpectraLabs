@@ -2111,6 +2111,7 @@ const ROUTE_RULES = {
   'engine/[...path] GET': 'engine',
   'engine/[...path] POST': 'engine',
   'engine/[...path] PATCH': 'engine',
+  'engine/[...path] PUT': 'engine',
   'engine/[...path] DELETE': 'engine',
   'engine-upload POST': 'editor',
   'engine-upload/sessions/[id] PUT': 'editor',

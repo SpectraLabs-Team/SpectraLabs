@@ -35,6 +35,8 @@ import {
   Wallet,
   X,
   Zap,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import {
   cancelAlpacaOrder,
@@ -144,6 +146,19 @@ export function PaperLab() {
 
   // Mode: 'alpaca' (live credentials) vs 'sandbox' (simulated local execution)
   const [tradingMode, setTradingMode] = useState<'alpaca' | 'sandbox'>('sandbox');
+  const [watchlistOpen, setWatchlistOpen] = useState(true);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('paper.watchlistOpen');
+      if (saved !== null) setWatchlistOpen(saved === '1');
+      else if (window.innerWidth < 1440) setWatchlistOpen(false);
+    } catch {}
+  }, []);
+  const toggleWatchlist = () =>
+    setWatchlistOpen((o) => {
+      try { localStorage.setItem('paper.watchlistOpen', o ? '0' : '1'); } catch {}
+      return !o;
+    });
   const [connectModalOpen, setConnectModalOpen] = useState(false);
 
   // Connection state
@@ -756,8 +771,8 @@ export function PaperLab() {
     return (
       <div className="flex min-h-[450px] items-center justify-center">
         <div className="text-center">
-          <Spinner className="mx-auto h-8 w-8 text-cyan-400" />
-          <p className="mt-3 text-sm text-slate-400">Verifying Alpaca paper account configuration...</p>
+          <Spinner className="mx-auto h-8 w-8 text-accent" />
+          <p className="mt-3 text-sm text-ink/55">Verifying Alpaca paper account configuration...</p>
         </div>
       </div>
     );
@@ -766,10 +781,10 @@ export function PaperLab() {
   return (
     <div className="space-y-6">
       {/* Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-ink/10 pb-4">
         <div>
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-white">Paper Trading & Execution</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-ink">Paper Trading & Execution</h1>
             {isSandbox ? (
               <Badge tone="caution" className="flex items-center gap-1.5 text-[11px] font-semibold">
                 <span className="h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
@@ -785,7 +800,7 @@ export function PaperLab() {
 
             {/* Live US Equities Market Session Indicator */}
             <div
-              className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-slate-300"
+              className="flex items-center gap-1.5 rounded-full border border-ink/10 bg-ink/[0.04] px-2.5 py-1 text-[11px] font-medium text-ink/70"
               title={`${marketSession.description} (${marketSession.formattedTimeEt})`}
             >
               <span
@@ -796,30 +811,31 @@ export function PaperLab() {
                   marketSession.badgeTone === 'neutral' && 'bg-slate-400'
                 )}
               />
-              <span className="font-semibold text-white">{marketSession.label}</span>
-              <span className="font-mono text-[10px] text-slate-400">{marketSession.formattedTimeEt}</span>
+              <span className="font-semibold text-ink">{marketSession.label}</span>
+              <span className="font-mono text-[10px] text-ink/55">{marketSession.formattedTimeEt}</span>
             </div>
           </div>
-          <p className="mt-1 text-xs text-slate-400">
+          <p className="mt-1 text-xs text-ink/55">
             Real-time direct paper order execution, interactive candlestick charts, live position tracking, and portfolio balances.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Trading Environment Toggle */}
-          <div className="inline-flex rounded-xl border border-white/10 bg-white/5 p-1 text-xs font-semibold">
+          <div className="inline-flex rounded-xl border border-ink/10 bg-ink/[0.04] p-1 text-xs font-semibold">
             <button
               type="button"
               onClick={() => setTradingMode('sandbox')}
               className={cn(
                 'rounded-lg px-3 py-1.5 transition',
-                isSandbox ? 'bg-cyan-500/20 text-cyan-400 shadow-sm' : 'text-slate-400 hover:text-white'
+                isSandbox ? 'bg-cyan-500/20 text-accent shadow-sm' : 'text-ink/55 hover:text-ink'
               )}
             >
               Paper Sandbox
             </button>
             <button
               type="button"
+              data-tour="paper-connect"
               onClick={() => {
                 if (isConnected) {
                   setTradingMode('alpaca');
@@ -829,7 +845,7 @@ export function PaperLab() {
               }}
               className={cn(
                 'rounded-lg px-3 py-1.5 transition',
-                !isSandbox ? 'bg-emerald-500/20 text-emerald-400 shadow-sm' : 'text-slate-400 hover:text-white'
+                !isSandbox ? 'bg-emerald-500/20 text-profit shadow-sm' : 'text-ink/55 hover:text-ink'
               )}
             >
               {isConnected ? 'Alpaca Broker' : 'Connect Alpaca'}
@@ -841,20 +857,11 @@ export function PaperLab() {
               <button
                 type="button"
                 onClick={handleResetSandbox}
-                className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10"
+                className="flex items-center gap-1.5 rounded-xl border border-ink/10 bg-ink/[0.04] px-3 py-2 text-xs font-semibold text-ink transition hover:bg-ink/[0.07]"
                 title="Reset Sandbox Balance"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 Reset $100k
-              </button>
-              <button
-                type="button"
-                data-tour="paper-connect"
-                onClick={() => setConnectModalOpen(true)}
-                className="flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-2 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20"
-              >
-                <Wallet className="h-3.5 w-3.5" />
-                Connect Alpaca
               </button>
             </>
           ) : (
@@ -863,7 +870,7 @@ export function PaperLab() {
                 type="button"
                 onClick={loadAlpacaData}
                 disabled={loadingData}
-                className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10"
+                className="flex items-center gap-1.5 rounded-xl border border-ink/10 bg-ink/[0.04] px-3 py-2 text-xs font-semibold text-ink/80 transition hover:bg-ink/[0.07]"
                 title="Refresh Account Data"
               >
                 <RefreshCw className={cn('h-3.5 w-3.5', loadingData && 'animate-spin')} />
@@ -872,7 +879,7 @@ export function PaperLab() {
               <button
                 type="button"
                 onClick={handleDisconnect}
-                className="flex items-center gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-400 transition hover:bg-rose-500/20"
+                className="flex items-center gap-1.5 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs font-semibold text-loss transition hover:bg-rose-500/20"
                 title="Disconnect Credentials"
               >
                 <Lock className="h-3.5 w-3.5" />
@@ -885,96 +892,112 @@ export function PaperLab() {
 
       {/* Top Portfolio Metric Cards */}
       <div data-tour="paper-account" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
-          <div className="flex items-center justify-between text-slate-400">
+        <GlassCard className="p-4 border border-ink/10 bg-panel">
+          <div className="flex items-center justify-between text-ink/55">
             <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider">
-              Total Equity <InfoTip metric="total_equity" className="text-slate-500" />
+              Total Equity <InfoTip metric="total_equity" className="text-ink/45" />
             </span>
-            <Wallet className="h-4 w-4 text-cyan-400" />
+            <Wallet className="h-4 w-4 text-accent" />
           </div>
-          <p className="mt-2 font-mono text-2xl font-bold text-white">
+          <p className="mt-2 font-mono text-2xl font-bold text-ink">
             {formatCurrency(effectiveEquity)}
           </p>
-          <p className="mt-1 text-[11px] text-slate-400">
+          <p className="mt-1 text-[11px] text-ink/55">
             {isSandbox ? 'Sandbox Portfolio Value' : `Account #${account?.account_number || 'Paper'}`}
           </p>
         </GlassCard>
 
-        <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
-          <div className="flex items-center justify-between text-slate-400">
+        <GlassCard className="p-4 border border-ink/10 bg-panel">
+          <div className="flex items-center justify-between text-ink/55">
             <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider">
-              Cash Balance <InfoTip metric="cash_balance" className="text-slate-500" />
+              Cash Balance <InfoTip metric="cash_balance" className="text-ink/45" />
             </span>
-            <DollarSign className="h-4 w-4 text-emerald-400" />
+            <DollarSign className="h-4 w-4 text-profit" />
           </div>
-          <p className="mt-2 font-mono text-2xl font-bold text-white">
+          <p className="mt-2 font-mono text-2xl font-bold text-ink">
             {formatCurrency(effectiveCash)}
           </p>
-          <p className="mt-1 text-[11px] text-slate-400">Available settle funds</p>
+          <p className="mt-1 text-[11px] text-ink/55">Available settle funds</p>
         </GlassCard>
 
-        <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
-          <div className="flex items-center justify-between text-slate-400">
+        <GlassCard className="p-4 border border-ink/10 bg-panel">
+          <div className="flex items-center justify-between text-ink/55">
             <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider">
-              Buying Power <InfoTip metric="buying_power" className="text-slate-500" />
+              Buying Power <InfoTip metric="buying_power" className="text-ink/45" />
             </span>
             <Activity className="h-4 w-4 text-purple-400" />
           </div>
-          <p className="mt-2 font-mono text-2xl font-bold text-white">
+          <p className="mt-2 font-mono text-2xl font-bold text-ink">
             {formatCurrency(effectiveBuyingPower)}
           </p>
-          <p className="mt-1 text-[11px] text-slate-400">Margin & Daytrading power</p>
+          <p className="mt-1 text-[11px] text-ink/55">Margin & Daytrading power</p>
         </GlassCard>
 
-        <GlassCard className="p-4 border border-white/10 bg-[#0d131f]/70">
-          <div className="flex items-center justify-between text-slate-400">
+        <GlassCard className="p-4 border border-ink/10 bg-panel">
+          <div className="flex items-center justify-between text-ink/55">
             <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider">
-              Unrealized P&L <InfoTip metric="unrealized_pnl" className="text-slate-500" />
+              Unrealized P&L <InfoTip metric="unrealized_pnl" className="text-ink/45" />
             </span>
             {totalUnrealizedPl >= 0 ? (
-              <TrendingUp className="h-4 w-4 text-emerald-400" />
+              <TrendingUp className="h-4 w-4 text-profit" />
             ) : (
-              <TrendingDown className="h-4 w-4 text-rose-400" />
+              <TrendingDown className="h-4 w-4 text-loss" />
             )}
           </div>
           <p
             className={cn(
               'mt-2 font-mono text-2xl font-bold',
-              totalUnrealizedPl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+              totalUnrealizedPl >= 0 ? 'text-profit' : 'text-loss'
             )}
           >
             {totalUnrealizedPl >= 0 ? '+' : ''}
             {formatCurrency(totalUnrealizedPl)}
           </p>
-          <p className="mt-1 text-[11px] text-slate-400">Across {effectivePositions.length} active positions</p>
+          <p className="mt-1 text-[11px] text-ink/55">Across {effectivePositions.length} active positions</p>
         </GlassCard>
       </div>
 
       {/* Main TradingView-Style 3-Column Dashboard */}
-      <div className="grid gap-4 lg:grid-cols-[240px_1fr_340px]">
+      <div className="grid items-start gap-4 lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_320px]">
         {/* LEFT PANEL: Stock Search & Watchlist */}
-        <div data-tour="paper-search" className="flex flex-col rounded-2xl border border-white/10 bg-[#090d14] p-3 text-white">
-          <div className="mb-2 font-mono text-[11px] uppercase tracking-wider text-slate-400">
+        {!watchlistOpen ? (
+          <button
+            type="button"
+            onClick={toggleWatchlist}
+            data-tour="paper-search"
+            title="Show watchlist"
+            className="flex items-center gap-2 rounded-2xl border border-ink/10 bg-panel px-3 py-2 text-xs font-semibold text-ink/70 transition hover:text-ink lg:h-full lg:w-11 lg:flex-col lg:px-0 lg:py-4"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+            <span className="font-mono text-accent lg:[writing-mode:vertical-rl]">{selectedSymbol}</span>
+            <span className="lg:[writing-mode:vertical-rl]">Watchlist</span>
+          </button>
+        ) : (
+        <div data-tour="paper-search" className="flex flex-col lg:w-[240px] rounded-2xl border border-ink/10 bg-panel p-3 text-ink">
+          <div className="mb-2 flex items-center justify-between font-mono text-[11px] uppercase tracking-wider text-ink/55">
             Symbol Search
+            <button type="button" onClick={toggleWatchlist} title="Hide watchlist" className="rounded p-1 text-ink/50 hover:bg-ink/[0.06] hover:text-ink">
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </button>
           </div>
           <div className="relative mb-3">
-            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-ink/55" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search ticker..."
-              className="w-full rounded-xl border border-white/10 bg-white/5 py-1.5 pl-8 pr-3 font-mono text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-500"
+              className="w-full rounded-xl border border-ink/10 bg-ink/[0.04] py-1.5 pl-8 pr-3 font-mono text-xs text-ink placeholder:text-ink/35 outline-none focus:border-cyan-500"
             />
           </div>
 
           {/* Search Results Dropdown */}
           {filteredAssets.length > 0 && (
-            <div className="mb-3 max-h-40 overflow-y-auto rounded-xl border border-white/10 bg-slate-900/90 p-1">
+            <div className="mb-3 max-h-40 overflow-y-auto rounded-xl border border-ink/10 bg-panel p-1">
               {filteredAssets.map((a) => (
                 <div
                   key={a.id}
-                  className="flex items-center justify-between rounded-lg px-2 py-1 text-xs hover:bg-white/10"
+                  className="flex items-center justify-between rounded-lg px-2 py-1 text-xs hover:bg-ink/[0.07]"
                 >
                   <button
                     type="button"
@@ -984,13 +1007,13 @@ export function PaperLab() {
                     }}
                     className="flex flex-col text-left truncate flex-1"
                   >
-                    <span className="font-mono font-bold text-cyan-400">{a.symbol}</span>
-                    <span className="truncate text-[10px] text-slate-400">{a.name}</span>
+                    <span className="font-mono font-bold text-accent">{a.symbol}</span>
+                    <span className="truncate text-[10px] text-ink/55">{a.name}</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => addToWatchlist(a.symbol)}
-                    className="ml-2 text-slate-400 hover:text-white"
+                    className="ml-2 text-ink/55 hover:text-ink"
                     title="Add to Watchlist"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -1001,7 +1024,7 @@ export function PaperLab() {
           )}
 
           {/* Quick-Pick Watchlist Category Tabs */}
-          <div className="mb-2 flex items-center justify-between border-b border-white/10 pb-1.5 font-mono text-[11px] uppercase tracking-wider text-slate-400">
+          <div className="mb-2 flex items-center justify-between border-b border-ink/10 pb-1.5 font-mono text-[11px] uppercase tracking-wider text-ink/55">
             <div className="flex gap-1">
               {(['my', 'tech', 'etfs', 'volatility'] as const).map((cat) => (
                 <button
@@ -1011,8 +1034,8 @@ export function PaperLab() {
                   className={cn(
                     'rounded-lg px-2 py-0.5 text-[10px] font-semibold transition',
                     watchlistCategory === cat
-                      ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                      ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                      : 'text-ink/55 hover:text-ink hover:bg-ink/[0.04]'
                   )}
                 >
                   {cat === 'my' ? `My (${watchlist.length})` : cat === 'tech' ? 'Tech' : cat === 'etfs' ? 'ETFs' : 'Beta'}
@@ -1025,8 +1048,8 @@ export function PaperLab() {
           <div className="mt-1 space-y-1 overflow-y-auto max-h-[380px]">
             {watchlistCategory === 'my' ? (
               watchlist.length === 0 ? (
-                <div className="p-4 text-center text-xs text-slate-500">
-                  <Star className="mx-auto h-5 w-5 text-slate-600 mb-1" />
+                <div className="p-4 text-center text-xs text-ink/45">
+                  <Star className="mx-auto h-5 w-5 text-ink/40 mb-1" />
                   Your watchlist is empty. Browse the tabs above or search to star assets.
                 </div>
               ) : (
@@ -1043,8 +1066,8 @@ export function PaperLab() {
                       className={cn(
                         'group flex items-center justify-between rounded-xl px-2.5 py-2 text-xs transition cursor-pointer',
                         isSelected
-                          ? 'bg-cyan-500/15 border border-cyan-500/30 text-white'
-                          : 'hover:bg-white/5 text-slate-300'
+                          ? 'bg-cyan-500/15 border border-cyan-500/30 text-ink'
+                          : 'hover:bg-ink/[0.04] text-ink/70'
                       )}
                       onClick={() => setSelectedSymbol(sym)}
                     >
@@ -1058,18 +1081,18 @@ export function PaperLab() {
                           )}
                         </div>
                         {curated && (
-                          <span className="truncate text-[10px] text-slate-400">{curated.name}</span>
+                          <span className="truncate text-[10px] text-ink/55">{curated.name}</span>
                         )}
                       </div>
                       <div className="flex items-center gap-2">
                         <div className="text-right">
-                          <p className="font-mono text-[11px] font-semibold text-slate-200">
+                          <p className="font-mono text-[11px] font-semibold text-ink/80">
                             {formatCurrency(price)}
                           </p>
                           {curated && (
                             <p className={cn(
                               'flex items-center justify-end font-mono text-[9.5px]',
-                              chg >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                              chg >= 0 ? 'text-profit' : 'text-loss'
                             )}>
                               {chg >= 0 ? <ArrowUpRight className="h-2.5 w-2.5 mr-0.5" /> : <ArrowDownRight className="h-2.5 w-2.5 mr-0.5" />}
                               {chg >= 0 ? '+' : ''}{chg.toFixed(2)}%
@@ -1082,7 +1105,7 @@ export function PaperLab() {
                             e.stopPropagation();
                             removeFromWatchlist(sym);
                           }}
-                          className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400"
+                          className="opacity-0 group-hover:opacity-100 text-ink/45 hover:text-loss"
                           title="Remove from watchlist"
                         >
                           <X className="h-3.5 w-3.5" />
@@ -1105,8 +1128,8 @@ export function PaperLab() {
                     className={cn(
                       'group flex items-center justify-between rounded-xl px-2.5 py-2 text-xs transition cursor-pointer',
                       isSelected
-                        ? 'bg-cyan-500/15 border border-cyan-500/30 text-white'
-                        : 'hover:bg-white/5 text-slate-300'
+                        ? 'bg-cyan-500/15 border border-cyan-500/30 text-ink'
+                        : 'hover:bg-ink/[0.04] text-ink/70'
                     )}
                     onClick={() => setSelectedSymbol(item.symbol)}
                   >
@@ -1119,16 +1142,16 @@ export function PaperLab() {
                           </span>
                         )}
                       </div>
-                      <span className="truncate text-[10px] text-slate-400">{item.name}</span>
+                      <span className="truncate text-[10px] text-ink/55">{item.name}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="text-right">
-                        <p className="font-mono text-[11px] font-semibold text-slate-200">
+                        <p className="font-mono text-[11px] font-semibold text-ink/80">
                           {formatCurrency(price)}
                         </p>
                         <p className={cn(
                           'flex items-center justify-end font-mono text-[9.5px]',
-                          item.changePct >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                          item.changePct >= 0 ? 'text-profit' : 'text-loss'
                         )}>
                           {item.changePct >= 0 ? <ArrowUpRight className="h-2.5 w-2.5 mr-0.5" /> : <ArrowDownRight className="h-2.5 w-2.5 mr-0.5" />}
                           {item.changePct >= 0 ? '+' : ''}{item.changePct.toFixed(2)}%
@@ -1146,7 +1169,7 @@ export function PaperLab() {
                         }}
                         className={cn(
                           'p-0.5 rounded transition',
-                          isStarred ? 'text-amber-400' : 'opacity-0 group-hover:opacity-100 text-slate-500 hover:text-amber-400'
+                          isStarred ? 'text-amber-500' : 'opacity-0 group-hover:opacity-100 text-ink/45 hover:text-amber-500'
                         )}
                         title={isStarred ? 'Remove from My Watchlist' : 'Add to My Watchlist'}
                       >
@@ -1159,6 +1182,7 @@ export function PaperLab() {
             )}
           </div>
         </div>
+        )}
 
         {/* CENTER PANEL: Interactive Candlestick Chart */}
         <div data-tour="paper-chart" className="flex flex-col">
@@ -1171,35 +1195,34 @@ export function PaperLab() {
             dataStatus={chartDataStatus}
             loading={chartLoading}
             onRefresh={() => loadBars(selectedSymbol, chartTimeframe)}
-            className="flex-1 min-h-[460px]"
           />
         </div>
 
         {/* RIGHT PANEL: Institutional Order Ticket */}
-        <div data-tour="paper-ticket" className="flex flex-col rounded-2xl border border-white/10 bg-[#090d14] p-4 text-white">
+        <div data-tour="paper-ticket" className="flex flex-col lg:col-span-2 xl:col-span-1 rounded-2xl border border-ink/10 bg-panel p-4 text-ink">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-[11px] uppercase tracking-wider text-slate-400">Order Ticket</span>
-              <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-accent">
+              <span className="font-mono text-[11px] uppercase tracking-wider text-ink/55">Order Ticket</span>
+              <span className="rounded bg-ink/[0.07] px-1.5 py-0.5 font-mono text-[10px] font-bold text-accent">
                 {selectedSymbol}
               </span>
             </div>
-            <span className="font-mono text-[11px] font-bold text-slate-200">
+            <span className="font-mono text-[11px] font-bold text-ink/80">
               {formatCurrency(currentSymbolPrice)}
             </span>
           </div>
 
           {/* Mode Pill Indicator */}
-          <div className="mb-3 flex items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-2.5 py-1 text-[11px]">
-            <span className="text-slate-400">Environment</span>
-            <span className={cn('flex items-center gap-1 font-semibold', isSandbox ? 'text-amber-400' : 'text-emerald-400')}>
+          <div className="mb-3 flex items-center justify-between rounded-lg border border-ink/10 bg-ink/[0.02] px-2.5 py-1 text-[11px]">
+            <span className="text-ink/55">Environment</span>
+            <span className={cn('flex items-center gap-1 font-semibold', isSandbox ? 'text-amber-500' : 'text-profit')}>
               <span className={cn('h-1.5 w-1.5 rounded-full', isSandbox ? 'bg-amber-400' : 'bg-emerald-400')} />
               {isSandbox ? 'Paper Sandbox' : 'Alpaca Broker'}
             </span>
           </div>
 
           {/* Buy / Sell Toggle */}
-          <div className="grid grid-cols-2 gap-2 rounded-xl bg-white/5 p-1 mb-3">
+          <div className="grid grid-cols-2 gap-2 rounded-xl bg-ink/[0.04] p-1 mb-3">
             <button
               type="button"
               onClick={() => setOrderSide('buy')}
@@ -1207,7 +1230,7 @@ export function PaperLab() {
                 'rounded-lg py-2 text-xs font-bold uppercase tracking-wider transition',
                 orderSide === 'buy'
                   ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-white'
+                  : 'text-ink/55 hover:text-ink'
               )}
             >
               Buy
@@ -1219,7 +1242,7 @@ export function PaperLab() {
                 'rounded-lg py-2 text-xs font-bold uppercase tracking-wider transition',
                 orderSide === 'sell'
                   ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
-                  : 'text-slate-400 hover:text-white'
+                  : 'text-ink/55 hover:text-ink'
               )}
             >
               Sell
@@ -1228,11 +1251,11 @@ export function PaperLab() {
 
           {/* Order Type: Market / Limit / Stop Loss / Stop Limit */}
           <div className="mb-3">
-            <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-400">
+            <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-ink/55">
               <span>Order Type</span>
-              <span className="text-[10px] text-slate-500 uppercase">{orderType}</span>
+              <span className="text-[10px] text-ink/45 uppercase">{orderType}</span>
             </div>
-            <div className="grid grid-cols-4 gap-1 rounded-xl bg-white/5 p-1 text-[11px]">
+            <div className="grid grid-cols-4 gap-1 rounded-xl bg-ink/[0.04] p-1 text-[11px]">
               {(['market', 'limit', 'stop', 'stop_limit'] as const).map((t) => (
                 <button
                   key={t}
@@ -1241,8 +1264,8 @@ export function PaperLab() {
                   className={cn(
                     'rounded-lg py-1 font-mono uppercase transition text-center',
                     orderType === t
-                      ? 'bg-cyan-500/20 font-bold text-cyan-400 shadow-sm'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-cyan-500/20 font-bold text-accent shadow-sm'
+                      : 'text-ink/55 hover:text-ink'
                   )}
                 >
                   {t === 'stop_limit' ? 'Stop-L' : t === 'stop' ? 'Stop' : t}
@@ -1253,11 +1276,11 @@ export function PaperLab() {
 
           {/* Time in Force: Day vs GTC */}
           <div className="mb-3">
-            <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-400">
+            <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-ink/55">
               <span>Time in Force</span>
-              <span className="text-[10px] text-slate-500 uppercase">{timeInForce}</span>
+              <span className="text-[10px] text-ink/45 uppercase">{timeInForce}</span>
             </div>
-            <div className="grid grid-cols-2 gap-1 rounded-xl bg-white/5 p-1 text-[11px]">
+            <div className="grid grid-cols-2 gap-1 rounded-xl bg-ink/[0.04] p-1 text-[11px]">
               {(['day', 'gtc'] as const).map((tif) => (
                 <button
                   key={tif}
@@ -1266,8 +1289,8 @@ export function PaperLab() {
                   className={cn(
                     'rounded-lg py-1 font-mono uppercase transition text-center',
                     timeInForce === tif
-                      ? 'bg-white/15 font-bold text-white'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-ink/10 font-bold text-ink'
+                      : 'text-ink/55 hover:text-ink'
                   )}
                 >
                   {tif === 'day' ? 'Day Order' : 'GTC (Till Cancel)'}
@@ -1278,21 +1301,21 @@ export function PaperLab() {
 
           {/* Sizing Mode: Shares vs Notional ($) */}
           <div className="mb-3">
-            <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-400">
+            <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-ink/55">
               <span>Order Size</span>
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => setSizingMode('shares')}
-                  className={cn('text-[10px] font-mono transition', sizingMode === 'shares' ? 'text-cyan-400 font-bold underline' : 'text-slate-500 hover:text-slate-300')}
+                  className={cn('text-[10px] font-mono transition', sizingMode === 'shares' ? 'text-accent font-bold underline' : 'text-ink/45 hover:text-ink/70')}
                 >
                   Shares
                 </button>
-                <span className="text-slate-600">|</span>
+                <span className="text-ink/40">|</span>
                 <button
                   type="button"
                   onClick={() => setSizingMode('notional')}
-                  className={cn('text-[10px] font-mono transition', sizingMode === 'notional' ? 'text-cyan-400 font-bold underline' : 'text-slate-500 hover:text-slate-300')}
+                  className={cn('text-[10px] font-mono transition', sizingMode === 'notional' ? 'text-accent font-bold underline' : 'text-ink/45 hover:text-ink/70')}
                 >
                   $ USD
                 </button>
@@ -1308,7 +1331,7 @@ export function PaperLab() {
                   value={orderQty}
                   onChange={(e) => setOrderQty(e.target.value)}
                   placeholder="Number of shares..."
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-500"
+                  className="w-full rounded-xl border border-ink/10 bg-ink/[0.04] px-3 py-2 font-mono text-sm text-ink outline-none focus:border-cyan-500"
                 />
                 {/* Quick Share Buttons */}
                 <div className="mt-1.5 flex gap-1">
@@ -1318,7 +1341,7 @@ export function PaperLab() {
                         key={q}
                         type="button"
                         onClick={() => setOrderQty(q)}
-                        className="flex-1 rounded-lg border border-white/10 bg-white/5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10"
+                        className="flex-1 rounded-lg border border-ink/10 bg-ink/[0.04] py-0.5 font-mono text-[10px] text-ink/70 hover:bg-ink/[0.07]"
                       >
                         +{q}
                       </button>
@@ -1334,7 +1357,7 @@ export function PaperLab() {
                         key={btn.label}
                         type="button"
                         onClick={() => setOrderQty(String(Math.max(1, Math.floor(currentHeldQty * btn.frac))))}
-                        className="flex-1 rounded-lg border border-white/10 bg-white/5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10"
+                        className="flex-1 rounded-lg border border-ink/10 bg-ink/[0.04] py-0.5 font-mono text-[10px] text-ink/70 hover:bg-ink/[0.07]"
                       >
                         {btn.label}
                       </button>
@@ -1345,7 +1368,7 @@ export function PaperLab() {
             ) : (
               <div>
                 <div className="relative">
-                  <span className="absolute left-3 top-2 font-mono text-sm text-slate-400">$</span>
+                  <span className="absolute left-3 top-2 font-mono text-sm text-ink/55">$</span>
                   <input
                     type="number"
                     min="1"
@@ -1353,7 +1376,7 @@ export function PaperLab() {
                     value={orderNotional}
                     onChange={(e) => setOrderNotional(e.target.value)}
                     placeholder="Dollar amount..."
-                    className="w-full rounded-xl border border-white/10 bg-white/5 pl-7 pr-3 py-2 font-mono text-sm text-white outline-none focus:border-cyan-500"
+                    className="w-full rounded-xl border border-ink/10 bg-ink/[0.04] pl-7 pr-3 py-2 font-mono text-sm text-ink outline-none focus:border-cyan-500"
                   />
                 </div>
                 {/* Quick % of Buying Power buttons */}
@@ -1368,7 +1391,7 @@ export function PaperLab() {
                       key={btn.label}
                       type="button"
                       onClick={() => setOrderNotional(String(Math.floor(effectiveBuyingPower * btn.frac)))}
-                      className="flex-1 rounded-lg border border-white/10 bg-white/5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10"
+                      className="flex-1 rounded-lg border border-ink/10 bg-ink/[0.04] py-0.5 font-mono text-[10px] text-ink/70 hover:bg-ink/[0.07]"
                     >
                       {btn.label}
                     </button>
@@ -1381,9 +1404,9 @@ export function PaperLab() {
           {/* Limit Price Input */}
           {(orderType === 'limit' || orderType === 'stop_limit') && (
             <div className="mb-3">
-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-400">
+              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-ink/55">
                 <span>Limit Price (USD)</span>
-                <span className="text-[10px] text-slate-500">Execution boundary</span>
+                <span className="text-[10px] text-ink/45">Execution boundary</span>
               </div>
               <div className="flex gap-1.5">
                 <input
@@ -1392,12 +1415,12 @@ export function PaperLab() {
                   step="0.01"
                   value={limitPrice}
                   onChange={(e) => setLimitPrice(e.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 font-mono text-sm text-white outline-none focus:border-cyan-500"
+                  className="w-full rounded-xl border border-ink/10 bg-ink/[0.04] px-3 py-1.5 font-mono text-sm text-ink outline-none focus:border-cyan-500"
                 />
                 <button
                   type="button"
                   onClick={() => setLimitPrice(currentSymbolPrice.toFixed(2))}
-                  className="shrink-0 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 font-mono text-[10px] text-cyan-400 hover:bg-white/10"
+                  className="shrink-0 rounded-xl border border-ink/10 bg-ink/[0.04] px-2.5 py-1.5 font-mono text-[10px] text-accent hover:bg-ink/[0.07]"
                   title="Snap to current price"
                 >
                   Snap
@@ -1409,9 +1432,9 @@ export function PaperLab() {
           {/* Stop Trigger Price Input */}
           {(orderType === 'stop' || orderType === 'stop_limit') && (
             <div className="mb-3">
-              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-400">
+              <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-ink/55">
                 <span>Stop Trigger Price (USD)</span>
-                <span className="text-[10px] text-rose-400">Loss / Trigger limit</span>
+                <span className="text-[10px] text-loss">Loss / Trigger limit</span>
               </div>
               <input
                 type="number"
@@ -1419,51 +1442,51 @@ export function PaperLab() {
                 step="0.01"
                 value={stopPrice}
                 onChange={(e) => setStopPrice(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 font-mono text-sm text-white outline-none focus:border-cyan-500"
+                className="w-full rounded-xl border border-ink/10 bg-ink/[0.04] px-3 py-1.5 font-mono text-sm text-ink outline-none focus:border-cyan-500"
               />
             </div>
           )}
 
           {/* Institutional Order Analytics & Impact Breakdown */}
-          <div className="mb-4 space-y-1.5 rounded-xl border border-white/5 bg-white/[0.02] p-3 font-mono text-xs">
-            <div className="flex justify-between text-slate-400">
+          <div className="mb-4 space-y-1.5 rounded-xl border border-ink/10 bg-ink/[0.02] p-3 font-mono text-xs">
+            <div className="flex justify-between text-ink/55">
               <span>Shares to Trade:</span>
-              <span className="font-bold text-white">{effectiveShares} sh</span>
+              <span className="font-bold text-ink">{effectiveShares} sh</span>
             </div>
-            <div className="flex justify-between text-slate-400">
+            <div className="flex justify-between text-ink/55">
               <span>Est. Execution Price:</span>
-              <span className="text-white">
+              <span className="text-ink">
                 {formatCurrency(orderPrice)}
-                {orderType === 'market' && <span className="ml-1 text-[10px] text-slate-500">(+2.5 bps slip)</span>}
+                {orderType === 'market' && <span className="ml-1 text-[10px] text-ink/45">(+2.5 bps slip)</span>}
               </span>
             </div>
-            <div className="flex justify-between text-slate-400">
+            <div className="flex justify-between text-ink/55">
               <span>Est. Commission:</span>
-              <span className="text-emerald-400">$0.00 (Zero)</span>
+              <span className="text-profit">$0.00 (Zero)</span>
             </div>
-            <div className="flex justify-between text-slate-400">
+            <div className="flex justify-between text-ink/55">
               <span>Current Position:</span>
-              <span className="text-slate-300">
-                {currentHeldQty} sh → <span className="text-white font-semibold">{postTradeQty} sh</span>
+              <span className="text-ink/70">
+                {currentHeldQty} sh → <span className="text-ink font-semibold">{postTradeQty} sh</span>
               </span>
             </div>
-            <div className="flex justify-between border-t border-white/10 pt-1.5 font-semibold">
-              <span className="text-slate-300">Estimated Total:</span>
-              <span className="text-cyan-400 font-bold">{formatCurrency(estimatedOrderTotal)}</span>
+            <div className="flex justify-between border-t border-ink/10 pt-1.5 font-semibold">
+              <span className="text-ink/70">Estimated Total:</span>
+              <span className="text-accent font-bold">{formatCurrency(estimatedOrderTotal)}</span>
             </div>
-            <div className="flex justify-between text-[11px] text-slate-500">
+            <div className="flex justify-between text-[11px] text-ink/45">
               <span>Post-Trade Buying Power:</span>
-              <span className="text-slate-400">{formatCurrency(postTradeBuyingPower)}</span>
+              <span className="text-ink/55">{formatCurrency(postTradeBuyingPower)}</span>
             </div>
           </div>
 
           {/* Quick-Execute Checkbox */}
-          <label className="mb-3 flex cursor-pointer items-center gap-2 text-[11px] text-slate-400">
+          <label className="mb-3 flex cursor-pointer items-center gap-2 text-[11px] text-ink/55">
             <input
               type="checkbox"
               checked={quickExecute}
               onChange={(e) => setQuickExecute(e.target.checked)}
-              className="rounded border-white/20 bg-white/5 text-cyan-500 focus:ring-0"
+              className="rounded border-ink/10 bg-ink/[0.04] text-cyan-500 focus:ring-0"
             />
             <span>Instant 1-Click Fill (skip confirmation modal)</span>
           </label>
@@ -1501,48 +1524,48 @@ export function PaperLab() {
       {/* Confirmation Modal */}
       {confirmModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0f172a] p-6 text-white shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl border border-ink/10 bg-panel p-6 text-ink shadow-2xl">
             <h3 className="text-lg font-bold">Confirm Paper Order</h3>
-            <p className="mt-1 text-xs text-slate-400">
+            <p className="mt-1 text-xs text-ink/55">
               {isSandbox
                 ? 'This order will execute immediately in your simulated Spectra Paper Sandbox.'
                 : 'This order will be submitted directly to your Alpaca paper trading account.'}
             </p>
 
-            <div className="my-4 rounded-xl border border-white/10 bg-white/5 p-4 text-xs space-y-2 font-mono">
+            <div className="my-4 rounded-xl border border-ink/10 bg-ink/[0.04] p-4 text-xs space-y-2 font-mono">
               <div className="flex justify-between">
-                <span className="text-slate-400">Symbol:</span>
-                <span className="font-bold text-white">{selectedSymbol}</span>
+                <span className="text-ink/55">Symbol:</span>
+                <span className="font-bold text-ink">{selectedSymbol}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Action:</span>
-                <span className={orderSide === 'buy' ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                <span className="text-ink/55">Action:</span>
+                <span className={orderSide === 'buy' ? 'text-profit font-bold' : 'text-loss font-bold'}>
                   {orderSide.toUpperCase()}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Quantity:</span>
-                <span className="text-white">{effectiveShares} shares</span>
+                <span className="text-ink/55">Quantity:</span>
+                <span className="text-ink">{effectiveShares} shares</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Order Type:</span>
-                <span className="text-white">{orderType.toUpperCase()} ({timeInForce.toUpperCase()})</span>
+                <span className="text-ink/55">Order Type:</span>
+                <span className="text-ink">{orderType.toUpperCase()} ({timeInForce.toUpperCase()})</span>
               </div>
               {(orderType === 'limit' || orderType === 'stop_limit') && (
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Limit Price:</span>
-                  <span className="text-white">{formatCurrency(parseFloat(limitPrice))}</span>
+                  <span className="text-ink/55">Limit Price:</span>
+                  <span className="text-ink">{formatCurrency(parseFloat(limitPrice))}</span>
                 </div>
               )}
               {(orderType === 'stop' || orderType === 'stop_limit') && (
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Stop Trigger:</span>
-                  <span className="text-white">{formatCurrency(parseFloat(stopPrice))}</span>
+                  <span className="text-ink/55">Stop Trigger:</span>
+                  <span className="text-ink">{formatCurrency(parseFloat(stopPrice))}</span>
                 </div>
               )}
-              <div className="flex justify-between border-t border-white/10 pt-2 font-semibold text-sm">
-                <span className="text-slate-300">Estimated Total:</span>
-                <span className="text-cyan-400">{formatCurrency(estimatedOrderTotal)}</span>
+              <div className="flex justify-between border-t border-ink/10 pt-2 font-semibold text-sm">
+                <span className="text-ink/70">Estimated Total:</span>
+                <span className="text-accent">{formatCurrency(estimatedOrderTotal)}</span>
               </div>
             </div>
 
@@ -1550,7 +1573,7 @@ export function PaperLab() {
               <button
                 type="button"
                 onClick={() => setConfirmModalOpen(false)}
-                className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
+                className="rounded-xl border border-ink/10 bg-ink/[0.04] px-4 py-2 text-xs font-semibold text-ink/70 hover:bg-ink/[0.07]"
               >
                 Cancel
               </button>
@@ -1573,22 +1596,22 @@ export function PaperLab() {
       {/* Connect Alpaca Modal */}
       {connectModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="relative w-full max-w-lg rounded-2xl border border-white/10 bg-[#0f172a] p-6 text-white shadow-2xl">
+          <div className="relative w-full max-w-lg rounded-2xl border border-ink/10 bg-panel p-6 text-ink shadow-2xl">
             <button
               type="button"
               onClick={() => setConnectModalOpen(false)}
-              className="absolute right-4 top-4 rounded p-1 text-slate-400 hover:text-white"
+              className="absolute right-4 top-4 rounded p-1 text-ink/55 hover:text-ink"
               aria-label="Close connect modal"
             >
               <X className="h-4 w-4" />
             </button>
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/10 text-accent border border-cyan-500/20">
                 <Wallet className="h-5 w-5" />
               </div>
               <div>
                 <h3 className="text-lg font-bold">Connect Alpaca Paper Trading</h3>
-                <p className="text-xs text-slate-400">Workspace AES-256 encrypted credential storage</p>
+                <p className="text-xs text-ink/55">Workspace AES-256 encrypted credential storage</p>
               </div>
             </div>
 
@@ -1600,7 +1623,7 @@ export function PaperLab() {
 
             <form onSubmit={handleConnect} className="mt-5 space-y-4">
               <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-slate-400">
+                <label className="block text-xs font-medium uppercase tracking-wider text-ink/55">
                   Alpaca API Key ID
                 </label>
                 <input
@@ -1609,12 +1632,12 @@ export function PaperLab() {
                   value={inputKeyId}
                   onChange={(e) => setInputKeyId(e.target.value)}
                   placeholder="e.g. PK0123456789ABCDEF"
-                  className="mt-1.5 w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2 font-mono text-sm text-white placeholder-slate-600 outline-none focus:border-cyan-500/50"
+                  className="mt-1.5 w-full rounded-xl border border-ink/10 bg-ink/[0.04] px-4 py-2 font-mono text-sm text-ink placeholder:text-ink/35 outline-none focus:border-cyan-500/50"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium uppercase tracking-wider text-slate-400">
+                <label className="block text-xs font-medium uppercase tracking-wider text-ink/55">
                   Alpaca Secret Key
                 </label>
                 <div className="relative mt-1.5">
@@ -1624,12 +1647,12 @@ export function PaperLab() {
                     value={inputSecretKey}
                     onChange={(e) => setInputSecretKey(e.target.value)}
                     placeholder="Your 40-character Alpaca paper secret key"
-                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2 pr-10 font-mono text-sm text-white placeholder-slate-600 outline-none focus:border-cyan-500/50"
+                    className="w-full rounded-xl border border-ink/10 bg-ink/[0.04] px-4 py-2 pr-10 font-mono text-sm text-ink placeholder:text-ink/35 outline-none focus:border-cyan-500/50"
                   />
                   <button
                     type="button"
                     onClick={() => setShowSecret(!showSecret)}
-                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white"
+                    className="absolute right-3 top-2.5 text-ink/55 hover:text-ink"
                   >
                     {showSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -1640,7 +1663,7 @@ export function PaperLab() {
                 <button
                   type="button"
                   onClick={() => setConnectModalOpen(false)}
-                  className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white/10"
+                  className="rounded-xl border border-ink/10 bg-ink/[0.04] px-4 py-2 text-xs font-semibold text-ink/70 hover:bg-ink/[0.07]"
                 >
                   Cancel
                 </button>
@@ -1659,17 +1682,17 @@ export function PaperLab() {
       )}
 
       {/* BOTTOM PANEL: Positions, Open Orders, Order History, Performance */}
-      <div data-tour="paper-positions" className="rounded-2xl border border-white/10 bg-[#090d14] p-4 text-white">
+      <div data-tour="paper-positions" className="rounded-2xl border border-ink/10 bg-panel p-4 text-ink">
         {/* Tab Headers */}
-        <div className="flex items-center gap-2 border-b border-white/10 pb-3">
+        <div className="flex items-center gap-2 border-b border-ink/10 pb-3">
           <button
             type="button"
             onClick={() => setBottomTab('positions')}
             className={cn(
               'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
               bottomTab === 'positions'
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
             )}
           >
             Current Positions ({effectivePositions.length})
@@ -1680,8 +1703,8 @@ export function PaperLab() {
             className={cn(
               'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
               bottomTab === 'open-orders'
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
             )}
           >
             Open Orders ({openOrders.length})
@@ -1692,8 +1715,8 @@ export function PaperLab() {
             className={cn(
               'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
               bottomTab === 'history'
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
             )}
           >
             Order History ({effectiveOrders.length})
@@ -1704,8 +1727,8 @@ export function PaperLab() {
             className={cn(
               'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
               bottomTab === 'performance'
-                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
-                : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
             )}
           >
             Portfolio Metrics
@@ -1716,13 +1739,13 @@ export function PaperLab() {
         {bottomTab === 'positions' && (
           <div className="mt-4 overflow-x-auto">
             {effectivePositions.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-500">
+              <div className="py-8 text-center text-xs text-ink/45">
                 No open positions in your {isSandbox ? 'Paper Sandbox' : 'Alpaca paper'} account.
               </div>
             ) : (
               <table className="w-full text-left font-mono text-xs">
                 <thead>
-                  <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-slate-400">
+                  <tr className="border-b border-ink/10 text-[11px] uppercase tracking-wider text-ink/55">
                     <th className="py-2">Symbol</th>
                     <th className="py-2">Side</th>
                     <th className="py-2 text-right">Shares</th>
@@ -1731,19 +1754,19 @@ export function PaperLab() {
                     <th className="py-2 text-right">Market Value</th>
                     <th className="py-2 text-right">
                       <span className="inline-flex items-center gap-1">
-                        Unrealized P&L <InfoTip metric="unrealized_pnl" className="text-slate-500" />
+                        Unrealized P&L <InfoTip metric="unrealized_pnl" className="text-ink/45" />
                       </span>
                     </th>
                     <th className="py-2 text-center">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
+                <tbody className="divide-y divide-ink/[0.06]">
                   {effectivePositions.map((pos) => {
                     const pl = parseFloat(pos.unrealized_pl || '0');
                     const plPct = parseFloat(pos.unrealized_plpc || '0') * 100;
                     return (
-                      <tr key={pos.symbol} className="hover:bg-white/[0.02]">
-                        <td className="py-2.5 font-bold text-white">{pos.symbol}</td>
+                      <tr key={pos.symbol} className="hover:bg-ink/[0.02]">
+                        <td className="py-2.5 font-bold text-ink">{pos.symbol}</td>
                         <td className="py-2.5">
                           <span
                             className={cn(
@@ -1756,20 +1779,20 @@ export function PaperLab() {
                             {pos.side}
                           </span>
                         </td>
-                        <td className="py-2.5 text-right text-slate-200">{pos.qty}</td>
-                        <td className="py-2.5 text-right text-slate-200">
+                        <td className="py-2.5 text-right text-ink/80">{pos.qty}</td>
+                        <td className="py-2.5 text-right text-ink/80">
                           {formatCurrency(parseFloat(pos.avg_entry_price))}
                         </td>
-                        <td className="py-2.5 text-right font-bold text-white">
+                        <td className="py-2.5 text-right font-bold text-ink">
                           {formatCurrency(parseFloat(pos.current_price))}
                         </td>
-                        <td className="py-2.5 text-right text-slate-200">
+                        <td className="py-2.5 text-right text-ink/80">
                           {formatCurrency(parseFloat(pos.market_value))}
                         </td>
                         <td
                           className={cn(
                             'py-2.5 text-right font-semibold',
-                            pl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            pl >= 0 ? 'text-profit' : 'text-loss'
                           )}
                         >
                           {pl >= 0 ? '+' : ''}
@@ -1798,13 +1821,13 @@ export function PaperLab() {
         {bottomTab === 'open-orders' && (
           <div className="mt-4 overflow-x-auto">
             {openOrders.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-500">
+              <div className="py-8 text-center text-xs text-ink/45">
                 No active open orders.
               </div>
             ) : (
               <table className="w-full text-left font-mono text-xs">
                 <thead>
-                  <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-slate-400">
+                  <tr className="border-b border-ink/10 text-[11px] uppercase tracking-wider text-ink/55">
                     <th className="py-2">Time</th>
                     <th className="py-2">Symbol</th>
                     <th className="py-2">Side</th>
@@ -1814,22 +1837,22 @@ export function PaperLab() {
                     <th className="py-2 text-right">Limit Price</th>
                     <th className="py-2">
                       <span className="inline-flex items-center gap-1">
-                        Status <InfoTip metric="order_status" className="text-slate-500" />
+                        Status <InfoTip metric="order_status" className="text-ink/45" />
                       </span>
                     </th>
                     <th className="py-2 text-center">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
+                <tbody className="divide-y divide-ink/[0.06]">
                   {openOrders.map((ord) => (
-                    <tr key={ord.id} className="hover:bg-white/[0.02]">
-                      <td className="py-2.5 text-slate-400">
+                    <tr key={ord.id} className="hover:bg-ink/[0.02]">
+                      <td className="py-2.5 text-ink/55">
                         {new Date(ord.created_at).toLocaleTimeString([], {
                           hour: '2-digit',
                           minute: '2-digit',
                         })}
                       </td>
-                      <td className="py-2.5 font-bold text-white">{ord.symbol}</td>
+                      <td className="py-2.5 font-bold text-ink">{ord.symbol}</td>
                       <td className="py-2.5">
                         <span
                           className={cn(
@@ -1842,10 +1865,10 @@ export function PaperLab() {
                           {ord.side}
                         </span>
                       </td>
-                      <td className="py-2.5 uppercase text-slate-300">{ord.type}</td>
-                      <td className="py-2.5 text-right text-slate-200">{ord.qty}</td>
-                      <td className="py-2.5 text-right text-slate-400">{ord.filled_qty}</td>
-                      <td className="py-2.5 text-right text-slate-200">
+                      <td className="py-2.5 uppercase text-ink/70">{ord.type}</td>
+                      <td className="py-2.5 text-right text-ink/80">{ord.qty}</td>
+                      <td className="py-2.5 text-right text-ink/55">{ord.filled_qty}</td>
+                      <td className="py-2.5 text-right text-ink/80">
                         {ord.limit_price ? formatCurrency(parseFloat(ord.limit_price)) : '-'}
                       </td>
                       <td className="py-2.5">
@@ -1874,13 +1897,13 @@ export function PaperLab() {
         {bottomTab === 'history' && (
           <div className="mt-4 overflow-x-auto">
             {effectiveOrders.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-500">
+              <div className="py-8 text-center text-xs text-ink/45">
                 No orders recorded yet.
               </div>
             ) : (
               <table className="w-full text-left font-mono text-xs">
                 <thead>
-                  <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-slate-400">
+                  <tr className="border-b border-ink/10 text-[11px] uppercase tracking-wider text-ink/55">
                     <th className="py-2">Date / Time</th>
                     <th className="py-2">Symbol</th>
                     <th className="py-2">Side</th>
@@ -1889,16 +1912,16 @@ export function PaperLab() {
                     <th className="py-2 text-right">Avg Fill Price</th>
                     <th className="py-2">
                       <span className="inline-flex items-center gap-1">
-                        Status <InfoTip metric="order_status" className="text-slate-500" />
+                        Status <InfoTip metric="order_status" className="text-ink/45" />
                       </span>
                     </th>
                     <th className="py-2">Order ID</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/5">
+                <tbody className="divide-y divide-ink/[0.06]">
                   {effectiveOrders.map((ord) => (
-                    <tr key={ord.id} className="hover:bg-white/[0.02]">
-                      <td className="py-2.5 text-slate-400">
+                    <tr key={ord.id} className="hover:bg-ink/[0.02]">
+                      <td className="py-2.5 text-ink/55">
                         {new Date(ord.created_at).toLocaleString(undefined, {
                           month: 'numeric',
                           day: 'numeric',
@@ -1906,7 +1929,7 @@ export function PaperLab() {
                           minute: '2-digit',
                         })}
                       </td>
-                      <td className="py-2.5 font-bold text-white">{ord.symbol}</td>
+                      <td className="py-2.5 font-bold text-ink">{ord.symbol}</td>
                       <td className="py-2.5">
                         <span
                           className={cn(
@@ -1919,11 +1942,11 @@ export function PaperLab() {
                           {ord.side}
                         </span>
                       </td>
-                      <td className="py-2.5 uppercase text-slate-300">{ord.type}</td>
-                      <td className="py-2.5 text-right text-slate-200">
+                      <td className="py-2.5 uppercase text-ink/70">{ord.type}</td>
+                      <td className="py-2.5 text-right text-ink/80">
                         {ord.filled_qty}/{ord.qty}
                       </td>
-                      <td className="py-2.5 text-right text-slate-200">
+                      <td className="py-2.5 text-right text-ink/80">
                         {ord.filled_avg_price ? formatCurrency(parseFloat(ord.filled_avg_price)) : '-'}
                       </td>
                       <td className="py-2.5">
@@ -1942,7 +1965,7 @@ export function PaperLab() {
                           {ord.status}
                         </Badge>
                       </td>
-                      <td className="py-2.5 font-mono text-[11px] text-slate-500">
+                      <td className="py-2.5 font-mono text-[11px] text-ink/45">
                         {ord.id.slice(0, 8)}…
                       </td>
                     </tr>
@@ -1956,47 +1979,47 @@ export function PaperLab() {
         {/* Tab 4: Performance & Account Metrics */}
         {bottomTab === 'performance' && (
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 text-xs">
-            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 space-y-2">
-              <span className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+            <div className="rounded-xl border border-ink/10 bg-ink/[0.02] p-3 space-y-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-ink/55">
                 Balances & Equity
               </span>
               <div className="flex justify-between">
-                <span className="text-slate-400"><MetricLabel metric="total_equity">Portfolio Value</MetricLabel>:</span>
-                <span className="font-mono text-white">{formatCurrency(effectiveEquity)}</span>
+                <span className="text-ink/55"><MetricLabel metric="total_equity">Portfolio Value</MetricLabel>:</span>
+                <span className="font-mono text-ink">{formatCurrency(effectiveEquity)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400"><MetricLabel metric="cash_balance">Cash Balance</MetricLabel>:</span>
-                <span className="font-mono text-white">{formatCurrency(effectiveCash)}</span>
+                <span className="text-ink/55"><MetricLabel metric="cash_balance">Cash Balance</MetricLabel>:</span>
+                <span className="font-mono text-ink">{formatCurrency(effectiveCash)}</span>
               </div>
               <div className="flex justify-between">
-                <MetricLabel metric="last_equity" className="text-slate-400">Last Equity:</MetricLabel>
-                <span className="font-mono text-white">
+                <MetricLabel metric="last_equity" className="text-ink/55">Last Equity:</MetricLabel>
+                <span className="font-mono text-ink">
                   {account?.last_equity ? formatCurrency(parseFloat(account.last_equity)) : formatCurrency(effectiveEquity)}
                 </span>
               </div>
             </div>
 
-            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 space-y-2">
-              <span className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+            <div className="rounded-xl border border-ink/10 bg-ink/[0.02] p-3 space-y-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-ink/55">
                 Margin & Buying Power
               </span>
               <div className="flex justify-between">
-                <span className="inline-flex items-center gap-1 text-slate-400">Buying Power: <InfoTip metric="buying_power" className="text-slate-500" /></span>
-                <span className="font-mono text-white">
+                <span className="inline-flex items-center gap-1 text-ink/55">Buying Power: <InfoTip metric="buying_power" className="text-ink/45" /></span>
+                <span className="font-mono text-ink">
                   {formatCurrency(effectiveBuyingPower)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Daytrading Power:</span>
-                <span className="font-mono text-white">
+                <span className="text-ink/55">Daytrading Power:</span>
+                <span className="font-mono text-ink">
                   {account?.daytrading_buying_power
                     ? formatCurrency(parseFloat(account.daytrading_buying_power))
                     : formatCurrency(effectiveBuyingPower * 2)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Maintenance Margin:</span>
-                <span className="font-mono text-white">
+                <span className="text-ink/55">Maintenance Margin:</span>
+                <span className="font-mono text-ink">
                   {account?.maintenance_margin
                     ? formatCurrency(parseFloat(account.maintenance_margin))
                     : '$0.00'}
@@ -2004,23 +2027,23 @@ export function PaperLab() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-white/5 bg-white/[0.02] p-3 space-y-2">
-              <span className="font-mono text-[10px] uppercase tracking-wider text-slate-400">
+            <div className="rounded-xl border border-ink/10 bg-ink/[0.02] p-3 space-y-2">
+              <span className="font-mono text-[10px] uppercase tracking-wider text-ink/55">
                 Regulatory & Trading Stats
               </span>
               <div className="flex justify-between">
-                <span className="text-slate-400">Pattern Day Trader:</span>
-                <span className="font-mono text-white">
+                <span className="text-ink/55">Pattern Day Trader:</span>
+                <span className="font-mono text-ink">
                   {account?.pattern_day_trader ? 'Yes' : 'No'}
                 </span>
               </div>
               <div className="flex justify-between">
-                <MetricLabel metric="daytrade_count" className="text-slate-400">Daytrade Count:</MetricLabel>
-                <span className="font-mono text-white">{account?.daytrade_count ?? 0} / 3</span>
+                <MetricLabel metric="daytrade_count" className="text-ink/55">Daytrade Count:</MetricLabel>
+                <span className="font-mono text-ink">{account?.daytrade_count ?? 0} / 3</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Account Currency:</span>
-                <span className="font-mono text-white">{account?.currency || 'USD'}</span>
+                <span className="text-ink/55">Account Currency:</span>
+                <span className="font-mono text-ink">{account?.currency || 'USD'}</span>
               </div>
             </div>
           </div>

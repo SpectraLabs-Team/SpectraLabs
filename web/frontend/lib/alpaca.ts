@@ -146,7 +146,12 @@ export async function getAlpacaStatus(): Promise<AlpacaConnectionStatus> {
   if (!res.ok) {
     return { connected: false };
   }
-  return res.json();
+  const data = await res.json().catch(() => ({ connected: false }));
+  return {
+    connected: Boolean(data.connected),
+    keyIdHint: data.keyIdHint || data.hint,
+    updatedAt: data.updatedAt,
+  };
 }
 
 export async function connectAlpaca(
@@ -163,7 +168,7 @@ export async function connectAlpaca(
   if (!res.ok || !data.ok) {
     return { ok: false, error: data.error || 'Failed to connect Alpaca credentials.' };
   }
-  return { ok: true, keyIdHint: data.keyIdHint, account: data.account };
+  return { ok: true, keyIdHint: data.keyIdHint || data.hint, account: data.account };
 }
 
 export async function disconnectAlpaca(): Promise<{ ok: boolean; error?: string }> {

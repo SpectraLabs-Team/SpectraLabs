@@ -237,6 +237,21 @@ export function PaperLab() {
     }
   }, []);
 
+  // Load Cached Alpaca Account from LocalStorage
+  useEffect(() => {
+    try {
+      const cached = localStorage.getItem('spectra-alpaca-account-cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && (parsed.equity || parsed.cash)) {
+          setAccount(parsed);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
   // Load Watchlist from LocalStorage
   useEffect(() => {
     try {
@@ -299,7 +314,14 @@ export function PaperLab() {
         getAlpacaOrders('all', 100).catch(() => []),
       ]);
 
-      if (acc) setAccount(acc);
+      if (acc) {
+        setAccount(acc);
+        try {
+          localStorage.setItem('spectra-alpaca-account-cache', JSON.stringify(acc));
+        } catch {
+          // ignore
+        }
+      }
       setPositions(posList);
       setOrders(ordList);
 
@@ -395,10 +417,19 @@ export function PaperLab() {
       setIsConnected(true);
       setTradingMode('alpaca');
       setConnectModalOpen(false);
-      setKeyHint(res.keyIdHint || inputKeyId.slice(-4));
+      const hint = res.keyIdHint || inputKeyId.slice(-4);
+      setKeyHint(hint);
       setInputKeyId('');
       setInputSecretKey('');
-      success('Connected to Alpaca Paper Trading', `Authenticated broker session · Key: ••••${res.keyIdHint || inputKeyId.slice(-4)}`);
+      if (res.account) {
+        setAccount(res.account);
+        try {
+          localStorage.setItem('spectra-alpaca-account-cache', JSON.stringify(res.account));
+        } catch {
+          // ignore
+        }
+      }
+      success('Connected to Alpaca Paper Trading', `Authenticated broker session · Key: ••••${hint}`);
       await loadAlpacaData();
     } catch (err) {
       setConnectError(err instanceof Error ? err.message : 'Connection failed. Check your network.');
@@ -418,6 +449,11 @@ export function PaperLab() {
       setPositions([]);
       setOrders([]);
       setKeyHint('');
+      try {
+        localStorage.removeItem('spectra-alpaca-account-cache');
+      } catch {
+        // ignore
+      }
       info('Alpaca Disconnected', 'Switched to Spectra Simulated Paper Sandbox');
     } catch (err) {
       toastError('Disconnect Failed', err instanceof Error ? err.message : 'Failed to disconnect account.');
@@ -1634,7 +1670,7 @@ export function PaperLab() {
                   value={inputKeyId}
                   onChange={(e) => setInputKeyId(e.target.value)}
                   placeholder="e.g. PK0123456789ABCDEF"
-                  className="mt-1.5 w-full rounded-xl border border-ink/10 bg-ink/[0.04] px-4 py-2 font-mono text-sm text-ink placeholder:text-ink/35 outline-none focus:border-cyan-500/50"
+                  className="mt-1.5 w-full rounded-xl border border-ink/20 bg-panel px-4 py-2.5 font-mono text-sm text-ink placeholder:text-ink/40 outline-none transition focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 dark:bg-slate-900 dark:text-slate-100"
                 />
               </div>
 
@@ -1649,7 +1685,7 @@ export function PaperLab() {
                     value={inputSecretKey}
                     onChange={(e) => setInputSecretKey(e.target.value)}
                     placeholder="Your 40-character Alpaca paper secret key"
-                    className="w-full rounded-xl border border-ink/10 bg-ink/[0.04] px-4 py-2 pr-10 font-mono text-sm text-ink placeholder:text-ink/35 outline-none focus:border-cyan-500/50"
+                    className="w-full rounded-xl border border-ink/20 bg-panel px-4 py-2.5 pr-10 font-mono text-sm text-ink placeholder:text-ink/40 outline-none transition focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/50 dark:bg-slate-900 dark:text-slate-100"
                   />
                   <button
                     type="button"

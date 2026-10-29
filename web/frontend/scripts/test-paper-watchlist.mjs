@@ -3,16 +3,22 @@ import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-  getMarketSession,
-  getBaselineTickerPrice,
-  CURATED_WATCHLIST_ITEMS,
-  WATCHLIST_CATEGORY_LABELS,
-} from '../lib/marketStatus.ts';
+import { transpileForTest } from './transpile-for-test.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const frontendDir = path.resolve(__dirname, '..');
+
+const { load, cleanup } = transpileForTest('paper-watchlist', {
+  files: ['lib/marketStatus.ts'],
+});
+
+const {
+  getMarketSession,
+  getBaselineTickerPrice,
+  CURATED_WATCHLIST_ITEMS,
+  WATCHLIST_CATEGORY_LABELS,
+} = load('lib/marketStatus.js');
 
 test('paper trading watchlist and market status', async (t) => {
   await t.test('calculates market session correctly for regular trading hours', () => {

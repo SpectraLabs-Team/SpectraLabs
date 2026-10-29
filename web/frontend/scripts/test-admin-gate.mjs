@@ -210,33 +210,47 @@ try {
   }
   if (browser) {
     const host = new URL(BASE).hostname;
-    for (const [who, token] of [['anonymous', null], ['signed-in non-admin', user.token]]) {
-      await test(`/admin shows the unauthorized screen to ${who}`, async () => {
-        const context = await browser.newContext();
-        if (token) await context.addCookies([{ name: 'spectra_session', value: token, domain: host, path: '/' }]);
+    await test('/admin sends anonymous visitors to sign-in', async () => {
+      const context = await browser.newContext();
+      try {
         const page = await context.newPage();
         await page.goto(`${BASE}/admin`, { waitUntil: 'domcontentloaded' });
-        const onLogin = !page.url().includes('/admin');
-        const blocked = onLogin
-          ? false
-          : await page
-              .getByText('Admin Privileges Required')
-              .first()
-              .waitFor({ state: 'visible', timeout: 15000 })
-              .then(() => true)
-              .catch(() => false);
+        expect(page.url().includes('auth=login'), `expected URL to contain auth=login, got ${page.url()}`);
+      } finally {
         await context.close();
-        expect(blocked || onLogin, `no unauthorized screen and still on ${page.url()}`);
-      });
-    }
+      }
+    });
+
+    await test('/admin shows the unauthorized screen to signed-in non-admin', async () => {
+      const context = await browser.newContext();
+      try {
+        await context.addCookies([{ name: 'spectra_session', value: user.token, domain: host, path: '/' }]);
+        const page = await context.newPage();
+        await page.goto(`${BASE}/admin`, { waitUntil: 'domcontentloaded' });
+        const blocked = await page
+          .getByText('Admin Privileges Required')
+          .first()
+          .waitFor({ state: 'visible', timeout: 15000 })
+          .then(() => true)
+          .catch(() => false);
+        expect(blocked, `no unauthorized screen and still on ${page.url()}`);
+      } finally {
+        await context.close();
+      }
+    });
+
     await test('/admin shows the dashboard to an admin (sanity)', async () => {
       const context = await browser.newContext();
-      await context.addCookies([{ name: 'spectra_session', value: admin.token, domain: host, path: '/' }]);
-      const page = await context.newPage();
-      await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
-      const blocked = await page.getByText('Admin Privileges Required').first().isVisible().catch(() => false);
-      await context.close();
-      expect(!blocked, 'an admin saw the unauthorized screen');
+      try {
+        await context.addCookies([{ name: 'spectra_session', value: admin.token, domain: host, path: '/' }]);
+        const page = await context.newPage();
+        await page.goto(`${BASE}/admin`, { waitUntil: 'networkidle' });
+        await page.locator('#kpi-accounts').waitFor({ state: 'visible', timeout: 15000 });
+        const blocked = await page.getByText('Admin Privileges Required').first().isVisible().catch(() => false);
+        expect(!blocked, 'an admin saw the unauthorized screen');
+      } finally {
+        await context.close();
+      }
     });
     await browser.close();
   } else {

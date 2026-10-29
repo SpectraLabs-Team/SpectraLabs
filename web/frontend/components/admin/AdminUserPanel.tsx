@@ -24,6 +24,7 @@ type Detail = {
   workspaces: { id: string; name: string; personal: boolean; role: string; members: number }[];
   sessions: { id: string; device: string; ip: string | null; lastSeenAt: number }[];
   events: { seq: string; occurredAt: number; action: string; outcome: string; actorEmail: string | null; ip: string | null }[];
+  ipsHidden: boolean;
 };
 
 const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -31,7 +32,8 @@ const when = (ms: number) => new Date(ms).toLocaleString(undefined, { month: 'sh
 /**
  * Admin → one account (M19 task 13): security, workspaces, devices and recent activity, plus
  * disable / re-enable and grant / remove admin. Changes ask for a fresh "confirm it's you" and are
- * audit-logged; opening this panel is logged too.
+ * audit-logged; opening this panel is logged too. IP addresses stay hidden until the admin
+ * chooses "Show IPs", which is logged separately.
  */
 export function AdminUserPanel({ userId, self, onChanged }: { userId: string; self: boolean; onChanged: () => void }) {
   const { call, dialog } = useReauth();
@@ -40,6 +42,17 @@ export function AdminUserPanel({ userId, self, onChanged }: { userId: string; se
   const [error, setError] = useState('');
 
   const load = useCallback(() => call<Detail>(`/api/admin/users/${userId}`).then(setD).catch((e) => setError(e.message)), [call, userId]);
+  const showIps = async () => {
+    setBusy('ips');
+    setError('');
+    try {
+      setD(await call<Detail>(`/api/admin/users/${userId}?reveal=ips`));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load IP addresses.');
+    } finally {
+      setBusy(null);
+    }
+  };
   useEffect(() => {
     load();
   }, [load]);
@@ -115,7 +128,20 @@ export function AdminUserPanel({ userId, self, onChanged }: { userId: string; se
           </ul>
         </div>
         <div>
-          <p className="mb-1.5 font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink/45">Signed in on</p>
+          <div className="mb-1.5 flex items-center justify-between gap-3">
+            <p className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink/45">Signed in on</p>
+            {d.ipsHidden && (d.sessions.length > 0 || d.events.length > 0) ? (
+              <button
+                type="button"
+                className="text-[11px] text-ink/55 underline-offset-2 hover:text-ink hover:underline disabled:opacity-50"
+                disabled={busy !== null}
+                onClick={showIps}
+                title="Shows IP addresses for this account. Viewing them is recorded in the audit log."
+              >
+                {busy === 'ips' ? 'Loading…' : 'Show IPs'}
+              </button>
+            ) : null}
+          </div>
           {d.sessions.length === 0 ? (
             <p className="text-ink/45">No active sessions.</p>
           ) : (
@@ -124,7 +150,7 @@ export function AdminUserPanel({ userId, self, onChanged }: { userId: string; se
                 <li key={s.id} className="flex justify-between gap-3">
                   <span className="truncate text-ink/80">{s.device}</span>
                   <span className="shrink-0 font-mono text-[11px] text-ink/50">
-                    {s.ip ?? '—'} · {when(s.lastSeenAt)}
+                    {d.ipsHidden ? 'IP hidden' : (s.ip ?? '—')} · {when(s.lastSeenAt)}
                   </span>
                 </li>
               ))}

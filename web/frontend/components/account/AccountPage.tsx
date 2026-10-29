@@ -402,6 +402,10 @@ function UsageData() {
         <li>Counts of what you run, such as simulations, backtests and paper orders, taken from your workspace history.</li>
         <li>We do not record the pages you view, your clicks or what you type.</li>
         <li>Daily activity totals are deleted after {ACTIVITY_RETENTION_DAYS_CLIENT} days. Deleting your account removes them immediately.</li>
+        <li>
+          Security records, such as sign-ins and admin actions, are kept permanently in a tamper-evident log, with the IP address and
+          browser used. They stay after you delete your account.
+        </li>
         <li>Admins can see these figures for your account, and every time they open them is recorded in the audit log.</li>
       </ul>
     </Section>

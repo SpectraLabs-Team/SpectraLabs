@@ -25,10 +25,9 @@
 
 - **Separate database roles for schema migration vs. application runtime.** Supported and hardened via `spectra-db provision-roles` and `scripts/setup-db-roles.sh`. The migration runner operates as the schema owner, while `spectra-api` and `spectra-worker` connect as `POSTGRES_APP_USER` (`spectra_app`) with read-only access to users/workspaces and read-write access to engine tables.
 - **Sentry error tracking delivery.** Verified and monitored via `/api/v1/observability/sentry` status inspection and `/api/v1/observability/sentry/verify` test event dispatch and flush.
-- **Artifact bytes of deleted workspaces stay in the store.** Their rows go with the workspace and no
-  longer count against a quota, but the content-addressed files are not garbage-collected yet (another
-  workspace may hold the same bytes). A sweep that removes files no `run_artifacts` row references is
-  still to be written.
+- **Artifact bytes of deleted workspaces:** resolved. Every 30 minutes the worker deletes stored files
+  that no workspace references any more (`sweep_unreferenced` in `crates/spectra-db/src/artifacts.rs`,
+  commit `b055adf`). Files still referenced by another workspace are kept.
 
 ## Model limits (inherited)
 

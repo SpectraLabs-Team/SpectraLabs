@@ -148,6 +148,61 @@ It writes `registry-heads-<time>.txt` (workspace, seq, hash per line) and append
 separate git repository or a release asset all work. To audit later, compare a past heads file
 with the hashes at those sequence numbers in the database.
 
+## Admin accounts
+
+Platform admins are set from the command line, against the database the app uses. From
+`web/frontend`, with `DATABASE_URL` pointing at that database:
+
+```bash
+npm run admin -- list                      # who is an admin
+npm run admin -- grant someone@example.com # make an admin
+npm run admin -- revoke someone@example.com
+```
+
+A role change signs that account out everywhere, so its next sign-in gets the new role. Granting
+admin turns on two-step login (always on for admins). The last admin can't be revoked: grant
+someone else first. Each change is recorded in the audit log (`admin.role.granted`,
+`admin.role.revoked`). Admins can also grant, remove and disable accounts in the admin console;
+that asks them to confirm it's them first, and they can't change their own account there.
+
+**If something looks wrong:** check `npm run admin -- list`, then the audit log (Admin → Audit log,
+filter on `admin.`). `npm run audit:verify` checks that nobody has altered the log.
+
+## Activity retention
+
+Daily active-time rows (`user_activity_daily`) are deleted after 400 days, as promised on the
+Account page. Policy: [data-retention.md](data-retention.md). Audit records are never deleted.
+
+**How it runs.** Each worker runs the purge every six hours, starting when it boots. A database lock
+means only one purge runs at a time, however many workers there are, and running it again just finds
+nothing to delete. To pause deletions, set `SPECTRA_ACTIVITY_PURGE=off` on the workers and restart them.
+
+**By hand.** From `web/frontend`, with `DATABASE_URL` set:
+
+```bash
+npm run activity:purge -- --dry-run   # count what would be deleted; deletes nothing
+npm run activity:purge                # delete rows older than 400 days
+```
+
+The script uses the same lock as the workers. If one is purging at that moment, it says so and
+exits with code 3; run it again later.
+
+**Before the first production run**, or after changing the retention period: run the dry run against
+production, and check the number is what you expect.
+
+**Checking it works.** Each run logs `activity purge removed N daily activity row(s)` (or
+`activity purge failed: ...` at error level, which goes to Sentry when `SENTRY_DSN` is set). The
+worker's `/metrics` has `activity_purge_runs_total{status="ok|busy|error"}`,
+`activity_purge_rows_total` and `activity_purge_last_success_timestamp_seconds`.
+
+**If it fails:** read the error in the worker logs or Sentry. Usual causes are the database being
+unreachable or the worker's database role lacking DELETE on `user_activity_daily`. Fix the cause; the
+next run catches up, since it deletes everything past the cutoff. To run it at once, use the script.
+
+**Deleted by mistake** (for example after setting too short a period): deleted rows can only come
+back from a backup. Restore the backup into a scratch database (see Backups), then copy the missing
+`user_activity_daily` rows across. Rows older than the backup's retention are gone.
+
 ## Monitoring
 
 `just up-prod` includes Prometheus at `http://127.0.0.1:9090` (bound to localhost; use an SSH tunnel
@@ -160,6 +215,8 @@ from elsewhere). Useful queries:
 | Jobs finished by outcome | `sum by (kind, status) (rate(jobs_completed_total[15m]))` |
 | Job duration p95 | `histogram_quantile(0.95, sum by (le, kind) (rate(job_duration_seconds_bucket[30m])))` |
 | Workers up | `up{job="spectra-worker"}` |
+| Hours since the last activity purge (alert above 24) | `(time() - max(activity_purge_last_success_timestamp_seconds)) / 3600` |
+| Failed activity purges | `sum(increase(activity_purge_runs_total{status="error"}[1d]))` |
 
 Logs from `spectra-api` and `spectra-worker` are JSON lines (`docker compose logs -f api worker`);
 `RUST_LOG` sets the level.

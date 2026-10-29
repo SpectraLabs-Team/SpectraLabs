@@ -27,9 +27,16 @@ export type AdminUserDetail = {
   workspaces: { id: string; name: string; personal: boolean; role: 'owner' | 'editor' | 'viewer'; members: number; joinedAt: number }[];
   sessions: { id: string; device: string; ip: string | null; createdAt: number; lastSeenAt: number }[];
   events: AuditEvent[];
+  /** `true` when IP addresses and browser strings were left out (the default). */
+  ipsHidden: boolean;
 };
 
-export async function getAdminUserDetail(userId: string): Promise<AdminUserDetail | null> {
+/**
+ * IP addresses and browser strings (on sessions and audit events) are left out unless `ips` is
+ * set, so an admin sees them only after choosing "Show IPs", which the route audit-logs.
+ */
+export async function getAdminUserDetail(userId: string, opts: { ips?: boolean } = {}): Promise<AdminUserDetail | null> {
+  const ips = opts.ips === true;
   if (!/^[0-9a-f-]{36}$/i.test(userId)) return null;
   const u = await findUserById(userId);
   if (!u) return null;
@@ -60,7 +67,8 @@ export async function getAdminUserDetail(userId: string): Promise<AdminUserDetai
       lockedUntil: lock?.locked_until && lock.locked_until.getTime() > Date.now() ? lock.locked_until.getTime() : null,
     },
     workspaces: workspaces.map((w) => ({ id: w.id, name: w.name, personal: w.personal_owner_id !== null, role: w.role, members: w.members, joinedAt: w.created_at.getTime() })),
-    sessions: sessions.map((s) => ({ id: s.id, device: describeUserAgent(s.userAgent).label, ip: s.ip, createdAt: s.createdAt, lastSeenAt: s.lastSeenAt })),
-    events: await listAudit({ subjectUserId: userId, limit: 30 }),
+    sessions: sessions.map((s) => ({ id: s.id, device: describeUserAgent(s.userAgent).label, ip: ips ? s.ip : null, createdAt: s.createdAt, lastSeenAt: s.lastSeenAt })),
+    events: (await listAudit({ subjectUserId: userId, limit: 30 })).map((e) => (ips ? e : { ...e, ip: null, userAgent: null })),
+    ipsHidden: !ips,
   };
 }

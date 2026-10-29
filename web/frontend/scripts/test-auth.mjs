@@ -1774,6 +1774,15 @@ test('admin: account list and detail show what an admin needs and nothing secret
   assert.ok(!json.includes('passwordHash') && !json.includes('password_hash') && !json.includes('token'), 'no hashes or tokens');
   assert.equal(await adminUsers.getAdminUserDetail('nope'), null);
   assert.equal(await adminUsers.getAdminUserDetail(crypto.randomUUID()), null);
+
+  // IP addresses and browser strings are hidden unless asked for.
+  assert.equal(d.ipsHidden, true, 'IPs hidden by default');
+  assert.ok(d.sessions.every((s) => s.ip === null), 'no session IPs by default');
+  assert.ok(d.events.every((e) => e.ip === null && e.userAgent === null), 'no event IPs or browsers by default');
+  const shown = await adminUsers.getAdminUserDetail(u.id, { ips: true });
+  assert.equal(shown.ipsHidden, false);
+  assert.equal(shown.sessions.length, d.sessions.length);
+  assert.equal(shown.events.length, d.events.length);
 });
 
 test('admin: routes are admin-only, need a fresh confirm, refuse self-changes, and log views', () => {
@@ -1782,6 +1791,8 @@ test('admin: routes are admin-only, need a fresh confirm, refuse self-changes, a
   assert.ok(src.includes('requireRecentAuth(auth.session)'));
   assert.ok(src.includes('target.id === auth.user.id'), 'no changing your own account');
   assert.ok(src.includes("'admin.user.viewed'"));
+  assert.ok(src.includes("'admin.user.ips_revealed'"), 'revealing IPs is logged separately');
+  assert.ok(src.includes("get('reveal') === 'ips'"), 'IPs only on request');
   assert.ok(fs.readFileSync(path.join(root, 'app/api/admin/users/route.ts'), 'utf8').includes('requireAdmin()'));
 });
 
@@ -1999,7 +2010,7 @@ test('audit: the routes that change security state write events', () => {
     'app/api/secrets/[kind]/route.ts': ['secret.added', 'secret.replaced', 'secret.deleted'],
     'lib/server/vault.ts': ['secret.used'],
     'lib/server/authStore.ts': ['admin.role.granted', 'admin.role.revoked'],
-    'lib/server/auditRoute.ts': ['audit.exported'],
+    'lib/server/auditRoute.ts': ['audit.exported', 'audit.viewed'],
   };
   for (const [file, actions] of Object.entries(expect)) {
     const src = fs.readFileSync(path.join(root, file), 'utf8');

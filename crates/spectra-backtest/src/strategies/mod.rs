@@ -107,6 +107,9 @@ impl BuiltinStrategy {
     /// # Errors
     /// [`ConfigError`] with fields named `params.<name>`.
     pub fn resolve_params(&self, given: &ParamSet) -> std::result::Result<ParamSet, ConfigError> {
+        if self.name == "dsl" {
+            return Ok(given.clone());
+        }
         let mut errors = Vec::new();
         let field = |n: &str| format!("params.{n}");
         for (k, _) in &given.values {

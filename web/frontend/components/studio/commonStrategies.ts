@@ -26,7 +26,7 @@ param qty: float = 100.0, min = 1.0, max = 1000000.0, desc = "Target order share
 
 on_bar {
     let fast_ma = sma(fast);
-    let slow_ma = slow > 0 ? sma(slow) : close;
+    let slow_ma = sma(slow);
 
     if fast_ma > slow_ma {
         target_shares(qty);

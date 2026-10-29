@@ -477,6 +477,8 @@ pub(crate) async fn apply_version(
     }
     payload["strategy_version_id"] = serde_json::Value::String(version.id.to_string());
     payload["strategy"] = serde_json::Value::String(version.builtin);
+    payload["strategy_name"] = serde_json::Value::String(version.strategy_name.clone());
+    payload["strategy_version_num"] = serde_json::json!(version.version);
     if let Some(code) = version.code {
         payload["dsl_code"] = serde_json::Value::String(code);
     }

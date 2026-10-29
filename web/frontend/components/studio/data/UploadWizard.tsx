@@ -85,7 +85,7 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
   const [name, setName] = useState('');
   const [running, setRunning] = useState<Running | null>(null);
   const [result, setResult] = useState<{ ok: IngestResult } | { rejected: IngestRejection | null; message: string } | null>(null);
-  const uploaded = useRef<{ file: File; id: string } | null>(null);
+  const [uploaded, setUploaded] = useState<{ file: File; id: string } | null>(null);
   const [maxBytes, setMaxBytes] = useState(MAX_UPLOAD_BYTES);
   useEffect(() => {
     getUploadLimits()
@@ -151,11 +151,11 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
     setResult(null);
     abort.current = new AbortController();
     try {
-      let uploadId = uploaded.current?.file === file ? uploaded.current.id : '';
+      let uploadId = uploaded?.file === file ? uploaded.id : '';
       if (!uploadId) {
         setRunning({ phase: 'upload', sent: 0, total: file.size });
         const u = await uploadFile(file, (sent, total) => setRunning({ phase: 'upload', sent, total }), abort.current.signal);
-        uploaded.current = { file, id: u.id };
+        setUploaded({ file, id: u.id });
         uploadId = u.id;
       }
       setRunning({ phase: 'ingest', sent: file.size, total: file.size });
@@ -173,7 +173,7 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
       setStage('done');
     } catch (e) {
       const f = detailErrors(e);
-      if (f.upload_id) uploaded.current = null; // expired: upload again next time
+      if (f.upload_id) setUploaded(null); // expired: upload again next time
       setError(Object.keys(f).length ? Object.entries(f).map(([k, m]) => (k ? `${k}: ${m}` : m)).join(' · ') : e instanceof Error ? e.message : 'The upload failed.');
       setStage('settings');
     } finally {
@@ -432,7 +432,7 @@ export function UploadWizard({ datasetNames, onClose, onDone, onBacktest }: { da
                 </datalist>
               </Field>
               <button type="button" className="btn-primary" onClick={start} disabled={!name.trim() || busy}>
-                <UploadIcon className="h-3.5 w-3.5" /> {uploaded.current?.file === file ? 'Ingest again' : 'Upload and ingest'}
+                <UploadIcon className="h-3.5 w-3.5" /> {uploaded?.file === file ? 'Ingest again' : 'Upload and ingest'}
               </button>
             </div>
           )}

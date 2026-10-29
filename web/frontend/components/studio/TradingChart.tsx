@@ -94,6 +94,7 @@ export function TradingChart({
 
   // Zoom handler
   const handleZoom = useCallback((direction: 'in' | 'out', factor = 0.15) => {
+    if (bars.length === 0) return;
     setViewWindow((prev) => {
       const span = prev.end - prev.start + 1;
       const delta = Math.max(2, Math.round(span * factor));
@@ -124,19 +125,39 @@ export function TradingChart({
     const canvas = canvasRef.current;
     const container = plotRef.current;
     if (!canvas || !container) return;
+
     const css = getComputedStyle(document.documentElement);
-    const rgbVar = (n: string) => css.getPropertyValue(`--${n}`).trim().split(/\s+/).join(', ');
-    const inkA = (a: number) => `rgba(${rgbVar('ink')}, ${a})`;
-    const panelBg = `rgb(${rgbVar('panel')})`;
-    const inkSolid = `rgb(${rgbVar('ink')})`;
+    const isDark = document.documentElement.classList.contains('dark') || theme === 'dark';
+    const fallbackInk = isDark ? '241, 245, 249' : '15, 23, 42';
+    const fallbackPanel = isDark ? '11, 15, 23' : '255, 255, 255';
+
+    const getRawRgb = (n: string, fallback: string) => {
+      try {
+        const raw = css.getPropertyValue(`--${n}`).replace(/\/\*.*?\*\//g, '').replace(/;/g, '').trim();
+        const parts = raw.split(/\s+/).filter(Boolean);
+        if (parts.length === 3 && parts.every((p) => !isNaN(Number(p)))) {
+          return parts.join(', ');
+        }
+      } catch {
+        // fallback
+      }
+      return fallback;
+    };
+
+    const inkRgb = getRawRgb('ink', fallbackInk);
+    const panelRgb = getRawRgb('panel', fallbackPanel);
+
+    const inkA = (a: number) => `rgba(${inkRgb}, ${a})`;
+    const panelBg = `rgb(${panelRgb})`;
+    const inkSolid = `rgb(${inkRgb})`;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
     const rect = container.getBoundingClientRect();
-    const width = Math.floor(rect.width);
-    const height = Math.floor(rect.height);
+    const width = Math.floor(rect.width) || plotSize.w || 600;
+    const height = Math.floor(rect.height) || plotSize.h || 360;
 
     if (width <= 0 || height <= 0) return;
 
@@ -344,14 +365,16 @@ export function TradingChart({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // Crosshair price tag
-      const crossPrice = yToPrice(crosshair.y);
-      ctx.fillStyle = inkSolid;
-      ctx.fillRect(chartWidth + 1, crosshair.y - 9, priceScaleWidth - 2, 18);
-      ctx.fillStyle = panelBg;
-      ctx.font = '10px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText(crossPrice.toFixed(2), chartWidth + priceScaleWidth / 2, crosshair.y + 3.5);
+      // Crosshair price tag (only rendered within candlestick price chart area)
+      if (crosshair.y <= candleChartHeight + 10) {
+        const crossPrice = yToPrice(crosshair.y);
+        ctx.fillStyle = inkSolid;
+        ctx.fillRect(chartWidth + 1, crosshair.y - 9, priceScaleWidth - 2, 18);
+        ctx.fillStyle = panelBg;
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(crossPrice.toFixed(2), chartWidth + priceScaleWidth / 2, crosshair.y + 3.5);
+      }
 
       // Crosshair time tag
       if (hoveredIdx !== null && visibleBars[hoveredIdx - start]) {
@@ -421,6 +444,7 @@ export function TradingChart({
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (bars.length === 0) return;
     setIsDragging(true);
     dragStartRef.current = {
       x: e.clientX,
@@ -582,14 +606,18 @@ export function TradingChart({
 
       <p className="pb-1 text-right text-[10px] text-ink/40">Drag to pan · Ctrl/⌘ + scroll to zoom</p>
       {/* Chart Canvas */}
-      <div ref={plotRef} className="relative h-[clamp(240px,36vh,380px)] w-full cursor-crosshair select-none">
+      <div
+        ref={plotRef}
+        style={{ minHeight: '340px', height: 'clamp(320px, 48vh, 480px)' }}
+        className="relative min-h-[340px] h-[clamp(320px,48vh,480px)] w-full flex-1 cursor-crosshair select-none"
+      >
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}
           onMouseDown={handleMouseDown}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseLeave}
-          className="absolute inset-0 block rounded-lg"
+          className="absolute inset-0 block h-full w-full rounded-lg"
         />
       </div>
     </div>

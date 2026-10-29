@@ -47,3 +47,42 @@ describe('sample dataset', () => {
     for (const x of s.SAMPLE_SYMBOLS) assert.match(x.symbol, /^DEMO/);
   });
 });
+
+describe('extra sample datasets', () => {
+  it('trend kind is exactly the original sample', () => {
+    assert.equal(s.buildSampleCsvFor('trend'), s.buildSampleCsv());
+  });
+  for (const kind of ['crash', 'range']) {
+    describe(kind, () => {
+      const info = s.sampleInfo(kind);
+      const csv = s.buildSampleCsvFor(kind);
+      const [header, ...data] = csv.trim().split('\n');
+      it('is seeded and has the shared header and bar count', () => {
+        assert.equal(s.buildSampleCsvFor(kind), csv);
+        assert.equal(header, 'symbol,timestamp,open,high,low,close,volume');
+        assert.equal(data.length, 504 * info.symbols.length);
+      });
+      it('every bar is valid OHLC with positive prices and volume', () => {
+        for (const r of data) {
+          const [O, H, L, C, V] = r.split(',').slice(2).map(Number);
+          assert.ok(L > 0 && V > 0 && H >= Math.max(O, C) && L <= Math.min(O, C), r);
+        }
+      });
+      it('says it is synthetic, uses DEMO symbols, and has a unique name', () => {
+        assert.match(info.name, /synthetic/i);
+        assert.match(info.filename, /synthetic/i);
+        for (const x of info.symbols) assert.match(x.symbol, /^DEMO/);
+        assert.equal(new Set(s.SAMPLE_DATASETS.map((d) => d.name)).size, s.SAMPLE_DATASETS.length);
+      });
+    });
+  }
+  it('crash sample has a deep drawdown; range sample stays near its start', () => {
+    const closes = (kind, sym) => s.buildSampleCsvFor(kind).trim().split('\n').slice(1).filter((r) => r.startsWith(sym + ',')).map((r) => Number(r.split(',')[5]));
+    const x = closes('crash', 'DEMOX');
+    let peak = 0, dd = 0;
+    for (const c of x) { peak = Math.max(peak, c); dd = Math.max(dd, 1 - c / peak); }
+    assert.ok(dd > 0.2, `max drawdown only ${dd}`);
+    const r = closes('range', 'DEMOS');
+    assert.ok(Math.abs(r[r.length - 1] / 150 - 1) < 0.3, `range drifted to ${r[r.length - 1]}`);
+  });
+});

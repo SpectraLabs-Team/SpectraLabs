@@ -75,3 +75,104 @@ export function buildSampleCsv(seed = 42): string {
   return `${lines.join('\n')}\n`;
 }
 
+
+// ---------------------------------------------------------------------------------------------
+// More built-in samples. Same rules as above: synthetic, seeded, made-up DEMO* symbols, same
+// columns and the same 504 weekday bars, so they share SAMPLE_COLUMNS and the ingest settings.
+// ---------------------------------------------------------------------------------------------
+
+export type SampleKind = 'trend' | 'crash' | 'range';
+
+export interface SampleDatasetInfo {
+  kind: SampleKind;
+  name: string;
+  filename: string;
+  /** One line for the UI: what the data looks like and what it is good for testing. */
+  description: string;
+  symbols: readonly { symbol: string; start: number; drift: number; vol: number }[];
+}
+
+export const SAMPLE_DATASETS: readonly SampleDatasetInfo[] = [
+  {
+    kind: 'trend',
+    name: SAMPLE_DATASET_NAME,
+    filename: SAMPLE_FILENAME,
+    description: 'Steady random-walk uptrend. A quick first backtest.',
+    symbols: SAMPLE_SYMBOLS,
+  },
+  {
+    kind: 'crash',
+    name: 'Sample: crash & recovery (synthetic, not real prices)',
+    filename: 'spectra-sample-crash-recovery-synthetic.csv',
+    description: 'Calm bull market, a sharp ~35% crash, then a choppy recovery. Tests drawdowns, stops and regime detection.',
+    // drift/vol here scale the shared regime path (beta-like): 1 = market, >1 = falls harder.
+    symbols: [
+      { symbol: 'DEMOX', start: 120, drift: 1.0, vol: 1.0 },
+      { symbol: 'DEMOY', start: 60, drift: 1.4, vol: 1.3 },
+      { symbol: 'DEMOZ', start: 250, drift: 0.6, vol: 0.7 },
+    ],
+  },
+  {
+    kind: 'range',
+    name: 'Sample: sideways range (synthetic, not real prices)',
+    filename: 'spectra-sample-sideways-range-synthetic.csv',
+    description: 'Prices keep pulling back to an average with no trend. Trend-following struggles; mean-reversion shines.',
+    // drift = pull-back speed (per year), vol = annualized volatility.
+    symbols: [
+      { symbol: 'DEMOR', start: 80, drift: 9, vol: 0.22 },
+      { symbol: 'DEMOS', start: 150, drift: 6, vol: 0.16 },
+      { symbol: 'DEMOT', start: 35, drift: 12, vol: 0.3 },
+    ],
+  },
+];
+
+export const sampleInfo = (kind: SampleKind): SampleDatasetInfo =>
+  SAMPLE_DATASETS.find((d) => d.kind === kind) ?? SAMPLE_DATASETS[0];
+
+/** Market regime (annual drift, annual vol) for bar index d of the crash sample. */
+function crashRegime(d: number): [number, number] {
+  if (d < 300) return [0.14, 0.14]; // calm bull
+  if (d < 330) return [-3.6, 0.55]; // crash: ~-35% over six weeks
+  if (d < 420) return [0.9, 0.38]; // sharp, choppy rebound
+  return [0.1, 0.2]; // settles down
+}
+
+/** Builds the CSV for any built-in sample. `trend` is exactly {@link buildSampleCsv}. */
+export function buildSampleCsvFor(kind: SampleKind, seed = 42): string {
+  if (kind === 'trend') return buildSampleCsv(seed);
+  const info = sampleInfo(kind);
+  const days = sampleDays();
+  const dt = 1 / 252;
+  const lines = ['symbol,timestamp,open,high,low,close,volume'];
+  info.symbols.forEach((s, i) => {
+    const next = rng(seed + 7919 * (kind === 'crash' ? 1 : 2) + i * 1009);
+    const mu = Math.log(s.start);
+    let close: number = s.start;
+    days.forEach((day, d) => {
+      let c: number;
+      let vol: number;
+      let volMult = 1;
+      if (kind === 'crash') {
+        const [m, v] = crashRegime(d);
+        const drift = m * s.drift;
+        vol = v * s.vol;
+        volMult = 1 + v * 3; // turnover spikes in the crash
+        c = close * Math.exp((drift - 0.5 * vol ** 2) * dt + vol * Math.sqrt(dt) * normal(next));
+      } else {
+        // Ornstein–Uhlenbeck on log price: pulled back toward log(start) at speed s.drift.
+        vol = s.vol;
+        const x = Math.log(close);
+        c = Math.exp(x + s.drift * (mu - x) * dt + vol * Math.sqrt(dt) * normal(next));
+      }
+      const open = r2(close * (1 + normal(next) * vol * Math.sqrt(dt) * 0.25));
+      c = r2(c);
+      const wick = vol * Math.sqrt(dt) * 0.5;
+      const high = r2(Math.max(open, c) * (1 + Math.abs(normal(next)) * wick));
+      const low = r2(Math.min(open, c) * (1 - Math.abs(normal(next)) * wick));
+      const volume = Math.round((400_000 + next() * 1_200_000) * volMult);
+      lines.push(`${s.symbol},${day}T21:00:00Z,${open.toFixed(2)},${high.toFixed(2)},${low.toFixed(2)},${c.toFixed(2)},${volume}`);
+      close = c;
+    });
+  });
+  return `${lines.join('\n')}\n`;
+}

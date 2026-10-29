@@ -1,8 +1,8 @@
 import { followIngest, ingest, uploadFile, type IngestRejection, type IngestResult, type IngestSettings } from '@/lib/datasets';
 import type { Job } from '@/lib/jobs';
-import { buildSampleCsv, FIRST_DAY, SAMPLE_COLUMNS, SAMPLE_DATASET_NAME, SAMPLE_FILENAME } from '@/lib/sampleCsv';
+import { buildSampleCsvFor, FIRST_DAY, SAMPLE_COLUMNS, sampleInfo, type SampleKind } from '@/lib/sampleCsv';
 
-export { SAMPLE_DATASET_NAME } from '@/lib/sampleCsv';
+export { SAMPLE_DATASET_NAME, SAMPLE_DATASETS, sampleInfo, type SampleKind } from '@/lib/sampleCsv';
 
 /** Ingest settings matching {@link buildSampleCsv} exactly, so no preview step is needed. */
 export const SAMPLE_SETTINGS: IngestSettings = {
@@ -26,11 +26,13 @@ export type SamplePhase = 'upload' | 'ingest';
 export async function loadSampleDataset(
   onPhase: (phase: SamplePhase) => void,
   signal?: AbortSignal,
+  kind: SampleKind = 'trend',
 ): Promise<Job<IngestResult | IngestRejection> | undefined> {
-  const file = new File([buildSampleCsv()], SAMPLE_FILENAME, { type: 'text/csv', lastModified: FIRST_DAY });
+  const info = sampleInfo(kind);
+  const file = new File([buildSampleCsvFor(kind)], info.filename, { type: 'text/csv', lastModified: FIRST_DAY });
   onPhase('upload');
   const upload = await uploadFile(file, () => undefined, signal);
   onPhase('ingest');
-  const job = await ingest({ upload_id: upload.id, dataset_name: SAMPLE_DATASET_NAME, settings: SAMPLE_SETTINGS });
+  const job = await ingest({ upload_id: upload.id, dataset_name: info.name, settings: SAMPLE_SETTINGS });
   return followIngest(job.id, () => undefined, signal);
 }

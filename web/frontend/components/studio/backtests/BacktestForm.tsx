@@ -25,7 +25,7 @@ import {
 import { Badge, ErrorNote, GlassCard, Segmented, Spinner } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/StudioToast';
 import { cn } from '@/lib/utils';
-import { loadSampleDataset, SAMPLE_DATASETS, sampleInfo, type SampleKind, type SamplePhase } from '@/lib/sampleData';
+import { loadAllSampleDatasets, loadSampleDataset, SAMPLE_DATASETS, sampleInfo, type SampleKind, type SamplePhase } from '@/lib/sampleData';
 import { ConfigFields, Field, NumberInput, ParamFields } from './Fields';
 import { int } from './format';
 import { SaveVersion } from './SaveVersion';
@@ -59,18 +59,67 @@ const toWeight = (pct: number) => Math.round(pct * 1e6) / 1e8;
 
 export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill, onDatasetsChanged }: { catalog: Catalog; datasets: DatasetVersion[]; canRun: boolean; onCreated: (b: Backtest) => void; prefill?: Prefill | null; onDatasetsChanged?: () => void }) {
   const { success, error: toastError } = useToast();
-  const [sampleBusy, setSampleBusy] = useState<SamplePhase | null>(null);
-  const [sampleKind, setSampleKind] = useState<SampleKind>('trend');
+  const [sampleBusy, setSampleBusy] = useState<string | null>(null);
+  const [sampleKind, setSampleKind] = useState<SampleKind | 'all'>('all');
+
+  const existingDatasetNames = useMemo(() => new Set(datasets.map((d) => d.dataset_name)), [datasets]);
+  const missingSamples = useMemo(() => SAMPLE_DATASETS.filter((s) => !existingDatasetNames.has(s.name)), [existingDatasetNames]);
+
   const loadSample = async () => {
+    if (sampleKind === 'all') {
+      setSampleBusy('Loading 3 sample datasets…');
+      try {
+        const res = await loadAllSampleDatasets((p) => {
+          setSampleBusy(`Uploading sample ${p.current}/${p.total} (${p.kind})…`);
+        });
+        if (res.succeeded.length > 0) {
+          success(
+            'Sample datasets loaded',
+            `Loaded ${res.succeeded.length} sample dataset${res.succeeded.length > 1 ? 's' : ''} (Uptrend, Crash & recovery, Sideways range). Pick one and run your backtest.`,
+          );
+          onDatasetsChanged?.();
+        } else {
+          toastError('Sample data was not loaded', 'The ingest did not finish. Try again, or upload a CSV in Data Lab.');
+        }
+      } catch (e) {
+        toastError('Sample data was not loaded', e instanceof ApiError && e.status === 403 ? 'Adding data needs the editor role in this workspace.' : e instanceof Error ? e.message : 'Unknown error.');
+      } finally {
+        setSampleBusy(null);
+      }
+      return;
+    }
+
     const info = sampleInfo(sampleKind);
-    setSampleBusy('upload');
+    setSampleBusy('Uploading sample…');
     try {
-      const job = await loadSampleDataset(setSampleBusy, undefined, sampleKind);
+      const job = await loadSampleDataset((phase) => setSampleBusy(phase === 'upload' ? 'Uploading sample…' : 'Checking and storing…'), undefined, sampleKind);
       if (job?.status === 'succeeded') {
         success('Sample data loaded', `${info.name}: three made-up symbols, two years of daily bars. Pick it as the dataset and run a backtest.`);
         onDatasetsChanged?.();
       } else {
         toastError('Sample data was not loaded', job?.error ?? 'The ingest did not finish. Try again, or upload a CSV in Data Lab.');
+      }
+    } catch (e) {
+      toastError('Sample data was not loaded', e instanceof ApiError && e.status === 403 ? 'Adding data needs the editor role in this workspace.' : e instanceof Error ? e.message : 'Unknown error.');
+    } finally {
+      setSampleBusy(null);
+    }
+  };
+
+  const loadMissingSamples = async () => {
+    if (!missingSamples.length) return;
+    setSampleBusy(`Loading ${missingSamples.length} sample dataset${missingSamples.length > 1 ? 's' : ''}…`);
+    try {
+      const res = await loadAllSampleDatasets(
+        (p) => setSampleBusy(`Uploading sample ${p.current}/${p.total} (${p.kind})…`),
+        undefined,
+        missingSamples.map((s) => s.kind),
+      );
+      if (res.succeeded.length > 0) {
+        success('Sample datasets loaded', `Loaded ${res.succeeded.length} sample dataset${res.succeeded.length > 1 ? 's' : ''}.`);
+        onDatasetsChanged?.();
+      } else {
+        toastError('Sample data was not loaded', 'The ingest did not finish.');
       }
     } catch (e) {
       toastError('Sample data was not loaded', e instanceof ApiError && e.status === 403 ? 'Adding data needs the editor role in this workspace.' : e instanceof Error ? e.message : 'Unknown error.');
@@ -265,16 +314,32 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill, on
         {/* Dataset */}
         <Field label="dataset" error={errors.dataset_version_id} hint={dataset ? `${int(dataset.row_count)} bars · ${dataset.checksum.slice(0, 12)}…` : undefined}>
           {datasets.length ? (
-            <div className="relative">
-              <Database className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink/40" />
-              <select className="input appearance-none py-1.5 !pl-9 pr-9 text-[13px]" value={datasetId} onChange={(e) => setDatasetId(e.target.value)} disabled={disabled} aria-label="Dataset version">
-                {datasets.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.dataset_name} · v{d.version} · {int(d.row_count)} bars
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink/40" />
+            <div>
+              <div className="relative">
+                <Database className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink/40" />
+                <select className="input appearance-none py-1.5 !pl-9 pr-9 text-[13px]" value={datasetId} onChange={(e) => setDatasetId(e.target.value)} disabled={disabled} aria-label="Dataset version">
+                  {datasets.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.dataset_name} · v{d.version} · {int(d.row_count)} bars
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink/40" />
+              </div>
+              {missingSamples.length > 0 && canRun && (
+                <div className="mt-1.5 flex items-center justify-between text-[11.5px] text-ink/50">
+                  <span>{datasets.length} dataset{datasets.length > 1 ? 's' : ''} available</span>
+                  <button
+                    type="button"
+                    onClick={loadMissingSamples}
+                    disabled={sampleBusy !== null}
+                    className="inline-flex items-center gap-1 text-accent font-medium hover:underline disabled:opacity-50"
+                  >
+                    {sampleBusy ? <Spinner className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
+                    {sampleBusy ? sampleBusy : `Load remaining sample datasets (${missingSamples.length})`}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="rounded-xl border border-dashed border-accent/30 bg-accent/[0.03] p-4 text-xs text-ink/75">
@@ -294,12 +359,13 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill, on
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <select
                       value={sampleKind}
-                      onChange={(e) => setSampleKind(e.target.value as SampleKind)}
+                      onChange={(e) => setSampleKind(e.target.value as SampleKind | 'all')}
                       disabled={sampleBusy !== null}
                       aria-label="Sample dataset"
-                      title={sampleInfo(sampleKind).description}
+                      title={sampleKind === 'all' ? 'Loads all 3 synthetic datasets (Uptrend, Crash & recovery, Sideways range)' : sampleInfo(sampleKind).description}
                       className="rounded-lg border border-ink/10 bg-panel px-2 py-1.5 text-xs text-ink"
                     >
+                      <option value="all">All 3 sample datasets (recommended)</option>
                       {SAMPLE_DATASETS.map((d) => (
                         <option key={d.kind} value={d.kind}>
                           {d.kind === 'trend' ? 'Uptrend' : d.kind === 'crash' ? 'Crash & recovery' : 'Sideways range'}
@@ -311,11 +377,11 @@ export function BacktestForm({ catalog, datasets, canRun, onCreated, prefill, on
                       data-testid="load-sample-data"
                       onClick={loadSample}
                       disabled={!canRun || sampleBusy !== null}
-                      title={canRun ? `Adds a small synthetic dataset (made-up symbols, not real prices): ${sampleInfo(sampleKind).description}` : 'Adding data needs the editor role in this workspace.'}
+                      title={canRun ? (sampleKind === 'all' ? 'Adds 3 synthetic datasets (Uptrend, Crash & recovery, Sideways range)' : `Adds a small synthetic dataset: ${sampleInfo(sampleKind).description}`) : 'Adding data needs the editor role in this workspace.'}
                       className="btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs disabled:opacity-60"
                     >
                       {sampleBusy ? <Spinner className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      {sampleBusy === 'upload' ? 'Uploading sample…' : sampleBusy === 'ingest' ? 'Checking and storing…' : 'Load sample data'}
+                      {sampleBusy ? sampleBusy : sampleKind === 'all' ? 'Load all 3 sample datasets' : 'Load sample data'}
                     </button>
                     <a
                       href="/studio?tab=data"

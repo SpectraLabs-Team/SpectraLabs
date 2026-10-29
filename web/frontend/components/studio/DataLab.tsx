@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Database } from 'lucide-react';
 import { listDatasetSummaries, type DatasetSummary, type IngestResult } from '@/lib/datasets';
+import { loadAllSampleDatasets, SAMPLE_DATASETS } from '@/lib/sampleData';
+import { useToast } from '@/components/ui/StudioToast';
 import { GlassCard } from '@/components/ui/primitives';
 import { DatasetDetail } from './data/DatasetDetail';
 import { DatasetList } from './data/DatasetList';
@@ -24,6 +26,8 @@ export function DataLab() {
   const [loading, setLoading] = useState(false);
   const [canEdit, setCanEdit] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [loadingSamples, setLoadingSamples] = useState(false);
+  const { success, error: toastError } = useToast();
   const [selected, setSelected] = useState<string | null>(() => {
     const d = params.get('dataset');
     return d && UUID.test(d) ? d : null;
@@ -41,6 +45,28 @@ export function DataLab() {
       setLoading(false);
     }
   }, []);
+
+  const existingNames = useMemo(() => new Set((items ?? []).map((d) => d.name)), [items]);
+  const missingSamples = useMemo(() => SAMPLE_DATASETS.filter((s) => !existingNames.has(s.name)), [existingNames]);
+
+  const handleLoadSamples = useCallback(async () => {
+    if (!canEdit || loadingSamples) return;
+    const targets = missingSamples.length > 0 ? missingSamples.map((s) => s.kind) : SAMPLE_DATASETS.map((s) => s.kind);
+    setLoadingSamples(true);
+    try {
+      const res = await loadAllSampleDatasets(undefined, undefined, targets);
+      if (res.succeeded.length > 0) {
+        success('Sample datasets loaded', `Loaded ${res.succeeded.length} sample dataset${res.succeeded.length > 1 ? 's' : ''} (Uptrend, Crash & recovery, Sideways range).`);
+        await load();
+      } else {
+        toastError('Failed to load sample datasets', 'The ingest did not finish.');
+      }
+    } catch (e) {
+      toastError('Could not load sample datasets', e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setLoadingSamples(false);
+    }
+  }, [canEdit, loadingSamples, missingSamples, success, toastError, load]);
 
   useEffect(() => {
     load();
@@ -88,7 +114,19 @@ export function DataLab() {
           onBacktest={backtest}
         />
       )}
-      <DatasetList items={items} error={error} loading={loading} selectedId={selected} canEdit={canEdit} onSelect={select} onRefresh={load} onUpload={() => setUploading(true)} />
+      <DatasetList
+        items={items}
+        error={error}
+        loading={loading}
+        selectedId={selected}
+        canEdit={canEdit}
+        onSelect={select}
+        onRefresh={load}
+        onUpload={() => setUploading(true)}
+        onLoadSamples={handleLoadSamples}
+        loadingSamples={loadingSamples}
+        missingSamplesCount={missingSamples.length}
+      />
       <div ref={detailRef} className="scroll-mt-20">
         {selected ? (
           <DatasetDetail

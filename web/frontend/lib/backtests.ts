@@ -238,6 +238,8 @@ export interface StoredRequest {
   dataset_version_id?: string;
   /** Set when the run was started from a saved strategy version (with `strategy` and `params` filled in). */
   strategy_version_id?: string;
+  strategy_name?: string;
+  strategy_version_num?: number;
   strategy?: string;
   params?: ParamValues;
   strategies?: StrategyAllocation[];
@@ -502,7 +504,14 @@ export function defaultParams(s: BuiltinStrategy): ParamValues {
 
 /** A strategy name, or "multi-strategy" for a strategies list, from a stored request. */
 export function describeRequest(r: StoredRequest, catalog?: Catalog | null): string {
-  const label = (name: string) => catalog?.strategies.find((s) => s.name === name)?.label ?? name;
+  if (r.strategy_name) {
+    const ver = r.strategy_version_num ? ` v${r.strategy_version_num}` : '';
+    return r.strategy_version_id ? `${r.strategy_name}${ver} · saved version` : `${r.strategy_name}${ver}`;
+  }
+  const label = (name: string) => {
+    if (name === 'dsl') return 'Custom Strategy';
+    return catalog?.strategies.find((s) => s.name === name)?.label ?? name;
+  };
   if (r.strategies?.length) return r.strategies.map((s) => label(s.strategy)).join(' + ');
   if (!r.strategy) return 'backtest';
   return r.strategy_version_id ? `${label(r.strategy)} · saved version` : label(r.strategy);

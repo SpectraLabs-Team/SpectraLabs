@@ -251,6 +251,70 @@ impl BacktestRequest {
         spectra_core::sha256_hex(text.as_bytes())
     }
 
+    /// Resolves and validates parameters for a DSL strategy from its code AST.
+    fn resolve_dsl_params_json(
+        code: &str,
+        doc: Option<&Json>,
+        errors: &mut Vec<FieldError>,
+    ) -> Option<ParamSet> {
+        let before = errors.len();
+        let program = match spectra_engine::dsl::parse_and_validate(code) {
+            Ok(p) => p,
+            Err(e) => {
+                errors.push(field_error("dsl_code", format!("{e}")));
+                return None;
+            }
+        };
+
+        let mut given = ParamSet::default();
+        if let Some(doc) = doc.filter(|d| !d.is_null()) {
+            let Ok(entries) = doc.entries() else {
+                errors.push(field_error("params", "must be a JSON object"));
+                return None;
+            };
+            for (k, v) in entries {
+                let x = match v {
+                    Json::Bool(b) => Some(f64::from(u8::from(*b))),
+                    other => other.as_double().ok(),
+                };
+                match x {
+                    Some(x) => given.values.push((k.clone(), x)),
+                    None => errors.push(field_error(format!("params.{k}"), "must be a number or a boolean")),
+                }
+            }
+        }
+
+        let field = |n: &str| format!("params.{n}");
+        for (k, _) in &given.values {
+            if !program.params.iter().any(|p| &p.name == k) {
+                errors.push(field_error(field(k), "unknown parameter"));
+            }
+        }
+
+        let mut out = ParamSet::default();
+        for spec in &program.params {
+            let v = given.values.iter().find(|(k, _)| k == &spec.name).map_or(spec.default, |(_, v)| *v);
+            let problem = if !v.is_finite() {
+                Some("must be a finite number".to_string())
+            } else if spec.kind != spectra_engine::dsl::ParamType::Float && v.fract() != 0.0 {
+                Some(match spec.kind {
+                    spectra_engine::dsl::ParamType::Bool => "must be true or false (1 or 0)".to_string(),
+                    _ => "must be a whole number".to_string(),
+                })
+            } else if v < spec.min || v > spec.max {
+                Some(format!("must be from {} to {} (got {v})", spec.min, spec.max))
+            } else {
+                None
+            };
+            if let Some(message) = problem {
+                errors.push(field_error(field(&spec.name), message));
+            }
+            out.values.push((spec.name.clone(), v));
+        }
+
+        (errors.len() == before).then_some(out)
+    }
+
     /// Parses a request document (see the module documentation), reporting
     /// every problem in the strategy, parameters and configuration at once.
     ///
@@ -283,9 +347,33 @@ impl BacktestRequest {
                 Some(read_strategies(list, &mut errors))
             }
         };
+        let dsl_code = match doc.find("dsl_code").map(Json::as_str) {
+            Some(Ok(s)) => Some(s.to_string()),
+            _ => None,
+        };
+
         let strategy = if multi.is_some() { None } else { read_strategy(doc, "", &mut errors) };
 
-        let params = strategy.map(|s| s.resolve_params_json(doc.find("params")));
+        let params = if let Some(strategy) = strategy {
+            if strategy.name == "dsl" {
+                if let Some(code) = &dsl_code {
+                    Self::resolve_dsl_params_json(code, doc.find("params"), &mut errors)
+                } else {
+                    errors.push(field_error("dsl_code", "is required for DSL strategy"));
+                    None
+                }
+            } else {
+                match strategy.resolve_params_json(doc.find("params")) {
+                    Ok(p) => Some(p),
+                    Err(mut e) => {
+                        errors.append(&mut e.errors);
+                        None
+                    }
+                }
+            }
+        } else {
+            None
+        };
         let actions = match doc.find("corporate_actions") {
             None | Some(Json::Null) => Some(Vec::new()),
             Some(list) => parse_actions(list, &mut errors),
@@ -295,14 +383,6 @@ impl BacktestRequest {
             Some(c) => parse_config(c),
         };
 
-        let params = match params {
-            Some(Ok(p)) => Some(p),
-            Some(Err(mut e)) => {
-                errors.append(&mut e.errors);
-                None
-            }
-            None => None,
-        };
         let config = match config {
             Ok(c) => Some(c),
             Err(e) => {

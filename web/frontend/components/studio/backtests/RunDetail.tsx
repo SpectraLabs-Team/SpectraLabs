@@ -721,7 +721,7 @@ export function RunDetail({
         <SurvivalLabPanel
           runId={b.run_id}
           enabled
-          strategy={b.request.strategy ?? describeRequest(b.request, catalog)}
+          strategy={describeRequest(b.request, catalog)}
           params={b.request.params ?? {}}
           datasetId={dataset ? `${dataset.dataset_name} v${dataset.version}` : b.request.dataset_version_id ?? ''}
         />
@@ -737,7 +737,7 @@ export function RunDetail({
           open={tearSheetOpen}
           onClose={() => setTearSheetOpen(false)}
           title="Quantitative Strategy Tear-Sheet"
-          subtitle={`${b.request.strategy ?? describeRequest(b.request, catalog)} · Started ${new Date(b.created_at).toLocaleDateString()}`}
+          subtitle={`${describeRequest(b.request, catalog)} · Started ${new Date(b.created_at).toLocaleDateString()}`}
           reportType="Quantitative Backtest"
           timestamp={new Date(b.created_at).toISOString()}
           metadata={{

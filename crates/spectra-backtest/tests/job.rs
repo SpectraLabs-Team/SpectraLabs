@@ -329,3 +329,64 @@ fn failed_strategy_becomes_failed_job_with_readable_message() {
 
     let _ = std::fs::remove_dir_all(root);
 }
+
+#[test]
+fn dsl_strategy_backtest_job_payload_validation_and_execution() {
+    let dsl_code = r#"
+param fast: int = 10, min = 2, max = 100, desc = "Fast period";
+param slow: int = 30, min = 5, max = 300, desc = "Slow period";
+
+on_bar {
+    let fast_ma = sma(close, fast);
+    let slow_ma = sma(close, slow);
+
+    if fast_ma > slow_ma {
+        market_buy(100.0);
+    } else {
+        market_sell(position);
+    }
+}
+"#;
+
+    let escaped_code = dsl_code.replace('\n', "\\n").replace('"', "\\\"");
+
+    // 1. Valid DSL payload with parameters
+    let valid_payload = format!(
+        r#"{{"dataset_version_id":"{VERSION}","strategy":"dsl","dsl_code":"{escaped_code}","params":{{"fast":50,"slow":30}}}}"#
+    );
+    let j = BacktestJob::from_payload(&payload(&valid_payload)).unwrap();
+    assert_eq!(j.request.strategy.name, "dsl");
+    assert_eq!(j.request.params.canonical(), "fast=50;slow=30");
+    assert_eq!(j.request.dsl_code.as_deref(), Some(dsl_code));
+
+    // 2. Unknown parameter on DSL strategy
+    let bad_param_payload = format!(
+        r#"{{"dataset_version_id":"{VERSION}","strategy":"dsl","dsl_code":"{escaped_code}","params":{{"fast":50,"slow":30,"unknown_param":1}}}}"#
+    );
+    let err = BacktestJob::from_payload(&payload(&bad_param_payload)).unwrap_err();
+    assert!(err.errors.iter().any(|e| e.field == "params.unknown_param" && e.message == "unknown parameter"));
+
+    // 3. Out-of-range parameter on DSL strategy
+    let out_of_range_payload = format!(
+        r#"{{"dataset_version_id":"{VERSION}","strategy":"dsl","dsl_code":"{escaped_code}","params":{{"fast":999,"slow":30}}}}"#
+    );
+    let err = BacktestJob::from_payload(&payload(&out_of_range_payload)).unwrap_err();
+    assert!(err
+        .errors
+        .iter()
+        .any(|e| e.field == "params.fast" && e.message.contains("must be from 2 to 100")));
+
+    // 4. Missing dsl_code
+    let missing_code_payload =
+        format!(r#"{{"dataset_version_id":"{VERSION}","strategy":"dsl","params":{{"fast":50,"slow":30}}}}"#);
+    let err = BacktestJob::from_payload(&payload(&missing_code_payload)).unwrap_err();
+    assert!(err.errors.iter().any(|e| e.field == "dsl_code"));
+
+    // 5. Execution of DSL strategy backtest job
+    let (root, checksum) = store_with_dataset("dsl-run", 100);
+    let mut ctl = RunControl::default();
+    let products = run_job_from_store(&root, &checksum, &j, &mut ctl).unwrap();
+    assert_eq!(products.run.bar_count, 200);
+    assert!(!products.run.result_sha256.is_empty());
+    let _ = std::fs::remove_dir_all(root);
+}

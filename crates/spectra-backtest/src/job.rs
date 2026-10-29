@@ -99,7 +99,11 @@ impl BacktestJob {
         };
         let mut rest = Json::object();
         for (k, v) in entries {
-            if k != "dataset_version_id" && k != "strategy_version_id" {
+            if k != "dataset_version_id"
+                && k != "strategy_version_id"
+                && k != "strategy_name"
+                && k != "strategy_version_num"
+            {
                 // Keys are unique in a parsed object, so this cannot fail.
                 let _ = rest.set(k.clone(), v.clone());
             }

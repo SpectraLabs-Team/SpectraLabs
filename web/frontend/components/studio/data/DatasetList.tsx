@@ -1,6 +1,6 @@
 'use client';
 
-import { Database, RefreshCw, Upload } from 'lucide-react';
+import { Database, RefreshCw, Sparkles, Upload } from 'lucide-react';
 import type { DatasetSummary } from '@/lib/datasets';
 import { ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,9 @@ export function DatasetList({
   onSelect,
   onRefresh,
   onUpload,
+  onLoadSamples,
+  loadingSamples,
+  missingSamplesCount = 0,
 }: {
   items: DatasetSummary[] | null;
   error: string;
@@ -25,6 +28,9 @@ export function DatasetList({
   onSelect: (id: string) => void;
   onRefresh: () => void;
   onUpload: () => void;
+  onLoadSamples?: () => void;
+  loadingSamples?: boolean;
+  missingSamplesCount?: number;
 }) {
   return (
     <GlassCard as="section" className="overflow-hidden">
@@ -32,12 +38,24 @@ export function DatasetList({
         <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
           <Database className="h-4 w-4 text-accent" /> Datasets
         </h2>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
           <button type="button" className="btn-ghost" onClick={onRefresh} disabled={loading} aria-label="Refresh datasets">
             {loading ? <Spinner className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}
           </button>
+          {canEdit && missingSamplesCount > 0 && onLoadSamples && (
+            <button
+              type="button"
+              className="btn-secondary px-2.5 py-1.5 text-xs inline-flex items-center gap-1.5"
+              onClick={onLoadSamples}
+              disabled={loadingSamples}
+              title="Load built-in synthetic datasets (Uptrend, Crash & recovery, Sideways range)"
+            >
+              {loadingSamples ? <Spinner className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5 text-accent" />}
+              {loadingSamples ? 'Loading samples…' : `Load sample datasets (${missingSamplesCount})`}
+            </button>
+          )}
           {canEdit && (
-            <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={onUpload}>
+            <button type="button" className="btn-primary px-3 py-1.5 text-xs inline-flex items-center gap-1.5" onClick={onUpload}>
               <Upload className="h-3.5 w-3.5" /> Upload CSV
             </button>
           )}
@@ -57,9 +75,22 @@ export function DatasetList({
           <Database className="h-5 w-5 text-ink/30" />
           No datasets in this workspace yet.
           {canEdit ? (
-            <button type="button" className="btn-secondary mt-1 px-3 py-1.5 text-xs" onClick={onUpload}>
-              <Upload className="h-3.5 w-3.5" /> Upload your first CSV
-            </button>
+            <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
+              {onLoadSamples && (
+                <button
+                  type="button"
+                  className="btn-primary px-3 py-1.5 text-xs inline-flex items-center gap-1.5"
+                  onClick={onLoadSamples}
+                  disabled={loadingSamples}
+                >
+                  {loadingSamples ? <Spinner className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {loadingSamples ? 'Loading 3 sample datasets…' : 'Load 3 sample datasets'}
+                </button>
+              )}
+              <button type="button" className="btn-secondary px-3 py-1.5 text-xs inline-flex items-center gap-1.5" onClick={onUpload}>
+                <Upload className="h-3.5 w-3.5" /> Upload CSV
+              </button>
+            </div>
           ) : (
             <span className="text-[11.5px] text-ink/45">An editor of the workspace can upload one.</span>
           )}

@@ -489,7 +489,7 @@ export function OptimizationLab() {
                     </div>
                     <div className="mt-1 flex items-center justify-between text-ink/60 text-[11px]">
                       <span>{s.trial_count} trials</span>
-                      {s.best_objective !== undefined && (
+                      {s.best_objective != null && (
                         <span>Best SR: {s.best_objective.toFixed(2)}</span>
                       )}
                     </div>
@@ -516,21 +516,21 @@ export function OptimizationLab() {
                     <div className="rounded-xl border border-ink/[0.08] bg-surface p-3.5">
                       <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/50 uppercase">Deflated Sharpe (DSR) <InfoTip metric="dsr" /></span>
                       <p className="mt-1 text-lg font-bold text-accent">
-                        {selectedSweepDetail.sweep.dsr !== undefined ? `${(selectedSweepDetail.sweep.dsr * 100).toFixed(1)}%` : '—'}
+                        {selectedSweepDetail.sweep.dsr != null ? `${(selectedSweepDetail.sweep.dsr * 100).toFixed(1)}%` : '—'}
                       </p>
                       <span className="text-[10px] text-ink/50">Multi-testing penalized</span>
                     </div>
                     <div className="rounded-xl border border-ink/[0.08] bg-surface p-3.5">
                       <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/50 uppercase">Probabilistic SR (PSR) <InfoTip metric="psr" /></span>
                       <p className="mt-1 text-lg font-bold text-ink">
-                        {selectedSweepDetail.sweep.psr !== undefined ? `${(selectedSweepDetail.sweep.psr * 100).toFixed(1)}%` : '—'}
+                        {selectedSweepDetail.sweep.psr != null ? `${(selectedSweepDetail.sweep.psr * 100).toFixed(1)}%` : '—'}
                       </p>
                       <span className="text-[10px] text-ink/50">Non-normal confidence</span>
                     </div>
                     <div className="rounded-xl border border-ink/[0.08] bg-surface p-3.5">
                       <span className="inline-flex items-center gap-1 text-[11px] font-medium text-ink/50 uppercase">CSCV PBO <InfoTip metric="pbo" /></span>
                       <p className="mt-1 text-lg font-bold text-rose-500">
-                        {selectedSweepDetail.sweep.pbo !== undefined ? `${(selectedSweepDetail.sweep.pbo * 100).toFixed(1)}%` : '—'}
+                        {selectedSweepDetail.sweep.pbo != null ? `${(selectedSweepDetail.sweep.pbo * 100).toFixed(1)}%` : '—'}
                       </p>
                       <span className="text-[10px] text-ink/50">Overfitting probability</span>
                     </div>
@@ -543,7 +543,7 @@ export function OptimizationLab() {
                   </div>
                   <div className="flex items-center gap-2">
                     <a
-                      href={`/api/v1/optimization/sweep/${selectedSweepDetail.sweep.id}/export?format=pdf`}
+                      href={`/api/engine/api/v1/optimization/sweep/${selectedSweepDetail.sweep.id}/export?format=pdf`}
                       download
                       className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-xs hover:bg-accent/90"
                       title="Export 1-page validation report as PDF"
@@ -552,7 +552,7 @@ export function OptimizationLab() {
                       Export Report (PDF)
                     </a>
                     <a
-                      href={`/api/v1/optimization/sweep/${selectedSweepDetail.sweep.id}/export?format=csv`}
+                      href={`/api/engine/api/v1/optimization/sweep/${selectedSweepDetail.sweep.id}/export?format=csv`}
                       download
                       className="btn-secondary inline-flex items-center gap-1.5 rounded-lg border border-ink/[0.12] bg-surface px-3 py-1.5 text-xs text-ink hover:bg-ink/[0.04]"
                       title="Export validation report as CSV"
@@ -710,7 +710,7 @@ export function OptimizationLab() {
                                   {Object.entries(t.params).map(([k, v]) => `${k}=${v}`).join(', ')}
                                 </td>
                                 <td className="py-2 text-right font-mono font-bold text-ink">
-                                  {t.objective_value.toFixed(2)}
+                                  {t.objective_value != null ? t.objective_value.toFixed(2) : '—'}
                                 </td>
                                 <td className="py-2 text-right font-mono text-ink/70">
                                   {t.metrics.total_return ? `${(t.metrics.total_return * 100).toFixed(1)}%` : '—'}
@@ -719,7 +719,7 @@ export function OptimizationLab() {
                                   {t.metrics.max_drawdown ? `-${(t.metrics.max_drawdown * 100).toFixed(1)}%` : '—'}
                                 </td>
                                 <td className="py-2 text-right font-mono text-ink/60">
-                                  {t.returns_mean !== undefined ? `${(t.returns_mean * 100).toFixed(3)}%` : '—'}
+                                  {t.returns_mean != null ? `${(t.returns_mean * 100).toFixed(3)}%` : '—'}
                                 </td>
                               </tr>
                             ))}
@@ -857,7 +857,7 @@ export function OptimizationLab() {
                   <div className="rounded-xl border border-ink/[0.08] bg-surface p-4">
                     <MetricLabel metric="walk_forward_efficiency" className="text-xs text-ink/50">Walk-Forward Efficiency (WFE)</MetricLabel>
                     <p className="mt-1 text-2xl font-bold text-accent">
-                      {selectedReport.efficiency_ratio !== undefined ? `${(selectedReport.efficiency_ratio * 100).toFixed(1)}%` : '—'}
+                      {selectedReport.efficiency_ratio != null ? `${(selectedReport.efficiency_ratio * 100).toFixed(1)}%` : '—'}
                     </p>
                     <span className="text-[10px] text-emerald-600 font-medium">
                       {(selectedReport.efficiency_ratio ?? 0) >= 0.5 ? 'Robust (≥ 50%)' : 'Overfit Decay (< 50%)'}

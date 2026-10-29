@@ -378,7 +378,7 @@ export function StrategyStudio() {
     setIsRunning(true);
     setRunMessage(null);
     try {
-      const res = await fetch('/api/v1/backtests', {
+      const res = await fetch('/api/engine/api/v1/backtests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

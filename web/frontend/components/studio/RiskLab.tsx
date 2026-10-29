@@ -841,7 +841,7 @@ export function RiskLab() {
                           Decoded market volatility state transitions over historical sample
                         </p>
                       </div>
-                      <div className="flex items-center gap-3 text-[11px] font-mono">
+                      <div className="hidden">
                         <span className="flex items-center gap-1.5 text-profit">
                           <span className="h-2 w-2 rounded-full bg-emerald-500" /> Calm / Bull (1)
                         </span>
@@ -854,57 +854,103 @@ export function RiskLab() {
                       </div>
                     </div>
 
-                    <div className="mt-4 h-[180px]">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart
-                          data={(regimeData.viterbi_path && regimeData.viterbi_path.length > 0
-                            ? regimeData.viterbi_path
-                            : Array.from({ length: 45 }, (_, idx) => (idx > 34 ? 'crisis' : idx > 18 ? 'neutral' : 'bull'))
-                          ).map((st, i) => {
-                            const val = st === 'crisis' || st === 'turbulent' ? 3 : st === 'neutral' ? 2 : 1;
-                            const fill = val === 3 ? '#f43f5e' : val === 2 ? '#f59e0b' : '#10b981';
-                            return { bar: i + 1, state: st, level: val, fill };
-                          })}
-                          margin={{ top: 10, right: 10, bottom: 0, left: -20 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
-                          <XAxis dataKey="bar" tick={{ fontSize: 10, fill: '#64748B' }} tickLine={false} axisLine={false} />
-                          <YAxis
-                            ticks={[1, 2, 3]}
-                            tickFormatter={(v) => (v === 1 ? 'Bull' : v === 2 ? 'Neutral' : 'Crisis')}
-                            domain={[0.5, 3.5]}
-                            tick={{ fontSize: 10, fill: '#64748B' }}
-                            tickLine={false}
-                            axisLine={false}
-                            width={50}
-                          />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                              border: '1px solid rgba(255, 255, 255, 0.12)',
-                              borderRadius: '8px',
-                              fontSize: '11px',
-                              color: '#F8FAFC',
-                            }}
-                            formatter={(v, name, item) => [
-                              `State: ${(item.payload as { state: string }).state.toUpperCase()}`,
-                              'Market Regime',
-                            ]}
-                            labelFormatter={(label) => `Bar Period: ${label}`}
-                          />
-                          <Bar dataKey="level" isAnimationActive={false}>
-                            {(regimeData.viterbi_path && regimeData.viterbi_path.length > 0
-                              ? regimeData.viterbi_path
-                              : Array.from({ length: 45 }, (_, idx) => (idx > 34 ? 'crisis' : idx > 18 ? 'neutral' : 'bull'))
-                            ).map((st, i) => {
-                              const val = st === 'crisis' || st === 'turbulent' ? 3 : st === 'neutral' ? 2 : 1;
-                              const fill = val === 3 ? '#f43f5e' : val === 2 ? '#f59e0b' : '#10b981';
-                              return <Cell key={i} fill={fill} />;
+                    {(() => {
+                      const path: string[] =
+                        regimeData.viterbi_path && regimeData.viterbi_path.length > 0
+                          ? regimeData.viterbi_path
+                          : Array.from({ length: 45 }, (_, idx) => (idx > 34 ? 'crisis' : idx > 18 ? 'neutral' : 'bull'));
+                      const lvl = (st: string) => (st === 'crisis' || st === 'turbulent' ? 3 : st === 'neutral' ? 2 : 1);
+                      const n = path.length;
+                      const runs: { level: number; start: number; len: number }[] = [];
+                      path.forEach((st, i) => {
+                        const l = lvl(st);
+                        const last = runs[runs.length - 1];
+                        if (last && last.level === l) last.len += 1;
+                        else runs.push({ level: l, start: i, len: 1 });
+                      });
+                      const lanes = [
+                        { level: 3, label: 'Crisis', bar: 'bg-rose-500', text: 'text-rose-500', soft: 'bg-rose-500/[0.06]' },
+                        { level: 2, label: 'Neutral', bar: 'bg-amber-500', text: 'text-amber-500', soft: 'bg-amber-500/[0.06]' },
+                        { level: 1, label: 'Bull', bar: 'bg-emerald-500', text: 'text-emerald-500', soft: 'bg-emerald-500/[0.06]' },
+                      ];
+                      const count = (l: number) => path.filter((s) => lvl(s) === l).length;
+                      const tickCount = 6;
+                      const ticks = Array.from({ length: tickCount }, (_, k) => Math.round((k * (n - 1)) / (tickCount - 1)));
+                      const current = lanes.find((x) => x.level === lvl(path[n - 1]));
+                      return (
+                        <div className="mt-4 space-y-4">
+                          {/* Composite strip */}
+                          <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-ink/[0.05]">
+                            {runs.map((r, i) => (
+                              <div
+                                key={i}
+                                className={lanes.find((x) => x.level === r.level)!.bar}
+                                style={{ width: `${(r.len / n) * 100}%` }}
+                              />
+                            ))}
+                          </div>
+
+                          {/* Swimlanes */}
+                          <div className="grid grid-cols-[72px_1fr] items-center gap-x-3 gap-y-2">
+                            {lanes.map((lane) => (
+                              <div key={lane.level} className="contents">
+                                <span className={cn('text-right text-[11px] font-semibold', lane.text)}>{lane.label}</span>
+                                <div className={cn('relative h-7 overflow-hidden rounded-md', lane.soft)}>
+                                  {runs
+                                    .filter((r) => r.level === lane.level)
+                                    .map((r, i) => (
+                                      <div
+                                        key={i}
+                                        title={`${lane.label}: bars ${r.start + 1}–${r.start + r.len} (${r.len} bars)`}
+                                        className={cn('absolute inset-y-1 rounded-sm opacity-90 transition-opacity hover:opacity-100', lane.bar)}
+                                        style={{ left: `${(r.start / n) * 100}%`, width: `max(3px, ${(r.len / n) * 100}%)` }}
+                                      />
+                                    ))}
+                                </div>
+                              </div>
+                            ))}
+                            <span />
+                            <div className="relative h-4">
+                              {ticks.map((t, k) => (
+                                <span
+                                  key={k}
+                                  className={cn(
+                                    'absolute top-0 font-mono text-[10px] text-ink/40',
+                                    k === 0 ? '' : k === tickCount - 1 ? '-translate-x-full' : '-translate-x-1/2',
+                                  )}
+                                  style={{ left: `${(t / Math.max(n - 1, 1)) * 100}%` }}
+                                >
+                                  {t + 1}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Summary */}
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            {[...lanes].reverse().map((lane) => {
+                              const c = count(lane.level);
+                              return (
+                                <div key={lane.level} className="rounded-lg border border-ink/[0.08] px-3 py-2">
+                                  <p className={cn('text-[10px] font-semibold uppercase tracking-wide', lane.text)}>{lane.label}</p>
+                                  <p className="mt-0.5 font-mono text-sm font-semibold text-ink">
+                                    {((c / n) * 100).toFixed(0)}%
+                                    <span className="ml-1 text-[10px] font-normal text-ink/45">{c} bars</span>
+                                  </p>
+                                </div>
+                              );
                             })}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+                            <div className="rounded-lg border border-ink/[0.08] px-3 py-2">
+                              <p className="text-[10px] font-semibold uppercase tracking-wide text-ink/50">Switches</p>
+                              <p className="mt-0.5 font-mono text-sm font-semibold text-ink">
+                                {runs.length - 1}
+                                {current && <span className={cn('ml-1 text-[10px] font-normal', current.text)}>now {current.label}</span>}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Transition Matrix Heatmap */}

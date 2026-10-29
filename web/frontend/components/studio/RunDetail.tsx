@@ -172,19 +172,19 @@ export function RunDetail({ runId, experimentName, onClose, onChanged }: {
                       <div>
                         <span className="text-[10px] uppercase text-ink/40">Holdout Sharpe</span>
                         <p className="font-mono font-medium text-ink">
-                          {evalItem.metrics?.sharpe !== undefined ? evalItem.metrics.sharpe.toFixed(2) : '—'}
+                          {typeof evalItem.metrics?.sharpe === 'number' ? evalItem.metrics.sharpe.toFixed(2) : '—'}
                         </p>
                       </div>
                       <div>
                         <span className="text-[10px] uppercase text-ink/40">Deflated Sharpe</span>
                         <p className="font-mono font-medium text-accent">
-                          {evalItem.dsr !== undefined ? `${(evalItem.dsr * 100).toFixed(1)}%` : '—'}
+                          {evalItem.dsr != null ? `${(evalItem.dsr * 100).toFixed(1)}%` : '—'}
                         </p>
                       </div>
                       <div>
                         <span className="text-[10px] uppercase text-ink/40">Total Return</span>
                         <p className="font-mono font-medium text-ink">
-                          {evalItem.metrics?.total_return !== undefined ? `${(evalItem.metrics.total_return * 100).toFixed(1)}%` : '—'}
+                          {typeof evalItem.metrics?.total_return === 'number' ? `${(evalItem.metrics.total_return * 100).toFixed(1)}%` : '—'}
                         </p>
                       </div>
                       <div>

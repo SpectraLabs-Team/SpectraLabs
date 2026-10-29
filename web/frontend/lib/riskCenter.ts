@@ -1,7 +1,7 @@
 import { request } from './api';
 
 export interface RiskLimits {
-  id?: string;
+  id?: string | null;
   workspace_id: string;
   strategy_id?: string | null;
   max_gross_exposure: number;

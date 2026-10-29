@@ -3,25 +3,25 @@ import { request } from './api';
 export interface OptimizationSweep {
   id: string;
   workspace_id: string;
-  job_id?: string;
-  strategy_id?: string;
-  strategy_version_id?: string;
+  job_id?: string | null;
+  strategy_id?: string | null;
+  strategy_version_id?: string | null;
   dataset_version_id: string;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   method: string;
   objective: string;
   param_grid: Record<string, unknown>;
   trial_count: number;
-  best_trial_num?: number;
+  best_trial_num?: number | null;
   best_params?: Record<string, unknown>;
   best_metrics?: Record<string, unknown>;
-  best_objective?: number;
-  dsr?: number;
-  psr?: number;
-  min_trl?: number;
-  pbo?: number;
+  best_objective?: number | null;
+  dsr?: number | null;
+  psr?: number | null;
+  min_trl?: number | null;
+  pbo?: number | null;
   created_at: string;
-  finished_at?: string;
+  finished_at?: string | null;
 }
 
 export interface SweepTrial {
@@ -38,8 +38,8 @@ export interface SweepTrial {
     [key: string]: unknown;
   };
   objective_value: number;
-  returns_mean?: number;
-  returns_vol?: number;
+  returns_mean?: number | null;
+  returns_vol?: number | null;
   created_at: string;
 }
 
@@ -74,9 +74,9 @@ export interface WalkForwardFold {
 export interface WalkForwardReport {
   id: string;
   workspace_id: string;
-  job_id?: string;
-  strategy_id?: string;
-  strategy_version_id?: string;
+  job_id?: string | null;
+  strategy_id?: string | null;
+  strategy_version_id?: string | null;
   dataset_version_id: string;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   mode: string;
@@ -87,11 +87,11 @@ export interface WalkForwardReport {
   objective: string;
   param_grid: Record<string, unknown>;
   folds: WalkForwardFold[];
-  efficiency_ratio?: number;
-  in_sample_sharpe?: number;
-  out_of_sample_sharpe?: number;
+  efficiency_ratio?: number | null;
+  in_sample_sharpe?: number | null;
+  out_of_sample_sharpe?: number | null;
   created_at: string;
-  finished_at?: string;
+  finished_at?: string | null;
 }
 
 export interface OverfittingMetrics {
@@ -114,7 +114,7 @@ export interface HoldoutVault {
   budget: number;
   evaluations_used: number;
   notes: string;
-  sealed_by?: string;
+  sealed_by?: string | null;
   sealed_at: string;
 }
 
@@ -122,12 +122,12 @@ export interface HoldoutEvaluation {
   id: string;
   holdout_id: string;
   workspace_id: string;
-  strategy_version_id?: string;
+  strategy_version_id?: string | null;
   evaluation_num: number;
   metrics: Record<string, unknown>;
-  dsr?: number;
+  dsr?: number | null;
   warnings: string[];
-  evaluated_by?: string;
+  evaluated_by?: string | null;
   evaluated_at: string;
 }
 

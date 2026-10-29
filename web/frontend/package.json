@@ -28,7 +28,9 @@
     "test:workspaces": "node scripts/test-workspaces.mjs",
     "test:activity": "node scripts/test-activity.mjs",
     "test:strategies": "node scripts/test-strategies.mjs",
-    "test:format": "node scripts/test-format.mjs"
+    "test:format": "node scripts/test-format.mjs",
+    "smoke": "node scripts/smoke-tabs.mjs",
+    "smoke:login": "node scripts/smoke-tabs.mjs --login"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
@@ -59,6 +61,7 @@
     "autoprefixer": "^10.4.16",
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.4.2",
+    "playwright": "^1.64.1",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.3.0"

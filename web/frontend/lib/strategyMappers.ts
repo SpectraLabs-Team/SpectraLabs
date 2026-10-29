@@ -16,7 +16,7 @@ export interface EngineVersion {
   strategy_sha256: string;
   config_hash?: string;
   params?: Record<string, unknown>;
-  code?: string;
+  code?: string | null;
   notes?: string;
   created_at: string;
   workspace_id?: string;
@@ -57,7 +57,7 @@ export function toStrategyVersion(v: EngineVersion, strategyId?: string): Strate
     strategy_id: v.strategy_id ?? strategyId ?? '',
     version_num: v.version,
     code_sha256: v.strategy_sha256 ?? '',
-    code: v.code,
+    code: v.code ?? undefined,
     parameters: v.params ?? {},
     notes: v.notes ?? '',
     created_at: v.created_at,

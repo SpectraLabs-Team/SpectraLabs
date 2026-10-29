@@ -301,6 +301,9 @@ pub struct WorkerConfig {
     pub backtest_max_bars: usize,
     /// Most instruments one backtest may trade (`SPECTRA_BACKTEST_MAX_INSTRUMENTS`).
     pub backtest_max_instruments: usize,
+    /// `SPECTRA_ACTIVITY_PURGE`: every six hours, delete daily activity rows older than the
+    /// retention window (default on). Turn off to pause deletions.
+    pub activity_purge: bool,
 }
 
 impl WorkerConfig {
@@ -374,6 +377,14 @@ impl WorkerConfig {
             addr
         });
         let data_dir = val("SPECTRA_DATA_DIR").map_or_else(|| std::path::PathBuf::from("data"), Into::into);
+        let activity_purge = match val("SPECTRA_ACTIVITY_PURGE").as_deref().map(parse_bool) {
+            None => true,
+            Some(Some(on)) => on,
+            Some(None) => {
+                problems.push("SPECTRA_ACTIVITY_PURGE must be on or off".into());
+                true
+            }
+        };
         if problems.is_empty() {
             Ok(Self {
                 database_url,
@@ -386,6 +397,7 @@ impl WorkerConfig {
                 data_dir,
                 backtest_max_bars,
                 backtest_max_instruments,
+                activity_purge,
             })
         } else {
             Err(ConfigError(problems))
@@ -476,6 +488,25 @@ mod tests {
         .unwrap();
         let shown = format!("{c:?}");
         assert!(!shown.contains("hunter2") && !shown.contains(SECRET), "{shown}");
+    }
+
+    #[test]
+    fn worker_activity_purge_is_on_unless_switched_off() {
+        let db = ("DATABASE_URL", "postgres://u:p@localhost/db");
+        assert!(WorkerConfig::from_lookup(lookup(&[db])).unwrap().activity_purge);
+        assert!(
+            !WorkerConfig::from_lookup(lookup(&[db, ("SPECTRA_ACTIVITY_PURGE", "off")]))
+                .unwrap()
+                .activity_purge
+        );
+        assert!(
+            WorkerConfig::from_lookup(lookup(&[db, ("SPECTRA_ACTIVITY_PURGE", "on")]))
+                .unwrap()
+                .activity_purge
+        );
+        let err =
+            WorkerConfig::from_lookup(lookup(&[db, ("SPECTRA_ACTIVITY_PURGE", "sometimes")])).unwrap_err();
+        assert!(err.to_string().contains("SPECTRA_ACTIVITY_PURGE"), "{err}");
     }
 
     #[test]

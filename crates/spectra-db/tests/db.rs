@@ -312,3 +312,73 @@ async fn service_role_provisioning_and_privileges() {
     assert!(ver.can_write_jobs);
     assert!(ver.cannot_write_users);
 }
+
+#[tokio::test]
+async fn activity_purge_removes_only_old_rows_and_never_overlaps() {
+    use spectra_db::activity::{purge_activity, PurgeOutcome, PURGE_LOCK};
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "activity-purge-test@example.com").await.unwrap();
+    let user = seeded.admin_id;
+    sqlx::query("DELETE FROM user_activity_daily WHERE user_id = $1")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for age in [500, 401, 399, 10] {
+        sqlx::query(
+            "INSERT INTO user_activity_daily (user_id, day, active_seconds, heartbeats) \
+             VALUES ($1, (now() AT TIME ZONE 'UTC')::date - $2::int, 60, 1)",
+        )
+        .bind(user)
+        .bind(age)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let mine = || async {
+        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM user_activity_daily WHERE user_id = $1")
+            .bind(user)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        n
+    };
+
+    // A dry run counts (at least our two old rows) and deletes nothing.
+    match purge_activity(&pool, 400, true).await.unwrap() {
+        PurgeOutcome::Done { rows, dry_run } => assert!(dry_run && rows >= 2, "dry run counted {rows}"),
+        PurgeOutcome::Busy => panic!("dry run found the lock taken"),
+    }
+    assert_eq!(mine().await, 4, "a dry run deletes nothing");
+
+    // While another session holds the lock, a purge does nothing.
+    let mut holder = pool.begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
+        .bind(PURGE_LOCK)
+        .execute(&mut *holder)
+        .await
+        .unwrap();
+    assert_eq!(purge_activity(&pool, 400, false).await.unwrap(), PurgeOutcome::Busy);
+    assert_eq!(mine().await, 4, "a busy purge deletes nothing");
+    holder.rollback().await.unwrap();
+
+    // The real purge removes the rows older than 400 days and keeps the rest.
+    assert!(matches!(
+        purge_activity(&pool, 400, false).await.unwrap(),
+        PurgeOutcome::Done { dry_run: false, .. }
+    ));
+    let kept: Vec<i32> = sqlx::query_scalar(
+        "SELECT ((now() AT TIME ZONE 'UTC')::date - day)::int FROM user_activity_daily WHERE user_id = $1 ORDER BY 1",
+    )
+    .bind(user)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kept, vec![10, 399]);
+
+    // Running it again is safe: nothing of ours left to delete.
+    purge_activity(&pool, 400, false).await.unwrap();
+    assert_eq!(mine().await, 2);
+
+    assert!(purge_activity(&pool, 0, false).await.is_err(), "retention below 1 day is refused");
+}

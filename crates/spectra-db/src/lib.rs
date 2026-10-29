@@ -18,6 +18,7 @@ use sqlx::postgres::PgPoolOptions;
 pub use sqlx::PgPool;
 use uuid::Uuid;
 
+pub mod activity;
 pub mod artifacts;
 pub mod corporate_actions;
 pub mod datasets;

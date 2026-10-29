@@ -57,6 +57,8 @@ const IDLE_POLL: Duration = Duration::from_secs(1);
 const EXPIRE_UPLOADS_EVERY: Duration = Duration::from_secs(600);
 /// Uploads removed per sweep.
 const EXPIRE_UPLOADS_BATCH: i32 = 500;
+/// How often to delete daily activity rows past the retention window (M21).
+const ACTIVITY_PURGE_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 
 struct Ctx {
     pool: PgPool,
@@ -68,6 +70,36 @@ struct Ctx {
     /// Size limits for one backtest.
     backtest_max_bars: usize,
     backtest_max_instruments: usize,
+}
+
+/// Deletes daily activity rows past the retention window and records the result: a log line,
+/// Prometheus counters and a last-success timestamp. Failures are logged at error level, which
+/// Sentry captures when `SENTRY_DSN` is set.
+async fn purge_activity_now(pool: &PgPool) {
+    use spectra_db::activity::{purge_activity, PurgeOutcome, ACTIVITY_RETENTION_DAYS};
+    match purge_activity(pool, ACTIVITY_RETENTION_DAYS, false).await {
+        Ok(PurgeOutcome::Done { rows, .. }) => {
+            metrics::counter!("activity_purge_runs_total", "status" => "ok").increment(1);
+            metrics::counter!("activity_purge_rows_total").increment(rows);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0.0, |d| d.as_secs_f64());
+            metrics::gauge!("activity_purge_last_success_timestamp_seconds").set(now);
+            info!(
+                rows,
+                retention_days = ACTIVITY_RETENTION_DAYS,
+                "activity purge removed {rows} daily activity row(s)"
+            );
+        }
+        Ok(PurgeOutcome::Busy) => {
+            metrics::counter!("activity_purge_runs_total", "status" => "busy").increment(1);
+            info!("activity purge skipped: another purge is running");
+        }
+        Err(e) => {
+            metrics::counter!("activity_purge_runs_total", "status" => "error").increment(1);
+            error!("activity purge failed: {e}");
+        }
+    }
 }
 
 /// Prometheus text for the worker's own metrics.
@@ -169,6 +201,7 @@ async fn main() -> ExitCode {
     // Housekeeping: this worker's heartbeat, and requeueing jobs of dead workers.
     let (hk_pool, hk_info, mut hk_stop, hk_store) =
         (pool.clone(), info.clone(), stop_rx.clone(), store.clone());
+    let activity_purge_on = cfg.activity_purge;
     let housekeeping = tokio::spawn(async move {
         let mut beat = tokio::time::interval(HEARTBEAT);
         let mut sweep = tokio::time::interval(SWEEP_EVERY);
@@ -176,6 +209,7 @@ async fn main() -> ExitCode {
         let mut sample = tokio::time::interval(Duration::from_secs(15));
         let mut refresh_sweep = tokio::time::interval(Duration::from_secs(30));
         let mut artifact_sweep = tokio::time::interval(Duration::from_secs(1800));
+        let mut activity_purge = tokio::time::interval(ACTIVITY_PURGE_EVERY);
         loop {
             tokio::select! {
                 _ = hk_stop.changed() => break,
@@ -194,6 +228,7 @@ async fn main() -> ExitCode {
                         Err(e) => warn!("unreferenced artifact sweep failed: {e}"),
                     }
                 }
+                _ = activity_purge.tick(), if activity_purge_on => purge_activity_now(&hk_pool).await,
                 _ = refresh_sweep.tick() => {
                     spectra_api::providers::runner::sweep_due_refresh_schedules(&hk_pool).await;
                 }

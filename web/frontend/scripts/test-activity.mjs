@@ -4,6 +4,11 @@
 import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { transpileForTest } from './transpile-for-test.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const t = transpileForTest('activity', {
   files: ['lib/server/activity.ts', 'lib/server/db.ts', 'lib/server/adminAnalytics.ts', 'lib/activityClient.ts', 'lib/adminTypes.ts'],
@@ -17,6 +22,22 @@ const client = t.load('lib/activityClient.js');
 describe('retention disclosure', () => {
   it('tells users the same retention period the purge job uses', () => {
     assert.equal(client.ACTIVITY_RETENTION_DAYS_CLIENT, activity.ACTIVITY_RETENTION_DAYS);
+  });
+
+  it('uses one retention period in the dashboard, the worker and the purge script', () => {
+    const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
+    const worker = read('crates/spectra-db/src/activity.rs').match(/pub const ACTIVITY_RETENTION_DAYS: i32 = (\d+);/);
+    assert.ok(worker, 'ACTIVITY_RETENTION_DAYS not found in crates/spectra-db/src/activity.rs');
+    assert.equal(Number(worker[1]), activity.ACTIVITY_RETENTION_DAYS, 'worker purge (Rust)');
+    const script = read('web/frontend/scripts/activity-purge.mjs').match(/const DEFAULT_RETENTION_DAYS = (\d+);/);
+    assert.ok(script, 'DEFAULT_RETENTION_DAYS not found in scripts/activity-purge.mjs');
+    assert.equal(Number(script[1]), activity.ACTIVITY_RETENTION_DAYS, 'npm run activity:purge');
+  });
+
+  it('the worker and the script share one purge lock', () => {
+    const lock = /'spectra:activity-purge'|"spectra:activity-purge"/;
+    assert.match(fs.readFileSync(path.join(repoRoot, 'crates/spectra-db/src/activity.rs'), 'utf8'), lock);
+    assert.match(fs.readFileSync(path.join(repoRoot, 'web/frontend/scripts/activity-purge.mjs'), 'utf8'), lock);
   });
 });
 

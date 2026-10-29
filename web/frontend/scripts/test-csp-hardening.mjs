@@ -3,19 +3,25 @@ import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
+import { transpileForTest } from './transpile-for-test.mjs';
+import securityHeaders from '../lib/securityHeaders.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const frontendDir = path.resolve(__dirname, '..');
+
+const { load } = transpileForTest('csp-hardening', {
+  files: ['lib/csp.ts'],
+});
+
+const {
   buildCsp,
   cspMode,
   newNonce,
   isCrossSite,
   allowedOrigins,
   CSP_REPORT_PATH,
-} from '../lib/csp.ts';
-import securityHeaders from '../lib/securityHeaders.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const frontendDir = path.resolve(__dirname, '..');
+} = load('lib/csp.js');
 
 test('security and production CSP hardening', async (t) => {
   await t.test('cspMode resolves enforce, report-only, and off correctly', () => {

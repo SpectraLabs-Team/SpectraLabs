@@ -20,6 +20,7 @@ export async function GET() {
       ok: true,
       connected: true,
       hint: secret.hint,
+      keyIdHint: secret.hint,
       lastUsedAt: secret.lastUsedAt,
       updatedAt: secret.updatedAt,
     });

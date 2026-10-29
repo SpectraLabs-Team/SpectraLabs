@@ -582,7 +582,7 @@ export function TradingChart({
 
       <p className="pb-1 text-right text-[10px] text-ink/40">Drag to pan · Ctrl/⌘ + scroll to zoom</p>
       {/* Chart Canvas */}
-      <div ref={plotRef} className="relative h-[clamp(320px,52vh,520px)] w-full cursor-crosshair select-none">
+      <div ref={plotRef} className="relative h-[clamp(240px,36vh,380px)] w-full cursor-crosshair select-none">
         <canvas
           ref={canvasRef}
           onMouseMove={handleMouseMove}

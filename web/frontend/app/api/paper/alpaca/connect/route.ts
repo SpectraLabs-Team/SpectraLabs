@@ -83,6 +83,7 @@ export async function POST(req: Request) {
       ok: true,
       connected: true,
       hint: secretInfo.hint,
+      keyIdHint: secretInfo.hint,
       account,
     });
   } catch (err) {

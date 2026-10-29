@@ -16,7 +16,6 @@ export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 /** The name to show: no directories, no control characters, at most 255 characters. */
 export function cleanFilename(name: string | null | undefined): string {
   const base = (name ?? '').split(/[\\/]/).pop() ?? '';
-  // eslint-disable-next-line no-control-regex
   return base.replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 255).trim();
 }
 

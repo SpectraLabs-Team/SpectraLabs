@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useSyncExternalStore, type ReactNode } from 'react';
 
 export type Theme = 'dark' | 'light';
 const KEY = 'spectra-theme';
@@ -13,11 +13,18 @@ export const themeInitScript = `(function(){try{var t=localStorage.getItem('${KE
 
 const Ctx = createContext<{ theme: Theme; toggle: (e?: React.MouseEvent) => void }>({ theme: 'dark', toggle: () => {} });
 
+function subscribeTheme(callback: () => void) {
+  if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return () => {};
+  const observer = new MutationObserver(callback);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  return () => observer.disconnect();
+}
+
+const getThemeSnapshot = (): Theme => (document.documentElement.classList.contains('dark') ? 'dark' : 'light');
+const getServerThemeSnapshot = (): Theme => 'dark';
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('dark');
-  useEffect(() => {
-    setTheme(document.documentElement.classList.contains('dark') ? 'dark' : 'light');
-  }, []);
+  const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);
 
   const toggle = useCallback((e?: React.MouseEvent) => {
     const isDark = document.documentElement.classList.contains('dark');
@@ -30,7 +37,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     if (!hasViewTransitions) {
       document.documentElement.classList.toggle('dark', next === 'dark');
-      setTheme(next);
       try {
         localStorage.setItem(KEY, next);
       } catch {}
@@ -46,7 +52,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
     const transition = (document as any).startViewTransition(async () => {
       document.documentElement.classList.toggle('dark', next === 'dark');
-      setTheme(next);
       try {
         localStorage.setItem(KEY, next);
       } catch {}

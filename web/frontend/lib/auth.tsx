@@ -92,7 +92,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const cached = readCache();
-    if (cached) setUser(cached); // instant header; confirmed or cleared by refresh()
+    if (cached) {
+      queueMicrotask(() => setUser(cached));
+    }
     refresh();
 
     // Multi-tab sync: another tab logged in or out → re-check the shared cookie.

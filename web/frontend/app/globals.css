@@ -5,10 +5,13 @@
 /* Theme tokens as RGB triplets so Tailwind opacity modifiers work (bg-ink/10). */
 :root {
   color-scheme: light;
-  --canvas: 248 250 252; /* #F8FAFC */
+  /* #F8FAFC */
+  --canvas: 248 250 252;
   --panel: 255 255 255;
-  --ink: 15 23 42; /* slate-900 */
-  --accent: 8 145 178; /* cyan-600: readable on light */
+  /* slate-900 */
+  --ink: 15 23 42;
+  /* cyan-600 */
+  --accent: 8 145 178;
   --accent-ice: 2 132 199;
   --violet: 99 102 241;
   --profit: 5 150 105;
@@ -20,10 +23,12 @@
 
 .dark {
   color-scheme: dark;
-  --canvas: 5 8 17; /* #050811 */
+  /* #050811 */
+  --canvas: 5 8 17;
   --panel: 11 15 23;
   --ink: 241 245 249;
-  --accent: 34 211 238; /* #22D3EE */
+  /* #22D3EE */
+  --accent: 34 211 238;
   --accent-ice: 56 189 248;
   --violet: 139 92 246;
   --profit: 16 185 129;

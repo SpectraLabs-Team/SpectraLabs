@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   BookOpen,
@@ -68,12 +68,17 @@ export function StrategyStudio() {
 
   // Editor state
   const [code, setCode] = useState(DEFAULT_DSL_TEMPLATE);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
   const [parameters, setParameters] = useState<Record<string, unknown>>({});
   const [inferredParams, setInferredParams] = useState<InferredParameter[]>([]);
   const [validationErrors, setValidationErrors] = useState<ValidationErrorItem[]>([]);
   const [isValid, setIsValid] = useState(true);
   const [draftStatus, setDraftStatus] = useState<'saved' | 'saving' | 'dirty' | 'idle'>('idle');
   const [isReadOnly, setIsReadOnly] = useState(false);
+
+  const matchedTemplate = useMemo(() => {
+    return COMMON_STRATEGY_TEMPLATES.find((t) => t.code.trim() === code.trim());
+  }, [code]);
 
   // Sub-tabs: 'code' | 'history' | 'diff' | 'presets'
   const [activeSubTab, setActiveSubTab] = useState<'code' | 'history' | 'diff' | 'presets'>('code');
@@ -150,6 +155,7 @@ export function StrategyStudio() {
   useEffect(() => {
     if (!selectedStrategy) return;
     const stratId = selectedStrategy.id;
+    setSelectedTemplateId('');
 
     // Load draft
     getDraft(stratId)
@@ -327,6 +333,7 @@ export function StrategyStudio() {
   };
 
   const handleSelectTemplate = async (template: CommonStrategyTemplate, mode: 'load' | 'create') => {
+    setSelectedTemplateId(template.id);
     if (mode === 'load') {
       setCode(template.code);
       setParameters(template.defaultParams);
@@ -337,11 +344,11 @@ export function StrategyStudio() {
           name: template.name,
           description: template.description,
         });
+        await saveDraft(strat.id, template.code, template.defaultParams).catch(() => {});
         setStrategies((prev) => [strat, ...prev]);
         setSelectedStrategy(strat);
         setCode(template.code);
         setParameters(template.defaultParams);
-        await saveDraft(strat.id, template.code, template.defaultParams).catch(() => {});
       } catch (e) {
         alert(e instanceof Error ? e.message : 'Failed to create strategy from template.');
       }
@@ -356,13 +363,13 @@ export function StrategyStudio() {
         name: newStrategyName.trim(),
         description: newStrategyDesc.trim(),
       });
-      setStrategies((prev) => [strat, ...prev]);
-      setSelectedStrategy(strat);
       if (selectedTemplateForNew) {
+        await saveDraft(strat.id, selectedTemplateForNew.code, selectedTemplateForNew.defaultParams).catch(() => {});
         setCode(selectedTemplateForNew.code);
         setParameters(selectedTemplateForNew.defaultParams);
-        await saveDraft(strat.id, selectedTemplateForNew.code, selectedTemplateForNew.defaultParams).catch(() => {});
       }
+      setStrategies((prev) => [strat, ...prev]);
+      setSelectedStrategy(strat);
       setShowNewStrategyModal(false);
       setSelectedTemplateForNew(null);
       setNewStrategyName('');
@@ -589,12 +596,15 @@ export function StrategyStudio() {
                 </span>
                 <div className="flex items-center gap-2.5">
                   <select
+                    value={matchedTemplate ? matchedTemplate.id : (selectedTemplateId || '')}
                     onChange={(e) => {
-                      const tmpl = COMMON_STRATEGY_TEMPLATES.find((t) => t.id === e.target.value);
-                      if (tmpl) handleSelectTemplate(tmpl, 'load');
-                      e.target.value = '';
+                      const val = e.target.value;
+                      const tmpl = COMMON_STRATEGY_TEMPLATES.find((t) => t.id === val);
+                      if (tmpl) {
+                        setSelectedTemplateId(tmpl.id);
+                        handleSelectTemplate(tmpl, 'load');
+                      }
                     }}
-                    defaultValue=""
                     className="rounded-md border border-ink/10 bg-panel px-2 py-0.5 text-[11px] font-sans text-ink/80 transition hover:border-accent/40 focus:outline-none"
                   >
                     <option value="" disabled>Load Strategy Template…</option>
@@ -603,6 +613,9 @@ export function StrategyStudio() {
                         {t.name} ({t.category})
                       </option>
                     ))}
+                    {!matchedTemplate && selectedTemplateId === 'custom' && (
+                      <option value="custom" disabled>Custom / Modified</option>
+                    )}
                   </select>
                   <span>{linesCount} lines · utf-8</span>
                 </div>
@@ -631,7 +644,12 @@ export function StrategyStudio() {
                 {/* Editor Textarea */}
                 <textarea
                   value={code}
-                  onChange={(e) => setCode(e.target.value)}
+                  onChange={(e) => {
+                    setCode(e.target.value);
+                    if (selectedTemplateId && selectedTemplateId !== 'custom') {
+                      setSelectedTemplateId('custom');
+                    }
+                  }}
                   placeholder="// Type restricted strategy code here..."
                   spellCheck={false}
                   className="flex-1 resize-y bg-transparent p-3 font-mono leading-5 text-ink outline-none selection:bg-accent/20 dark:text-zinc-200"

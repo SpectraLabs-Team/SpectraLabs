@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { ArrowRight, BarChart3, ChevronLeft, ChevronRight, LayoutGrid, ScrollText, Server, Users } from 'lucide-react';
 import { AuditLog } from '@/components/audit/AuditLog';
 import { AdminUserPanel } from './AdminUserPanel';
@@ -285,10 +285,10 @@ function AnalyticsPanel() {
   const url = `/api/admin/analytics?from=${from}&to=${to}`;
   const { data, error } = useJson<AdminAnalytics>(url);
 
-  const preset = (days: number) => {
+  const preset = useCallback((days: number) => {
     setTo(today);
     setFrom(utcDay(new Date(Date.now() - (days - 1) * 86_400_000)));
-  };
+  }, [today]);
   const maxMinutes = Math.max(1, ...(data?.series.map((d) => d.activeMinutes) ?? [1]));
 
   return (

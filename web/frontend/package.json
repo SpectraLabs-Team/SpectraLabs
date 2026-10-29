@@ -5,7 +5,7 @@
   "scripts": {
     "predev": "node scripts/db-migrate.mjs --create",
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "prestart": "node scripts/db-migrate.mjs",
     "start": "next start",
     "lint": "eslint app components lib middleware.ts next.config.js",
@@ -27,6 +27,7 @@
     "typecheck": "tsc --noEmit",
     "test:workspaces": "node scripts/test-workspaces.mjs",
     "test:activity": "node scripts/test-activity.mjs",
+    "test:admin-gate": "node scripts/test-admin-gate.mjs",
     "test:strategies": "node scripts/test-strategies.mjs",
     "test:format": "node scripts/test-format.mjs",
     "smoke": "node scripts/smoke-tabs.mjs",

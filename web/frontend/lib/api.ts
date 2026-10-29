@@ -226,16 +226,16 @@ export interface PaperOrderView {
   side: 'buy' | 'sell';
   order_type: 'market' | 'limit' | 'stop';
   qty: number;
-  limit_price?: number;
-  stop_price?: number;
+  limit_price?: number | null;
+  stop_price?: number | null;
   tif: string;
   status: 'new' | 'filled' | 'partially_filled' | 'cancelled' | 'rejected';
   filled_qty: number;
-  filled_avg_price?: number;
-  reject_reason?: string;
+  filled_avg_price?: number | null;
+  reject_reason?: string | null;
   created_at: string;
   updated_at: string;
-  fills?: PaperFillView[];
+  fills?: PaperFillView[] | null;
 }
 
 export interface CreatePaperOrderRequest {

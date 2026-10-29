@@ -1,3 +1,7 @@
 
 # Local auth store (password hashes); never commit
 .data/
+
+# Smoke test session and screenshots (npm run smoke)
+.smoke-auth.json
+smoke-report/

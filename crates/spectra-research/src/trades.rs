@@ -488,6 +488,35 @@ mod tests {
     }
 
     #[test]
+    fn average_holding_period() {
+        const DAY: i64 = 86_400_000_000_000;
+        let mut l = Ledger::new(LedgerConfig::reference(true, false));
+        l.deposit(Money::from_f64(100_000.0).unwrap(), 0).unwrap();
+        // A: long 3 days, scaled in on day 1 (scaling in does not restart the clock).
+        l.apply_fill(&fill(0, Side::Buy, 5.0, 100.0, 0.0)).unwrap();
+        l.apply_fill(&fill(DAY, Side::Buy, 5.0, 100.0, 0.0)).unwrap();
+        l.apply_fill(&fill(2 * DAY, Side::Sell, 4.0, 101.0, 0.0)).unwrap(); // partial close
+        l.apply_fill(&fill(3 * DAY, Side::Sell, 6.0, 101.0, 0.0)).unwrap();
+        // B: long 1 day.
+        l.apply_fill(&fill(5 * DAY, Side::Buy, 10.0, 100.0, 0.0)).unwrap();
+        l.apply_fill(&fill(6 * DAY, Side::Sell, 10.0, 99.0, 0.0)).unwrap();
+        // C: long 2 days, closed by a flip; D: the short it opens, held 3 days.
+        l.apply_fill(&fill(7 * DAY, Side::Buy, 10.0, 100.0, 0.0)).unwrap();
+        l.apply_fill(&fill(9 * DAY, Side::Sell, 15.0, 102.0, 0.0)).unwrap();
+        l.apply_fill(&fill(12 * DAY, Side::Buy, 5.0, 101.0, 0.0)).unwrap();
+        // Still open at the end: not a trade, so not in the average.
+        l.apply_fill(&fill(13 * DAY, Side::Buy, 1.0, 100.0, 0.0)).unwrap();
+
+        let x = extract_trades(&l).unwrap();
+        let held: Vec<i64> = x.trades.iter().map(|t| t.holding_ns() / DAY).collect();
+        assert_eq!(held, vec![3, 1, 2, 3]);
+        assert_eq!(x.open_positions, 1);
+        let st = compute_trade_stats(&x.trades);
+        assert!((st.avg_holding_ns / DAY as f64 - 2.25).abs() < 1e-12, "{}", st.avg_holding_ns);
+        assert_eq!(compute_trade_stats(&[]).avg_holding_ns, 0.0);
+    }
+
+    #[test]
     fn resampling_is_deterministic() {
         let pnl = [10.0, -5.0, 3.0, -8.0, 12.0, -1.0];
         let a = resample_trades(&pnl, 100.0, 500, 7);

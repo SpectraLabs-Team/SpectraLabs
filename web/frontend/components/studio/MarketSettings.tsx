@@ -1,6 +1,7 @@
 'use client';
 
 import type { MetricId } from '@/lib/learn/metrics';
+import { getAlpacaStatus } from '@/lib/alpaca';
 import { MetricLabel } from '@/components/ui/MetricInfo';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -23,6 +24,12 @@ function useAlpacaProbe() {
   const run = async () => {
     setProbe({ status: 'checking' });
     try {
+      // No Alpaca keys saved: the account endpoint can only answer 501, so report paper mode directly.
+      const status = await getAlpacaStatus().catch(() => ({ connected: false }));
+      if (!status.connected) {
+        setProbe({ status: 'done', code: 501, detail: 'No Alpaca keys connected.' });
+        return;
+      }
       const r = await fetch(`${API_BASE}/api/alpaca/account`);
       let detail = r.statusText;
       try {

@@ -176,6 +176,11 @@ export async function PATCH(req: Request, props: { params: Promise<{ path: strin
   return proxy(req, params.path, 'PATCH');
 }
 
+export async function PUT(req: Request, props: { params: Promise<{ path: string[] }> }) {
+  const params = await props.params;
+  return proxy(req, params.path, 'PUT');
+}
+
 export async function DELETE(req: Request, props: { params: Promise<{ path: string[] }> }) {
   const params = await props.params;
   return proxy(req, params.path, 'DELETE');

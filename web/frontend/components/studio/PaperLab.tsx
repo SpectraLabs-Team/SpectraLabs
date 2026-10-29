@@ -326,10 +326,11 @@ export function PaperLab() {
   }, [checkStatus, loadAlpacaData]);
 
   // 3. Load Candlestick Bars for Selected Symbol
-  const loadBars = useCallback(async (sym: string, tf: string) => {
+  const loadBars = useCallback(async (sym: string, tf: string, connected: boolean) => {
     setChartLoading(true);
     try {
-      const res = await getAlpacaBars(sym, tf, 100);
+      // Sandbox (no Alpaca keys): skip the market-data call, which can only 404, and simulate.
+      const res = connected ? await getAlpacaBars(sym, tf, 100) : { bars: [] as CandleBar[] };
       if (res.bars && res.bars.length > 0) {
         setChartBars(res.bars);
         setChartDataStatus('Alpaca Paper (IEX Feed)');
@@ -370,8 +371,9 @@ export function PaperLab() {
   }, []);
 
   useEffect(() => {
-    loadBars(selectedSymbol, chartTimeframe);
-  }, [selectedSymbol, chartTimeframe, loadBars]);
+    if (checkingConnection) return;
+    loadBars(selectedSymbol, chartTimeframe, isConnected);
+  }, [selectedSymbol, chartTimeframe, loadBars, checkingConnection, isConnected]);
 
   // 4. Handle Connect Alpaca
   const handleConnect = async (e: React.FormEvent) => {
@@ -1194,7 +1196,7 @@ export function PaperLab() {
             onTimeframeChange={(tf) => setChartTimeframe(tf)}
             dataStatus={chartDataStatus}
             loading={chartLoading}
-            onRefresh={() => loadBars(selectedSymbol, chartTimeframe)}
+            onRefresh={() => loadBars(selectedSymbol, chartTimeframe, isConnected)}
           />
         </div>
 

@@ -87,9 +87,6 @@ export function Hero() {
                 Portfolio Risk
               </span>
             </motion.h1>
-            <motion.p {...rise(0.12)} className="mt-5 max-w-[500px] text-[16px] leading-[1.65] text-slate-300 lg:[@media(max-height:760px)]:mt-3">
-              High-performance pure-Rust quantitative engine. Sub-millisecond Monte Carlo risk, zero look-ahead backtesting, and cryptographic auditability.
-            </motion.p>
 
             <motion.div {...rise(0.22)} className="mt-8 flex flex-wrap items-center gap-3.5 lg:[@media(max-height:760px)]:mt-5">
               <button

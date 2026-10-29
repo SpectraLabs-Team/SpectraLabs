@@ -118,16 +118,16 @@ export function TearSheetModal({
       />
 
       {/* Modal Container */}
-      <div className="relative z-10 flex max-h-[92vh] w-full max-w-4xl flex-col rounded-2xl border border-white/10 bg-[#0c121e] shadow-2xl overflow-hidden print:border-none print:shadow-none print:max-h-none print:w-full print:bg-white print:text-black">
+      <div className="relative z-10 flex max-h-[92vh] w-full max-w-4xl flex-col rounded-2xl border border-ink/10 bg-panel shadow-2xl overflow-hidden print:border-none print:shadow-none print:max-h-none print:w-full print:bg-white print:text-black">
         {/* Modal Action Bar (hidden on print) */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-white/[0.03] px-6 py-4 print:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/10 bg-ink/[0.03] px-6 py-4 print:hidden">
           <div className="flex items-center gap-2">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
               <FileText className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold text-white">Executive Tear-Sheet</h2>
-              <p className="text-[11px] text-slate-400">Institutional Print-Ready Compliance Report</p>
+              <h2 className="text-sm font-semibold text-ink">Executive Tear-Sheet</h2>
+              <p className="text-[11px] text-ink/55">Institutional Print-Ready Compliance Report</p>
             </div>
           </div>
 
@@ -166,7 +166,7 @@ export function TearSheetModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white/10 hover:text-white ml-2"
+              className="rounded-lg p-1.5 text-ink/55 transition hover:bg-ink/[0.07] hover:text-ink ml-2"
               aria-label="Close"
             >
               <X className="h-4 w-4" />
@@ -177,10 +177,10 @@ export function TearSheetModal({
         {/* Scrollable Printable Report Body */}
         <div
           ref={printRef}
-          className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6 text-white print:text-black print:p-0 print:overflow-visible"
+          className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6 text-ink print:text-black print:p-0 print:overflow-visible"
         >
           {/* Institutional Document Header */}
-          <div className="border-b border-white/15 pb-6 print:border-black/20">
+          <div className="border-b border-ink/10 pb-6 print:border-black/20">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
@@ -189,47 +189,47 @@ export function TearSheetModal({
                   </span>
                   <Badge tone="accent">{reportType}</Badge>
                 </div>
-                <h1 className="mt-2 text-2xl font-bold tracking-tight text-white print:text-black">
+                <h1 className="mt-2 text-2xl font-bold tracking-tight text-ink print:text-black">
                   {title}
                 </h1>
-                <p className="mt-1 text-xs text-slate-400 print:text-slate-600">{subtitle}</p>
+                <p className="mt-1 text-xs text-ink/55 print:text-slate-600">{subtitle}</p>
               </div>
 
-              <div className="text-right text-xs text-slate-400 print:text-slate-600 space-y-1 font-mono">
+              <div className="text-right text-xs text-ink/55 print:text-slate-600 space-y-1 font-mono">
                 <p>
-                  <span className="text-slate-500">Workspace:</span>{' '}
+                  <span className="text-ink/45">Workspace:</span>{' '}
                   <span className="font-semibold text-slate-300 print:text-black">{workspaceName}</span>
                 </p>
                 <p>
-                  <span className="text-slate-500">Generated:</span> {timestamp}
+                  <span className="text-ink/45">Generated:</span> {timestamp}
                 </p>
                 <p>
-                  <span className="text-slate-500">Engine:</span> {metadata.engine}{' '}
+                  <span className="text-ink/45">Engine:</span> {metadata.engine}{' '}
                   {metadata.engineVersion ? `v${metadata.engineVersion}` : ''}
                 </p>
               </div>
             </div>
 
             {/* Audit & Compute Lineage Pill */}
-            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl bg-white/[0.03] border border-white/5 px-4 py-2.5 text-[11px] font-mono text-slate-400 print:bg-slate-100 print:text-black print:border-slate-300">
+            <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl bg-ink/[0.03] border border-ink/10 px-4 py-2.5 text-[11px] font-mono text-ink/55 print:bg-slate-100 print:text-black print:border-slate-300">
               {metadata.seed && (
                 <div>
-                  <span className="text-slate-500">Seed:</span> {metadata.seed}
+                  <span className="text-ink/45">Seed:</span> {metadata.seed}
                 </div>
               )}
               {metadata.commitSha && (
                 <div>
-                  <span className="text-slate-500">Commit:</span> {metadata.commitSha.slice(0, 8)}
+                  <span className="text-ink/45">Commit:</span> {metadata.commitSha.slice(0, 8)}
                 </div>
               )}
               {metadata.duration && (
                 <div>
-                  <span className="text-slate-500">Compute Time:</span> {metadata.duration}
+                  <span className="text-ink/45">Compute Time:</span> {metadata.duration}
                 </div>
               )}
               {metadata.datasetOrBook && (
                 <div>
-                  <span className="text-slate-500">Source:</span> {metadata.datasetOrBook}
+                  <span className="text-ink/45">Source:</span> {metadata.datasetOrBook}
                 </div>
               )}
               <div className="ml-auto flex items-center gap-1 text-emerald-400 print:text-emerald-700">
@@ -243,16 +243,16 @@ export function TearSheetModal({
           <div className="space-y-6">
             {sections.map((sec) => (
               <div key={sec.category} className="print:break-inside-avoid">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 print:text-slate-700 border-b border-white/10 pb-1.5 print:border-black/15 mb-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-ink/55 print:text-slate-700 border-b border-ink/10 pb-1.5 print:border-black/15 mb-3">
                   {sec.category}
                 </h3>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 print:grid-cols-4">
                   {sec.items.map((item) => (
                     <div
                       key={item.label}
-                      className="rounded-xl border border-white/10 bg-white/[0.02] p-3 print:bg-white print:border-slate-300"
+                      className="rounded-xl border border-ink/10 bg-ink/[0.02] p-3 print:bg-white print:border-slate-300"
                     >
-                      <p className="text-[10.5px] font-medium text-slate-400 print:text-slate-600">
+                      <p className="text-[10.5px] font-medium text-ink/55 print:text-slate-600">
                         {item.label}
                       </p>
                       <p
@@ -262,13 +262,13 @@ export function TearSheetModal({
                             ? 'text-emerald-400'
                             : item.tone === 'loss'
                             ? 'text-rose-400'
-                            : 'text-white'
+                            : 'text-ink'
                         )}
                       >
                         {item.value}
                       </p>
                       {item.sub && (
-                        <p className="mt-0.5 text-[10px] text-slate-500 print:text-slate-600">
+                        <p className="mt-0.5 text-[10px] text-ink/45 print:text-slate-600">
                           {item.sub}
                         </p>
                       )}
@@ -282,13 +282,13 @@ export function TearSheetModal({
           {/* Detailed Data Table */}
           {table && table.rows.length > 0 && (
             <div className="space-y-3 print:break-inside-avoid pt-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 print:text-slate-700 border-b border-white/10 pb-1.5 print:border-black/15">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink/55 print:text-slate-700 border-b border-ink/10 pb-1.5 print:border-black/15">
                 {table.title}
               </h3>
-              <div className="overflow-x-auto rounded-xl border border-white/10 bg-white/[0.01] print:border-slate-300 print:bg-white">
+              <div className="overflow-x-auto rounded-xl border border-ink/10 bg-ink/[0.01] print:border-slate-300 print:bg-white">
                 <table className="w-full text-left font-mono text-xs print:text-[11px]">
                   <thead>
-                    <tr className="border-b border-white/10 bg-white/[0.03] text-[10.5px] uppercase tracking-wider text-slate-400 print:bg-slate-100 print:text-black print:border-slate-300">
+                    <tr className="border-b border-ink/10 bg-ink/[0.03] text-[10.5px] uppercase tracking-wider text-ink/55 print:bg-slate-100 print:text-black print:border-slate-300">
                       {table.headers.map((h, i) => (
                         <th
                           key={h}
@@ -299,9 +299,9 @@ export function TearSheetModal({
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/5 print:divide-slate-200">
+                  <tbody className="divide-y divide-ink/[0.06] print:divide-slate-200">
                     {table.rows.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-white/[0.02] print:hover:bg-transparent">
+                      <tr key={idx} className="hover:bg-ink/[0.02] print:hover:bg-transparent">
                         {row.map((val, cellIdx) => (
                           <td
                             key={cellIdx}
@@ -322,7 +322,7 @@ export function TearSheetModal({
           )}
 
           {/* Footer & Compliance Disclaimer */}
-          <div className="border-t border-white/10 pt-4 print:border-slate-300 text-[10px] text-slate-500 print:text-slate-600 space-y-1 leading-relaxed">
+          <div className="border-t border-ink/10 pt-4 print:border-slate-300 text-[10px] text-ink/45 print:text-slate-600 space-y-1 leading-relaxed">
             <p>
               CONFIDENTIAL & PROPRIETARY — Produced by Spectra Labs Quantitative Risk & Execution Platform.
             </p>

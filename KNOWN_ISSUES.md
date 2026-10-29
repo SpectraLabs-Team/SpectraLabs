@@ -18,8 +18,8 @@
 - **Bit-exact parity tests run only on Linux with glibc.** The goldens depend on glibc's `exp`,
   `log` and `pow`, so those tests are compiled out elsewhere. All behavioural tests run on every
   platform.
-- **Not tested on macOS.** The full Rust test suite and frontend checks passed locally on Windows;
-  no macOS run has been reported.
+- **macOS:** the app runs on macOS and the Risk Lab dependence models (Aggregate, Gaussian,
+  T-Copula) have been checked there by hand. The full Rust test suite has not been run on macOS yet.
 
 ## Platform follow-ups
 
@@ -32,9 +32,10 @@
 
 ## Model limits (inherited)
 
-- The risk model treats the portfolio as one aggregate position: zero drift, and volatility equal to
-  the simple average of the assets' volatilities. There are no correlations and no per-asset paths, so
-  it cannot attribute risk to positions, and it treats the assets as perfectly correlated.
+- The default **Aggregate** risk model treats the portfolio as one aggregate position: zero drift, and
+  volatility equal to the simple average of the assets' volatilities, so it treats the assets as
+  perfectly correlated. The **Gaussian** and **T-Copula** dependence models simulate correlated
+  per-asset paths (the T-Copula adds tail dependence); use them when diversification or joint crashes matter.
 - Data: CSV only. There is no Parquet (corporate actions, exchange calendars, point-in-time revisions with symbol changes and delistings, and market data provider connectors with scheduled refreshes were added in tasks 10–13); datasets are held fully in memory during a backtest (ingest streams since M1b task 9; streaming backtests are M3 task 14).
 - Backtester: market, limit, stop and stop-limit orders; flat-bps slippage, bid-ask spread costs, volume-based slippage and square-root market impact; a single currency and average-cost accounting.
 - PSR and DSR assume serially independent returns and independent trials.

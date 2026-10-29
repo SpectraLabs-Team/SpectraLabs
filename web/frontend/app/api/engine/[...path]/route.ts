@@ -100,7 +100,7 @@ async function proxy(req: Request, path: string[], method: EngineMethod) {
   }
 
   let body: string | undefined;
-  if (method === 'POST' || method === 'PATCH') {
+  if (method === 'POST' || method === 'PATCH' || method === 'PUT') {
     const maxBody = maxBodyBytes(route);
     const len = Number(req.headers.get('content-length') || 0);
     if (len > maxBody) return NextResponse.json({ detail: 'Request too large.' }, { status: 413 });

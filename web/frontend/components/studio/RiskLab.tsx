@@ -291,8 +291,9 @@ export function RiskLab() {
   return (
     <div className="grid gap-5 xl:grid-cols-[340px_1fr] [&>*]:min-w-0">
       {/* Controls */}
-      <GlassCard as="section" className="h-fit p-5 xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto overscroll-contain">
-        <div className="flex items-center justify-between">
+      <GlassCard as="section" className="flex flex-col xl:sticky xl:top-16 xl:max-h-[calc(100dvh-5rem)] overflow-hidden !p-0">
+        {/* Pinned Card Header */}
+        <div className="flex items-center justify-between border-b border-ink/[0.07] px-5 py-3.5 bg-panel/70">
           <h2 className="text-sm font-semibold text-ink">Simulation</h2>
           <label className="flex cursor-pointer items-center gap-2 text-[11px] text-ink/60">
             Live
@@ -302,7 +303,8 @@ export function RiskLab() {
           </label>
         </div>
 
-        <div className="mt-5 space-y-6">
+        {/* Scrollable Parameters Area */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
           <RangeSlider label="Confidence level" value={confidence} min={0.9} max={0.999} step={0.001} onChange={setConfidence} display={confidenceLabel(confidence)} hint={<><span>90%</span><span>99.9%</span></>} />
 
           <RangeSlider
@@ -410,20 +412,23 @@ export function RiskLab() {
               Runs on all CPU cores. Results depend only on the seed and path count, so a run is reproducible on any machine.
             </span>
           </p>
+        </div>
 
+        {/* Pinned Sticky Action Footer - Always on screen */}
+        <div className="border-t border-ink/[0.08] bg-panel/95 backdrop-blur-sm px-5 py-3.5 space-y-2">
           <div className="flex gap-2">
-            <button type="button" onClick={run} disabled={!online || loading} className="btn-primary flex-1">
-              {loading ? <Spinner /> : <Play className="h-4 w-4" />} {loading ? 'Simulating' : 'Run simulation'}
+            <button type="button" onClick={run} disabled={!online || loading} className="btn-primary flex-1 shadow-sm">
+              {loading ? <Spinner /> : <Play className="h-4 w-4" />} {loading ? 'Simulating…' : 'Run simulation'}
             </button>
           </div>
           {dirty && !loading && (
-            <p role="status" className="-mt-3 flex items-center gap-2 rounded-lg border border-caution/30 bg-caution/[0.07] px-3 py-2 text-[11.5px] font-medium text-amber-800 dark:text-amber-200">
+            <p role="status" className="flex items-center gap-2 rounded-lg border border-caution/30 bg-caution/[0.07] px-3 py-1.5 text-[11px] font-medium text-amber-800 dark:text-amber-200">
               <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" />
-              Parameters modified · Re-run simulation to update
+              Parameters modified · Re-run simulation
             </p>
           )}
           {results && (
-            <div className="flex gap-2 -mt-2">
+            <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setTearSheetOpen(true)}

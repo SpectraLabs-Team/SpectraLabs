@@ -75,7 +75,6 @@ export function useReauth(): { call: <T = Record<string, unknown>>(url: string, 
     }
     if (!res.ok || !data.ok) throw new Error(data.error || 'Something went wrong. Try again.');
     return data as T;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const dialog = open ? (

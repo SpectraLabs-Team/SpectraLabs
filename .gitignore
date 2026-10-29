@@ -13,4 +13,7 @@ out/
 .pgdata/
 artifacts/
 AGENTS.md
+data/
+.DS_Store
+*.DS_Store
 

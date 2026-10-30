@@ -77,8 +77,8 @@ pub fn extract_trades(ledger: &Ledger) -> Result<TradeExtraction> {
                 }
                 continue;
             }
-            // A dividend is part of the open trade's P&L.
-            EntryType::Dividend => {
+            // A dividend or a bond coupon is part of the open trade's P&L.
+            EntryType::Dividend | EntryType::Coupon => {
                 if let Some(s) = state.get_mut(&e.fill.instrument) {
                     if !s.qty.is_zero() {
                         s.gross = s.gross.checked_add(e.amount)?;

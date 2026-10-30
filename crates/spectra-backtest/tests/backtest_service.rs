@@ -538,6 +538,7 @@ fn summary_writes_null_for_non_finite_ratios() {
         benchmark: Vec::new(),
         symbols: Vec::new(),
         setup: spectra_engine::InstrumentSetup::default(),
+        last_quotes: std::collections::BTreeMap::new(),
     };
     let s = summary_json(&out).unwrap();
     let t = s.find("trades").unwrap();

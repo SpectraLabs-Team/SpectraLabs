@@ -226,3 +226,48 @@ async fn instruments_fx_and_their_snapshot_into_a_backtest() {
     assert_eq!(status, 404);
     f.clean_up();
 }
+
+#[tokio::test]
+async fn bond_pricing_round_trips_and_validates() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    // A 10-year 8% annual bond at a 10% yield: price 87.7109, Macaulay duration 7.0439 (textbook values).
+    let (status, body) = f
+        .call(
+            "POST",
+            "/api/v1/pricing/bond",
+            &json!({"maturity": "2036-01-01", "coupon_rate": 0.08, "coupon_frequency": 1,
+                    "day_count": "act_act_icma", "as_of": "2026-01-01", "yield": 0.10}),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert!((body["dirty_price"].as_f64().unwrap() - 87.7109).abs() < 1e-4, "{body}");
+    assert!((body["macaulay_duration"].as_f64().unwrap() - 7.0439).abs() < 1e-4, "{body}");
+    assert_eq!(body["accrued_interest"].as_f64(), Some(0.0));
+    // And back: the yield from that price.
+    let (status, back) = f
+        .call(
+            "POST",
+            "/api/v1/pricing/bond",
+            &json!({"maturity": "2036-01-01", "coupon_rate": 0.08, "coupon_frequency": 1,
+                    "day_count": "act_act_icma", "as_of": "2026-01-01", "dirty_price": body["dirty_price"]}),
+        )
+        .await;
+    assert_eq!(status, 200, "{back}");
+    assert!((back["yield"].as_f64().unwrap() - 0.10).abs() < 1e-9, "{back}");
+    // Every problem at once.
+    let (status, bad) = f
+        .call(
+            "POST",
+            "/api/v1/pricing/bond",
+            &json!({"maturity": "soon", "coupon_rate": 0.08, "coupon_frequency": 3,
+                    "day_count": "act_act", "as_of": "2026-01-01", "yield": 0.1, "clean_price": 99}),
+        )
+        .await;
+    assert_eq!(status, 422, "{bad}");
+    let fs = fields(&bad);
+    for want in ["maturity", "day_count", "coupon_frequency", ""] {
+        assert!(fs.contains(&want.to_string()), "{want}: {bad}");
+    }
+    f.clean_up();
+}

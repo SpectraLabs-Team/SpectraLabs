@@ -355,6 +355,8 @@ pub enum RollKind {
     Closed,
     /// Still open at expiry with no price to trade at: settled at its last mark.
     Settled,
+    /// A bond repaid at par at maturity.
+    Redeemed,
 }
 
 impl RollKind {
@@ -364,6 +366,7 @@ impl RollKind {
             Self::Rolled => "rolled",
             Self::Closed => "closed",
             Self::Settled => "settled",
+            Self::Redeemed => "redeemed",
         }
     }
 }
@@ -1099,6 +1102,7 @@ fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order]
             spectra_core::EntryType::Split => 5,
             spectra_core::EntryType::Dividend => 6,
             spectra_core::EntryType::Listing => 7,
+            spectra_core::EntryType::Coupon => 8,
         });
         h.update_i64(e.ts_ns);
         h.update_i64(e.amount.raw());
@@ -1878,6 +1882,107 @@ impl RollCtx<'_> {
     }
 }
 
+/// Pays every bond coupon that fell due after `prev_ts` and on or before
+/// `ts`, on the positions held at the previous close: each strategy its own,
+/// and the account their sum (exactly, so the books still add up).
+fn pay_coupons(
+    setup: &InstrumentSetup,
+    prev_ts: Option<i64>,
+    ts: i64,
+    ledger: &mut Ledger,
+    sleeves: &mut [Ledger],
+) -> std::result::Result<(), RunError> {
+    let Some(prev) = prev_ts else { return Ok(()) };
+    for &id in setup.instruments.keys() {
+        let Some(terms) = setup.bond_terms(id) else { continue };
+        for day in terms.coupon_days_between(prev, ts) {
+            let Some((start, end)) = terms.period_around(day * 86_400_000_000_000) else { continue };
+            // Per 100 face, in the bond's currency, converted at the rate known now.
+            let per_unit = setup.fx_convert(id, Price::from_f64(terms.coupon_amount(start, end))?, ts)?;
+            if per_unit.is_zero() {
+                continue;
+            }
+            let owed = |book: &Ledger| -> Result<Money> {
+                let q = book.position(id).qty;
+                if q.is_zero() {
+                    return Ok(Money::ZERO);
+                }
+                Ok(book.notional_of(id, per_unit, q)?)
+            };
+            if sleeves.is_empty() {
+                let amount = owed(ledger)?;
+                if !amount.is_zero() {
+                    ledger.apply_coupon(id, amount, ts).map_err(ledger_err)?;
+                }
+                continue;
+            }
+            let mut total = Money::ZERO;
+            for book in sleeves.iter_mut() {
+                let amount = owed(book)?;
+                if !amount.is_zero() {
+                    book.apply_coupon(id, amount, ts).map_err(ledger_err)?;
+                    total = total.checked_add(amount)?;
+                }
+            }
+            if !total.is_zero() {
+                ledger.apply_coupon(id, total, ts).map_err(ledger_err)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Repays every bond position at par (100) once its maturity has come.
+fn redeem_bonds(
+    setup: &InstrumentSetup,
+    ts: i64,
+    ledger: &mut Ledger,
+    sleeves: &mut [Ledger],
+    rolls: &mut Vec<RollEvent>,
+    fill_orders: &mut Vec<OrderId>,
+) -> std::result::Result<Vec<(usize, Fill)>, RunError> {
+    let mut out = Vec::new();
+    let owners = sleeves.len().max(1);
+    for (&id, inst) in &setup.instruments {
+        let Some(maturity) = inst.maturity_ns.filter(|_| inst.kind == InstrumentType::Bond) else { continue };
+        if ts < maturity {
+            continue;
+        }
+        // At maturity nothing has accrued: par, converted to the base currency.
+        let par = setup.fx_convert(id, Price::from_units(100)?, ts)?;
+        for owner in 0..owners {
+            let qty = sleeves.get(owner).unwrap_or(ledger).position(id).qty;
+            if qty.is_zero() {
+                continue;
+            }
+            let side = if qty.raw() > 0 { Side::Sell } else { Side::Buy };
+            let f = Fill {
+                instrument: id,
+                side,
+                qty: qty.checked_abs()?,
+                price: par,
+                fee: Money::ZERO,
+                ts_ns: ts,
+            };
+            apply_engine_fill(ledger, sleeves, owner, &f, false).map_err(ledger_err)?;
+            fill_orders.push(0);
+            out.push((owner, f));
+            rolls.push(RollEvent {
+                ts_ns: ts,
+                strategy: owner,
+                from: id,
+                to: None,
+                qty,
+                close_price: par,
+                open_price: None,
+                kind: RollKind::Redeemed,
+                note: None,
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// Refuses a setup the engine cannot run: an invalid record or rate series,
 /// or an instrument type whose model is not in this engine yet.
 fn check_setup(setup: &InstrumentSetup, bars: &[Bar]) -> std::result::Result<(), RunError> {
@@ -1897,8 +2002,7 @@ fn check_setup(setup: &InstrumentSetup, bars: &[Bar]) -> std::result::Result<(),
 /// Why the engine cannot trade `inst` yet, if it cannot.
 fn unsupported(inst: &Instrument) -> Option<&'static str> {
     match inst.kind {
-        InstrumentType::Equity | InstrumentType::Future => None,
-        InstrumentType::Bond => Some("bond trading needs the bond model (coupons and accrued interest)"),
+        InstrumentType::Equity | InstrumentType::Future | InstrumentType::Bond => None,
         InstrumentType::Option => Some("option trading needs the option model (expiry settlement)"),
         InstrumentType::Swap => Some("swap trading needs a curve model"),
     }
@@ -1951,6 +2055,8 @@ fn run_inner<'s>(
     let interval = check_uniform_intervals(bars)?;
     let sessions = SessionRule::new(cfg.exchange, interval);
     let chains = Chains::new(setup, &setup.roll, cfg.exchange);
+    let has_bonds = setup.instruments.values().any(|i| i.kind == InstrumentType::Bond);
+    let mut prev_ts: Option<i64> = None;
     let mut continuous = Continuous::default();
     let mut rolls: Vec<RollEvent> = Vec::new();
     let actions = prepare_actions(actions, bars)?;
@@ -2085,9 +2191,14 @@ fn run_inner<'s>(
         // 1. Fill orders submitted at earlier timestamps, in submission order.
         let session_open = sessions.is_open(ts);
         // Futures past their roll date roll first, at this timestamp's open (M24.2).
-        let mut fills: Vec<(usize, Fill)> = if chains.is_empty() {
-            Vec::new()
-        } else {
+        let mut fills: Vec<(usize, Fill)> = Vec::new();
+        // Bonds: coupons on the positions held at the previous close, then
+        // redemption at maturity (M24.3).
+        if has_bonds {
+            pay_coupons(setup, prev_ts, ts, &mut ledger, &mut sleeves)?;
+            fills.extend(redeem_bonds(setup, ts, &mut ledger, &mut sleeves, &mut rolls, &mut fill_orders)?);
+        }
+        if !chains.is_empty() {
             let mut ctx = RollCtx {
                 chains: &chains,
                 setup,
@@ -2098,8 +2209,8 @@ fn run_inner<'s>(
                 rolls: &mut rolls,
                 fill_orders: &mut fill_orders,
             };
-            ctx.roll(&mut ledger, &mut sleeves)?
-        };
+            fills.extend(ctx.roll(&mut ledger, &mut sleeves)?);
+        }
         if session_open {
             for k in open.candidates(group, &orders) {
                 if !orders[k].state.is_open() || step - orders[k].submit_step < min_wait {
@@ -2206,8 +2317,12 @@ fn run_inner<'s>(
                     }
                 }
 
-                // A contract cannot trade at or after its expiry.
-                if setup.instrument(o.instrument).and_then(|i| i.expiry_ns).is_some_and(|e| ts >= e) {
+                // A contract cannot trade at or after its expiry (a bond: its maturity).
+                if setup
+                    .instrument(o.instrument)
+                    .and_then(|i| i.expiry_ns.or(i.maturity_ns))
+                    .is_some_and(|e| ts >= e)
+                {
                     o.state = OrderState::Rejected;
                     o.reject_reason = Some(Reject::ContractExpired);
                     open.remove(&orders[k], k);
@@ -2325,6 +2440,7 @@ fn run_inner<'s>(
         open.market.retain(|&k| orders[k].state.is_open());
         i = j;
         step += 1;
+        prev_ts = Some(ts);
     }
 
     if let Some(cb) = ctl.progress.as_mut() {

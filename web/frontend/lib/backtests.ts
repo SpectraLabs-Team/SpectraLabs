@@ -156,13 +156,39 @@ export interface StrategySummary {
 export interface FuturesRoll {
   ts_ns: number;
   strategy: number;
-  kind: 'rolled' | 'closed' | 'settled';
+  kind: 'rolled' | 'closed' | 'settled' | 'redeemed';
   from: string;
   to: string | null;
   qty: string;
   close_price: string;
   open_price: string | null;
   note: string | null;
+}
+
+export interface BondSummary {
+  symbol: string;
+  coupon_rate: number;
+  coupon_frequency: number;
+  day_count: string;
+  maturity: number;
+  as_of?: number;
+  clean_price?: number;
+  dirty_price?: number;
+  accrued_interest?: number;
+  yield_to_maturity?: number;
+  macaulay_duration?: number;
+  modified_duration?: number;
+  convexity?: number;
+  dv01_per_100?: number;
+}
+
+export interface BondsSummary {
+  quote: 'clean' | 'dirty';
+  /** Net coupons received, base currency. */
+  coupons: string;
+  bonds: BondSummary[];
+  redemptions: { ts_ns: number; strategy: number; symbol: string; qty: string; price: string }[];
+  gaps: string[];
 }
 
 export interface FuturesSummary {
@@ -248,6 +274,8 @@ export interface Summary {
   instruments: InstrumentSummary[];
   /** M24.2: present only for runs with futures. */
   futures?: FuturesSummary;
+  /** M24.3: present only for runs with bonds. */
+  bonds?: BondsSummary;
   benchmark: {
     valid: boolean;
     name?: string;

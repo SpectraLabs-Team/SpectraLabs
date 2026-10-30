@@ -79,6 +79,10 @@ pub struct CreateBacktest {
     #[serde(default)]
     #[schema(value_type = Option<Object>)]
     pub futures_roll: Option<serde_json::Value>,
+    /// Whether bond bars are `clean` (default: accrued interest is added at
+    /// every fill and mark) or `dirty` prices.
+    #[serde(default)]
+    pub bond_quote: Option<String>,
     /// -10..10; higher runs first. Default 0.
     #[serde(default)]
     pub priority: i32,
@@ -327,6 +331,9 @@ pub(crate) async fn create_backtest(
     }
     if let Some(r) = req.futures_roll {
         payload["futures_roll"] = r;
+    }
+    if let Some(q) = req.bond_quote {
+        payload["bond_quote"] = serde_json::Value::String(q);
     }
     // Snapshot the workspace's instrument data into the run, so it reproduces.
     if let Ok((pool, ws)) = crate::jobs_api::context(&st, &id) {

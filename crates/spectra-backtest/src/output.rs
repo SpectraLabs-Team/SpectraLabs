@@ -315,6 +315,7 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("total_fees", money(r.ledger.total_fees()))
         .with("financing", money(r.ledger.financing()))
         .with("dividends", money(r.ledger.dividends()))
+        .with("coupons", money(r.ledger.coupons()))
         .with("corporate_actions_applied", Json::integer(applied_actions(r) as i64))
         .with("realized_pnl", money(r.ledger.realized_pnl()))
         .with("final_cash", money(r.ledger.cash()))
@@ -370,6 +371,10 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("benchmark", benchmark_json(out)?);
     let summary = match futures_json(out)? {
         Some(f) => summary.with("futures", f),
+        None => summary,
+    };
+    let summary = match bonds_json(out)? {
+        Some(b) => summary.with("bonds", b),
         None => summary,
     };
     if req.is_multi() {
@@ -519,10 +524,11 @@ pub fn net_pnl(
 /// P&L and costs per instrument, from the ledger.
 fn instruments_json(out: &BacktestOutput) -> Result<Json> {
     let l = &out.result.ledger;
-    let mut fills: std::collections::BTreeMap<spectra_core::InstrumentId, (i64, f64, Money, Money)> =
+    // (fills, traded notional, borrow fees, dividends, coupons) per instrument.
+    let mut fills: std::collections::BTreeMap<spectra_core::InstrumentId, (i64, f64, Money, Money, Money)> =
         std::collections::BTreeMap::new();
     for e in l.journal() {
-        let slot = fills.entry(e.fill.instrument).or_insert((0, 0.0, Money::ZERO, Money::ZERO));
+        let slot = fills.entry(e.fill.instrument).or_insert((0, 0.0, Money::ZERO, Money::ZERO, Money::ZERO));
         match e.kind {
             EntryType::Fill => {
                 slot.0 += 1;
@@ -530,6 +536,7 @@ fn instruments_json(out: &BacktestOutput) -> Result<Json> {
             }
             EntryType::BorrowFee => slot.2 = slot.2.checked_add(e.amount)?,
             EntryType::Dividend => slot.3 = slot.3.checked_add(e.amount)?,
+            EntryType::Coupon => slot.4 = slot.4.checked_add(e.amount)?,
             _ => {}
         }
     }
@@ -539,9 +546,10 @@ fn instruments_json(out: &BacktestOutput) -> Result<Json> {
         // notional never changed hands, so its P&L is reported separately.
         let value = l.position_exposure(id)?;
         let unrealized = l.position_unrealized(id)?;
-        let (count, traded, borrow, dividends) =
-            fills.get(&id).copied().unwrap_or((0, 0.0, Money::ZERO, Money::ZERO));
-        let net = net_pnl(p.realized, unrealized, p.fees, borrow, dividends)?;
+        let (count, traded, borrow, dividends, coupons) =
+            fills.get(&id).copied().unwrap_or((0, 0.0, Money::ZERO, Money::ZERO, Money::ZERO));
+        // Income is income: a coupon adds to net P&L as a dividend does.
+        let net = net_pnl(p.realized, unrealized, p.fees, borrow, dividends.checked_add(coupons)?)?;
         let symbol = out.symbols.get(id as usize).map_or(Json::Null, |s| Json::string(s.clone()));
         let record = out.setup.instrument(id);
         let underlying = record.and_then(|r| r.underlying.clone()).map_or(Json::Null, Json::string);
@@ -565,11 +573,89 @@ fn instruments_json(out: &BacktestOutput) -> Result<Json> {
                 .with("fees", money(p.fees))
                 .with("borrow_fees", money(borrow))
                 .with("dividends", money(dividends))
+                .with("coupons", money(coupons))
                 .with("net_pnl", money(net)),
         )?;
     }
     Ok(arr)
 }
+
+/// What the run says about bonds, when it has any: the quote convention,
+/// redemptions, and each bond's yield and interest-rate risk at its last price.
+fn bonds_json(out: &BacktestOutput) -> Result<Option<Json>> {
+    let bonds: Vec<(spectra_core::InstrumentId, spectra_engine::BondTerms)> =
+        out.setup.instruments.keys().filter_map(|&id| out.setup.bond_terms(id).map(|t| (id, t))).collect();
+    if bonds.is_empty() {
+        return Ok(None);
+    }
+    let name = |id: spectra_core::InstrumentId| {
+        out.symbols
+            .get(id as usize)
+            .cloned()
+            .or_else(|| out.setup.instrument(id).map(|i| i.symbol.clone()))
+            .unwrap_or_else(|| format!("#{id}"))
+    };
+    let mut list = Json::array();
+    for (id, terms) in &bonds {
+        let mut j = Json::object()
+            .with("symbol", Json::string(name(*id)))
+            .with("coupon_rate", num(terms.coupon_rate))
+            .with("coupon_frequency", Json::integer(i64::from(terms.frequency)))
+            .with("day_count", Json::string(terms.day_count.as_str()))
+            .with("maturity", Json::integer(terms.maturity_ns));
+        if let Some(&(ts, close)) = out.last_quotes.get(id) {
+            let quoted = close.to_f64();
+            let accrued = terms.accrued(ts);
+            let (clean, dirty) = match out.setup.bond_quote {
+                spectra_engine::BondQuote::Clean => (quoted, quoted + accrued),
+                spectra_engine::BondQuote::Dirty => (quoted - accrued, quoted),
+            };
+            j = j
+                .with("as_of", Json::integer(ts))
+                .with("clean_price", num(clean))
+                .with("dirty_price", num(dirty))
+                .with("accrued_interest", num(accrued));
+            if let Ok(y) = terms.yield_from_price(dirty, ts) {
+                let r = terms.risk(y, ts);
+                j = j
+                    .with("yield_to_maturity", num(y))
+                    .with("macaulay_duration", num(r.macaulay))
+                    .with("modified_duration", num(r.modified))
+                    .with("convexity", num(r.convexity))
+                    .with("dv01_per_100", num(r.dv01));
+            }
+        }
+        list.push(j)?;
+    }
+    let mut redemptions = Json::array();
+    for e in out.result.rolls.iter().filter(|e| e.kind == spectra_engine::RollKind::Redeemed) {
+        redemptions.push(
+            Json::object()
+                .with("ts_ns", Json::integer(e.ts_ns))
+                .with("strategy", Json::integer(e.strategy as i64))
+                .with("symbol", Json::string(name(e.from)))
+                .with("qty", Json::string(e.qty.to_string()))
+                .with("price", Json::string(e.close_price.to_string())),
+        )?;
+    }
+    Ok(Some(
+        Json::object()
+            .with("quote", Json::string(out.setup.bond_quote.as_str()))
+            .with("coupons", money(out.result.ledger.coupons()))
+            .with("bonds", list)
+            .with("redemptions", redemptions)
+            .with("gaps", {
+                let mut g = Json::array();
+                g.push(Json::string(BOND_GAP))?;
+                g
+            }),
+    ))
+}
+
+/// What a bond run does not model, stated in its summary.
+pub const BOND_GAP: &str = "Ex-coupon periods, settlement lags, default and call features are not modelled: \
+    the holder at the close before a coupon date receives the coupon, trades settle at the bar, and every bond \
+    is repaid at par at maturity.";
 
 /// What a futures run does not model (M24.2 task 10), stated in its summary.
 pub const MARGIN_GAP: &str = "Margin is not modelled. Futures are marked to market (no notional changes \
@@ -592,7 +678,7 @@ fn futures_json(out: &BacktestOutput) -> Result<Option<Json>> {
     };
     let rule = &out.setup.roll;
     let mut rolls = Json::array();
-    for e in &out.result.rolls {
+    for e in out.result.rolls.iter().filter(|e| e.kind != spectra_engine::RollKind::Redeemed) {
         rolls.push(
             Json::object()
                 .with("ts_ns", Json::integer(e.ts_ns))

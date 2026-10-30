@@ -15,6 +15,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::bonds::BondTerms;
 use crate::futures::RollRule;
 use spectra_core::fixed::{div_round_half_away, narrow};
 use spectra_core::{
@@ -96,6 +97,38 @@ pub struct InstrumentSetup {
     pub fx: BTreeMap<String, Vec<FxRate>>,
     /// When futures roll and how continuous series are adjusted (decision 3).
     pub roll: RollRule,
+    /// Whether bond bars are clean or dirty prices (M24.3 task 12).
+    pub bond_quote: BondQuote,
+}
+
+/// How bond prices in the bars are quoted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BondQuote {
+    /// Without accrued interest, the market convention: the engine adds the
+    /// accrued interest to every fill and mark.
+    #[default]
+    Clean,
+    /// Accrued interest included: fills and marks use the price as it is.
+    Dirty,
+}
+
+impl BondQuote {
+    /// Name used in requests.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Clean => "clean",
+            Self::Dirty => "dirty",
+        }
+    }
+
+    /// The convention called `name`.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "clean" => Some(Self::Clean),
+            "dirty" => Some(Self::Dirty),
+            _ => None,
+        }
+    }
 }
 
 impl Default for InstrumentSetup {
@@ -103,6 +136,7 @@ impl Default for InstrumentSetup {
         Self {
             base_currency: DEFAULT_BASE_CURRENCY.into(),
             roll: RollRule::default(),
+            bond_quote: BondQuote::default(),
             instruments: BTreeMap::new(),
             fx: BTreeMap::new(),
         }
@@ -113,6 +147,11 @@ impl InstrumentSetup {
     /// The record of `id`, if the run has one.
     pub fn instrument(&self, id: InstrumentId) -> Option<&Instrument> {
         self.instruments.get(&id)
+    }
+
+    /// The coupon terms of `id`, when it is a bond.
+    pub fn bond_terms(&self, id: InstrumentId) -> Option<BondTerms> {
+        self.instrument(id).and_then(BondTerms::from_instrument)
     }
 
     /// The type of `id` (equity when it has no record).
@@ -213,12 +252,27 @@ impl InstrumentSetup {
         Ok(Some(series[k - 1].rate))
     }
 
-    /// `price` of `id` in the base currency at `ts_ns`, rounded half away from
-    /// zero to price precision. Unchanged for an instrument in the base currency.
+    /// The price the books use for quoted `price` of `id` at `ts_ns`: a bond
+    /// quoted clean gets its accrued interest added (the dirty price, which is
+    /// what changes hands), then anything not in the base currency is converted.
+    /// Unchanged for an instrument in the base currency that is not a bond.
     ///
     /// # Errors
     /// As [`Self::fx_rate`]; overflow; a conversion that rounds to zero.
     pub fn to_base(&self, id: InstrumentId, price: Price, ts_ns: i64) -> Result<Price> {
+        let price = match (self.bond_quote, self.bond_terms(id)) {
+            (BondQuote::Clean, Some(terms)) => price.checked_add(Price::from_f64(terms.accrued(ts_ns))?)?,
+            _ => price,
+        };
+        self.fx_convert(id, price, ts_ns)
+    }
+
+    /// `price` of `id` converted to the base currency at the rate known at
+    /// `ts_ns`, rounded half away from zero; unchanged in the base currency.
+    ///
+    /// # Errors
+    /// As [`Self::fx_rate`]; overflow; a conversion that rounds to zero.
+    pub fn fx_convert(&self, id: InstrumentId, price: Price, ts_ns: i64) -> Result<Price> {
         let Some(rate) = self.fx_rate(id, ts_ns)? else { return Ok(price) };
         let raw = narrow(div_round_half_away(i128::from(price.raw()) * rate, FX_SCALE))?;
         if raw <= 0 && price.raw() > 0 {
@@ -251,10 +305,16 @@ impl InstrumentSetup {
             if let Some(u) = &i.underlying {
                 s.push_str(&format!("underlying={u};"));
             }
+            if let (Some(f), Some(d)) = (i.coupon_frequency, i.day_count) {
+                s.push_str(&format!("coupons={f},{};", d.as_str()));
+            }
         }
         // The roll rule changes only runs that have futures.
         if self.effective().any(|(_, i)| i.kind == InstrumentType::Future) {
             s.push_str(&self.roll.canonical());
+        }
+        if self.effective().any(|(_, i)| i.kind == InstrumentType::Bond) {
+            s.push_str(&format!("bond_quote={};", self.bond_quote.as_str()));
         }
         for ccy in self.foreign_currencies() {
             if let Some(series) = self.fx.get(ccy) {

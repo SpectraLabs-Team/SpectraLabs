@@ -77,7 +77,7 @@ pub struct StrategyAllocation {
 /// Most strategies in one request.
 pub const MAX_REQUEST_STRATEGIES: usize = 10;
 
-const REQUEST_FIELDS: [&str; 11] = [
+const REQUEST_FIELDS: [&str; 12] = [
     "strategy",
     "params",
     "strategies",
@@ -89,6 +89,7 @@ const REQUEST_FIELDS: [&str; 11] = [
     "instruments",
     "fx_rates",
     "futures_roll",
+    "bond_quote",
 ];
 const ENTRY_FIELDS: [&str; 3] = ["strategy", "params", "weight"];
 
@@ -552,6 +553,8 @@ pub struct BacktestOutput {
     pub symbols: Vec<String>,
     /// The instrument setup the run used (records, base currency, FX rates).
     pub setup: InstrumentSetup,
+    /// Each instrument's last bar time and close, as quoted (for bond analytics).
+    pub last_quotes: std::collections::BTreeMap<spectra_core::InstrumentId, (i64, spectra_core::Price)>,
 }
 
 /// Builds the strategy and runs it under `ctl`, on a dataset whose symbols
@@ -632,5 +635,16 @@ pub fn run_request_on(
         }
     };
     let benchmark = spectra_research::benchmark_returns(bars);
-    Ok(BacktestOutput { request: request.clone(), result, benchmark, symbols: symbols.to_vec(), setup })
+    let mut last_quotes = std::collections::BTreeMap::new();
+    for b in bars {
+        last_quotes.insert(b.instrument, (b.ts_ns, b.close));
+    }
+    Ok(BacktestOutput {
+        request: request.clone(),
+        result,
+        benchmark,
+        symbols: symbols.to_vec(),
+        setup,
+        last_quotes,
+    })
 }

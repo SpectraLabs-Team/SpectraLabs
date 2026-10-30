@@ -91,7 +91,47 @@ pub struct Instrument {
     /// What the contract is on: a future's chain (contracts with the same
     /// underlying roll into each other, e.g. `ES`), or an option's underlying symbol.
     pub underlying: Option<String>,
+    /// Coupons a year (bonds): 1, 2, 4 or 12.
+    pub coupon_frequency: Option<u32>,
+    /// How accrued interest counts days (bonds).
+    pub day_count: Option<DayCount>,
 }
+
+/// How a fraction of a year is counted between two dates (bond accrued interest).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DayCount {
+    /// Actual/Actual (ICMA): every full period pays exactly `rate / frequency`. Government bonds.
+    ActActIcma,
+    /// 30/360 (US bond basis). Corporate and agency bonds.
+    Thirty360,
+    /// Actual/360. Money-market instruments.
+    Act360,
+    /// Actual/365 fixed.
+    Act365F,
+}
+
+impl DayCount {
+    /// Every convention.
+    pub const ALL: [Self; 4] = [Self::ActActIcma, Self::Thirty360, Self::Act360, Self::Act365F];
+
+    /// Name used in requests and storage.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ActActIcma => "act_act_icma",
+            Self::Thirty360 => "30_360",
+            Self::Act360 => "act_360",
+            Self::Act365F => "act_365f",
+        }
+    }
+
+    /// The convention called `name`.
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|d| d.as_str() == name)
+    }
+}
+
+/// Coupon frequencies a bond may have.
+pub const COUPON_FREQUENCIES: [u32; 4] = [1, 2, 4, 12];
 
 /// The base currency of a workspace that has not chosen one.
 pub const DEFAULT_BASE_CURRENCY: &str = "USD";
@@ -121,6 +161,8 @@ impl Instrument {
             maturity_ns: None,
             coupon_rate: None,
             underlying: None,
+            coupon_frequency: None,
+            day_count: None,
         }
     }
 
@@ -176,6 +218,10 @@ impl Instrument {
                 Ok(())
             }
         };
+        if self.kind != InstrumentType::Bond {
+            forbid(self.coupon_frequency.is_some(), "a coupon frequency")?;
+            forbid(self.day_count.is_some(), "a day count")?;
+        }
         match self.kind {
             InstrumentType::Equity => {
                 forbid(self.expiry_ns.is_some(), "an expiry")?;
@@ -205,6 +251,14 @@ impl Instrument {
                 forbid(self.expiry_ns.is_some(), "an expiry")?;
                 forbid(self.strike.is_some(), "a strike")?;
                 forbid(self.underlying.is_some(), "an underlying")?;
+                need(self.coupon_frequency.is_some(), "a coupon frequency")?;
+                need(self.day_count.is_some(), "a day count")?;
+                if self.coupon_frequency.is_some_and(|f| !COUPON_FREQUENCIES.contains(&f)) {
+                    return Err("a bond's coupon frequency must be 1, 2, 4 or 12 a year".into());
+                }
+                if self.coupon_rate.is_some_and(|c| c.raw() < 0 || c > Ratio::ONE) {
+                    return Err("a bond's coupon rate must be between 0 and 1".into());
+                }
             }
             InstrumentType::Swap => return Err("swaps are not supported yet".into()),
         }

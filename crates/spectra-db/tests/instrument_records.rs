@@ -62,3 +62,25 @@ async fn refuses_rows_that_break_their_type() {
     eq.underlying = Some("X".into());
     assert!(create_instrument(&pool, ws, &eq).await.is_err(), "an equity with an underlying");
 }
+
+#[tokio::test]
+async fn bond_terms_round_trip_and_are_required() {
+    let Some(pool) = pool().await else { return };
+    let ws = workspace(&pool).await;
+    let symbol = format!("UST-{}", Uuid::now_v7().simple());
+    let mut b = Instrument::equity(symbol.clone(), "USD", Price::from_raw(SCALE / 128), Qty::from_raw(SCALE));
+    b.kind = InstrumentType::Bond;
+    b.multiplier = Ratio::from_units(10).unwrap();
+    b.maturity_ns = Some(1_893_456_000_000_000_000);
+    b.coupon_rate = Some(Ratio::from_raw(SCALE / 20));
+    b.coupon_frequency = Some(2);
+    b.day_count = Some(spectra_core::DayCount::Thirty360);
+    create_instrument(&pool, ws, &b).await.unwrap();
+    let rows = list_instruments(&pool, ws).await.unwrap();
+    assert_eq!(rows.iter().find(|r| r.instrument.symbol == symbol).unwrap().instrument, b);
+    // The table refuses a bond without its coupon terms.
+    let mut missing = b.clone();
+    missing.symbol = format!("UST2-{}", Uuid::now_v7().simple());
+    missing.day_count = None;
+    assert!(create_instrument(&pool, ws, &missing).await.is_err());
+}

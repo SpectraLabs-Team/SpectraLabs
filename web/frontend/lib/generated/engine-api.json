@@ -3086,6 +3086,47 @@
         }
       }
     },
+    "/api/v1/pricing/bond": {
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "summary": "Price a fixed-coupon bond: accrued interest, clean and dirty price, yield,\nduration, convexity and DV01, from any one of clean price, dirty price or yield.",
+        "operationId": "price_bond",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BondPricingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BondPricingView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/providers/configs": {
       "get": {
         "tags": [
@@ -6254,6 +6295,123 @@
           }
         }
       },
+      "BondPricingRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/pricing/bond` body. Give exactly one of `clean_price`,\n`dirty_price` or `yield`; the rest are worked out from it.",
+        "required": [
+          "maturity",
+          "coupon_rate",
+          "coupon_frequency",
+          "day_count",
+          "as_of"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "description": "The valuation date (RFC 3339 or YYYY-MM-DD)."
+          },
+          "clean_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Price per 100 face without accrued interest."
+          },
+          "coupon_frequency": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Coupons a year: 1, 2, 4 or 12.",
+            "minimum": 0
+          },
+          "coupon_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "Annual coupon rate as a fraction (0.05 is 5%)."
+          },
+          "day_count": {
+            "type": "string",
+            "description": "act_act_icma, 30_360, act_360 or act_365f."
+          },
+          "dirty_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Price per 100 face with accrued interest."
+          },
+          "maturity": {
+            "type": "string",
+            "description": "Maturity date (RFC 3339 or YYYY-MM-DD)."
+          },
+          "yield": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Annual yield, compounded `coupon_frequency` times a year."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BondPricingView": {
+        "type": "object",
+        "description": "A bond priced.",
+        "required": [
+          "clean_price",
+          "dirty_price",
+          "accrued_interest",
+          "yield",
+          "macaulay_duration",
+          "modified_duration",
+          "convexity",
+          "dv01"
+        ],
+        "properties": {
+          "accrued_interest": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 100 face."
+          },
+          "clean_price": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 100 face."
+          },
+          "convexity": {
+            "type": "number",
+            "format": "double",
+            "description": "Years squared."
+          },
+          "dirty_price": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 100 face."
+          },
+          "dv01": {
+            "type": "number",
+            "format": "double",
+            "description": "Price change per 100 face for a one basis point move in yield."
+          },
+          "macaulay_duration": {
+            "type": "number",
+            "format": "double",
+            "description": "Years."
+          },
+          "modified_duration": {
+            "type": "number",
+            "format": "double",
+            "description": "Years."
+          },
+          "yield": {
+            "type": "number",
+            "format": "double",
+            "description": "Annual, compounded `coupon_frequency` times a year."
+          }
+        }
+      },
       "CalendarView": {
         "type": "object",
         "description": "An exchange calendar supported by the platform.",
@@ -6557,6 +6715,13 @@
               "null"
             ],
             "description": "The currency the run books in. Default: the workspace's base currency."
+          },
+          "bond_quote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Whether bond bars are `clean` (default: accrued interest is added at\nevery fill and mark) or `dirty` prices."
           },
           "config": {
             "type": [
@@ -8107,6 +8272,15 @@
           "lot_size"
         ],
         "properties": {
+          "coupon_frequency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Coupons a year (bonds).",
+            "minimum": 0
+          },
           "coupon_rate": {
             "type": [
               "string",
@@ -8117,6 +8291,13 @@
           "currency": {
             "type": "string",
             "description": "ISO currency the price is quoted in."
+          },
+          "day_count": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Day count for accrued interest (bonds): act_act_icma, 30_360, act_360 or act_365f."
           },
           "expiry": {
             "type": [
@@ -12212,6 +12393,10 @@
     {
       "name": "instruments",
       "description": "Instrument records, base currency and FX rates"
+    },
+    {
+      "name": "pricing",
+      "description": "Bond, option, curve and swap pricing with the M24 models"
     },
     {
       "name": "providers",

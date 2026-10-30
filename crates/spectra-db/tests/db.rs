@@ -315,6 +315,17 @@ async fn service_role_provisioning_and_privileges() {
     assert!(ver.can_read_workspaces);
     assert!(ver.can_write_jobs);
     assert!(ver.cannot_write_users);
+
+    let backup_role = "test_spectra_backup_unit";
+    let b_outcome = spectra_db::roles::provision_backup_role(&pool, backup_role, Some("backup_pw_123"))
+        .await
+        .expect("provision backup role");
+    assert_eq!(b_outcome.role_name, backup_role);
+
+    let b_ver = spectra_db::roles::verify_backup_role(&pool, backup_role).await.expect("verify backup role");
+    assert!(b_ver.can_connect);
+    assert!(b_ver.can_read_all);
+    assert!(b_ver.cannot_write);
 }
 
 static PURGE_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

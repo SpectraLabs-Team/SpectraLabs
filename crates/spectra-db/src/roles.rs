@@ -156,3 +156,138 @@ pub async fn verify_service_role(pool: &PgPool, role_name: &str) -> Result<RoleV
         cannot_write_users: !can_write_users,
     })
 }
+
+/// Provision or update the dedicated backup role (`spectra_backup`).
+///
+/// The backup role is granted:
+/// - `CONNECT` on the current database
+/// - `USAGE` on schema `public`
+/// - `SELECT` on all tables in schema `public` (required for `pg_dump`)
+/// - `SELECT` on all sequences in schema `public`
+/// - `DEFAULT PRIVILEGES` for future tables and sequences created by the owner
+/// - Strictly read-only: all `INSERT, UPDATE, DELETE, TRUNCATE` privileges are revoked
+///
+/// # Errors
+/// Fails if the current connection lacks `CREATEROLE` or table grant privileges.
+pub async fn provision_backup_role(
+    pool: &PgPool,
+    role_name: &str,
+    password: Option<&str>,
+) -> Result<RoleProvisionOutcome, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    // 1. Check if role exists
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = $1)")
+            .bind(role_name)
+            .fetch_one(&mut *tx)
+            .await?;
+
+    let mut created = false;
+    if !exists {
+        let create_sql = match password {
+            Some(pw) if !pw.trim().is_empty() => {
+                format!("CREATE ROLE \"{role_name}\" WITH LOGIN PASSWORD '{pw}'")
+            }
+            _ => format!("CREATE ROLE \"{role_name}\" WITH LOGIN"),
+        };
+        sqlx::query(&create_sql).execute(&mut *tx).await?;
+        created = true;
+    } else if let Some(pw) = password {
+        if !pw.trim().is_empty() {
+            let alter_sql = format!("ALTER ROLE \"{role_name}\" WITH PASSWORD '{pw}'");
+            sqlx::query(&alter_sql).execute(&mut *tx).await?;
+        }
+    }
+
+    // 2. Grant schema usage and connect
+    let db_name: String = sqlx::query_scalar("SELECT current_database()").fetch_one(&mut *tx).await?;
+    let grant_db = format!("GRANT CONNECT ON DATABASE \"{db_name}\" TO \"{role_name}\"");
+    sqlx::query(&grant_db).execute(&mut *tx).await?;
+
+    let grant_schema = format!("GRANT USAGE ON SCHEMA public TO \"{role_name}\"");
+    sqlx::query(&grant_schema).execute(&mut *tx).await?;
+
+    // 3. Grant SELECT on all tables (read-only for pg_dump)
+    let grant_all_tables = format!("GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{role_name}\"");
+    sqlx::query(&grant_all_tables).execute(&mut *tx).await?;
+
+    // 4. Grant SELECT on all sequences
+    let grant_seqs = format!("GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO \"{role_name}\"");
+    sqlx::query(&grant_seqs).execute(&mut *tx).await?;
+
+    // 5. Explicitly revoke any write privileges
+    let revoke_writes = format!(
+        "REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM \"{role_name}\""
+    );
+    sqlx::query(&revoke_writes).execute(&mut *tx).await?;
+
+    // 6. Set default privileges for future objects created by the current user
+    let default_tables =
+        format!("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO \"{role_name}\"");
+    sqlx::query(&default_tables).execute(&mut *tx).await?;
+
+    let default_seqs =
+        format!("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON SEQUENCES TO \"{role_name}\"");
+    sqlx::query(&default_seqs).execute(&mut *tx).await?;
+
+    tx.commit().await?;
+
+    Ok(RoleProvisionOutcome { role_name: role_name.to_string(), created, grants_applied: true })
+}
+
+/// Verification of the backup role permissions.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BackupRoleVerification {
+    pub role_name: String,
+    pub can_connect: bool,
+    pub can_read_all: bool,
+    pub cannot_write: bool,
+}
+
+/// Check that the backup role has expected read-only boundaries.
+///
+/// # Errors
+/// Returns an error if querying PostgreSQL role privileges fails.
+pub async fn verify_backup_role(
+    pool: &PgPool,
+    role_name: &str,
+) -> Result<BackupRoleVerification, sqlx::Error> {
+    let can_connect: bool =
+        sqlx::query_scalar("SELECT has_database_privilege($1, current_database(), 'CONNECT')")
+            .bind(role_name)
+            .fetch_one(pool)
+            .await?;
+
+    let can_read_workspaces: bool =
+        sqlx::query_scalar("SELECT has_table_privilege($1, 'workspaces', 'SELECT')")
+            .bind(role_name)
+            .fetch_one(pool)
+            .await
+            .unwrap_or(false);
+
+    let can_read_users: bool = sqlx::query_scalar("SELECT has_table_privilege($1, 'users', 'SELECT')")
+        .bind(role_name)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+
+    let can_write_jobs: bool = sqlx::query_scalar("SELECT has_table_privilege($1, 'jobs', 'INSERT')")
+        .bind(role_name)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+
+    let can_write_users: bool = sqlx::query_scalar("SELECT has_table_privilege($1, 'users', 'INSERT')")
+        .bind(role_name)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+
+    Ok(BackupRoleVerification {
+        role_name: role_name.to_string(),
+        can_connect,
+        can_read_all: can_read_workspaces && can_read_users,
+        cannot_write: !can_write_jobs && !can_write_users,
+    })
+}

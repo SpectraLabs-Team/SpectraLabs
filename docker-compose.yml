@@ -97,6 +97,7 @@ services:
       SPECTRA_WORKER_CONCURRENCY: ${SPECTRA_WORKER_CONCURRENCY:-2}
       SPECTRA_WORKSPACE_MAX_RUNNING: ${SPECTRA_WORKSPACE_MAX_RUNNING:-2}
       SPECTRA_WORKER_METRICS_ADDR: 0.0.0.0:9100 # /health and Prometheus /metrics, private network only
+      SPECTRA_ACTIVITY_PURGE: ${SPECTRA_ACTIVITY_PURGE:-on}
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - artifacts:/var/lib/spectra/artifacts

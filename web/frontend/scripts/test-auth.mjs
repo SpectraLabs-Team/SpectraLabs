@@ -2131,6 +2131,8 @@ const ROUTE_RULES = {
   'paper/alpaca/connect POST': 'editor',
   'paper/alpaca/disconnect POST': 'editor',
   'paper/alpaca/status GET': 'viewer',
+  'paper/market/bars GET': 'viewer',
+  'paper/market/quote GET': 'viewer',
   'secrets GET': 'viewer',
   'secrets/[kind] PUT': 'owner',
   'secrets/[kind] DELETE': 'owner',

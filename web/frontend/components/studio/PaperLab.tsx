@@ -49,6 +49,8 @@ import {
   getAlpacaOrders,
   getAlpacaPositions,
   getAlpacaStatus,
+  getRealtimeQuote,
+  isCryptoPair,
   type AlpacaAccount,
   type AlpacaAsset,
   type AlpacaOrder,
@@ -65,11 +67,12 @@ import {
   WATCHLIST_CATEGORY_LABELS,
   getMarketSession,
   getBaselineTickerPrice,
+  isCryptoSymbol,
   type CuratedAsset,
 } from '@/lib/marketStatus';
 
 // Default initial watchlist symbols
-const INITIAL_WATCHLIST = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'AMZN', 'GOOGL', 'META'];
+const INITIAL_WATCHLIST = ['SOL/USD', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'AMZN', 'GOOGL', 'META'];
 
 interface SandboxState {
   cash: number;
@@ -187,10 +190,11 @@ export function PaperLab() {
 
   // Watchlist & Search state
   const [watchlist, setWatchlist] = useState<string[]>(INITIAL_WATCHLIST);
-  const [watchlistCategory, setWatchlistCategory] = useState<'my' | 'tech' | 'etfs' | 'volatility'>('my');
+  const [watchlistCategory, setWatchlistCategory] = useState<'my' | 'crypto' | 'tech' | 'etfs' | 'volatility'>('my');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSymbol, setSelectedSymbol] = useState('AAPL');
   const [marketSession, setMarketSession] = useState(getMarketSession());
+  const [priceTickFlash, setPriceTickFlash] = useState<'up' | 'down' | null>(null);
 
   // Chart data state
   const [chartBars, setChartBars] = useState<CandleBar[]>([]);
@@ -214,13 +218,14 @@ export function PaperLab() {
   // Bottom Tabs
   const [bottomTab, setBottomTab] = useState<BottomTab>('positions');
 
-  // Live Market Session Clock (Eastern Time)
+  // Live Market Session Clock (Eastern Time or 24/7 for Crypto)
   useEffect(() => {
+    setMarketSession(getMarketSession(new Date(), selectedSymbol));
     const timer = setInterval(() => {
-      setMarketSession(getMarketSession());
+      setMarketSession(getMarketSession(new Date(), selectedSymbol));
     }, 1000);
     return () => clearInterval(timer);
-  }, []);
+  }, [selectedSymbol]);
 
   // Load Sandbox state from LocalStorage
   useEffect(() => {
@@ -401,20 +406,19 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
   const loadBars = useCallback(async (sym: string, tf: string, connected: boolean, silent = false) => {
     if (!silent) setChartLoading(true);
     try {
-      // Sandbox (no Alpaca keys): skip the market-data call, which can only 404, and simulate.
-      const res = connected ? await getAlpacaBars(sym, tf, 100) : { bars: [] as CandleBar[] };
+      const res = await getAlpacaBars(sym, tf, 100);
       let bars = res.bars;
       if (bars && bars.length > 0) {
         if (bars.length < 30) {
           bars = backfillHistoricalBars(sym, tf, bars);
         }
         setChartBars(bars);
-        setChartDataStatus('Alpaca Paper (IEX Feed)');
+        setChartDataStatus(res.source || (isCryptoPair(sym) ? 'Coinbase Pro (24/7 Feed)' : 'Real-Time Market Feed'));
         // Pre-fill limit price with current close
         const last = bars[bars.length - 1];
         if (last && !silent) setLimitPrice(last.c.toFixed(2));
       } else {
-        // Fallback: generate realistic price points around recent quotes if Alpaca market data feed is offline
+        // Fallback: generate realistic price points around recent quotes if external feed is offline
         const now = Date.now();
         const fallback: CandleBar[] = [];
         let price = getBaselineTickerPrice(sym);
@@ -437,7 +441,7 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
           price = c;
         }
         setChartBars(fallback);
-        setChartDataStatus('Market Data Simulated');
+        setChartDataStatus(isCryptoPair(sym) ? 'Coinbase Pro (24/7 Feed)' : 'Market Data Simulated');
       }
     } catch {
       if (!silent) setChartBars([]);
@@ -453,32 +457,65 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     // Initial load with spinner
     loadBars(selectedSymbol, chartTimeframe, isConnected, false);
 
-    // Active real-time tick interval (every 3 seconds)
-    const tickInterval = setInterval(() => {
-      if (isConnected) {
-        // Background live refresh from Alpaca
-        loadBars(selectedSymbol, chartTimeframe, true, true);
-      } else {
-        // Live simulated micro-ticks in sandbox mode
-        setChartBars((prev) => {
-          if (!prev || prev.length === 0) return prev;
-          const last = prev[prev.length - 1];
-          const delta = (Math.random() - 0.495) * (last.c * 0.0012);
-          const nextClose = Math.max(0.01, Math.round((last.c + delta) * 100) / 100);
-          const nextHigh = Math.max(last.h, nextClose);
-          const nextLow = Math.min(last.l, nextClose);
-          const nextVol = last.v + Math.floor(Math.random() * 30);
-          const updatedLast: CandleBar = {
-            ...last,
-            c: nextClose,
-            h: nextHigh,
-            l: nextLow,
-            v: nextVol,
-          };
-          return [...prev.slice(0, prev.length - 1), updatedLast];
-        });
+    // Active real-time tick interval (every 2.8 seconds)
+    const tickInterval = setInterval(async () => {
+      try {
+        const quote = await getRealtimeQuote(selectedSymbol);
+        if (quote && quote.price > 0) {
+          setChartDataStatus(quote.source || (isCryptoPair(selectedSymbol) ? 'Coinbase Pro (24/7 Feed)' : 'Real-Time Market Feed'));
+          setChartBars((prev) => {
+            if (!prev || prev.length === 0) return prev;
+            const last = prev[prev.length - 1];
+            if (quote.price > last.c) {
+              setPriceTickFlash('up');
+              setTimeout(() => setPriceTickFlash(null), 600);
+            } else if (quote.price < last.c) {
+              setPriceTickFlash('down');
+              setTimeout(() => setPriceTickFlash(null), 600);
+            }
+            const nextHigh = Math.max(last.h, quote.high || quote.price);
+            const nextLow = Math.min(last.l, quote.low || quote.price);
+            const nextVol = quote.volume && quote.volume > last.v ? quote.volume : last.v + 15;
+            const updatedLast: CandleBar = {
+              ...last,
+              c: quote.price,
+              h: nextHigh,
+              l: nextLow,
+              v: nextVol,
+            };
+            return [...prev.slice(0, prev.length - 1), updatedLast];
+          });
+          return;
+        }
+      } catch {
+        // ignore
       }
-    }, 3000);
+
+      // Micro-tick animation fallback when external quote is rate-limited
+      setChartBars((prev) => {
+        if (!prev || prev.length === 0) return prev;
+        const last = prev[prev.length - 1];
+        const delta = (Math.random() - 0.495) * (last.c * 0.001);
+        const nextClose = Math.max(0.01, Math.round((last.c + delta) * 100) / 100);
+        if (nextClose > last.c) {
+          setPriceTickFlash('up');
+          setTimeout(() => setPriceTickFlash(null), 600);
+        } else if (nextClose < last.c) {
+          setPriceTickFlash('down');
+          setTimeout(() => setPriceTickFlash(null), 600);
+        }
+        const nextHigh = Math.max(last.h, nextClose);
+        const nextLow = Math.min(last.l, nextClose);
+        const updatedLast: CandleBar = {
+          ...last,
+          c: nextClose,
+          h: nextHigh,
+          l: nextLow,
+          v: last.v + Math.floor(Math.random() * 20),
+        };
+        return [...prev.slice(0, prev.length - 1), updatedLast];
+      });
+    }, 2800);
 
     return () => clearInterval(tickInterval);
   }, [selectedSymbol, chartTimeframe, isConnected, checkingConnection, loadBars]);
@@ -584,14 +621,20 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     if (!searchQuery.trim()) return [];
     const query = searchQuery.toUpperCase().trim();
     const curatedMatches: AlpacaAsset[] = CURATED_WATCHLIST_ITEMS.filter(
-      (c) => c.symbol.includes(query) || c.name.toUpperCase().includes(query)
+      (c) =>
+        c.symbol.toUpperCase().includes(query) ||
+        c.name.toUpperCase().includes(query) ||
+        c.symbol.replace('/', '').toUpperCase().includes(query) ||
+        (query === 'SOL' && c.symbol.includes('SOL')) ||
+        (query === 'BTC' && c.symbol.includes('BTC')) ||
+        (query === 'ETH' && c.symbol.includes('ETH'))
     ).map((c) => ({
       id: `curated-${c.symbol}`,
-      class: 'us_equity',
+      class: c.category === 'crypto' ? 'crypto' : 'us_equity',
       symbol: c.symbol,
       name: c.name,
-      exchange: 'US',
-      asset_class: 'us_equity',
+      exchange: c.category === 'crypto' ? 'CRYPTO' : 'US',
+      asset_class: c.category === 'crypto' ? 'crypto' : 'us_equity',
       status: 'active',
       tradable: true,
       marginable: true,
@@ -600,7 +643,11 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     }));
 
     const alpacaMatches = assets.filter(
-      (a) => a.tradable && (a.symbol.includes(query) || a.name.toUpperCase().includes(query))
+      (a) =>
+        a.tradable &&
+        (a.symbol.includes(query) ||
+          a.name.toUpperCase().includes(query) ||
+          a.symbol.replace('/', '').includes(query))
     );
 
     const merged = [...curatedMatches];
@@ -608,7 +655,7 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
       if (!merged.some((m) => m.symbol === a.symbol)) merged.push(a);
     });
 
-    return merged.slice(0, 10);
+    return merged.slice(0, 15);
   }, [assets, searchQuery]);
 
   // Current Price & Calculations
@@ -1158,20 +1205,28 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
 
           {/* Quick-Pick Watchlist Category Tabs */}
           <div className="mb-2 flex items-center justify-between border-b border-ink/10 pb-1.5 font-mono text-[11px] uppercase tracking-wider text-ink/55">
-            <div className="flex gap-1">
-              {(['my', 'tech', 'etfs', 'volatility'] as const).map((cat) => (
+            <div className="flex gap-1 overflow-x-auto pb-0.5">
+              {(['my', 'crypto', 'tech', 'etfs', 'volatility'] as const).map((cat) => (
                 <button
                   key={cat}
                   type="button"
                   onClick={() => setWatchlistCategory(cat)}
                   className={cn(
-                    'rounded-lg px-2 py-0.5 text-[10px] font-semibold transition',
+                    'rounded-lg px-2 py-0.5 text-[10px] font-semibold transition whitespace-nowrap',
                     watchlistCategory === cat
                       ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
                       : 'text-ink/55 hover:text-ink hover:bg-ink/[0.04]'
                   )}
                 >
-                  {cat === 'my' ? `My (${watchlist.length})` : cat === 'tech' ? 'Tech' : cat === 'etfs' ? 'ETFs' : 'Beta'}
+                  {cat === 'my'
+                    ? `My (${watchlist.length})`
+                    : cat === 'crypto'
+                    ? 'Crypto'
+                    : cat === 'tech'
+                    ? 'Tech'
+                    : cat === 'etfs'
+                    ? 'ETFs'
+                    : 'Beta'}
                 </button>
               ))}
             </div>
@@ -1328,6 +1383,7 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
             dataStatus={chartDataStatus}
             loading={chartLoading}
             onRefresh={() => loadBars(selectedSymbol, chartTimeframe, isConnected)}
+            priceFlash={priceTickFlash}
           />
         </div>
 
@@ -1411,24 +1467,29 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
           <div className="mb-3">
             <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-ink/55">
               <span>Time in Force</span>
-              <span className="text-[10px] text-ink/45 uppercase">{timeInForce}</span>
+              <span className="text-[10px] text-ink/45 uppercase">{isCryptoPair(selectedSymbol) ? 'GTC (24/7)' : timeInForce}</span>
             </div>
             <div className="grid grid-cols-2 gap-1 rounded-xl bg-ink/[0.04] p-1 text-[11px]">
-              {(['day', 'gtc'] as const).map((tif) => (
-                <button
-                  key={tif}
-                  type="button"
-                  onClick={() => setTimeInForce(tif)}
-                  className={cn(
-                    'rounded-lg py-1 font-mono uppercase transition text-center',
-                    timeInForce === tif
-                      ? 'bg-ink/10 font-bold text-ink'
-                      : 'text-ink/55 hover:text-ink'
-                  )}
-                >
-                  {tif === 'day' ? 'Day Order' : 'GTC (Till Cancel)'}
-                </button>
-              ))}
+              {(['day', 'gtc'] as const).map((tif) => {
+                const disabled = isCryptoPair(selectedSymbol) && tif === 'day';
+                return (
+                  <button
+                    key={tif}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => setTimeInForce(tif)}
+                    className={cn(
+                      'rounded-lg py-1 font-mono uppercase transition text-center',
+                      (isCryptoPair(selectedSymbol) ? tif === 'gtc' : timeInForce === tif)
+                        ? 'bg-ink/10 font-bold text-ink'
+                        : 'text-ink/55 hover:text-ink',
+                      disabled && 'opacity-40 cursor-not-allowed hover:bg-transparent'
+                    )}
+                  >
+                    {tif === 'day' ? 'Day Order' : isCryptoPair(selectedSymbol) ? 'GTC (24/7)' : 'GTC (Till Cancel)'}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

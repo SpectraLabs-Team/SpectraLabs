@@ -37,6 +37,8 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/alpaca/reconcile': { method: 'GET', minRole: 'editor', timeoutMs: 20_000 },
   'api/alpaca/assets': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/alpaca/stocks/{symbol}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/alpaca/crypto/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/alpaca/crypto/latest/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/alpaca/account': { method: 'GET', minRole: 'editor', timeoutMs: 15_000 },
   'api/v1/alpaca/positions': { method: 'GET', minRole: 'editor', timeoutMs: 15_000 },
   'api/v1/alpaca/orders': { method: ['GET', 'POST'], minRole: 'editor', timeoutMs: 20_000 },
@@ -45,6 +47,8 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/alpaca/reconcile': { method: 'GET', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/alpaca/assets': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/alpaca/stocks/{symbol}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/alpaca/crypto/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/alpaca/crypto/latest/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/jobs': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/jobs/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/jobs/{id}/cancel': { method: 'POST', minRole: 'editor', timeoutMs: 10_000 },
@@ -179,6 +183,12 @@ export function routePolicyKey(path: string): string {
   }
   if (/^api\/(?:v1\/)?alpaca\/stocks\/[^/]+\/bars$/i.test(path)) {
     return path.startsWith('api/v1/') ? 'api/v1/alpaca/stocks/{symbol}/bars' : 'api/alpaca/stocks/{symbol}/bars';
+  }
+  if (/^api\/(?:v1\/)?alpaca\/crypto\/bars$/i.test(path)) {
+    return path.startsWith('api/v1/') ? 'api/v1/alpaca/crypto/bars' : 'api/alpaca/crypto/bars';
+  }
+  if (/^api\/(?:v1\/)?alpaca\/crypto\/latest\/bars$/i.test(path)) {
+    return path.startsWith('api/v1/') ? 'api/v1/alpaca/crypto/latest/bars' : 'api/alpaca/crypto/latest/bars';
   }
   if (/^api\/v1\/paper\/orders\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/orders/{id}';
   if (/^api\/v1\/paper\/gap\/reports\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/gap/reports/{id}';

@@ -617,11 +617,12 @@ async fn handle_cancel_order(order_id: &str, creds: Option<&(String, String)>) -
 }
 
 async fn forward_alpaca_request(subpath: &str, query: &str, key_id: &str, secret_key: &str) -> Response {
-    let base_url = if subpath.starts_with("data/") || subpath.starts_with("stocks/") {
-        "https://data.alpaca.markets"
-    } else {
-        ALPACA_PAPER_BASE_URL
-    };
+    let base_url =
+        if subpath.starts_with("data/") || subpath.starts_with("stocks/") || subpath.starts_with("crypto/") {
+            "https://data.alpaca.markets"
+        } else {
+            ALPACA_PAPER_BASE_URL
+        };
     let clean_sub = subpath.strip_prefix("data/").unwrap_or(subpath);
     let normalized =
         if clean_sub.starts_with("v2/") { clean_sub.to_string() } else { format!("v2/{clean_sub}") };

@@ -317,8 +317,11 @@ async fn service_role_provisioning_and_privileges() {
     assert!(ver.cannot_write_users);
 }
 
+static PURGE_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn activity_purge_removes_only_old_rows_and_never_overlaps() {
+    let _guard = PURGE_TEST_LOCK.lock().await;
     use spectra_db::activity::{purge_activity, PurgeOutcome, PURGE_LOCK};
     let Some(pool) = pool().await else { return };
     let seeded = seed_dev(&pool, "activity-purge-test@example.com").await.unwrap();
@@ -385,6 +388,73 @@ async fn activity_purge_removes_only_old_rows_and_never_overlaps() {
     assert_eq!(mine().await, 2);
 
     assert!(purge_activity(&pool, 0, false).await.is_err(), "retention below 1 day is refused");
+}
+
+#[tokio::test]
+async fn activity_purge_around_400_day_boundary() {
+    let _guard = PURGE_TEST_LOCK.lock().await;
+    use spectra_db::activity::{purge_activity, PurgeOutcome, ACTIVITY_RETENTION_DAYS};
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "activity-boundary-test@example.com").await.unwrap();
+    let user = seeded.admin_id;
+    sqlx::query("DELETE FROM user_activity_daily WHERE user_id = $1")
+        .bind(user)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Seed activity rows at 10, 399, 400, 401, and 500 days old around the 400-day boundary.
+    for age in [10, 399, 400, 401, 500] {
+        sqlx::query(
+            "INSERT INTO user_activity_daily (user_id, day, active_seconds, heartbeats) \
+             VALUES ($1, (now() AT TIME ZONE 'UTC')::date - $2::int, 60, 1)",
+        )
+        .bind(user)
+        .bind(age)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let mine = || async {
+        let n: i64 = sqlx::query_scalar("SELECT count(*) FROM user_activity_daily WHERE user_id = $1")
+            .bind(user)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        n
+    };
+    assert_eq!(mine().await, 5, "seeded 5 activity rows");
+
+    // The dry run counts the rows older than 400 days (401 and 500 days old) and deletes nothing.
+    match purge_activity(&pool, ACTIVITY_RETENTION_DAYS, true).await.unwrap() {
+        PurgeOutcome::Done { rows, dry_run } => {
+            assert!(dry_run, "dry run flag must be true");
+            assert!(rows >= 2, "dry run counted {rows} rows (at least 2)");
+        }
+        PurgeOutcome::Busy => panic!("dry run found lock taken"),
+    }
+    assert_eq!(mine().await, 5, "the dry run deletes nothing");
+
+    // The real run deletes the rows older than 400 days (401 and 500 days old).
+    match purge_activity(&pool, ACTIVITY_RETENTION_DAYS, false).await.unwrap() {
+        PurgeOutcome::Done { rows, dry_run } => {
+            assert!(!dry_run, "real run flag must be false");
+            assert!(rows >= 2, "real purge removed {rows} rows (at least 2)");
+        }
+        PurgeOutcome::Busy => panic!("real purge found lock taken"),
+    }
+
+    // The rows kept are 10, 399, and 400 days old.
+    let kept: Vec<i32> = sqlx::query_scalar(
+        "SELECT ((now() AT TIME ZONE 'UTC')::date - day)::int FROM user_activity_daily WHERE user_id = $1 ORDER BY 1",
+    )
+    .bind(user)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(kept, vec![10, 399, 400], "the rows kept were 10, 399, and 400 days old");
+    assert_eq!(mine().await, 3, "exactly 3 rows kept");
 }
 
 #[tokio::test]

@@ -3127,6 +3127,47 @@
         }
       }
     },
+    "/api/v1/pricing/curve": {
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "summary": "Bootstrap a discount curve from deposits and par swaps (or build a flat\none); every input quote reprices exactly.",
+        "operationId": "build_curve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurveView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pricing/option": {
       "post": {
         "tags": [
@@ -3151,6 +3192,47 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OptionPricingView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pricing/swap": {
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "summary": "Value a fixed-for-floating interest-rate swap on a curve (single-curve).",
+        "operationId": "price_swap",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwapView"
                 }
               }
             }
@@ -6370,6 +6452,17 @@
             "format": "double",
             "description": "Annual coupon rate as a fraction (0.05 is 5%)."
           },
+          "curve": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CurveInput",
+                "description": "A discount curve to measure the bond's z-spread over (optional)."
+              }
+            ]
+          },
           "day_count": {
             "type": "string",
             "description": "act_act_icma, 30_360, act_360 or act_365f."
@@ -6450,6 +6543,14 @@
             "type": "number",
             "format": "double",
             "description": "Annual, compounded `coupon_frequency` times a year."
+          },
+          "z_spread": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Continuously compounded spread over `curve` that reprices the bond, when a curve was given."
           }
         }
       },
@@ -7329,6 +7430,138 @@
           }
         },
         "additionalProperties": false
+      },
+      "CurveInput": {
+        "type": "object",
+        "description": "A discount curve: market quotes to bootstrap, or one flat rate.",
+        "properties": {
+          "flat_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "A flat continuously compounded rate instead of quotes."
+          },
+          "quotes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/CurveQuoteInput"
+            },
+            "description": "Deposits and par swaps, by increasing maturity."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CurvePointView": {
+        "type": "object",
+        "description": "One point of a curve.",
+        "required": [
+          "years",
+          "discount_factor",
+          "zero_rate"
+        ],
+        "properties": {
+          "discount_factor": {
+            "type": "number",
+            "format": "double",
+            "description": "Discount factor."
+          },
+          "years": {
+            "type": "number",
+            "format": "double",
+            "description": "Years."
+          },
+          "zero_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "Continuously compounded zero rate."
+          }
+        }
+      },
+      "CurveQuoteInput": {
+        "type": "object",
+        "description": "One market quote for a curve bootstrap.",
+        "required": [
+          "type",
+          "years",
+          "rate"
+        ],
+        "properties": {
+          "frequency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Fixed payments a year (swaps): 1, 2, 4 or 12.",
+            "minimum": 0
+          },
+          "rate": {
+            "type": "number",
+            "format": "double",
+            "description": "The rate, as a fraction (0.04 is 4%)."
+          },
+          "type": {
+            "type": "string",
+            "description": "`deposit` (a simple rate to `years`) or `swap` (a par swap rate)."
+          },
+          "years": {
+            "type": "number",
+            "format": "double",
+            "description": "Maturity, years."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CurveRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/pricing/curve` body.",
+        "required": [
+          "curve"
+        ],
+        "properties": {
+          "at": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Extra maturities (years) to report besides the nodes."
+          },
+          "curve": {
+            "$ref": "#/components/schemas/CurveInput",
+            "description": "The curve."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CurveView": {
+        "type": "object",
+        "description": "A bootstrapped curve.",
+        "required": [
+          "nodes",
+          "points"
+        ],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurvePointView"
+            },
+            "description": "The curve's nodes (log-linear discount factors between them)."
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurvePointView"
+            },
+            "description": "The maturities asked for in `at`."
+          }
+        }
       },
       "DatasetDetailView": {
         "type": "object",
@@ -11381,6 +11614,82 @@
           }
         },
         "additionalProperties": false
+      },
+      "SwapRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/pricing/swap` body: a fixed-for-floating swap from today.",
+        "required": [
+          "curve",
+          "notional",
+          "fixed_rate",
+          "years",
+          "frequency",
+          "pay_fixed"
+        ],
+        "properties": {
+          "curve": {
+            "$ref": "#/components/schemas/CurveInput",
+            "description": "The discount curve."
+          },
+          "fixed_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "Fixed rate, as a fraction."
+          },
+          "frequency": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Fixed payments a year: 1, 2, 4 or 12.",
+            "minimum": 0
+          },
+          "notional": {
+            "type": "number",
+            "format": "double",
+            "description": "Notional."
+          },
+          "pay_fixed": {
+            "type": "boolean",
+            "description": "True for the side that pays fixed and receives floating."
+          },
+          "years": {
+            "type": "number",
+            "format": "double",
+            "description": "Maturity, years."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SwapView": {
+        "type": "object",
+        "description": "A swap valued.",
+        "required": [
+          "pv",
+          "par_rate",
+          "dv01",
+          "annuity"
+        ],
+        "properties": {
+          "annuity": {
+            "type": "number",
+            "format": "double",
+            "description": "PV of 1 a year on the fixed schedule."
+          },
+          "dv01": {
+            "type": "number",
+            "format": "double",
+            "description": "PV change for a one basis point parallel rise in zero rates."
+          },
+          "par_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "The fixed rate at which the swap is worth zero."
+          },
+          "pv": {
+            "type": "number",
+            "format": "double",
+            "description": "Present value to the holder."
+          }
+        }
       },
       "SweepTrialView": {
         "type": "object",

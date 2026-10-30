@@ -74,6 +74,29 @@ impl Fixture {
         (status, serde_json::from_slice(&bytes).unwrap_or(Value::Null))
     }
 
+    /// A GET whose response is a file: status, headers and raw bytes.
+    async fn get_raw(&self, ws: Uuid, path: &str) -> (u16, axum::http::HeaderMap, Vec<u8>) {
+        let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
+        let (user, wss) = (self.user.to_string(), ws.to_string());
+        let req_id = spectra_db::new_id().to_string();
+        let sig = sign(SECRET.as_bytes(), &canonical("GET", path, &ts, &user, &wss, &req_id, b""));
+        let req = Request::builder()
+            .method("GET")
+            .uri(path)
+            .header("X-Spectra-User", user)
+            .header("X-Spectra-Workspace", wss)
+            .header("X-Request-Id", req_id)
+            .header("X-Spectra-Timestamp", ts)
+            .header("X-Spectra-Signature", sig)
+            .body(Body::empty())
+            .unwrap();
+        let res = self.app.clone().oneshot(req).await.unwrap();
+        let status = res.status().as_u16();
+        let headers = res.headers().clone();
+        let bytes = res.into_body().collect().await.unwrap().to_bytes().to_vec();
+        (status, headers, bytes)
+    }
+
     async fn call(&self, method: &str, path: &str, body: &Value) -> (u16, Value) {
         let text = if body.is_null() { String::new() } else { body.to_string() };
         self.call_in(self.ws, method, path, &text).await
@@ -484,6 +507,76 @@ async fn sweep_export_report_flow() {
         .call("GET", &format!("/api/v1/optimization/sweep/{sweep_id}/export?format=pdf"), &Value::Null)
         .await;
     assert_eq!(status, 200, "status: {status}, body: {res_pdf}");
+    f.clean_up().await;
+}
+
+/// M16: every export of a sweep is stored as a new version of its validation report, linked to the
+/// sweep, and can be listed and downloaded again byte for byte.
+#[tokio::test]
+async fn sweep_exports_are_versioned_reports() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+    let (status, sweep) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/sweep",
+            &json!({ "dataset_version_id": ds_ver, "strategy": "sma_cross",
+                     "param_grid": { "fast": [5.0, 10.0], "slow": [20.0, 30.0] } }),
+        )
+        .await;
+    assert_eq!(status, 202);
+    let sweep_id = sweep["id"].as_str().unwrap().to_string();
+    let header = |h: &axum::http::HeaderMap, k: &str| h.get(k).unwrap().to_str().unwrap().to_string();
+
+    // Three exports: versions 1, 2, 3 of one report, whatever the format.
+    let export = format!("/api/v1/optimization/sweep/{sweep_id}/export");
+    let (s1, h1, csv1) = f.get_raw(f.ws, &export).await;
+    let (s2, h2, pdf2) = f.get_raw(f.ws, &format!("{export}?format=pdf")).await;
+    let (s3, h3, _) = f.get_raw(f.ws, &export).await;
+    assert_eq!((s1, s2, s3), (200, 200, 200));
+    assert_eq!(header(&h1, "content-type"), "text/csv; charset=utf-8");
+    assert_eq!(header(&h2, "content-type"), "application/pdf");
+    assert!(header(&h1, "content-disposition").ends_with("-validation-report.csv\""));
+    assert!(pdf2.starts_with(b"%PDF-1.4"));
+    let versions: Vec<String> = [&h1, &h2, &h3].iter().map(|h| header(h, "x-report-version")).collect();
+    assert_eq!(versions, ["1", "2", "3"]);
+    let report_id = header(&h1, "x-report-id");
+    assert!([&h2, &h3].iter().all(|h| header(h, "x-report-id") == report_id));
+
+    // The run lists its report versions, newest first.
+    let (status, list) =
+        f.call("GET", &format!("/api/v1/reports?run_kind=sweep&run_id={sweep_id}"), &Value::Null).await;
+    assert_eq!(status, 200, "{list}");
+    let list = list.as_array().unwrap();
+    assert_eq!(list.iter().map(|v| v["version"].as_i64().unwrap()).collect::<Vec<_>>(), [3, 2, 1]);
+    assert!(list.iter().all(|v| v["report_type"] == "validation" && v["run_id"] == sweep_id.as_str()));
+    assert_eq!(list[2]["created_by"], f.user.to_string());
+    assert_eq!(list[1]["format"], "pdf");
+    assert_eq!(list[2]["download_url"], format!("/api/v1/reports/{report_id}/versions/1"));
+
+    // Version 1 downloads byte for byte, with its hash.
+    let (status, h, body) = f.get_raw(f.ws, &format!("/api/v1/reports/{report_id}/versions/1")).await;
+    assert_eq!(status, 200);
+    assert_eq!(body, csv1);
+    assert_eq!(header(&h, "x-report-sha256"), spectra_core::sha256_hex(&csv1));
+    assert_eq!(header(&h, "x-report-sha256"), list[2]["sha256"].as_str().unwrap());
+    let (status, versions) =
+        f.call("GET", &format!("/api/v1/reports/{report_id}/versions"), &Value::Null).await;
+    assert_eq!(status, 200);
+    assert_eq!(versions.as_array().unwrap().len(), 3);
+
+    // Unknown version, unknown run kind, and another workspace.
+    assert_eq!(f.get_raw(f.ws, &format!("/api/v1/reports/{report_id}/versions/99")).await.0, 404);
+    assert_eq!(
+        f.call("GET", &format!("/api/v1/reports?run_kind=job&run_id={sweep_id}"), &Value::Null).await.0,
+        422
+    );
+    let other = spectra_db::new_id();
+    assert_eq!(f.get_raw(other, &format!("/api/v1/reports/{report_id}/versions/1")).await.0, 404);
+    let (_, empty) =
+        f.call_in(other, "GET", &format!("/api/v1/reports?run_kind=sweep&run_id={sweep_id}"), "").await;
+    assert_eq!(empty, json!([]));
     f.clean_up().await;
 }
 

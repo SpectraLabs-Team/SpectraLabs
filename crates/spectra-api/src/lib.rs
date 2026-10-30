@@ -55,9 +55,11 @@ pub mod observability;
 pub mod openapi;
 pub mod optimization_api;
 pub mod paper_api;
+pub(crate) mod pdf;
 pub mod providers;
 pub mod providers_api;
 pub mod registry_api;
+pub mod reports_api;
 pub mod risk_center_api;
 pub mod sessions_api;
 pub mod strategies_api;
@@ -957,6 +959,14 @@ fn paper_routes() -> Router<AppState> {
         .route("/api/v1/paper/gap/reports/{id}", only(get(gap_api::handle_get_gap_report)))
 }
 
+/// Module 16: versioned reports.
+fn report_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/reports", only(get(reports_api::list_reports)))
+        .route("/api/v1/reports/{report_id}/versions", only(get(reports_api::list_versions)))
+        .route("/api/v1/reports/{report_id}/versions/{version}", only(get(reports_api::download_version)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -977,6 +987,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(optimization_routes())
         .merge(risk_center_routes())
         .merge(paper_routes())
+        .merge(report_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .merge(upload_routes())

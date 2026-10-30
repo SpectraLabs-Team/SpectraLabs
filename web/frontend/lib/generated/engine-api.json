@@ -3048,6 +3048,153 @@
         }
       }
     },
+    "/api/v1/reports": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "The reports of a run: every version, grouped by type and newest first.",
+        "operationId": "list_reports",
+        "parameters": [
+          {
+            "name": "run_kind",
+            "in": "path",
+            "description": "`sweep`, `backtest` or `paper_gap`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "The run's id.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Report versions for the run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReportVersionView"
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Missing or unknown run_kind, or an invalid run_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reports/{report_id}/versions": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Every version of one report, newest first.",
+        "operationId": "list_versions",
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "description": "Report id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versions, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReportVersionView"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reports/{report_id}/versions/{version}": {
+      "get": {
+        "tags": [
+          "reports"
+        ],
+        "summary": "Download one version of a report, exactly as it was stored.",
+        "operationId": "download_version",
+        "parameters": [
+          {
+            "name": "report_id",
+            "in": "path",
+            "description": "Report id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "description": "Version number (1, 2, ...)",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stored PDF or CSV; `x-report-sha256` carries its hash"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/risk": {
       "post": {
         "tags": [
@@ -9129,6 +9276,77 @@
           }
         }
       },
+      "ReportVersionView": {
+        "type": "object",
+        "description": "One stored version of a report (without its content).",
+        "required": [
+          "report_id",
+          "report_type",
+          "run_kind",
+          "run_id",
+          "version",
+          "format",
+          "content_type",
+          "sha256",
+          "size_bytes",
+          "created_at",
+          "download_url"
+        ],
+        "properties": {
+          "content_type": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "download_url": {
+            "type": "string",
+            "description": "Where to download this version."
+          },
+          "format": {
+            "type": "string",
+            "description": "`pdf` or `csv`."
+          },
+          "report_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Shared by every version of the report."
+          },
+          "report_type": {
+            "type": "string",
+            "description": "`validation`, `tear_sheet` or `gap`."
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "run_kind": {
+            "type": "string",
+            "description": "What `run_id` points at: `sweep`, `backtest` or `paper_gap`."
+          },
+          "sha256": {
+            "type": "string",
+            "description": "Lower-case hex SHA-256 of the content."
+          },
+          "size_bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1, 2, ... in creation order."
+          }
+        }
+      },
       "ResetPaperAccountRequest": {
         "type": "object",
         "required": [
@@ -11585,6 +11803,10 @@
     {
       "name": "paper",
       "description": "Simulated paper trading accounts, orders and fills"
+    },
+    {
+      "name": "reports",
+      "description": "Versioned, run-linked reports (M16)"
     }
   ]
 }

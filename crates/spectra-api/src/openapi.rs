@@ -266,9 +266,13 @@ pub struct StressRequest {
         crate::gap_api::handle_analyze_gap,
         crate::gap_api::handle_list_gap_reports,
         crate::gap_api::handle_get_gap_report,
+        crate::reports_api::list_reports,
+        crate::reports_api::list_versions,
+        crate::reports_api::download_version,
     ),
     components(schemas(
         ErrorDoc,
+        crate::reports_api::ReportVersionView,
         RiskRequest,
         RiskRegimesRequest,
         RiskGarchRequest,
@@ -426,6 +430,7 @@ pub struct StressRequest {
         (name = "optimization", description = "Parameter sweeps, walk-forward validation, overfitting statistics and holdout vault"),
         (name = "risk", description = "Risk Center: limits, pre-trade enforcement, kill switches, and decision audit logs"),
         (name = "paper", description = "Simulated paper trading accounts, orders and fills"),
+        (name = "reports", description = "Versioned, run-linked reports (M16)"),
     )
 )]
 pub struct ApiDoc;

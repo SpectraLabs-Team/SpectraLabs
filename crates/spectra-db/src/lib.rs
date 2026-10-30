@@ -29,6 +29,7 @@ pub mod lifecycle;
 pub mod optimization;
 pub mod paper;
 pub mod providers;
+pub mod reports;
 pub mod risk_center;
 pub mod roles;
 pub mod strategies;

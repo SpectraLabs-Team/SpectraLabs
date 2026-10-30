@@ -61,6 +61,7 @@ The dashboard and the engine share one Postgres database (`DATABASE_URL` for eve
    ```
    `checks.worker` is `none_alive` when no worker has sent a heartbeat in 30 seconds. That does not
    make the API unready (synchronous routes work without workers), so alert on it separately.
+5. Set `SENTRY_DSN` and confirm a test event arrives via `/api/v1/observability/sentry/verify` before the first deploy.
 
 ## Accounts and workspaces in the engine database
 
@@ -189,6 +190,8 @@ exits with code 3; run it again later.
 
 **Before the first production run**, or after changing the retention period: run the dry run against
 production, and check the number is what you expect.
+
+**Turning it on.** Check the dry-run count on production (`npm run activity:purge -- --dry-run`). Once confirmed and the retention policy is signed off, set `SPECTRA_ACTIVITY_PURGE=on`, restart the workers, then check the first `activity purge removed` log line.
 
 **Checking it works.** Each run logs `activity purge removed N daily activity row(s)` (or
 `activity purge failed: ...` at error level, which goes to Sentry when `SENTRY_DSN` is set). The

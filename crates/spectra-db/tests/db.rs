@@ -382,3 +382,70 @@ async fn activity_purge_removes_only_old_rows_and_never_overlaps() {
 
     assert!(purge_activity(&pool, 0, false).await.is_err(), "retention below 1 day is refused");
 }
+
+#[tokio::test]
+async fn report_versions_count_up_under_concurrent_exports() {
+    use spectra_db::reports::{create_version, for_run, get_version, versions_of, NewReport};
+
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "reports-test@example.com").await.unwrap();
+    let ws = seeded.workspace_id;
+    // A fresh run id, so the test can run against a shared database.
+    let run = spectra_db::new_id();
+
+    // Eight exports of the same run at once: versions 1..=8, one report id, nothing lost.
+    let tasks: Vec<_> = (0..8u8)
+        .map(|i| {
+            let pool = pool.clone();
+            tokio::spawn(async move {
+                let body = vec![b'%', b'P', b'D', b'F', i];
+                let report = NewReport {
+                    report_type: "validation",
+                    run_kind: "sweep",
+                    run_id: run,
+                    format: "pdf",
+                    content_type: "application/pdf",
+                    content: &body,
+                    created_by: None,
+                };
+                create_version(&pool, ws, &report).await.unwrap()
+            })
+        })
+        .collect();
+    let mut created = Vec::new();
+    for t in tasks {
+        created.push(t.await.unwrap());
+    }
+    let mut versions: Vec<i32> = created.iter().map(|v| v.version).collect();
+    versions.sort_unstable();
+    assert_eq!(versions, (1..=8).collect::<Vec<_>>());
+    let report_id = created[0].report_id;
+    assert!(created.iter().all(|v| v.report_id == report_id));
+
+    // Fetch by report id and version: the bytes that version was created with.
+    let v3 = created.iter().find(|v| v.version == 3).unwrap();
+    let got = get_version(&pool, ws, report_id, 3).await.unwrap().unwrap();
+    assert_eq!(got.meta, *v3);
+    assert_eq!(got.content.len(), 5);
+    assert_eq!(spectra_core::sha256_hex(&got.content), v3.sha256);
+    assert!(get_version(&pool, spectra_db::new_id(), report_id, 3).await.unwrap().is_none());
+
+    let listed = versions_of(&pool, ws, report_id).await.unwrap();
+    assert_eq!(listed.iter().map(|v| v.version).collect::<Vec<_>>(), (1..=8).rev().collect::<Vec<_>>());
+    assert_eq!(for_run(&pool, ws, "sweep", run).await.unwrap().len(), 8);
+
+    // An unknown format is refused by the table.
+    let bad = NewReport {
+        format: "docx",
+        ..NewReport {
+            report_type: "validation",
+            run_kind: "sweep",
+            run_id: run,
+            format: "pdf",
+            content_type: "application/pdf",
+            content: b"x",
+            created_by: None,
+        }
+    };
+    assert!(create_version(&pool, ws, &bad).await.is_err());
+}

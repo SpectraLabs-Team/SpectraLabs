@@ -111,6 +111,8 @@ jobs:
             | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
           { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/risk_checks.sql; } \
             | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
+          { node crates/spectra-db/scripts/prepare-queries.mjs; cat crates/spectra-db/tests/report_checks.sql; } \
+            | psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1
           scripts/backup-postgres.sh "$RUNNER_TEMP/backups"
           psql "$DATABASE_URL" -c 'CREATE DATABASE spectra_restore'
           RESTORE_DATABASE_URL=postgresql://spectra:spectra@localhost:5432/spectra_restore \

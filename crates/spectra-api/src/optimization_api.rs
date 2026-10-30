@@ -9,11 +9,11 @@ use axum::Extension;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use spectra_db::datasets;
 use spectra_db::jobs::{self, NewJob};
 use spectra_db::optimization::{
     self, HoldoutEvaluation, HoldoutVault, OptimizationSweep, OptimizationTrial, WalkForwardReport,
 };
+use spectra_db::{datasets, reports};
 use spectra_research::pbo::cscv_pbo;
 use spectra_research::stats::{
     deflated_sharpe, expected_max_sharpe, min_track_record_length, moments, probabilistic_sharpe,
@@ -23,6 +23,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::jobs_api::{context, db_error, to_json};
+use crate::pdf::{escape_pdf, stream_object, SimplePdf};
 use crate::{error_response, error_with_code, AppState, Identity};
 
 const NOT_FOUND: &str = "Resource not found.";
@@ -613,14 +614,9 @@ pub(crate) async fn export_sweep(
     .and_then(|list| list.into_iter().next());
 
     if export_format == "pdf" {
-        let pdf_bytes = generate_validation_pdf(&sweep, &trials, holdout_eval.as_ref());
+        let pdf_bytes = generate_validation_pdf(&sweep, &trials, holdout_eval.as_ref(), Utc::now());
         let filename = format!("sweep-{}-validation-report.pdf", sweep.id);
-        return Response::builder()
-            .status(200)
-            .header("content-type", "application/pdf")
-            .header("content-disposition", format!("attachment; filename=\"{filename}\""))
-            .body(axum::body::Body::from(pdf_bytes))
-            .unwrap();
+        return store_and_send(&pool, ws, &id, &sweep, "pdf", "application/pdf", filename, pdf_bytes).await;
     }
 
     let mut csv = String::new();
@@ -671,66 +667,34 @@ pub(crate) async fn export_sweep(
     }
 
     let filename = format!("sweep-{}-validation-report.csv", sweep.id);
-    Response::builder()
-        .status(200)
-        .header("content-type", "text/csv; charset=utf-8")
-        .header("content-disposition", format!("attachment; filename=\"{filename}\""))
-        .body(axum::body::Body::from(csv))
-        .unwrap()
+    store_and_send(&pool, ws, &id, &sweep, "csv", "text/csv; charset=utf-8", filename, csv.into_bytes()).await
 }
 
-fn escape_pdf(text: &str) -> String {
-    let mut out = String::new();
-    for c in text.chars() {
-        match c {
-            '(' => out.push_str("\\("),
-            ')' => out.push_str("\\)"),
-            '\\' => out.push_str("\\\\"),
-            '\n' | '\r' | '\t' => out.push(' '),
-            c if c.is_ascii() => out.push(c),
-            _ => out.push('?'),
-        }
-    }
-    out
-}
-
-struct SimplePdf {
-    objects: Vec<Vec<u8>>,
-}
-
-impl SimplePdf {
-    fn new() -> Self {
-        Self { objects: Vec::new() }
-    }
-
-    fn add_object(&mut self, data: Vec<u8>) -> usize {
-        self.objects.push(data);
-        self.objects.len()
-    }
-
-    fn finish(self) -> Vec<u8> {
-        let mut out = Vec::new();
-        out.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
-        let mut offsets = Vec::new();
-        for (i, obj) in self.objects.iter().enumerate() {
-            offsets.push(out.len());
-            let num = i + 1;
-            let header = format!("{num} 0 obj\n");
-            out.extend_from_slice(header.as_bytes());
-            out.extend_from_slice(obj);
-            out.extend_from_slice(b"\nendobj\n");
-        }
-        let xref_offset = out.len();
-        let total_objs = self.objects.len() + 1;
-        out.extend_from_slice(format!("xref\n0 {total_objs}\n0000000000 65535 f \n").as_bytes());
-        for offset in offsets {
-            out.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
-        }
-        out.extend_from_slice(
-            format!("trailer\n<< /Size {total_objs} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n")
-                .as_bytes(),
-        );
-        out
+/// Stores an export as the next version of the sweep's validation report (M16), then sends it.
+/// Every export is kept: a second export of the same sweep is version 2, and so on.
+#[allow(clippy::too_many_arguments)]
+async fn store_and_send(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    id: &Identity,
+    sweep: &OptimizationSweep,
+    format: &str,
+    content_type: &str,
+    filename: String,
+    body: Vec<u8>,
+) -> Response {
+    let report = reports::NewReport {
+        report_type: reports::report_type::VALIDATION,
+        run_kind: reports::run_kind::SWEEP,
+        run_id: sweep.id,
+        format,
+        content_type,
+        content: &body,
+        created_by: user_of(id),
+    };
+    match reports::create_version(pool, ws, &report).await {
+        Ok(meta) => crate::reports_api::report_response(&meta, &filename, body),
+        Err(e) => db_error(&e),
     }
 }
 
@@ -738,6 +702,7 @@ fn generate_validation_pdf(
     sweep: &OptimizationSweep,
     trials: &[OptimizationTrial],
     holdout_eval: Option<&HoldoutEvaluation>,
+    generated_at: DateTime<Utc>,
 ) -> Vec<u8> {
     let mut pdf = SimplePdf::new();
 
@@ -770,7 +735,7 @@ fn generate_validation_pdf(
     let sweep_id_short = sweep.id.to_string();
     let method = sweep.method.to_uppercase();
     let objective = sweep.objective.to_uppercase();
-    let now = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+    let now = generated_at.format("%Y-%m-%d %H:%M UTC").to_string();
     stream.push_str("0.2 0.22 0.28 rg\n");
     stream.push_str("BT\n/F2 8.5 Tf\n40 690 Td\n(Sweep ID: ) Tj\n/F1 8.5 Tf\n");
     stream.push_str(&format!("({}) Tj\n", escape_pdf(&sweep_id_short)));
@@ -929,16 +894,8 @@ fn generate_validation_pdf(
     );
     stream.push_str("ET\n");
 
-    let stream_bytes = stream.into_bytes();
-    let stream_len = stream_bytes.len();
-    let stream_obj = format!("<< /Length {stream_len} >>\nstream\n").into_bytes();
-    let mut full_stream_obj = Vec::with_capacity(stream_obj.len() + stream_bytes.len() + 12);
-    full_stream_obj.extend_from_slice(&stream_obj);
-    full_stream_obj.extend_from_slice(&stream_bytes);
-    full_stream_obj.extend_from_slice(b"\nendstream");
-
     // 6: Stream Contents
-    pdf.add_object(full_stream_obj);
+    pdf.add_object(stream_object(&stream));
 
     pdf.finish()
 }
@@ -1451,5 +1408,96 @@ pub(crate) async fn evaluate_holdout(
     {
         Ok(eval) => to_json(200, &HoldoutEvaluationView::from(eval)),
         Err(e) => db_error(&e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(s: &str) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    }
+
+    fn sweep() -> OptimizationSweep {
+        OptimizationSweep {
+            id: Uuid::parse_str("0193a1b2-0000-7000-8000-000000000001").unwrap(),
+            workspace_id: Uuid::nil(),
+            job_id: None,
+            experiment_id: None,
+            strategy_id: None,
+            strategy_version_id: None,
+            dataset_version_id: Uuid::nil(),
+            status: "succeeded".into(),
+            method: "grid".into(),
+            objective: "sharpe".into(),
+            param_grid: json!({"fast": [5, 10], "slow": [20, 50]}),
+            trial_count: 3,
+            best_trial_num: Some(2),
+            best_params: Some(json!({"fast": 10, "slow": 50})),
+            best_metrics: None,
+            best_objective: Some(1.2345),
+            dsr: Some(0.8123),
+            psr: Some(0.9456),
+            min_trl: Some(187.25),
+            pbo: Some(0.1875),
+            created_by: None,
+            created_at: at("2026-10-28T09:00:00Z"),
+            finished_at: Some(at("2026-10-28T09:05:00Z")),
+        }
+    }
+
+    fn trials() -> Vec<OptimizationTrial> {
+        [
+            (1, 0.91, json!({"fast": 5, "slow": 20})),
+            (2, 1.2345, json!({"fast": 10, "slow": 50})),
+            (3, -0.2, json!({"fast": 5, "slow": 50})),
+        ]
+        .into_iter()
+        .map(|(n, obj, params)| OptimizationTrial {
+            id: Uuid::nil(),
+            sweep_id: Uuid::nil(),
+            trial_num: n,
+            params,
+            metrics: json!({}),
+            objective_value: obj,
+            returns_mean: Some(obj / 1000.0),
+            returns_vol: if n == 3 { None } else { Some(0.012) },
+            created_at: at("2026-10-28T09:01:00Z"),
+        })
+        .collect()
+    }
+
+    fn holdout() -> HoldoutEvaluation {
+        HoldoutEvaluation {
+            id: Uuid::nil(),
+            holdout_id: Uuid::nil(),
+            workspace_id: Uuid::nil(),
+            strategy_version_id: None,
+            evaluation_num: 1,
+            metrics: json!({}),
+            dsr: Some(0.6012),
+            warnings: json!([]),
+            evaluated_by: None,
+            evaluated_at: at("2026-10-29T10:30:00Z"),
+        }
+    }
+
+    /// The validation PDF is byte-for-byte what M4 produced before the PDF builder moved to the
+    /// shared `pdf` module (M16 task 3). Regenerate these hashes only for a deliberate layout change.
+    #[test]
+    fn validation_pdf_is_unchanged() {
+        let generated = at("2026-10-30T08:15:00Z");
+        let without = generate_validation_pdf(&sweep(), &trials(), None, generated);
+        let with = generate_validation_pdf(&sweep(), &trials(), Some(&holdout()), generated);
+        assert!(without.starts_with(b"%PDF-1.4\n") && without.ends_with(b"%%EOF\n"));
+        assert_eq!(
+            spectra_core::sha256_hex(&without),
+            "7e7c519a2fc3c5a2ab5340217c07ad9924fab71a7613077e0df4f361a2b0354c"
+        );
+        assert_eq!(
+            spectra_core::sha256_hex(&with),
+            "b5ba5086df1a8be27d86cb992b80376139eca954a19fe330e8c33950a37fdf23"
+        );
     }
 }

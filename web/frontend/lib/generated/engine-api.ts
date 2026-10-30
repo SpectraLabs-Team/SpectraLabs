@@ -1053,6 +1053,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The reports of a run: every version, grouped by type and newest first. */
+        get: operations["list_reports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/{report_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every version of one report, newest first. */
+        get: operations["list_versions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/{report_id}/versions/{version}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download one version of a report, exactly as it was stored. */
+        get: operations["download_version"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/risk": {
         parameters: {
             query?: never;
@@ -3353,6 +3404,38 @@ export interface components {
             matches: boolean;
             projected_metrics: components["schemas"]["ProjectedMetricsView"];
             replay_verdict: string;
+        };
+        /** @description One stored version of a report (without its content). */
+        ReportVersionView: {
+            content_type: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by?: string | null;
+            /** @description Where to download this version. */
+            download_url: string;
+            /** @description `pdf` or `csv`. */
+            format: string;
+            /**
+             * Format: uuid
+             * @description Shared by every version of the report.
+             */
+            report_id: string;
+            /** @description `validation`, `tear_sheet` or `gap`. */
+            report_type: string;
+            /** Format: uuid */
+            run_id: string;
+            /** @description What `run_id` points at: `sweep`, `backtest` or `paper_gap`. */
+            run_kind: string;
+            /** @description Lower-case hex SHA-256 of the content. */
+            sha256: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /**
+             * Format: int32
+             * @description 1, 2, ... in creation order.
+             */
+            version: number;
         };
         ResetPaperAccountRequest: {
             /** Format: double */
@@ -6697,6 +6780,102 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_reports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `sweep`, `backtest` or `paper_gap`. */
+                run_kind: string;
+                /** @description The run's id. */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Report versions for the run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportVersionView"][];
+                };
+            };
+            /** @description Missing or unknown run_kind, or an invalid run_id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_versions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report id */
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versions, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportVersionView"][];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    download_version: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Report id */
+                report_id: string;
+                /** @description Version number (1, 2, ...) */
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored PDF or CSV; `x-report-sha256` carries its hash */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
             };
         };
     };

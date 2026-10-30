@@ -1786,11 +1786,7 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
 
     match outcome {
         Ok(wf_res) => {
-            let eff_ratio = if wf_res.mean_in_sample_objective.abs() > 1e-9 {
-                wf_res.mean_out_of_sample_objective / wf_res.mean_in_sample_objective
-            } else {
-                0.0
-            };
+            let eff_ratio = wf_res.efficiency();
 
             let folds_vec: Vec<serde_json::Value> = wf_res
                 .folds

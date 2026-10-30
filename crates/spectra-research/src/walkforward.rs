@@ -123,6 +123,23 @@ pub struct WalkForwardResult {
     pub total_trials: usize,
 }
 
+/// Walk-forward efficiency: mean out-of-sample objective / mean in-sample objective. 0 when the
+/// in-sample mean is effectively zero (`|mean_is| <= 1e-9`), where the ratio is meaningless.
+pub fn walk_forward_efficiency(mean_in_sample: f64, mean_out_of_sample: f64) -> f64 {
+    if mean_in_sample.abs() > 1e-9 {
+        mean_out_of_sample / mean_in_sample
+    } else {
+        0.0
+    }
+}
+
+impl WalkForwardResult {
+    /// [`walk_forward_efficiency`] of this run.
+    pub fn efficiency(&self) -> f64 {
+        walk_forward_efficiency(self.mean_in_sample_objective, self.mean_out_of_sample_objective)
+    }
+}
+
 /// Runs walk-forward validation. If `ledger` is given every sweep trial is
 /// recorded in it (label "walk-forward fold k").
 ///

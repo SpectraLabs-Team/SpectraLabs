@@ -17,9 +17,12 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use spectra_engine::performance::cagr;
-use spectra_research::{compute_benchmark_metrics, expected_max_sharpe, TrialLedger, TrialSummary};
+use spectra_research::{
+    compute_benchmark_metrics, expected_max_sharpe, walk_forward_efficiency, TrialLedger, TrialSummary,
+    WalkForwardResult,
+};
 use spectra_risk::portfolio::Portfolio;
-use spectra_risk::{PortfolioSnapshot, PositionSnapshot};
+use spectra_risk::{LimitUtilization, PortfolioSnapshot, PositionSnapshot, RiskLimits};
 
 /// Formulas pinned by `web/frontend/scripts/test-learn.mjs` against `calc.ts`.
 const PINNED_IN_FRONTEND: &[&str] = &[
@@ -39,13 +42,6 @@ const PINNED_IN_FRONTEND: &[&str] = &[
 
 /// Registry formulas with no single library function to check against yet, and why.
 const NOT_YET_PINNED: &[(&str, &str)] = &[
-    ("gross_exposure_utilization", "computed inline in spectra-api risk_center_api"),
-    ("net_exposure_utilization", "computed inline in spectra-api risk_center_api"),
-    ("leverage_utilization", "computed inline in spectra-api risk_center_api"),
-    ("drawdown_utilization", "computed inline in spectra-api risk_center_api"),
-    ("daily_loss_utilization", "computed inline in spectra-api risk_center_api"),
-    ("var_utilization", "computed inline in spectra-api risk_center_api"),
-    ("walk_forward_efficiency", "computed inline in spectra-worker"),
     ("paths_per_second", "reported by the benchmark harness"),
     ("parallel_speedup", "reported by the benchmark harness"),
     ("final_equity", "ledger state at the end of a backtest"),
@@ -186,6 +182,52 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
     let net: f64 = pos.iter().map(|(_, q, p)| q * p).sum();
     let hhi: f64 = pos.iter().map(|(_, q, p)| ((q * p).abs() / gross).powi(2)).sum();
 
+    // Risk Center limit utilization (spectra-api risk summary and alerts use LimitUtilization).
+    let (peak_equity, day_start) = (46_000.0, 41_500.0);
+    // Net short, so |net exposure| differs from net exposure.
+    let risk_pos: [(&str, f64, f64); 2] = [("AAA", 50.0, 100.0), ("BBB", -120.0, 210.0)];
+    let risk_gross: f64 = risk_pos.iter().map(|(_, q, p)| (q * p).abs()).sum();
+    let risk_net: f64 = risk_pos.iter().map(|(_, q, p)| q * p).sum();
+    assert!(risk_net < 0.0);
+    let risk = PortfolioSnapshot {
+        equity,
+        peak_equity,
+        daily_start_equity: day_start,
+        positions: risk_pos
+            .iter()
+            .map(|(sym, q, p)| ((*sym).to_string(), PositionSnapshot { qty: *q, price: *p }))
+            .collect(),
+        ..PortfolioSnapshot::default()
+    };
+    let limits = RiskLimits {
+        max_gross_exposure: 60_000.0,
+        max_net_exposure: 20_000.0,
+        max_leverage: 2.5,
+        max_drawdown_pct: 0.2,
+        max_daily_loss: 2_000.0,
+        max_var_pct: 0.05,
+        ..RiskLimits::default()
+    };
+    let var_pct = 0.031; // 1-day 99% VaR as a fraction of equity (a simulation output; fixed here)
+    let util = LimitUtilization::new(
+        risk.gross_exposure(),
+        risk.net_exposure(),
+        risk.leverage(),
+        risk.drawdown_pct(),
+        risk.daily_loss(),
+        var_pct,
+        &limits,
+    );
+
+    // Walk-forward efficiency.
+    let (mean_is, mean_oos) = (0.84, 0.51);
+    let wf = WalkForwardResult {
+        mean_in_sample_objective: mean_is,
+        mean_out_of_sample_objective: mean_oos,
+        ..WalkForwardResult::default()
+    };
+    assert_eq!(wf.efficiency(), walk_forward_efficiency(mean_is, mean_oos));
+
     // Trial ledger for the Sharpe variance across trials.
     let srs = [0.031, 0.044, 0.012, 0.058, 0.027, 0.039];
     let mut ledger = TrialLedger::default();
@@ -221,6 +263,39 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
         ("gross_exposure", ("Σ |quantity × price|", gross, snap.gross_exposure())),
         ("net_exposure", ("Σ qᵢ pᵢ (longs positive, shorts negative)", net, snap.net_exposure())),
         ("gross_leverage", ("Σ |position value| / equity", gross / equity, snap.leverage())),
+        (
+            "gross_exposure_utilization",
+            ("gross exposure ÷ max gross exposure", risk_gross / 60_000.0, util.gross_exposure),
+        ),
+        (
+            "net_exposure_utilization",
+            ("|net exposure| ÷ max net exposure", risk_net.abs() / 20_000.0, util.net_exposure),
+        ),
+        (
+            "leverage_utilization",
+            ("(gross exposure ÷ equity) ÷ max leverage", (risk_gross / equity) / 2.5, util.leverage),
+        ),
+        (
+            "drawdown_utilization",
+            (
+                "((peak equity − equity) ÷ peak equity) ÷ max drawdown",
+                ((peak_equity - equity) / peak_equity) / 0.2,
+                util.drawdown,
+            ),
+        ),
+        (
+            "daily_loss_utilization",
+            (
+                "(start-of-day equity − equity) ÷ max daily loss",
+                (day_start - equity) / 2_000.0,
+                util.daily_loss,
+            ),
+        ),
+        ("var_utilization", ("1-day 99% VaR (% of equity) ÷ max VaR", var_pct / 0.05, util.var)),
+        (
+            "walk_forward_efficiency",
+            ("mean OOS objective / mean IS objective", mean_oos / mean_is, wf.efficiency()),
+        ),
         (
             "market_value",
             ("quantity × price", -40.0 * 210.0, PositionSnapshot { qty: -40.0, price: 210.0 }.value()),

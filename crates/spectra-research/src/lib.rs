@@ -42,5 +42,6 @@ pub use trades::{
 };
 pub use validation::{format_report, validate_selection, ValidationReport};
 pub use walkforward::{
-    make_folds, run_walk_forward, Fold, FoldResult, WalkForwardConfig, WalkForwardMode, WalkForwardResult,
+    make_folds, run_walk_forward, walk_forward_efficiency, Fold, FoldResult, WalkForwardConfig,
+    WalkForwardMode, WalkForwardResult,
 };

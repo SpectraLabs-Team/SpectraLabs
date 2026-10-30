@@ -61,6 +61,7 @@ The dashboard and the engine share one Postgres database (`DATABASE_URL` for eve
    ```
    `checks.worker` is `none_alive` when no worker has sent a heartbeat in 30 seconds. That does not
    make the API unready (synchronous routes work without workers), so alert on it separately.
+5. Set `SENTRY_DSN` and confirm a test event arrives via `/api/v1/observability/sentry/verify` before the first deploy.
 
 ## Accounts and workspaces in the engine database
 

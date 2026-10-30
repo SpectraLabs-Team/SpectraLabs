@@ -43,9 +43,9 @@ pub async fn create_instrument(pool: &PgPool, workspace_id: Uuid, inst: &Instrum
     .bind(inst.tick_size.raw())
     .bind(inst.lot_size.raw())
     .bind(inst.expiry_ns)
-    .bind(inst.strike.map(|p| p.raw()))
+    .bind(inst.strike.map(spectra_core::Fixed::raw))
     .bind(inst.maturity_ns)
-    .bind(inst.coupon_rate.map(|r| r.raw()))
+    .bind(inst.coupon_rate.map(spectra_core::Fixed::raw))
     .fetch_one(pool)
     .await?;
     Ok(row.get("id"))

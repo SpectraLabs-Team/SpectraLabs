@@ -1,8 +1,8 @@
 # Data retention: accounts, activity and security records (M21)
 
 Owner: product owner. Status: **draft, awaiting the owner's sign-off.**
-Covers the personal data the account system and admin console keep. Workspace content (datasets,
-strategies, runs) is out of scope.
+Covers the personal data the account system and admin console keep, and the workspace content
+described in "Workspace content" below (M28).
 
 Users are told the short version on the Account page (`web/frontend/components/account/AccountPage.tsx`).
 This document and that page must say the same thing.
@@ -15,9 +15,27 @@ This document and that page must say the same thing.
 | Daily active time (one row per user per UTC day: seconds, heartbeat count, last heartbeat) | `user_activity_daily` | **400 days** | The worker's purge, every six hours (`SPECTRA_ACTIVITY_PURGE`), or `npm run activity:purge` by hand | Gone immediately (`ON DELETE CASCADE`) |
 | Sessions (device, IP address, sign-in and last-seen times) | `sessions` | While the session is live (at most 7 days, or 24 hours idle), then about a week | Session housekeeping (`lib/server/sessions.ts`) | Gone |
 | Security and admin records (sign-ins, password and two-step changes, admin actions, admin views, with email, IP address and browser) | `audit_events` | **Permanently** | Never: triggers refuse UPDATE, DELETE and TRUNCATE, and a hash chain makes changes detectable | **Kept**, including the email as it was at the time |
-| Database backups | Backup host (`docs/operations.md`) | `BACKUP_KEEP_DAYS` (14 in the example) | `scripts/backup-postgres.sh` | Deleted data can remain in backups until they expire |
+| Database backups | Backup host (`docs/operations.md`) | Daily copies `BACKUP_KEEP_DAYS` (14 by default); Sunday copies `BACKUP_KEEP_WEEKLY_DAYS` (90 by default) | `scripts/backup-postgres.sh` | Deleted data can remain in backups until they expire |
+| Artifact-store backups | Backup host (`scripts/backup-artifacts.sh`) | Same periods as database backups | `scripts/backup-artifacts.sh` | Deleted data can remain in backups until they expire |
 
 We don't record the pages people view, their clicks or what they type. Only daily activity totals.
+
+## Workspace content (M28, draft)
+
+Status: **draft, pending owner sign-off.** The keep periods here are proposed, not final. Each
+row says what the code does today; anything not yet confirmed is marked "to confirm".
+
+| Data | Where | Kept for | Removed by | After the account is deleted |
+|---|---|---|---|---|
+| Runs and their notes and history | `runs`, `run_notes` | Until a user or admin deletes them, or the workspace is deleted. No automatic expiry in the code. | Deleting the run or workspace | Gone with the workspace |
+| Strategy drafts | `strategy_drafts` | Until the strategy or workspace is deleted. No automatic expiry in the code. | Deleting the strategy or workspace (`ON DELETE CASCADE`) | Gone with the workspace |
+| Uploads not yet ingested | `uploads`, `upload_sessions` | 24 hours (`UPLOAD_TTL_SECS`, `SESSION_TTL_SECS`), then removed by the worker | Expiry | Gone |
+| Ingested uploads | `uploads` | While a dataset version uses them. Deleting the version makes them expire. | Expiry after the version is deleted | Gone with the workspace |
+| Artifact files (blobs in the artifact store) | Artifact store | While referenced. The worker sweeps files that nothing references, including files from deleted workspaces. | Worker garbage collection | Removed by the sweep after the workspace is deleted (swept every 30 minutes) |
+
+Deleting an account removes its personal workspace with everything in it, and any team workspace
+where it is the only member. Team workspaces with other members stay (if the user is the sole owner
+of a team with other members, another owner must be appointed or other members removed first).
 
 ## Why the audit log is permanent
 
@@ -43,6 +61,13 @@ The number lives in four places, and `web/frontend/scripts/test-activity.mjs` fa
 `web/frontend/lib/server/activity.ts`, `web/frontend/lib/activityClient.ts` (shown on the Account
 page), `crates/spectra-db/src/activity.rs` (the worker) and `web/frontend/scripts/activity-purge.mjs`.
 Shortening it deletes more on the next purge run: dry-run first (see `docs/operations.md`).
+
+## Open points for the owner
+
+- Runs and drafts have no automatic expiry. Decide whether they need one (Decision 2 in the M28 plan).
+- Artifact sweep timing: the worker sweeps unreferenced files every 30 minutes (`spectra-worker.rs`). Owner to confirm if an explicit grace period before removal is desired.
+- An unset `SPECTRA_ACTIVITY_PURGE` is **on** in the code (`config.rs`), but `docs/operations.md` says
+  unset means off. Fix one or the other before production relies on either.
 
 ## Sign-off
 

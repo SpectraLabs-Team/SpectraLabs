@@ -44,6 +44,10 @@ pub struct InstrumentView {
     pub coupon_rate: Option<String>,
     /// A future's chain or an option's underlying symbol.
     pub underlying: Option<String>,
+    /// Coupons a year (bonds).
+    pub coupon_frequency: Option<u32>,
+    /// Day count for accrued interest (bonds): act_act_icma, 30_360, act_360 or act_365f.
+    pub day_count: Option<String>,
 }
 
 impl From<&Instrument> for InstrumentView {
@@ -60,6 +64,8 @@ impl From<&Instrument> for InstrumentView {
             maturity: i.maturity_ns,
             coupon_rate: i.coupon_rate.map(|r| r.to_string()),
             underlying: i.underlying.clone(),
+            coupon_frequency: i.coupon_frequency,
+            day_count: i.day_count.map(|d| d.as_str().to_string()),
         }
     }
 }

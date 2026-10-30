@@ -54,6 +54,8 @@ pub struct CostDecomposition {
     pub borrow_fees: f64,
     pub financing_interest: f64,
     pub dividends: f64,
+    /// Bond coupons received (paid when negative, on shorts).
+    pub coupons: f64,
     pub total_costs: f64,
 }
 
@@ -126,6 +128,7 @@ impl PnlAttribution {
             .with("borrow_fees", num(self.costs.borrow_fees))
             .with("financing_interest", num(self.costs.financing_interest))
             .with("dividends", num(self.costs.dividends))
+            .with("coupons", num(self.costs.coupons))
             .with("total_costs", num(self.costs.total_costs));
 
         let mut waterfall_arr = Vec::new();
@@ -173,6 +176,7 @@ pub fn compute_pnl_attribution(
     let mut borrow_fees = Money::ZERO;
     let mut financing_interest = Money::ZERO;
     let mut dividends = Money::ZERO;
+    let mut coupons = Money::ZERO;
     let mut total_notional = 0.0f64;
 
     for e in ledger.journal() {
@@ -192,6 +196,9 @@ pub fn compute_pnl_attribution(
             }
             EntryType::Dividend => {
                 dividends = dividends.checked_add(e.amount)?;
+            }
+            EntryType::Coupon => {
+                coupons = coupons.checked_add(e.amount)?;
             }
             _ => {}
         }
@@ -313,6 +320,7 @@ pub fn compute_pnl_attribution(
         borrow_fees: borrow_f64,
         financing_interest: int_f64,
         dividends: div_f64,
+        coupons: coupons.to_f64(),
         total_costs,
     };
 
@@ -358,6 +366,16 @@ pub fn compute_pnl_attribution(
         waterfall.push(WaterfallStep {
             name: "Dividends Received".into(),
             amount: div_f64,
+            running_total: running,
+        });
+    }
+
+    let coupon_f64 = coupons.to_f64();
+    if coupon_f64 != 0.0 {
+        running += coupon_f64;
+        waterfall.push(WaterfallStep {
+            name: "Coupons Received".into(),
+            amount: coupon_f64,
             running_total: running,
         });
     }

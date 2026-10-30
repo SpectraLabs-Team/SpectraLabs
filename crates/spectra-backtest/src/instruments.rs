@@ -27,7 +27,7 @@ use spectra_core::{
     is_currency_code, Fixed, Instrument, InstrumentId, InstrumentType, Json, Price, Qty, Ratio, Result,
     DEFAULT_BASE_CURRENCY,
 };
-use spectra_engine::{FxRate, InstrumentSetup, RollAdjust, RollRule, MAX_ROLL_BUSINESS_DAYS};
+use spectra_engine::{BondQuote, FxRate, InstrumentSetup, RollAdjust, RollRule, MAX_ROLL_BUSINESS_DAYS};
 
 use crate::config::FieldError;
 
@@ -53,12 +53,14 @@ pub struct RequestInstruments {
     fx_text: BTreeMap<String, Vec<String>>,
     /// The futures roll rule, when the request sets one (else the default).
     pub roll: Option<RollRule>,
+    /// Whether bond bars are clean or dirty, when the request says (else clean).
+    pub bond_quote: Option<BondQuote>,
 }
 
 /// Request fields this module reads.
-pub const FIELDS: [&str; 4] = ["base_currency", "instruments", "fx_rates", "futures_roll"];
+pub const FIELDS: [&str; 5] = ["base_currency", "instruments", "fx_rates", "futures_roll", "bond_quote"];
 
-const INSTRUMENT_FIELDS: [&str; 12] = [
+const INSTRUMENT_FIELDS: [&str; 14] = [
     "symbol",
     "instrument",
     "type",
@@ -71,6 +73,8 @@ const INSTRUMENT_FIELDS: [&str; 12] = [
     "maturity",
     "coupon_rate",
     "underlying",
+    "coupon_frequency",
+    "day_count",
 ];
 
 fn err(errors: &mut Vec<FieldError>, field: impl Into<String>, message: impl Into<String>) {
@@ -233,6 +237,28 @@ fn parse_one(
             None
         }
     };
+    let coupon_frequency = match item.find("coupon_frequency") {
+        None | Some(Json::Null) => None,
+        Some(Json::Int(f))
+            if u32::try_from(*f).is_ok_and(|f| spectra_core::COUPON_FREQUENCIES.contains(&f)) =>
+        {
+            u32::try_from(*f).ok()
+        }
+        Some(_) => {
+            err(errors, format!("{p}coupon_frequency"), "must be 1, 2, 4 or 12 coupons a year");
+            None
+        }
+    };
+    let day_count = match item.find("day_count") {
+        None | Some(Json::Null) => None,
+        Some(Json::String(d)) if spectra_core::DayCount::parse(d.trim()).is_some() => {
+            spectra_core::DayCount::parse(d.trim())
+        }
+        Some(_) => {
+            err(errors, format!("{p}day_count"), "must be act_act_icma, 30_360, act_360 or act_365f");
+            None
+        }
+    };
     let mut when = |name: &str| match item.find(name) {
         None | Some(Json::Null) => None,
         Some(v) => timestamp(v).map(|t| t.0).or_else(|| {
@@ -266,6 +292,8 @@ fn parse_one(
         maturity_ns: maturity,
         coupon_rate: coupon,
         underlying,
+        coupon_frequency,
+        day_count,
     };
     if let Err(e) = inst.validate() {
         err(errors, whole, e);
@@ -281,6 +309,7 @@ impl RequestInstruments {
             && self.instruments.is_empty()
             && self.fx.is_empty()
             && self.roll.is_none()
+            && self.bond_quote.is_none()
     }
 
     /// The base currency the run books in.
@@ -318,6 +347,13 @@ impl RequestInstruments {
         }
         if let Some(r) = doc.find("futures_roll").filter(|v| !v.is_null()) {
             out.roll = parse_roll(r, errors);
+        }
+        match doc.find("bond_quote") {
+            None | Some(Json::Null) => {}
+            Some(Json::String(q)) if BondQuote::parse(q.trim()).is_some() => {
+                out.bond_quote = BondQuote::parse(q.trim());
+            }
+            Some(_) => err(errors, "bond_quote", "must be \"clean\" or \"dirty\""),
         }
         // One record per instrument.
         for (i, (r, _)) in out.instruments.iter().enumerate() {
@@ -384,6 +420,7 @@ impl RequestInstruments {
         let mut setup = InstrumentSetup {
             base_currency: self.base().to_string(),
             roll: self.roll.unwrap_or_default(),
+            bond_quote: self.bond_quote.unwrap_or_default(),
             ..InstrumentSetup::default()
         };
         for (i, (r, inst)) in self.instruments.iter().enumerate() {
@@ -419,6 +456,9 @@ impl RequestInstruments {
     pub fn write_into(&self, mut doc: Json) -> Result<Json> {
         if let Some(b) = &self.base_currency {
             doc = doc.with("base_currency", Json::string(b.clone()));
+        }
+        if let Some(q) = self.bond_quote {
+            doc = doc.with("bond_quote", Json::string(q.as_str()));
         }
         if let Some(r) = &self.roll {
             doc = doc.with(
@@ -458,6 +498,12 @@ impl RequestInstruments {
                 }
                 if let Some(u) = &i.underlying {
                     j = j.with("underlying", Json::string(u.clone()));
+                }
+                if let Some(f) = i.coupon_frequency {
+                    j = j.with("coupon_frequency", Json::integer(i64::from(f)));
+                }
+                if let Some(d) = i.day_count {
+                    j = j.with("day_count", Json::string(d.as_str()));
                 }
                 list.push(j)?;
             }

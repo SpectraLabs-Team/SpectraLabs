@@ -20,6 +20,7 @@ import {
   type Catalog,
   type DatasetVersion,
   type DownloadKind,
+  type BondsSummary,
   type FuturesRoll,
   type FuturesSummary,
   type InstrumentSummary,
@@ -480,6 +481,7 @@ function Results({
       })()}
 
       {summary.futures && <FuturesCard futures={summary.futures} />}
+      {summary.bonds && <BondsCard bonds={summary.bonds} />}
 
       {b.run_id && <ExperimentLineageCard runId={b.run_id} />}
 
@@ -561,10 +563,72 @@ function expiryDate(ns: number): string {
   return new Date(ns / 1e6).toISOString().slice(0, 10);
 }
 
+/** M24.3: each bond's yield and rate risk at its last price, coupons and redemptions. */
+function BondsCard({ bonds }: { bonds: BondsSummary }) {
+  const fmt = (v: number | undefined, digits: number) => (v === undefined ? '—' : v.toFixed(digits));
+  return (
+    <GlassCard as="section" className="overflow-hidden">
+      <div className="border-b border-ink/[0.06] px-5 py-4">
+        <h3 className="text-sm font-semibold text-ink">Bonds</h3>
+        <p className="mt-0.5 text-xs text-ink/50">
+          Bars are {bonds.quote} prices{bonds.quote === 'clean' ? '; accrued interest is added at every fill and mark' : ''}.
+          Coupons received: {cash(bonds.coupons)}. Yield and risk at each bond&apos;s last price, per 100 face.
+        </p>
+      </div>
+      <div className="max-h-[320px] overflow-auto">
+        <table className="w-full min-w-[760px] text-[12.5px]">
+          <thead className="sticky top-0 bg-panel/95 backdrop-blur">
+            <tr className="text-left text-[10.5px] uppercase tracking-wider text-ink/45">
+              {['Bond', 'Coupon', 'Maturity', 'Clean', 'Dirty', 'Yield', 'Mod. duration', 'DV01'].map((h, i) => (
+                <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 && 'pl-5', i >= 3 && 'text-right', i === 7 && 'pr-5')}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="num">
+            {bonds.bonds.map((b) => (
+              <tr key={b.symbol} className="border-t border-ink/[0.04]">
+                <td className="py-2 pl-5 pr-3 font-sans text-ink/90">{b.symbol}</td>
+                <td className="px-3 py-2 font-sans text-ink/70">
+                  {(b.coupon_rate * 100).toFixed(3)}% × {b.coupon_frequency}/yr <span className="text-ink/45">{b.day_count}</span>
+                </td>
+                <td className="px-3 py-2 font-sans text-ink/70">{expiryDate(b.maturity)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{fmt(b.clean_price, 4)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{fmt(b.dirty_price, 4)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{b.yield_to_maturity === undefined ? '—' : `${(b.yield_to_maturity * 100).toFixed(3)}%`}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{fmt(b.modified_duration, 3)}</td>
+                <td className="py-2 pl-3 pr-5 text-right text-ink/70">{fmt(b.dv01_per_100, 4)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {bonds.redemptions.length > 0 && (
+        <div className="border-t border-ink/[0.06] px-5 py-3 text-xs text-ink/60">
+          {bonds.redemptions.map((r, i) => (
+            <p key={`${r.ts_ns}-${r.strategy}-${i}`}>
+              {r.symbol}: {Number(r.qty).toLocaleString('en-US', { maximumFractionDigits: 4 })} redeemed at {cash(r.price)} on {expiryDate(r.ts_ns)}
+            </p>
+          ))}
+        </div>
+      )}
+      {bonds.gaps.length > 0 && (
+        <div className="border-t border-ink/[0.06] px-5 py-3 text-xs text-ink/55">
+          {bonds.gaps.map((g) => (
+            <p key={g}>{g}</p>
+          ))}
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
 const ROLL_KIND_LABEL: Record<FuturesRoll['kind'], string> = {
   rolled: 'Rolled',
   closed: 'Closed',
   settled: 'Settled at expiry',
+  redeemed: 'Redeemed at par',
 };
 
 /** M24.2: the roll rule, every roll the engine made, and what the futures model leaves out. */

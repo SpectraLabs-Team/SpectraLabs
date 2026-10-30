@@ -1045,6 +1045,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pricing/bond": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Price a fixed-coupon bond: accrued interest, clean and dirty price, yield,
+         *     duration, convexity and DV01, from any one of clean price, dirty price or yield. */
+        post: operations["price_bond"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers/configs": {
         parameters: {
             query?: never;
@@ -2176,6 +2194,84 @@ export interface components {
              */
             warmups?: number | null;
         };
+        /** @description `POST /api/v1/pricing/bond` body. Give exactly one of `clean_price`,
+         *     `dirty_price` or `yield`; the rest are worked out from it. */
+        BondPricingRequest: {
+            /** @description The valuation date (RFC 3339 or YYYY-MM-DD). */
+            as_of: string;
+            /**
+             * Format: double
+             * @description Price per 100 face without accrued interest.
+             */
+            clean_price?: number | null;
+            /**
+             * Format: int32
+             * @description Coupons a year: 1, 2, 4 or 12.
+             */
+            coupon_frequency: number;
+            /**
+             * Format: double
+             * @description Annual coupon rate as a fraction (0.05 is 5%).
+             */
+            coupon_rate: number;
+            /** @description act_act_icma, 30_360, act_360 or act_365f. */
+            day_count: string;
+            /**
+             * Format: double
+             * @description Price per 100 face with accrued interest.
+             */
+            dirty_price?: number | null;
+            /** @description Maturity date (RFC 3339 or YYYY-MM-DD). */
+            maturity: string;
+            /**
+             * Format: double
+             * @description Annual yield, compounded `coupon_frequency` times a year.
+             */
+            yield?: number | null;
+        };
+        /** @description A bond priced. */
+        BondPricingView: {
+            /**
+             * Format: double
+             * @description Per 100 face.
+             */
+            accrued_interest: number;
+            /**
+             * Format: double
+             * @description Per 100 face.
+             */
+            clean_price: number;
+            /**
+             * Format: double
+             * @description Years squared.
+             */
+            convexity: number;
+            /**
+             * Format: double
+             * @description Per 100 face.
+             */
+            dirty_price: number;
+            /**
+             * Format: double
+             * @description Price change per 100 face for a one basis point move in yield.
+             */
+            dv01: number;
+            /**
+             * Format: double
+             * @description Years.
+             */
+            macaulay_duration: number;
+            /**
+             * Format: double
+             * @description Years.
+             */
+            modified_duration: number;
+            /**
+             * Format: double
+             * @description Annual, compounded `coupon_frequency` times a year.
+             */
+            yield: number;
+        };
         /** @description An exchange calendar supported by the platform. */
         CalendarView: {
             /** @description MIC or short code (e.g. `XNYS`). */
@@ -2316,6 +2412,9 @@ export interface components {
             as_of?: string | null;
             /** @description The currency the run books in. Default: the workspace's base currency. */
             base_currency?: string | null;
+            /** @description Whether bond bars are `clean` (default: accrued interest is added at
+             *     every fill and mark) or `dirty` prices. */
+            bond_quote?: string | null;
             /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
             config?: Record<string, never> | null;
             /** @description Splits and dividends to apply during the run, on unadjusted prices:
@@ -2922,10 +3021,17 @@ export interface components {
         };
         /** @description One instrument record. */
         InstrumentView: {
+            /**
+             * Format: int32
+             * @description Coupons a year (bonds).
+             */
+            coupon_frequency?: number | null;
             /** @description Annual coupon rate as a fraction (bonds), exact decimal text. */
             coupon_rate?: string | null;
             /** @description ISO currency the price is quoted in. */
             currency: string;
+            /** @description Day count for accrued interest (bonds): act_act_icma, 30_360, act_360 or act_365f. */
+            day_count?: string | null;
             /**
              * Format: int64
              * @description Expiry (futures, options), nanoseconds since the epoch.
@@ -6925,6 +7031,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SyncOrdersResponse"];
+                };
+            };
+        };
+    };
+    price_bond: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BondPricingRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BondPricingView"];
+                };
+            };
+            /** @description Every problem with the request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
         };

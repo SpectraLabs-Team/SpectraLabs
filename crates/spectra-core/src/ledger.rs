@@ -167,6 +167,10 @@ pub enum EntryType {
     /// number, and `amount` is 1 (raw) when it is marked to market (a future).
     /// No cash moves. Written before the instrument's first fill.
     Listing,
+    /// A bond coupon on `fill.instrument`: `amount` > 0 received on a long
+    /// position, < 0 paid on a short one; `fill.qty` is the position it was
+    /// paid on. Booked as coupon income, separate from dividends.
+    Coupon,
 }
 
 /// One accepted operation.
@@ -237,6 +241,8 @@ pub struct Ledger {
     financing: Money,
     /// Net dividends: received on longs minus paid on shorts.
     dividends: Money,
+    /// Net bond coupons: received on longs minus paid on shorts.
+    coupons: Money,
     positions: BTreeMap<InstrumentId, Position>,
     marks: BTreeMap<InstrumentId, Price>,
     /// Contract multipliers other than 1. An instrument not listed has multiplier 1.
@@ -528,6 +534,37 @@ impl Ledger {
         Ok(())
     }
 
+    /// Post a bond coupon on the position in `instrument`: `amount` > 0
+    /// credits a long, < 0 debits a short (a debt, so it posts even when it
+    /// takes cash below zero).
+    ///
+    /// # Errors
+    /// `InvalidAmount` if `amount` is zero; `InvalidFill` if there is no
+    /// position or the sign does not match it; overflow.
+    pub fn apply_coupon(&mut self, instrument: InstrumentId, amount: Money, ts_ns: i64) -> Result<()> {
+        if amount.is_zero() {
+            return Err(Reject::InvalidAmount.into());
+        }
+        let qty = self.position(instrument).qty;
+        if qty.is_zero() || qty.signum() != amount.signum() {
+            return Err(Reject::InvalidFill.into());
+        }
+        let new_cash = self.cash.checked_add(amount)?;
+        let new_coupons = self.coupons.checked_add(amount)?;
+        self.journal.push(JournalEntry {
+            seq: self.journal.len() as u64,
+            kind: EntryType::Coupon,
+            ts_ns,
+            amount,
+            fill: Fill { instrument, qty, ts_ns, ..Fill::default() },
+            realized: Money::ZERO,
+            cash_after: new_cash,
+        });
+        self.cash = new_cash;
+        self.coupons = new_coupons;
+        Ok(())
+    }
+
     /// Apply an executed fill. Nothing changes unless it returns `Ok`.
     ///
     /// # Errors
@@ -797,6 +834,10 @@ impl Ledger {
     pub fn dividends(&self) -> Money {
         self.dividends
     }
+    /// Net bond coupons: received on long positions minus paid on short ones.
+    pub fn coupons(&self) -> Money {
+        self.coupons
+    }
     /// The policy this ledger enforces.
     pub fn config(&self) -> &LedgerConfig {
         &self.cfg
@@ -869,6 +910,7 @@ impl Ledger {
                 EntryType::BorrowFee => out.charge_borrow_fee(e.fill.instrument, e.amount, e.ts_ns),
                 EntryType::Split => out.split_quantity(e.fill.instrument, e.fill.qty, e.ts_ns),
                 EntryType::Dividend => out.apply_dividend(e.fill.instrument, e.amount, e.ts_ns),
+                EntryType::Coupon => out.apply_coupon(e.fill.instrument, e.amount, e.ts_ns),
                 EntryType::Listing => {
                     let m = Ratio::from_raw(e.fill.qty.raw());
                     out.register_contract(e.fill.instrument, m, e.amount.raw() == 1, e.ts_ns)
@@ -944,6 +986,10 @@ impl Ledger {
                     t.cash = t.cash.checked_add(e.amount)?;
                     t.dividends = t.dividends.checked_add(e.amount)?;
                 }
+                EntryType::Coupon => {
+                    t.cash = t.cash.checked_add(e.amount)?;
+                    t.coupons = t.coupons.checked_add(e.amount)?;
+                }
                 EntryType::Listing => {
                     let m = Ratio::from_raw(e.fill.qty.raw());
                     if m != Ratio::ONE {
@@ -965,8 +1011,11 @@ impl Ledger {
         use InvariantFailure::Violated as fail;
 
         // 1. Independent recomputation from the journal alone.
-        let JournalTotals { cash, net, fees, realized, financing, dividends, qty, mults, mtm } =
+        let JournalTotals { cash, net, fees, realized, financing, dividends, coupons, qty, mults, mtm } =
             self.journal_totals()?;
+        if coupons != self.coupons {
+            return Err(fail("coupons differ from journal".into()));
+        }
         if mtm != self.marked_to_market {
             return Err(fail("marked-to-market instruments differ from journal".into()));
         }
@@ -1031,7 +1080,8 @@ impl Ledger {
             .checked_sub(total_cost)?
             .checked_add(self.realized)?
             .checked_add(self.financing)?
-            .checked_add(self.dividends)?;
+            .checked_add(self.dividends)?
+            .checked_add(self.coupons)?;
         if self.cash != expected_cash {
             return Err(fail("cash does not reconcile with cost basis and realized P&L".into()));
         }
@@ -1046,6 +1096,7 @@ impl Ledger {
             && self.cash.raw() < 0
             && self.financing.raw() >= 0
             && self.dividends.raw() >= 0
+            && self.coupons.raw() >= 0
             && self.marked_to_market.is_empty()
         {
             return Err(fail("negative cash while disabled".into()));
@@ -1058,7 +1109,8 @@ impl Ledger {
             .checked_add(self.realized)?
             .checked_add(self.unrealized_pnl()?)?
             .checked_add(self.financing)?
-            .checked_add(self.dividends)?;
+            .checked_add(self.dividends)?
+            .checked_add(self.coupons)?;
         if self.equity()? != identity {
             return Err(fail("equity identity violated".into()));
         }
@@ -1074,6 +1126,7 @@ impl Ledger {
             || r.fees != self.fees
             || r.financing != self.financing
             || r.dividends != self.dividends
+            || r.coupons != self.coupons
             || r.multipliers != self.multipliers
             || r.marked_to_market != self.marked_to_market
         {
@@ -1094,6 +1147,7 @@ struct JournalTotals {
     realized: Money,
     financing: Money,
     dividends: Money,
+    coupons: Money,
     qty: BTreeMap<InstrumentId, Qty>,
     mults: BTreeMap<InstrumentId, Ratio>,
     mtm: std::collections::BTreeSet<InstrumentId>,

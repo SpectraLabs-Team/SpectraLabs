@@ -42,6 +42,7 @@ import { listDatasets, type DatasetVersion } from '@/lib/backtests';
 import { listStrategies, type StrategySummary } from '@/lib/strategies';
 import { cn } from '@/lib/utils';
 import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
+import { RunReports } from '@/components/studio/RunReports';
 
 export function OptimizationLab() {
   const [activeTab, setActiveTab] = useState<'sweeps' | 'walkforward' | 'overfitting' | 'holdout'>('sweeps');
@@ -55,6 +56,9 @@ export function OptimizationLab() {
   const [selectedSweepId, setSelectedSweepId] = useState<string | null>(null);
   const [selectedSweepDetail, setSelectedSweepDetail] = useState<SweepDetail | null>(null);
   const [selectedCell, setSelectedCell] = useState<{ x: number; y: number } | null>(null);
+  // Bumped after an export so the saved-report list reloads (M16).
+  const [reportsRefresh, setReportsRefresh] = useState(0);
+  const refreshReportsSoon = () => setTimeout(() => setReportsRefresh((n) => n + 1), 1500);
   const [sweepDatasetId, setSweepDatasetId] = useState<string>('');
   const [sweepStrategy, setSweepStrategy] = useState<string>('sma_cross');
   const [sweepParamGridText, setSweepParamGridText] = useState<string>(
@@ -545,8 +549,9 @@ export function OptimizationLab() {
                     <a
                       href={`/api/engine/api/v1/optimization/sweep/${selectedSweepDetail.sweep.id}/export?format=pdf`}
                       download
+                      onClick={refreshReportsSoon}
                       className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white shadow-xs hover:bg-accent/90"
-                      title="Export 1-page validation report as PDF"
+                      title="Export 1-page validation report as PDF (saved as a new version)"
                     >
                       <FileText className="h-3.5 w-3.5" />
                       Export Report (PDF)
@@ -554,14 +559,17 @@ export function OptimizationLab() {
                     <a
                       href={`/api/engine/api/v1/optimization/sweep/${selectedSweepDetail.sweep.id}/export?format=csv`}
                       download
+                      onClick={refreshReportsSoon}
                       className="btn-secondary inline-flex items-center gap-1.5 rounded-lg border border-ink/[0.12] bg-surface px-3 py-1.5 text-xs text-ink hover:bg-ink/[0.04]"
-                      title="Export validation report as CSV"
+                      title="Export validation report as CSV (saved as a new version)"
                     >
                       <Download className="h-3.5 w-3.5 text-accent" />
                       Export (CSV)
                     </a>
                   </div>
                 </div>
+
+                <RunReports runKind="sweep" runId={selectedSweepDetail.sweep.id} refreshKey={reportsRefresh} />
 
                 {/* 2D SENSITIVITY HEATMAP */}
                 {selectedSweepDetail.sensitivity ? (

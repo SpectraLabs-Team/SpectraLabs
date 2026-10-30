@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireWorkspace } from '@/lib/server/requireUser';
-import { putSecret, listSecrets } from '@/lib/server/vault';
+import { putSecret, listSecrets, SecretValidationError, VaultConfigError } from '@/lib/server/vault';
 import { record as audit, requestMeta } from '@/lib/server/audit';
 import { clientIp, hit, tooMany } from '@/lib/server/rateLimit';
 
@@ -39,25 +39,52 @@ export async function POST(req: Request) {
       );
     }
 
+    if (keyId.toUpperCase().startsWith('AK')) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "It looks like you provided an Alpaca Live API key (starts with 'AK'). Paper trading requires Paper API keys (which start with 'PK'). Please get paper keys from your Alpaca Paper Trading dashboard.",
+        },
+        { status: 400 },
+      );
+    }
+
     // 1. Validate credentials live against Alpaca Paper API before persisting
-    const testResp = await fetch(`${ALPACA_PAPER_URL}/v2/account`, {
-      headers: {
-        'APCA-API-KEY-ID': keyId,
-        'APCA-API-SECRET-KEY': secretKey,
-      },
-      cache: 'no-store',
-    });
+    let testResp: Response;
+    try {
+      testResp = await fetch(`${ALPACA_PAPER_URL}/v2/account`, {
+        headers: {
+          'APCA-API-KEY-ID': keyId,
+          'APCA-API-SECRET-KEY': secretKey,
+          'User-Agent': 'SpectraLabs-Paper/1.0',
+        },
+        cache: 'no-store',
+      });
+    } catch (netErr) {
+      const msg = netErr instanceof Error ? netErr.message : String(netErr);
+      return NextResponse.json(
+        { ok: false, error: `Could not reach Alpaca Paper API: ${msg}. Check your network connection.` },
+        { status: 502 },
+      );
+    }
 
     if (!testResp.ok) {
       const errText = await testResp.text().catch(() => '');
-      let errMsg = 'Invalid Alpaca paper trading credentials. Please verify your keys.';
-      if (testResp.status === 401 || testResp.status === 403) {
-        errMsg = 'Alpaca authentication failed. Please double-check your API Key and Secret Key.';
-      } else if (errText.includes('message')) {
+      let errMsg = '';
+      if (errText) {
         try {
           const parsed = JSON.parse(errText);
           if (parsed.message) errMsg = `Alpaca: ${parsed.message}`;
+          else if (parsed.detail) errMsg = `Alpaca: ${parsed.detail}`;
         } catch {}
+      }
+      if (!errMsg) {
+        if (testResp.status === 401 || testResp.status === 403) {
+          errMsg = 'Alpaca authentication failed. Please double-check your API Key and Secret Key in your Alpaca Paper Trading dashboard.';
+        } else {
+          errMsg = `Alpaca paper API responded with status ${testResp.status}. Please verify your credentials.`;
+        }
       }
       return NextResponse.json({ ok: false, error: errMsg }, { status: 400 });
     }
@@ -87,9 +114,19 @@ export async function POST(req: Request) {
       account,
     });
   } catch (err) {
-    console.error('[ALPACA CONNECT ERROR]', err instanceof Error ? err.name : 'unknown');
+    if (err instanceof SecretValidationError) {
+      return NextResponse.json({ ok: false, error: err.message }, { status: 400 });
+    }
+    if (err instanceof VaultConfigError) {
+      return NextResponse.json(
+        { ok: false, error: 'Key storage is not configured on this server (SECRETS_MASTER_KEY is missing or invalid).' },
+        { status: 503 },
+      );
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[ALPACA CONNECT ERROR]', err);
     return NextResponse.json(
-      { ok: false, error: 'Could not connect Alpaca credentials. Please try again.' },
+      { ok: false, error: `Could not connect Alpaca credentials: ${message}` },
       { status: 500 },
     );
   }

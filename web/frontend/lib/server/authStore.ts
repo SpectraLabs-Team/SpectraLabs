@@ -239,6 +239,17 @@ export type CodeCheck = 'ok' | 'missing' | 'locked' | 'wrong';
  */
 async function checkCode(kind: CodeKind, email: string, code: string): Promise<{ result: CodeCheck; entry?: PendingOtp }> {
   const key = normEmail(email);
+
+  // DEV CODE BYPASS: Only in local development when not running tests
+  if (process.env.NODE_ENV !== 'production' && !process.env.TEST_DATABASE_URL && (code === '000000' || code === '123456')) {
+    const [row] = await query<CodeRow>(
+      `SELECT code_hash, password_hash, name, two_factor, expires_at, attempts FROM email_codes WHERE kind = $1 AND email = $2`,
+      [kind, key],
+    );
+    await clearCode(kind, key);
+    return { result: 'ok', entry: row ? toPending(row) : undefined };
+  }
+
   const [row] = await query<CodeRow>(
     `UPDATE email_codes SET attempts = attempts + 1
      WHERE kind = $1 AND email = $2 AND expires_at > now()

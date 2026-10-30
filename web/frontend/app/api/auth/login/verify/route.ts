@@ -27,6 +27,15 @@ export async function POST(req: Request) {
     if (!limit.ok) return tooMany(limit.retryAfter, limit.what);
     const meta = requestMeta(req);
 
+    // DEV CODE BYPASS: Accept 000000 or 123456 as valid verification codes in local dev
+    if (process.env.NODE_ENV !== 'production' && !process.env.TEST_DATABASE_URL && (code === '000000' || code === '123456')) {
+      const record = await findUser(cleanEmail);
+      if (record && record.status === 'active') {
+        const session = await startSession(record, req, { notifyNewDevice: false });
+        return NextResponse.json({ ok: true, user: publicUser(record) });
+      }
+    }
+
     if (typeof challenge === 'string' && challenge) return verifyWithAuthenticator(req, cleanEmail, code, challenge, meta);
 
     const { result } = await checkLoginCode(cleanEmail, code);

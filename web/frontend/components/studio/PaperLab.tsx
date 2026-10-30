@@ -305,25 +305,34 @@ export function PaperLab() {
   const loadAlpacaData = useCallback(async () => {
     setLoadingData(true);
     try {
-      const [acc, posList, ordList] = await Promise.all([
-        getAlpacaAccount().catch((err) => {
-          console.warn('Account load error:', err);
-          return null;
-        }),
-        getAlpacaPositions().catch(() => []),
-        getAlpacaOrders('all', 100).catch(() => []),
+      const [accResult, posResult, ordResult] = await Promise.allSettled([
+        getAlpacaAccount(),
+        getAlpacaPositions(),
+        getAlpacaOrders('all', 100),
       ]);
 
-      if (acc) {
-        setAccount(acc);
-        try {
-          localStorage.setItem('spectra-alpaca-account-cache', JSON.stringify(acc));
-        } catch {
-          // ignore
+      if (accResult.status === 'fulfilled') {
+        const acc = accResult.value;
+        if (acc) {
+          setAccount(acc);
+          try {
+            localStorage.setItem('spectra-alpaca-account-cache', JSON.stringify(acc));
+          } catch {
+            // ignore
+          }
         }
+      } else {
+        const err = accResult.reason;
+        const msg = err instanceof Error ? err.message : 'Failed to retrieve Alpaca account data.';
+        toastError('Alpaca Account Error', msg);
       }
-      setPositions(posList);
-      setOrders(ordList);
+
+      if (posResult.status === 'fulfilled') {
+        setPositions(posResult.value || []);
+      }
+      if (ordResult.status === 'fulfilled') {
+        setOrders(ordResult.value || []);
+      }
 
       // Lazy load assets in background if empty
       getAlpacaAssets()
@@ -342,6 +351,7 @@ export function PaperLab() {
   useEffect(() => {
     checkStatus().then((connected) => {
       if (connected) {
+        setTradingMode('alpaca');
         loadAlpacaData();
       }
     });
@@ -1651,6 +1661,19 @@ export function PaperLab() {
                 <h3 className="text-lg font-bold">Connect Alpaca Paper Trading</h3>
                 <p className="text-xs text-ink/55">Workspace AES-256 encrypted credential storage</p>
               </div>
+            </div>
+
+            <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-3 text-xs leading-relaxed text-ink/70">
+              <span className="font-semibold text-accent">Paper Trading Keys Required:</span> Generate your keys in the{' '}
+              <a
+                href="https://app.alpaca.markets/paper/dashboard/overview"
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-accent font-medium"
+              >
+                Alpaca Paper Dashboard
+              </a>
+              . Key IDs usually start with <code className="font-mono font-bold text-accent">PK</code>. Live keys (<code className="font-mono text-loss">AK...</code>) cannot be used in paper mode.
             </div>
 
             {connectError && (

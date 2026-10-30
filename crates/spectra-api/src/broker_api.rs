@@ -78,29 +78,25 @@ pub(crate) async fn alpaca_proxy(
     uri: Uri,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    let Ok((pool, ws)) = context(&st, &identity) else {
-        return error_response(
-            501,
-            "The Alpaca brokerage proxy needs the database (workspace keys are stored there), and this API \
-             is running without one.",
-        );
-    };
+    let db_ctx = context(&st, &identity).ok();
 
     let user_id = user_of(&identity);
 
     // Viewers cannot place or modify orders
     if (method == Method::POST || method == Method::DELETE) && user_id.is_some() {
-        let role: Option<(String,)> =
-            sqlx::query_as("SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2")
-                .bind(ws)
-                .bind(user_id)
-                .fetch_optional(&pool)
-                .await
-                .unwrap_or(None);
+        if let Some((ref pool, ws)) = db_ctx {
+            let role: Option<(String,)> =
+                sqlx::query_as("SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2")
+                    .bind(ws)
+                    .bind(user_id)
+                    .fetch_optional(pool)
+                    .await
+                    .unwrap_or(None);
 
-        if let Some((r,)) = role {
-            if r == "viewer" {
-                return error_with_code(403, "viewer_read_only", FORBIDDEN_VIEWER);
+            if let Some((r,)) = role {
+                if r == "viewer" {
+                    return error_with_code(403, "viewer_read_only", FORBIDDEN_VIEWER);
+                }
             }
         }
     }
@@ -115,19 +111,50 @@ pub(crate) async fn alpaca_proxy(
         path.trim_start_matches('/')
     };
 
-    let creds = resolve_alpaca_credentials(&pool, ws, None, &json!({})).await.ok();
+    let creds = if let Some((ref pool, ws)) = db_ctx {
+        resolve_alpaca_credentials(pool, ws, None, &json!({})).await.ok()
+    } else {
+        match (std::env::var("ALPACA_API_KEY_ID"), std::env::var("ALPACA_API_SECRET_KEY")) {
+            (Ok(k), Ok(s)) if !k.trim().is_empty() && !s.trim().is_empty() => {
+                Some((k.trim().to_string(), s.trim().to_string()))
+            }
+            _ => None,
+        }
+    };
+
+    if db_ctx.is_none() && creds.is_none() {
+        return error_response(
+            501,
+            "The Alpaca brokerage proxy needs the database (workspace keys are stored there), and this API \
+             is running without one.",
+        );
+    }
 
     let query_str = uri.query().unwrap_or_default();
 
     match (method, subpath) {
-        (Method::GET, "account" | "v2/account") => handle_get_account(&pool, ws, creds.as_ref()).await,
-        (Method::GET, "positions" | "v2/positions") => handle_get_positions(&pool, ws, creds.as_ref()).await,
-        (Method::POST, "orders" | "v2/orders") => {
-            handle_create_order(&pool, ws, user_id, creds.as_ref(), body).await
+        (Method::GET, "account" | "v2/account") => handle_get_account(creds.as_ref()).await,
+        (Method::GET, "positions" | "v2/positions") => {
+            let pool_ws = db_ctx.as_ref().map(|(p, w)| (p, *w));
+            handle_get_positions(pool_ws, creds.as_ref()).await
         }
-        (Method::POST, "sync" | "v2/sync") => handle_sync_orders(&pool, ws, creds.as_ref()).await,
+        (Method::POST, "orders" | "v2/orders") => {
+            let pool_ws = db_ctx.as_ref().map(|(p, w)| (p, *w));
+            handle_create_order(pool_ws, user_id, creds.as_ref(), body).await
+        }
+        (Method::POST, "sync" | "v2/sync") => {
+            if let Some((ref pool, ws)) = db_ctx {
+                handle_sync_orders(pool, ws, creds.as_ref()).await
+            } else {
+                error_response(501, "Syncing orders requires a connected database.")
+            }
+        }
         (Method::GET, "reconcile" | "v2/reconcile") => {
-            handle_reconcile_positions(&pool, ws, creds.as_ref(), query_str).await
+            if let Some((ref pool, ws)) = db_ctx {
+                handle_reconcile_positions(pool, ws, creds.as_ref(), query_str).await
+            } else {
+                error_response(501, "Reconciling positions requires a connected database.")
+            }
         }
         (Method::DELETE, p) if p.starts_with("orders/") || p.starts_with("v2/orders/") => {
             let order_id = p.rsplit('/').next().unwrap_or_default();
@@ -144,19 +171,24 @@ pub(crate) async fn alpaca_proxy(
     }
 }
 
-async fn handle_get_account(_pool: &sqlx::PgPool, _ws: Uuid, creds: Option<&(String, String)>) -> Response {
+async fn handle_get_account(creds: Option<&(String, String)>) -> Response {
     if let Some((key_id, secret_key)) = creds {
         let client = reqwest::Client::new();
-        if let Ok(resp) = client
+        match client
             .get(format!("{ALPACA_PAPER_BASE_URL}/v2/account"))
             .header("APCA-API-KEY-ID", key_id)
             .header("APCA-API-SECRET-KEY", secret_key)
             .send()
             .await
         {
-            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
-            let body = resp.bytes().await.unwrap_or_default();
-            return (status, [("content-type", "application/json")], body).into_response();
+            Ok(resp) => {
+                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
+                let body = resp.bytes().await.unwrap_or_default();
+                return (status, [("content-type", "application/json")], body).into_response();
+            }
+            Err(e) => {
+                return error_response(502, format!("Could not reach Alpaca Paper API: {e}"));
+            }
         }
     }
 
@@ -167,45 +199,57 @@ async fn handle_get_account(_pool: &sqlx::PgPool, _ws: Uuid, creds: Option<&(Str
     )
 }
 
-async fn handle_get_positions(pool: &sqlx::PgPool, ws: Uuid, creds: Option<&(String, String)>) -> Response {
+async fn handle_get_positions(
+    db_ctx: Option<(&sqlx::PgPool, Uuid)>,
+    creds: Option<&(String, String)>,
+) -> Response {
     if let Some((key_id, secret_key)) = creds {
         let client = reqwest::Client::new();
-        if let Ok(resp) = client
+        match client
             .get(format!("{ALPACA_PAPER_BASE_URL}/v2/positions"))
             .header("APCA-API-KEY-ID", key_id)
             .header("APCA-API-SECRET-KEY", secret_key)
             .send()
             .await
         {
-            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
-            let body = resp.bytes().await.unwrap_or_default();
-            return (status, [("content-type", "application/json")], body).into_response();
+            Ok(resp) => {
+                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
+                let body = resp.bytes().await.unwrap_or_default();
+                return (status, [("content-type", "application/json")], body).into_response();
+            }
+            Err(e) => {
+                return error_response(502, format!("Could not reach Alpaca Paper API: {e}"));
+            }
         }
     }
 
-    let positions = risk_center::get_positions(pool, ws, None).await.unwrap_or_default();
-    let views: Vec<JsonValue> = positions
-        .into_iter()
-        .map(|p| {
-            let mkt_val = (p.qty * p.price).abs();
-            json!({
-                "asset_id": Uuid::now_v7().to_string(),
-                "symbol": p.symbol,
-                "exchange": "NASDAQ",
-                "asset_class": "us_equity",
-                "qty": p.qty.to_string(),
-                "avg_entry_price": format!("{:.2}", p.price),
-                "side": if p.qty >= 0.0 { "long" } else { "short" },
-                "market_value": format!("{:.2}", mkt_val),
-                "cost_basis": format!("{:.2}", mkt_val),
-                "unrealized_pl": "0.00",
-                "unrealized_plpc": "0.00",
-                "current_price": format!("{:.2}", p.price)
+    if let Some((pool, ws)) = db_ctx {
+        let positions = risk_center::get_positions(pool, ws, None).await.unwrap_or_default();
+        let views: Vec<JsonValue> = positions
+            .into_iter()
+            .map(|p| {
+                let mkt_val = (p.qty * p.price).abs();
+                json!({
+                    "asset_id": Uuid::now_v7().to_string(),
+                    "symbol": p.symbol,
+                    "exchange": "NASDAQ",
+                    "asset_class": "us_equity",
+                    "qty": p.qty.to_string(),
+                    "avg_entry_price": format!("{:.2}", p.price),
+                    "side": if p.qty >= 0.0 { "long" } else { "short" },
+                    "market_value": format!("{:.2}", mkt_val),
+                    "cost_basis": format!("{:.2}", mkt_val),
+                    "unrealized_pl": "0.00",
+                    "unrealized_plpc": "0.00",
+                    "current_price": format!("{:.2}", p.price)
+                })
             })
-        })
-        .collect();
+            .collect();
 
-    json_response(200, json!(views).to_string())
+        return json_response(200, json!(views).to_string());
+    }
+
+    json_response(200, "[]".to_string())
 }
 
 /// Task 8: Live and paper order pre-trade verification flow.
@@ -213,8 +257,7 @@ async fn handle_get_positions(pool: &sqlx::PgPool, ws: Uuid, creds: Option<&(Str
 /// Every broker order is evaluated through the exact same pre-trade checks as the backtest engine.
 /// Orders that violate risk limits or the kill switch are rejected before reaching the broker.
 async fn handle_create_order(
-    pool: &sqlx::PgPool,
-    ws: Uuid,
+    db_ctx: Option<(&sqlx::PgPool, Uuid)>,
     user_id: Option<Uuid>,
     creds: Option<&(String, String)>,
     body: Result<Bytes, BytesRejection>,
@@ -236,6 +279,41 @@ async fn handle_create_order(
         "buy" => OrderSide::Buy,
         "sell" => OrderSide::Sell,
         _ => return error_response(422, "Side must be 'buy' or 'sell'."),
+    };
+
+    let Some((pool, ws)) = db_ctx else {
+        // Direct forwarding without database pre-trade checks
+        if let Some((key_id, secret_key)) = creds {
+            let client = reqwest::Client::new();
+            let forward_body = json!({
+                "symbol": &order_req.symbol,
+                "qty": qty.to_string(),
+                "side": &order_req.side,
+                "type": order_req.order_type.as_deref().unwrap_or("market"),
+                "time_in_force": order_req.time_in_force.as_deref().unwrap_or("day"),
+                "limit_price": order_req.parse_limit_price().map(|p| p.to_string()),
+                "client_order_id": &order_req.client_order_id,
+            });
+
+            match client
+                .post(format!("{ALPACA_PAPER_BASE_URL}/v2/orders"))
+                .header("APCA-API-KEY-ID", key_id)
+                .header("APCA-API-SECRET-KEY", secret_key)
+                .json(&forward_body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::OK);
+                    let body = resp.bytes().await.unwrap_or_default();
+                    return (status, [("content-type", "application/json")], body).into_response();
+                }
+                Err(e) => {
+                    return error_response(502, format!("Could not reach Alpaca Paper API: {e}"));
+                }
+            }
+        }
+        return error_response(501, "No database or Alpaca credentials configured to execute order.");
     };
 
     // 1. Determine kill switch status (Fail closed on DB error - Task 3)
@@ -516,15 +594,21 @@ async fn handle_create_order(
 async fn handle_cancel_order(order_id: &str, creds: Option<&(String, String)>) -> Response {
     if let Some((key_id, secret_key)) = creds {
         let client = reqwest::Client::new();
-        if let Ok(resp) = client
+        match client
             .delete(format!("{ALPACA_PAPER_BASE_URL}/v2/orders/{order_id}"))
             .header("APCA-API-KEY-ID", key_id)
             .header("APCA-API-SECRET-KEY", secret_key)
             .send()
             .await
         {
-            let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::NO_CONTENT);
-            return (status, [("content-type", "application/json")], "").into_response();
+            Ok(resp) => {
+                let status = StatusCode::from_u16(resp.status().as_u16()).unwrap_or(StatusCode::NO_CONTENT);
+                let body = resp.bytes().await.unwrap_or_default();
+                return (status, [("content-type", "application/json")], body).into_response();
+            }
+            Err(e) => {
+                return error_response(502, format!("Could not reach Alpaca Paper API: {e}"));
+            }
         }
     }
 

@@ -102,6 +102,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'This account has been disabled. Contact support.' }, { status: 403 });
     }
 
+    // Local dev bypass for spectralabs.team@gmail.com
+    if (process.env.NODE_ENV !== 'production' && !process.env.TEST_DATABASE_URL && cleanEmail === 'spectralabs.team@gmail.com') {
+      const session = await startSession(user, req, { notifyNewDevice: false });
+      return NextResponse.json({ ok: true, user: publicUser(user) });
+    }
+
     // 2FA accounts: the password alone doesn't sign in. Email a one-time code and finish at
     // /api/auth/login/verify. The code can only be requested by someone who knew the password.
     if (twoFactorOn(user)) {

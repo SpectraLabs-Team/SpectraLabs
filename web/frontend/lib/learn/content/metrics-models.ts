@@ -8,7 +8,7 @@ export const modelMetrics = [
     title: 'Engine Benchmark: Latency, Throughput and Speed-up',
     level: 'Intermediate',
     summary: 'How fast the risk engine runs a Monte Carlo VaR calculation on this machine, measured as median latency, paths per second and the parallel speed-up.',
-    keywords: ['benchmark', 'latency', 'p50', 'median', 'throughput', 'paths per second', 'speed-up', 'parallel', 'performance'],
+    keywords: ['benchmark', 'latency', 'p50', 'median', 'throughput', 'paths per second', 'speed-up', 'parallel', 'engine performance'],
     what: [
       'The Benchmark Lab times the risk engine running a full **99% Monte Carlo VaR** calculation on the sample portfolio, at several path counts and on two backends: **CPU** (single-threaded reference) and **Parallel** (all cores). Each size runs a few warm-up passes that are discarded, then a number of timed repetitions.',
       'From the timed runs it reports the **median latency (p50)**, the **throughput** in paths per second, and the **speed-up** of Parallel over CPU.',

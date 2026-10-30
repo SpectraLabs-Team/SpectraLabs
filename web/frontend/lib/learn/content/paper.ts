@@ -103,7 +103,7 @@ export const paper: Lesson[] = [
     level: 'Beginner',
     featured: true,
     summary: 'Each candle shows one bar’s open, high, low and close. The body is open to close; the wicks reach the high and low.',
-    keywords: ['candlestick', 'ohlc', 'chart', 'wick', 'timeframe', 'volume'],
+    keywords: ['candlestick', 'ohlc', 'chart', 'wick', 'timeframe', 'volume bars'],
     blocks: [
       { type: 'diagram', id: 'candlestick', caption: 'A rising (green) and a falling (red) candle.' },
       { type: 'list', items: [
@@ -127,7 +127,7 @@ export const paper: Lesson[] = [
     title: 'Placing Buy and Sell Orders',
     level: 'Beginner',
     summary: 'Use the order ticket to choose side, type and quantity, review the order, then submit it to your Alpaca paper account.',
-    keywords: ['order ticket', 'buy', 'sell', 'market', 'limit', 'submit', 'review'],
+    keywords: ['order ticket', 'buy', 'sell', 'limit', 'submit', 'review'],
     blocks: [
       { type: 'list', ordered: true, items: [
         'Pick a symbol from search or your watchlist.',

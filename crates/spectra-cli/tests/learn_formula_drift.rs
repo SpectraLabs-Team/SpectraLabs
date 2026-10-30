@@ -16,11 +16,14 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
+use spectra_core::{Fill, Ledger, LedgerConfig, Money, Price, Qty, Side};
+use spectra_engine::backtest::annualized_turnover;
 use spectra_engine::performance::cagr;
 use spectra_research::{
     compute_benchmark_metrics, expected_max_sharpe, walk_forward_efficiency, TrialLedger, TrialSummary,
     WalkForwardResult,
 };
+use spectra_risk::engine::paths_per_second;
 use spectra_risk::portfolio::Portfolio;
 use spectra_risk::{LimitUtilization, PortfolioSnapshot, PositionSnapshot, RiskLimits};
 
@@ -38,17 +41,14 @@ const PINNED_IN_FRONTEND: &[&str] = &[
     "profit_factor",
     "payoff_ratio",
     "expectancy",
+    // Computed in the browser (BenchmarkLab.tsx); test-learn.mjs pins the expression.
+    "parallel_speedup",
 ];
 
-/// Registry formulas with no single library function to check against yet, and why.
-const NOT_YET_PINNED: &[(&str, &str)] = &[
-    ("paths_per_second", "reported by the benchmark harness"),
-    ("parallel_speedup", "reported by the benchmark harness"),
-    ("final_equity", "ledger state at the end of a backtest"),
-    ("net_pnl", "ledger state at the end of a backtest"),
-    ("unrealized_pnl", "ledger state for an open position"),
-    ("turnover", "needs a full BacktestResult (ledger journal)"),
-];
+/// Registry formulas with no check yet, each with the reason. Empty today: every tooltip formula is
+/// checked. Add an entry here (rather than skipping the coverage test) when a new formula can't be
+/// pinned straight away.
+const NOT_YET_PINNED: &[(&str, &str)] = &[];
 
 /// `metric id -> tooltip formula` for every registry entry that has a formula.
 fn registry_formulas() -> BTreeMap<String, String> {
@@ -244,7 +244,95 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
     let emax_written = v.sqrt()
         * ((1.0 - gamma) * inv_norm(1.0 - 1.0 / n) + gamma * inv_norm(1.0 - 1.0 / (n * std::f64::consts::E)));
 
+    // Ledger books: a long built in two buys and partly sold, a short with a borrow fee, and a
+    // dividend on the long. Values are read off the books, not a backtest.
+    let money = |v: f64| Money::from_f64(v).unwrap();
+    let price = |v: f64| Price::from_f64(v).unwrap();
+    let qty = |v: f64| Qty::from_f64(v).unwrap();
+    let mut books = Ledger::new(LedgerConfig::reference(true, false));
+    books.deposit(money(100_000.0), 1).unwrap();
+    let fills = [
+        (0, Side::Buy, 100.0, 50.0, 1.0),
+        (0, Side::Buy, 30.0, 54.0, 1.0),
+        (0, Side::Sell, 40.0, 57.0, 1.0),
+        (1, Side::Sell, 20.0, 210.0, 1.5),
+    ];
+    for (i, (instrument, side, q, p, fee)) in fills.into_iter().enumerate() {
+        let f = Fill { instrument, side, qty: qty(q), price: price(p), fee: money(fee), ts_ns: 2 + i as i64 };
+        books.apply_fill(&f).unwrap();
+    }
+    let (last_long, last_short) = (56.5, 200.0);
+    books.mark(0, price(last_long)).unwrap();
+    books.mark(1, price(last_short)).unwrap();
+    let (borrow, dividend) = (3.25, 12.0);
+    books.charge_borrow_fee(1, money(borrow), 10).unwrap();
+    books.apply_dividend(0, money(dividend), 11).unwrap();
+
+    // Long: 130 bought at an average of (100 × 50 + 30 × 54) / 130, then 40 sold at 57.
+    let avg_long = (100.0 * 50.0 + 30.0 * 54.0) / 130.0;
+    let (q_long, q_short) = (90.0, -20.0);
+    let cash = 100_000.0 - 100.0 * 50.0 - 30.0 * 54.0 + 40.0 * 57.0 + 20.0 * 210.0 - 4.5 - borrow + dividend;
+    let unrealized_long = q_long * (last_long - avg_long);
+    let unrealized_short = q_short * (last_short - 210.0);
+    let realized_long = 40.0 * (57.0 - avg_long);
+    let long = books.position(0);
+    let engine_net_long = spectra_backtest::output::net_pnl(
+        long.realized,
+        books.position_value(0).unwrap().checked_sub(long.cost).unwrap(),
+        long.fees,
+        Money::ZERO,
+        money(dividend),
+    )
+    .unwrap()
+    .to_f64();
+
+    // Turnover on a short equity series.
+    let traded = 100.0 * 50.0 + 30.0 * 54.0 + 40.0 * 57.0 + 20.0 * 210.0;
+    let equity_series = [100_000.0, 100_400.0, 99_800.0, 100_900.0, 101_300.0];
+    let periods = (equity_series.len() - 1) as f64;
+    let mean_equity = equity_series.iter().sum::<f64>() / equity_series.len() as f64;
+
     BTreeMap::from([
+        (
+            "final_equity",
+            (
+                "cash + Σ qty × last close",
+                cash + q_long * last_long + q_short * last_short,
+                books.equity().unwrap().to_f64(),
+            ),
+        ),
+        (
+            "unrealized_pnl",
+            (
+                "qty × (price − average cost)",
+                unrealized_long + unrealized_short,
+                books.unrealized_pnl().unwrap().to_f64(),
+            ),
+        ),
+        (
+            "net_pnl",
+            (
+                "realized + unrealized − fees − borrow + dividends",
+                realized_long + unrealized_long - 3.0 - 0.0 + dividend,
+                engine_net_long,
+            ),
+        ),
+        (
+            "turnover",
+            (
+                "Σ |notional| / mean equity × ppy / n",
+                traded / mean_equity * 252.0 / periods,
+                annualized_turnover(traded, &equity_series, 252.0),
+            ),
+        ),
+        (
+            "paths_per_second",
+            (
+                "paths × 1000 / median latency (ms)",
+                250_000.0 * 1000.0 / 412.5,
+                paths_per_second(250_000, 412.5),
+            ),
+        ),
         ("beta", ("cov(r_s, r_b) / var(r_b)", beta, bm.beta)),
         (
             "alpha",

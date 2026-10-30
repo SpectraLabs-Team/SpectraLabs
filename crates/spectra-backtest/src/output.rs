@@ -428,6 +428,20 @@ fn applied_actions(r: &BacktestResult) -> usize {
     r.ledger.journal().iter().filter(|e| matches!(e.kind, EntryType::Split | EntryType::Dividend)).count()
 }
 
+/// Net P&L of a position: `realized + unrealized − fees − borrow + dividends`.
+///
+/// # Errors
+/// Overflow.
+pub fn net_pnl(
+    realized: Money,
+    unrealized: Money,
+    fees: Money,
+    borrow: Money,
+    dividends: Money,
+) -> Result<Money> {
+    Ok(realized.checked_add(unrealized)?.checked_sub(fees)?.checked_sub(borrow)?.checked_add(dividends)?)
+}
+
 /// P&L and costs per instrument, from the ledger.
 fn instruments_json(out: &BacktestOutput) -> Result<Json> {
     let l = &out.result.ledger;
@@ -451,12 +465,7 @@ fn instruments_json(out: &BacktestOutput) -> Result<Json> {
         let unrealized = value.checked_sub(p.cost)?;
         let (count, traded, borrow, dividends) =
             fills.get(&id).copied().unwrap_or((0, 0.0, Money::ZERO, Money::ZERO));
-        let net = p
-            .realized
-            .checked_add(unrealized)?
-            .checked_sub(p.fees)?
-            .checked_sub(borrow)?
-            .checked_add(dividends)?;
+        let net = net_pnl(p.realized, unrealized, p.fees, borrow, dividends)?;
         let symbol = out.symbols.get(id as usize).map_or(Json::Null, |s| Json::string(s.clone()));
         arr.push(
             Json::object()

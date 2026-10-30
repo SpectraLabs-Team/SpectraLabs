@@ -224,8 +224,12 @@ export function TradingChart({
       return paddedMin + norm * fullPriceRange;
     };
 
-    const candleWidth = Math.max(2, chartWidth / count);
-    const bodyWidth = Math.max(1, candleWidth * 0.72);
+    const minSlots = 30;
+    const effectiveSlots = Math.max(count, minSlots);
+    const candleSlotWidth = chartWidth / effectiveSlots;
+    const candleWidth = Math.min(24, Math.max(2, candleSlotWidth));
+    const bodyWidth = Math.max(1, Math.min(18, candleWidth * 0.74));
+    const xOffset = count < minSlots ? Math.max(0, chartWidth - count * candleSlotWidth - 10) : 0;
 
     // Grid lines (horizontal price lines)
     const priceSteps = 6;
@@ -251,7 +255,7 @@ export function TradingChart({
     // Grid lines (vertical time lines)
     const timeStep = Math.max(1, Math.floor(count / 6));
     for (let i = 0; i < count; i += timeStep) {
-      const x = Math.round(i * candleWidth + candleWidth / 2);
+      const x = Math.round(xOffset + i * candleSlotWidth + candleSlotWidth / 2);
       ctx.beginPath();
       ctx.moveTo(x, 10);
       ctx.lineTo(x, chartHeight);
@@ -281,7 +285,7 @@ export function TradingChart({
 
     for (let i = 0; i < count; i++) {
       const b = visibleBars[i];
-      const x = i * candleWidth + (candleWidth - bodyWidth) / 2;
+      const x = xOffset + i * candleSlotWidth + (candleSlotWidth - bodyWidth) / 2;
       const isBarUp = b.c >= b.o;
       const vHeight = maxVolume > 0 ? (b.v / maxVolume) * volHeightMax : 0;
       const vY = volBaseY - vHeight;
@@ -297,8 +301,8 @@ export function TradingChart({
       const candleColor = isBarUp ? '#10B981' : '#EF4444';
       const wickColor = isBarUp ? '#34D399' : '#F87171';
 
-      const xCenter = i * candleWidth + candleWidth / 2;
-      const xBody = i * candleWidth + (candleWidth - bodyWidth) / 2;
+      const xCenter = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+      const xBody = xOffset + i * candleSlotWidth + (candleSlotWidth - bodyWidth) / 2;
 
       const yHigh = priceToY(b.h);
       const yLow = priceToY(b.l);
@@ -423,9 +427,14 @@ export function TradingChart({
     if (x <= chartWidth && x >= 0) {
       const { start, end } = viewWindow;
       const count = end - start + 1;
-      const candleWidth = chartWidth / count;
-      const localIdx = Math.floor(x / candleWidth);
-      const actualIdx = Math.min(bars.length - 1, Math.max(0, start + localIdx));
+      const minSlots = 30;
+      const effectiveSlots = Math.max(count, minSlots);
+      const candleSlotWidth = chartWidth / effectiveSlots;
+      const candleWidth = Math.min(24, Math.max(2, candleSlotWidth));
+      const xOffset = count < minSlots ? Math.max(0, chartWidth - count * candleSlotWidth - 10) : 0;
+
+      const localIdx = Math.floor((x - xOffset) / candleSlotWidth);
+      const actualIdx = Math.min(bars.length - 1, Math.max(0, start + Math.max(0, localIdx)));
 
       setHoveredIdx(actualIdx);
       setCrosshair({ x, y, price: 0 });
@@ -433,7 +442,7 @@ export function TradingChart({
       // Handle dragging (pan)
       if (isDragging && dragStartRef.current) {
         const dx = e.clientX - dragStartRef.current.x;
-        const indexShift = Math.round(dx / candleWidth);
+        const indexShift = Math.round(dx / candleSlotWidth);
         const newStart = Math.max(0, Math.min(bars.length - count, dragStartRef.current.startIdx - indexShift));
         const newEnd = Math.min(bars.length - 1, newStart + count - 1);
         setViewWindow({ start: newStart, end: newEnd });
@@ -532,11 +541,14 @@ export function TradingChart({
         {/* Actions & Status */}
         <div className="flex items-center gap-2">
           <span
-            className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[10.5px] font-medium text-profit"
-            title="Real Alpaca market data feed"
+            className="flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-profit shadow-sm shadow-emerald-500/10"
+            title="Real-Time Active Feed · Refreshes every 3s"
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            {dataStatus}
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            </span>
+            <span>LIVE · {dataStatus}</span>
           </span>
 
           <button

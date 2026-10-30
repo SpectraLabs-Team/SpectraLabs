@@ -501,6 +501,10 @@ pub(crate) async fn create_order(
     if symbol.is_empty() {
         return error_response(422, "Symbol is required.");
     }
+    // M24.4: options are backtest-only until the M26 review signs off (fails closed).
+    if let Some(refusal) = crate::instruments_api::refuse_options(&pool, ws, req.symbol.trim()).await {
+        return refusal;
+    }
     if req.qty <= 0.0 {
         return error_response(422, "Quantity must be positive.");
     }

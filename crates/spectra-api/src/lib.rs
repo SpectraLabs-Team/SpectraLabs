@@ -840,6 +840,7 @@ fn backtest_routes() -> Router<AppState> {
             only(get(instruments_api::list_fx_rates).post(instruments_api::put_fx_rates)),
         )
         .route("/api/v1/pricing/bond", only(post(pricing_api::price_bond)))
+        .route("/api/v1/pricing/option", only(post(pricing_api::price_option)))
         .route(
             "/api/v1/symbol-changes",
             only(get(lifecycle_api::list_symbol_changes).post(lifecycle_api::create_symbol_change)),

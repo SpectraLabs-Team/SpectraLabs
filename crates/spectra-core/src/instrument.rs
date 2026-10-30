@@ -95,6 +95,44 @@ pub struct Instrument {
     pub coupon_frequency: Option<u32>,
     /// How accrued interest counts days (bonds).
     pub day_count: Option<DayCount>,
+    /// Call or put (options). Options are European and cash-settled at expiry.
+    pub option_right: Option<OptionRight>,
+}
+
+/// Call or put.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OptionRight {
+    /// Right to buy the underlying at the strike.
+    Call,
+    /// Right to sell the underlying at the strike.
+    Put,
+}
+
+impl OptionRight {
+    /// Name used in requests and storage.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Call => "call",
+            Self::Put => "put",
+        }
+    }
+
+    /// The right called `name`.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "call" => Some(Self::Call),
+            "put" => Some(Self::Put),
+            _ => None,
+        }
+    }
+
+    /// Value at expiry for an underlying price `spot` and strike `strike`.
+    pub fn intrinsic(self, spot: f64, strike: f64) -> f64 {
+        match self {
+            Self::Call => (spot - strike).max(0.0),
+            Self::Put => (strike - spot).max(0.0),
+        }
+    }
 }
 
 /// How a fraction of a year is counted between two dates (bond accrued interest).
@@ -163,6 +201,7 @@ impl Instrument {
             underlying: None,
             coupon_frequency: None,
             day_count: None,
+            option_right: None,
         }
     }
 
@@ -222,6 +261,9 @@ impl Instrument {
             forbid(self.coupon_frequency.is_some(), "a coupon frequency")?;
             forbid(self.day_count.is_some(), "a day count")?;
         }
+        if self.kind != InstrumentType::Option {
+            forbid(self.option_right.is_some(), "a call or put right")?;
+        }
         match self.kind {
             InstrumentType::Equity => {
                 forbid(self.expiry_ns.is_some(), "an expiry")?;
@@ -242,6 +284,8 @@ impl Instrument {
             InstrumentType::Option => {
                 need(self.expiry_ns.is_some(), "an expiry")?;
                 need(self.strike.is_some(), "a strike")?;
+                need(self.option_right.is_some(), "a right (call or put)")?;
+                need(self.underlying.is_some(), "an underlying")?;
                 forbid(self.maturity_ns.is_some(), "a maturity")?;
                 forbid(self.coupon_rate.is_some(), "a coupon rate")?;
             }
@@ -317,6 +361,10 @@ mod tests {
         o.kind = InstrumentType::Option;
         assert!(o.validate().unwrap_err().contains("strike"));
         o.strike = Some(px(100));
+        assert!(o.validate().unwrap_err().contains("right"));
+        o.option_right = Some(OptionRight::Call);
+        assert!(o.validate().unwrap_err().contains("underlying"));
+        o.underlying = Some("SPX".into());
         assert_eq!(o.validate(), Ok(()));
 
         let mut b = Instrument::equity("UST10", "USD", Price::from_raw(1), lot());

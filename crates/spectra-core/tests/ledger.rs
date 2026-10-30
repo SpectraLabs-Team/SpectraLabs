@@ -718,3 +718,26 @@ fn listing_a_future_marks_it_to_market() {
     assert_eq!(l.journal().len(), 1);
     assert_eq!(l.journal()[0].kind, EntryType::Listing);
 }
+
+// ---------------------------------------------------------------- M24.4 expiry at zero
+
+#[test]
+fn an_expired_option_closes_at_zero() {
+    let mut l = reference(true, false);
+    l.register_instrument(AAPL, r(100), 0).unwrap();
+    l.deposit(m(10_000.0), 0).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Buy, 2.0, 3.5, 1.0)).unwrap(); // premium 700 + 1 fee
+    l.expire_position(AAPL, 5).unwrap();
+    assert_eq!(l.position(AAPL).qty, Qty::ZERO);
+    assert_eq!(l.realized_pnl(), m(-700.0));
+    assert_eq!(l.cash(), m(10_000.0 - 701.0), "no cash moves at expiry");
+    expect_invariants(&l);
+    // A short keeps the premium.
+    l.register_instrument(2, r(100), 0).unwrap();
+    l.apply_fill(&fill(2, Side::Sell, 1.0, 2.0, 0.0)).unwrap();
+    l.expire_position(2, 6).unwrap();
+    assert_eq!(l.position(2).realized, m(200.0));
+    expect_invariants(&l);
+    assert_eq!(l.expire_position(2, 7), rej(Reject::InvalidFill), "nothing left to expire");
+    assert_eq!(Ledger::replay(*l.config(), l.journal()).unwrap().realized_pnl(), l.realized_pnl());
+}

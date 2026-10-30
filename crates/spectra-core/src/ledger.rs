@@ -171,6 +171,11 @@ pub enum EntryType {
     /// position, < 0 paid on a short one; `fill.qty` is the position it was
     /// paid on. Booked as coupon income, separate from dividends.
     Coupon,
+    /// A position closed at zero value: an option that expired worthless.
+    /// `fill` holds the closing side and quantity (price and fee zero);
+    /// `realized` is minus the cost basis released. No cash moves for an
+    /// instrument whose cost was paid; a marked-to-market one settles `realized`.
+    Expire,
 }
 
 /// One accepted operation.
@@ -565,6 +570,49 @@ impl Ledger {
         Ok(())
     }
 
+    /// Close the whole position in `instrument` at zero value (an option that
+    /// expired worthless): the cost basis becomes realized loss (or, for a
+    /// short, realized gain).
+    ///
+    /// # Errors
+    /// `InvalidFill` if there is no position; overflow.
+    pub fn expire_position(&mut self, instrument: InstrumentId, ts_ns: i64) -> Result<()> {
+        let cur = self.position(instrument);
+        if cur.qty.is_zero() {
+            return Err(Reject::InvalidFill.into());
+        }
+        let realized = cur.cost.checked_neg()?;
+        let new_cash = if self.marked_to_market.contains(&instrument) {
+            self.cash.checked_add(realized)?
+        } else {
+            self.cash
+        };
+        let new_realized = self.realized.checked_add(realized)?;
+        let side = if cur.qty.raw() > 0 { Side::Sell } else { Side::Buy };
+        let fill = Fill { instrument, side, qty: cur.qty.checked_abs()?, ts_ns, ..Fill::default() };
+        self.journal.push(JournalEntry {
+            seq: self.journal.len() as u64,
+            kind: EntryType::Expire,
+            ts_ns,
+            amount: Money::ZERO,
+            fill,
+            realized,
+            cash_after: new_cash,
+        });
+        self.positions.insert(
+            instrument,
+            Position {
+                qty: Qty::ZERO,
+                cost: Money::ZERO,
+                realized: cur.realized.checked_add(realized)?,
+                fees: cur.fees,
+            },
+        );
+        self.cash = new_cash;
+        self.realized = new_realized;
+        Ok(())
+    }
+
     /// Apply an executed fill. Nothing changes unless it returns `Ok`.
     ///
     /// # Errors
@@ -911,6 +959,7 @@ impl Ledger {
                 EntryType::Split => out.split_quantity(e.fill.instrument, e.fill.qty, e.ts_ns),
                 EntryType::Dividend => out.apply_dividend(e.fill.instrument, e.amount, e.ts_ns),
                 EntryType::Coupon => out.apply_coupon(e.fill.instrument, e.amount, e.ts_ns),
+                EntryType::Expire => out.expire_position(e.fill.instrument, e.ts_ns),
                 EntryType::Listing => {
                     let m = Ratio::from_raw(e.fill.qty.raw());
                     out.register_contract(e.fill.instrument, m, e.amount.raw() == 1, e.ts_ns)
@@ -989,6 +1038,15 @@ impl Ledger {
                 EntryType::Coupon => {
                     t.cash = t.cash.checked_add(e.amount)?;
                     t.coupons = t.coupons.checked_add(e.amount)?;
+                }
+                EntryType::Expire => {
+                    let f = &e.fill;
+                    if t.mtm.contains(&f.instrument) {
+                        t.cash = t.cash.checked_add(e.realized)?;
+                    }
+                    t.realized = t.realized.checked_add(e.realized)?;
+                    let q = t.qty.entry(f.instrument).or_default();
+                    *q = q.checked_add(if f.side == Side::Buy { f.qty } else { f.qty.checked_neg()? })?;
                 }
                 EntryType::Listing => {
                     let m = Ratio::from_raw(e.fill.qty.raw());

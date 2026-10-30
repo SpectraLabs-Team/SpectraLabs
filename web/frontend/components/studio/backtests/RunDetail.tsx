@@ -21,6 +21,7 @@ import {
   type DatasetVersion,
   type DownloadKind,
   type BondsSummary,
+  type OptionsSummary,
   type FuturesRoll,
   type FuturesSummary,
   type InstrumentSummary,
@@ -482,6 +483,7 @@ function Results({
 
       {summary.futures && <FuturesCard futures={summary.futures} />}
       {summary.bonds && <BondsCard bonds={summary.bonds} />}
+      {summary.options && <OptionsCard options={summary.options} />}
 
       {b.run_id && <ExperimentLineageCard runId={b.run_id} />}
 
@@ -563,6 +565,65 @@ function expiryDate(ns: number): string {
   return new Date(ns / 1e6).toISOString().slice(0, 10);
 }
 
+/** M24.4: each option's implied volatility and Greeks at its last price, and its settlement. */
+function OptionsCard({ options }: { options: OptionsSummary }) {
+  const fmt = (v: number | undefined, digits: number) => (v === undefined ? '—' : v.toFixed(digits));
+  return (
+    <GlassCard as="section" className="overflow-hidden">
+      <div className="border-b border-ink/[0.06] px-5 py-4">
+        <h3 className="text-sm font-semibold text-ink">Options</h3>
+        <p className="mt-0.5 text-xs text-ink/50">Implied volatility and Greeks at each option&apos;s last price (Black-Scholes-Merton).</p>
+      </div>
+      <div className="max-h-[320px] overflow-auto">
+        <table className="w-full min-w-[760px] text-[12.5px]">
+          <thead className="sticky top-0 bg-panel/95 backdrop-blur">
+            <tr className="text-left text-[10.5px] uppercase tracking-wider text-ink/45">
+              {['Option', 'Expiry', 'Price', 'Underlying', 'Impl. vol', 'Delta', 'Gamma', 'Vega'].map((h, i) => (
+                <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 && 'pl-5', i >= 2 && 'text-right', i === 7 && 'pr-5')}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="num">
+            {options.options.map((o) => (
+              <tr key={o.symbol} className="border-t border-ink/[0.04]">
+                <td className="py-2 pl-5 pr-3 font-sans text-ink/90">
+                  {o.symbol} <span className="text-ink/45">{o.right} {o.strike}</span>
+                </td>
+                <td className="px-3 py-2 font-sans text-ink/70">{expiryDate(o.expiry)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{fmt(o.price, 4)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{fmt(o.underlying_price, 4)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{o.implied_volatility === undefined ? '—' : `${(o.implied_volatility * 100).toFixed(2)}%`}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{fmt(o.delta, 4)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{fmt(o.gamma, 5)}</td>
+                <td className="py-2 pl-3 pr-5 text-right text-ink/70">{fmt(o.vega, 4)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {options.settlements.length > 0 && (
+        <div className="border-t border-ink/[0.06] px-5 py-3 text-xs text-ink/60">
+          {options.settlements.map((s, i) => (
+            <p key={`${s.ts_ns}-${s.strategy}-${i}`}>
+              {s.symbol}: {s.kind === 'exercised' ? `cash-settled at ${cash(s.price)}` : 'expired worthless'} on {expiryDate(s.ts_ns)}
+              {s.note ? ` (${s.note})` : ''}
+            </p>
+          ))}
+        </div>
+      )}
+      {options.gaps.length > 0 && (
+        <div className="border-t border-ink/[0.06] px-5 py-3 text-xs text-ink/55">
+          {options.gaps.map((g) => (
+            <p key={g}>{g}</p>
+          ))}
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
 /** M24.3: each bond's yield and rate risk at its last price, coupons and redemptions. */
 function BondsCard({ bonds }: { bonds: BondsSummary }) {
   const fmt = (v: number | undefined, digits: number) => (v === undefined ? '—' : v.toFixed(digits));
@@ -629,6 +690,8 @@ const ROLL_KIND_LABEL: Record<FuturesRoll['kind'], string> = {
   closed: 'Closed',
   settled: 'Settled at expiry',
   redeemed: 'Redeemed at par',
+  exercised: 'Cash-settled',
+  expired: 'Expired worthless',
 };
 
 /** M24.2: the roll rule, every roll the engine made, and what the futures model leaves out. */

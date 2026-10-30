@@ -285,6 +285,13 @@ async fn handle_create_order(
         _ => return error_response(422, "Side must be 'buy' or 'sell'."),
     };
 
+    // M24.4: options are backtest-only until the M26 review signs off (fails closed).
+    if let Some((pool, ws)) = db_ctx {
+        if let Some(refusal) = crate::instruments_api::refuse_options(pool, ws, &order_req.symbol).await {
+            return refusal;
+        }
+    }
+
     let Some((pool, ws)) = db_ctx else {
         // Direct forwarding without database pre-trade checks
         if let Some((key_id, secret_key)) = creds {

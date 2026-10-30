@@ -22,7 +22,8 @@ pub use fixed::{
     notional, notional_with_multiplier, prorate, ArithmeticError, Bps, Fixed, Money, Price, Qty, Ratio, SCALE,
 };
 pub use instrument::{
-    is_currency_code, DayCount, Instrument, InstrumentType, COUPON_FREQUENCIES, DEFAULT_BASE_CURRENCY,
+    is_currency_code, DayCount, Instrument, InstrumentType, OptionRight, COUPON_FREQUENCIES,
+    DEFAULT_BASE_CURRENCY,
 };
 pub use json::Json;
 pub use ledger::{

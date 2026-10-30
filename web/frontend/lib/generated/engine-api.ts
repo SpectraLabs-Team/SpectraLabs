@@ -1063,6 +1063,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pricing/option": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Price a European option (Black-Scholes-Merton with a dividend yield), or
+         *     find its implied volatility from a price. */
+        post: operations["price_option"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers/configs": {
         parameters: {
             query?: never;
@@ -3046,6 +3064,8 @@ export interface components {
             maturity?: number | null;
             /** @description Contract multiplier, exact decimal text. */
             multiplier: string;
+            /** @description `call` or `put` (options). */
+            right?: string | null;
             /** @description Strike (options), exact decimal text. */
             strike?: string | null;
             /** @description Symbol, unique in the workspace. */
@@ -3231,6 +3251,87 @@ export interface components {
             trial_count: number;
             /** Format: uuid */
             workspace_id: string;
+        };
+        /** @description `POST /api/v1/pricing/option` body. Give `volatility` for a price and the
+         *     Greeks, or `price` for the implied volatility (and the Greeks at it). */
+        OptionPricingRequest: {
+            /**
+             * Format: double
+             * @description Continuous dividend (or carry) yield. Default 0.
+             */
+            dividend_yield?: number;
+            /**
+             * Format: double
+             * @description Option price, to solve for the implied volatility.
+             */
+            price?: number | null;
+            /**
+             * Format: double
+             * @description Continuously compounded risk-free rate.
+             */
+            rate: number;
+            /** @description `call` or `put`. */
+            right: string;
+            /**
+             * Format: double
+             * @description Underlying price.
+             */
+            spot: number;
+            /**
+             * Format: double
+             * @description Strike.
+             */
+            strike: number;
+            /**
+             * Format: double
+             * @description Annual volatility.
+             */
+            volatility?: number | null;
+            /**
+             * Format: double
+             * @description Time to expiry in years.
+             */
+            years: number;
+        };
+        /** @description An option priced by Black-Scholes-Merton. */
+        OptionPricingView: {
+            /**
+             * Format: double
+             * @description dPrice/dSpot.
+             */
+            delta: number;
+            /**
+             * Format: double
+             * @description d²Price/dSpot².
+             */
+            gamma: number;
+            /** @description The model's review status: it awaits the M26 correctness audit. */
+            model_status: string;
+            /**
+             * Format: double
+             * @description Theoretical price.
+             */
+            price: number;
+            /**
+             * Format: double
+             * @description Per 1.00 of rate.
+             */
+            rho: number;
+            /**
+             * Format: double
+             * @description Per year.
+             */
+            theta: number;
+            /**
+             * Format: double
+             * @description Per 1.00 of volatility.
+             */
+            vega: number;
+            /**
+             * Format: double
+             * @description The volatility used (given, or implied by `price`).
+             */
+            volatility: number;
         };
         OverfittingResponse: {
             /** Format: double */
@@ -7054,6 +7155,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BondPricingView"];
+                };
+            };
+            /** @description Every problem with the request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    price_option: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptionPricingRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionPricingView"];
                 };
             };
             /** @description Every problem with the request */

@@ -99,6 +99,8 @@ pub struct InstrumentSetup {
     pub roll: RollRule,
     /// Whether bond bars are clean or dirty prices (M24.3 task 12).
     pub bond_quote: BondQuote,
+    /// Each option's underlying instrument in the dataset (M24.4).
+    pub underlying_ids: BTreeMap<InstrumentId, InstrumentId>,
 }
 
 /// How bond prices in the bars are quoted.
@@ -137,6 +139,7 @@ impl Default for InstrumentSetup {
             base_currency: DEFAULT_BASE_CURRENCY.into(),
             roll: RollRule::default(),
             bond_quote: BondQuote::default(),
+            underlying_ids: BTreeMap::new(),
             instruments: BTreeMap::new(),
             fx: BTreeMap::new(),
         }
@@ -147,6 +150,16 @@ impl InstrumentSetup {
     /// The record of `id`, if the run has one.
     pub fn instrument(&self, id: InstrumentId) -> Option<&Instrument> {
         self.instruments.get(&id)
+    }
+
+    /// The underlying instrument of option `id`.
+    pub fn underlying_of(&self, id: InstrumentId) -> Option<InstrumentId> {
+        self.underlying_ids.get(&id).copied()
+    }
+
+    /// The currency instrument `id` is quoted in (the base when it has no record).
+    pub fn currency_of(&self, id: InstrumentId) -> &str {
+        self.instrument(id).map_or(self.base_currency.as_str(), |i| i.currency.as_str())
     }
 
     /// The coupon terms of `id`, when it is a bond.
@@ -216,6 +229,22 @@ impl InstrumentSetup {
             }
             if series.iter().any(|r| r.rate <= 0) {
                 return Err(bad(format!("FX series {ccy} has a non-positive rate")));
+            }
+        }
+        for (&id, inst) in &self.instruments {
+            if inst.kind != InstrumentType::Option {
+                continue;
+            }
+            let Some(u) = self.underlying_of(id) else {
+                return Err(bad(format!("option {}: its underlying is not in this run", inst.symbol)));
+            };
+            if self.currency_of(u) != inst.currency {
+                return Err(bad(format!(
+                    "option {} is quoted in {} but its underlying in {}; they must match",
+                    inst.symbol,
+                    inst.currency,
+                    self.currency_of(u)
+                )));
             }
         }
         for ccy in self.foreign_currencies() {
@@ -307,6 +336,9 @@ impl InstrumentSetup {
             }
             if let (Some(f), Some(d)) = (i.coupon_frequency, i.day_count) {
                 s.push_str(&format!("coupons={f},{};", d.as_str()));
+            }
+            if let Some(r) = i.option_right {
+                s.push_str(&format!("right={};", r.as_str()));
             }
         }
         // The roll rule changes only runs that have futures.

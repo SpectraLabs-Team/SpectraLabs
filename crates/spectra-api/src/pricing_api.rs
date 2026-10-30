@@ -1,13 +1,14 @@
 //! Synchronous pricing with the M24 models: bonds (accrued interest, clean
-//! and dirty prices, yield, duration). Nothing is stored; the answer depends
-//! only on the request.
+//! and dirty prices, yield, duration) and European options (Black-Scholes-
+//! Merton price, Greeks, implied volatility). Nothing is stored; the answer
+//! depends only on the request.
 
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
-use spectra_core::{DayCount, COUPON_FREQUENCIES};
-use spectra_engine::BondTerms;
+use spectra_core::{DayCount, OptionRight, COUPON_FREQUENCIES};
+use spectra_engine::{BondTerms, OptionInputs};
 use utoipa::ToSchema;
 
 use crate::jobs_api::to_json;
@@ -160,4 +161,109 @@ pub(crate) async fn price_bond(body: Result<Bytes, BytesRejection>) -> Response 
             dv01: r.dv01,
         },
     )
+}
+
+/// `POST /api/v1/pricing/option` body. Give `volatility` for a price and the
+/// Greeks, or `price` for the implied volatility (and the Greeks at it).
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OptionPricingRequest {
+    /// `call` or `put`.
+    pub right: String,
+    /// Underlying price.
+    pub spot: f64,
+    /// Strike.
+    pub strike: f64,
+    /// Time to expiry in years.
+    pub years: f64,
+    /// Continuously compounded risk-free rate.
+    pub rate: f64,
+    /// Continuous dividend (or carry) yield. Default 0.
+    #[serde(default)]
+    pub dividend_yield: f64,
+    /// Annual volatility.
+    #[serde(default)]
+    pub volatility: Option<f64>,
+    /// Option price, to solve for the implied volatility.
+    #[serde(default)]
+    pub price: Option<f64>,
+}
+
+/// An option priced by Black-Scholes-Merton.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct OptionPricingView {
+    /// Theoretical price.
+    pub price: f64,
+    /// The volatility used (given, or implied by `price`).
+    pub volatility: f64,
+    /// dPrice/dSpot.
+    pub delta: f64,
+    /// d²Price/dSpot².
+    pub gamma: f64,
+    /// Per 1.00 of volatility.
+    pub vega: f64,
+    /// Per year.
+    pub theta: f64,
+    /// Per 1.00 of rate.
+    pub rho: f64,
+    /// The model's review status: it awaits the M26 correctness audit.
+    pub model_status: String,
+}
+
+/// Price a European option (Black-Scholes-Merton with a dividend yield), or
+/// find its implied volatility from a price.
+#[utoipa::path(post, path = "/api/v1/pricing/option", tag = "pricing", request_body = OptionPricingRequest,
+    responses(
+        (status = 200, body = OptionPricingView),
+        (status = 422, description = "Every problem with the request", body = crate::openapi::ErrorDoc),
+    ))]
+pub(crate) async fn price_option(body: Result<Bytes, BytesRejection>) -> Response {
+    let req: OptionPricingRequest = match read_body(body) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let mut errors: Vec<(String, String)> = Vec::new();
+    let right = OptionRight::parse(req.right.trim());
+    if right.is_none() {
+        errors.push(("right".into(), "must be \"call\" or \"put\"".into()));
+    }
+    if req.volatility.is_some() == req.price.is_some() {
+        errors.push((String::new(), "give exactly one of volatility or price".into()));
+    }
+    let Some(right) = right else { return invalid_fields(&errors) };
+    if !errors.is_empty() {
+        return invalid_fields(&errors);
+    }
+    let base = OptionInputs {
+        right,
+        spot: req.spot,
+        strike: req.strike,
+        years: req.years,
+        rate: req.rate,
+        dividend_yield: req.dividend_yield,
+        volatility: req.volatility.unwrap_or(0.2),
+    };
+    let vol = match req.price {
+        Some(p) => match base.implied_volatility(p) {
+            Ok(v) => v,
+            Err(e) => return invalid_fields(&[("price".into(), e.to_string())]),
+        },
+        None => base.volatility,
+    };
+    match (OptionInputs { volatility: vol, ..base }).value() {
+        Ok(v) => to_json(
+            200,
+            &OptionPricingView {
+                price: v.price,
+                volatility: vol,
+                delta: v.delta,
+                gamma: v.gamma,
+                vega: v.vega,
+                theta: v.theta,
+                rho: v.rho,
+                model_status: "awaiting M26 review".into(),
+            },
+        ),
+        Err(e) => invalid_fields(&[(String::new(), e.to_string())]),
+    }
 }

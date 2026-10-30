@@ -3127,6 +3127,47 @@
         }
       }
     },
+    "/api/v1/pricing/option": {
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "summary": "Price a European option (Black-Scholes-Merton with a dividend yield), or\nfind its implied volatility from a price.",
+        "operationId": "price_option",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionPricingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionPricingView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/providers/configs": {
       "get": {
         "tags": [
@@ -8323,6 +8364,13 @@
             "type": "string",
             "description": "Contract multiplier, exact decimal text."
           },
+          "right": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`call` or `put` (options)."
+          },
           "strike": {
             "type": [
               "string",
@@ -8739,6 +8787,120 @@
           "workspace_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "OptionPricingRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/pricing/option` body. Give `volatility` for a price and the\nGreeks, or `price` for the implied volatility (and the Greeks at it).",
+        "required": [
+          "right",
+          "spot",
+          "strike",
+          "years",
+          "rate"
+        ],
+        "properties": {
+          "dividend_yield": {
+            "type": "number",
+            "format": "double",
+            "description": "Continuous dividend (or carry) yield. Default 0."
+          },
+          "price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Option price, to solve for the implied volatility."
+          },
+          "rate": {
+            "type": "number",
+            "format": "double",
+            "description": "Continuously compounded risk-free rate."
+          },
+          "right": {
+            "type": "string",
+            "description": "`call` or `put`."
+          },
+          "spot": {
+            "type": "number",
+            "format": "double",
+            "description": "Underlying price."
+          },
+          "strike": {
+            "type": "number",
+            "format": "double",
+            "description": "Strike."
+          },
+          "volatility": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Annual volatility."
+          },
+          "years": {
+            "type": "number",
+            "format": "double",
+            "description": "Time to expiry in years."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OptionPricingView": {
+        "type": "object",
+        "description": "An option priced by Black-Scholes-Merton.",
+        "required": [
+          "price",
+          "volatility",
+          "delta",
+          "gamma",
+          "vega",
+          "theta",
+          "rho",
+          "model_status"
+        ],
+        "properties": {
+          "delta": {
+            "type": "number",
+            "format": "double",
+            "description": "dPrice/dSpot."
+          },
+          "gamma": {
+            "type": "number",
+            "format": "double",
+            "description": "d²Price/dSpot²."
+          },
+          "model_status": {
+            "type": "string",
+            "description": "The model's review status: it awaits the M26 correctness audit."
+          },
+          "price": {
+            "type": "number",
+            "format": "double",
+            "description": "Theoretical price."
+          },
+          "rho": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 1.00 of rate."
+          },
+          "theta": {
+            "type": "number",
+            "format": "double",
+            "description": "Per year."
+          },
+          "vega": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 1.00 of volatility."
+          },
+          "volatility": {
+            "type": "number",
+            "format": "double",
+            "description": "The volatility used (given, or implied by `price`)."
           }
         }
       },

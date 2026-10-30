@@ -1,9 +1,8 @@
--- params: uuid, uuid
+-- params: uuid, uuid, text, uuid
 -- The dataset-store checksum and size of a dataset version, if it belongs to the workspace, and
 -- where its bars.qfb is in the artifact store (NULL: only in the local dataset store).
--- $1 workspace, $2 dataset version id.
-SELECT v.id, v.checksum::text AS checksum, v.row_count, d.name AS dataset_name, v.version,
-       v.blob_sha256::text AS blob_sha256
-  FROM dataset_versions v
-  JOIN datasets d ON d.workspace_id = v.workspace_id AND d.id = v.dataset_id
- WHERE v.workspace_id = $1 AND v.id = $2
+-- A sealed holdout comes back with NULL checksum and blob and the holdout's name in
+-- sealed_holdout, and the attempt is logged (see resolve_dataset_version in the M4a guard migration).
+-- $1 workspace, $2 dataset version id, $3 purpose ('job', 'sweep', ...), $4 user (NULL: engine).
+SELECT id, checksum, row_count, dataset_name, version, blob_sha256, sealed_holdout
+  FROM resolve_dataset_version($1, $2, $3, $4)

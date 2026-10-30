@@ -40,7 +40,23 @@
 - PSR and DSR assume serially independent returns and independent trials.
 - The registry loads the whole log into memory. The hash chain shows tampering but does not prevent
   it: anchor the head hash somewhere you trust.
-- The holdout vault enforces access control at the API & database boundary: direct reads of sealed bars, exports and backtests are prohibited without a metered evaluate call.
+- The holdout vault is enforced by the database (M4a). A dataset version's checksum is the key to its
+  bars, and the queries the services use never return a sealed holdout's checksum:
+  `resolve_dataset_version()` refuses it and logs the attempt in `holdout_access_log`, and
+  `grant_holdout_evaluation()` is the only way to it. That function spends one unit of budget, logs
+  the grant, and only then returns the data, under the holdout's row lock, so concurrent evaluations
+  cannot overspend. The access log is append-only, and a holdout's budget cannot be refunded or moved
+  to other data. Every route and worker that loads bars goes through these functions, including the
+  generic `POST /api/v1/jobs` route, which previously did not check. Checked by
+  `crates/spectra-db/tests/holdout_checks.sql` and `crates/spectra-api/tests/optimization_flow.rs`.
+- **Limit:** the guard covers the queries the services ship. A raw SQL session with the
+  application role (`spectra_app`) can still `SELECT checksum FROM dataset_versions`, because that
+  role reads the table directly. Closing that needs column privileges on `checksum` and
+  `blob_sha256`, with the remaining queries moved behind `SECURITY DEFINER` functions (follow-up).
+- **Holdout evaluation does not yet evaluate the requested strategy.** `evaluate_holdout` always runs
+  the built-in `buy_and_hold` with default parameters, whatever strategy is sent, and if the sealed
+  bars cannot be loaded it runs on two synthetic bars and records the result as real. Fix before
+  relying on holdout results.
 
 ## API deployment boundary
 

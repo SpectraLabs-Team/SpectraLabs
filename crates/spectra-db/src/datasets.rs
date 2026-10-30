@@ -31,7 +31,54 @@ pub struct DatasetVersion {
     pub blob_sha256: Option<String>,
 }
 
-/// The dataset version `id`, if it belongs to `workspace_id`.
+/// What [`resolve_version`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Resolved {
+    /// The version, with the checksum that unlocks its bars.
+    Found(DatasetVersion),
+    /// The version is a sealed holdout. The database did not hand out its checksum and logged the
+    /// attempt; the only way to its bars is a holdout evaluation
+    /// ([`crate::optimization::grant_holdout_evaluation`]).
+    Sealed {
+        /// Name of the holdout that seals it.
+        holdout: String,
+    },
+    /// No such version in this workspace.
+    Missing,
+}
+
+impl Resolved {
+    /// The version, if it was found and is not sealed.
+    #[must_use]
+    pub fn found(self) -> Option<DatasetVersion> {
+        match self {
+            Self::Found(v) => Some(v),
+            Self::Sealed { .. } | Self::Missing => None,
+        }
+    }
+}
+
+/// Who is asking [`resolve_version`] for a version's data, recorded when it is a sealed holdout.
+#[derive(Debug, Clone, Copy)]
+pub struct Access<'a> {
+    /// What the data is for: `"job"`, `"sweep"`, `"bars"`, `"worker"`, ...
+    pub purpose: &'a str,
+    /// The user, or `None` for the engine itself.
+    pub user: Option<Uuid>,
+}
+
+impl<'a> Access<'a> {
+    /// An engine-side access (no user).
+    #[must_use]
+    pub const fn engine(purpose: &'a str) -> Self {
+        Self { purpose, user: None }
+    }
+}
+
+/// The dataset version `id` of `workspace_id`, as a job needs it.
+///
+/// The database never returns the checksum of a sealed holdout: such a version comes back as
+/// [`Resolved::Sealed`], and the attempt is written to `holdout_access_log`.
 ///
 /// # Errors
 /// Any database error.
@@ -39,21 +86,24 @@ pub async fn resolve_version(
     pool: &PgPool,
     workspace_id: Uuid,
     id: Uuid,
-) -> Result<Option<DatasetVersion>, Error> {
-    let row: Option<(Uuid, String, i64, String, i32, Option<String>)> =
-        sqlx::query_as(include_str!("../queries/dataset_version_resolve.sql"))
-            .bind(workspace_id)
-            .bind(id)
-            .fetch_optional(pool)
-            .await?;
-    Ok(row.map(|(id, checksum, row_count, dataset_name, version, blob_sha256)| DatasetVersion {
-        id,
-        checksum,
-        row_count,
-        dataset_name,
-        version,
-        blob_sha256,
-    }))
+    access: Access<'_>,
+) -> Result<Resolved, Error> {
+    type Row = (Uuid, Option<String>, i64, String, i32, Option<String>, Option<String>);
+    let row: Option<Row> = sqlx::query_as(include_str!("../queries/dataset_version_resolve.sql"))
+        .bind(workspace_id)
+        .bind(id)
+        .bind(access.purpose)
+        .bind(access.user)
+        .fetch_optional(pool)
+        .await?;
+    Ok(match row {
+        Some((_, _, _, _, _, _, Some(holdout))) => Resolved::Sealed { holdout },
+        Some((id, Some(checksum), row_count, dataset_name, version, blob_sha256, None)) => {
+            Resolved::Found(DatasetVersion { id, checksum, row_count, dataset_name, version, blob_sha256 })
+        }
+        // No row, or (impossible: the column is NOT NULL) an unsealed version without a checksum.
+        None | Some((_, None, ..)) => Resolved::Missing,
+    })
 }
 
 /// A dataset version as the Studio lists it.

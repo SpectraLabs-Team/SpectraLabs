@@ -31,10 +31,11 @@ row says what the code does today; anything not yet confirmed is marked "to conf
 | Strategy drafts | `strategy_drafts` | Until the strategy or workspace is deleted. No automatic expiry in the code. | Deleting the strategy or workspace (`ON DELETE CASCADE`) | Gone with the workspace |
 | Uploads not yet ingested | `uploads`, `upload_sessions` | 24 hours (`UPLOAD_TTL_SECS`, `SESSION_TTL_SECS`), then removed by the worker | Expiry | Gone |
 | Ingested uploads | `uploads` | While a dataset version uses them. Deleting the version makes them expire. | Expiry after the version is deleted | Gone with the workspace |
-| Artifact files (blobs in the artifact store) | Artifact store | While referenced. The worker sweeps files that nothing references, including files from deleted workspaces. | Worker garbage collection | Removed by the sweep after the workspace is deleted (to confirm: timing) |
+| Artifact files (blobs in the artifact store) | Artifact store | While referenced. The worker sweeps files that nothing references, including files from deleted workspaces. | Worker garbage collection | Removed by the sweep after the workspace is deleted (swept every 30 minutes) |
 
 Deleting an account removes its personal workspace with everything in it, and any team workspace
-where it is the only member. Team workspaces with other members stay.
+where it is the only member. Team workspaces with other members stay (if the user is the sole owner
+of a team with other members, another owner must be appointed or other members removed first).
 
 ## Why the audit log is permanent
 
@@ -64,7 +65,7 @@ Shortening it deletes more on the next purge run: dry-run first (see `docs/opera
 ## Open points for the owner
 
 - Runs and drafts have no automatic expiry. Decide whether they need one (Decision 2 in the M28 plan).
-- Confirm how long unreferenced artifact files stay before the sweep removes them.
+- Artifact sweep timing: the worker sweeps unreferenced files every 30 minutes (`spectra-worker.rs`). Owner to confirm if an explicit grace period before removal is desired.
 - An unset `SPECTRA_ACTIVITY_PURGE` is **on** in the code (`config.rs`), but `docs/operations.md` says
   unset means off. Fix one or the other before production relies on either.
 

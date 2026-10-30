@@ -66,8 +66,7 @@ Shortening it deletes more on the next purge run: dry-run first (see `docs/opera
 
 - Runs and drafts have no automatic expiry. Decide whether they need one (Decision 2 in the M28 plan).
 - Artifact sweep timing: the worker sweeps unreferenced files every 30 minutes (`spectra-worker.rs`). Owner to confirm if an explicit grace period before removal is desired.
-- An unset `SPECTRA_ACTIVITY_PURGE` is **on** in the code (`config.rs`), but `docs/operations.md` says
-  unset means off. Fix one or the other before production relies on either.
+- An unset `SPECTRA_ACTIVITY_PURGE` means **off** (`config.rs` and `docs/operations.md`, M28 Decision 6).
 
 ## Sign-off
 

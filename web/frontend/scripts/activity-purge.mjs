@@ -2,7 +2,7 @@
 //   npm run activity:purge                     keep 400 days
 //   npm run activity:purge -- --dry-run        only count what would be deleted
 //   node scripts/activity-purge.mjs 180        keep 180 days
-// The worker runs the same purge every six hours (SPECTRA_ACTIVITY_PURGE, on by default); this
+// The worker runs the same purge every six hours (SPECTRA_ACTIVITY_PURGE, off by default); this
 // script is for running it by hand. Both take the same advisory lock, so they never overlap.
 // Only user_activity_daily is touched. The audit log is append-only (triggers refuse UPDATE,
 // DELETE and TRUNCATE) and is never purged.

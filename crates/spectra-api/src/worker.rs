@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use spectra_backtest::{run_job_from_store, JobFailure, JobProducts};
 use spectra_core::Json;
 use spectra_db::artifacts::{store_for_run, ArtifactBackend, NewArtifact};
-use spectra_db::datasets::{self, NewBacktestRun};
+use spectra_db::datasets::{self, Access, NewBacktestRun, Resolved};
 use spectra_db::jobs::{self, Beat, Job};
 use spectra_db::PgPool;
 use spectra_engine::{Progress, RunControl, RunLimits};
@@ -192,9 +192,22 @@ pub async fn run_backtest_job(
         fail_backtest_job(env, job, worker_id, started, msg, false).await;
         return Err((msg.to_string(), false));
     };
-    let version = match datasets::resolve_version(pool, job.workspace_id, version_id).await {
-        Ok(Some(v)) => v,
-        Ok(None) => {
+    let version = match datasets::resolve_version(
+        pool,
+        job.workspace_id,
+        version_id,
+        Access::engine("worker-backtest"),
+    )
+    .await
+    {
+        Ok(Resolved::Found(v)) => v,
+        // A job queued before its data was sealed, or one that bypassed the API check.
+        Ok(Resolved::Sealed { holdout }) => {
+            let msg = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+            fail_backtest_job(env, job, worker_id, started, &msg, false).await;
+            return Err((msg, false));
+        }
+        Ok(Resolved::Missing) => {
             let msg = "The dataset version no longer exists in this workspace.";
             fail_backtest_job(env, job, worker_id, started, msg, false).await;
             return Err((msg.to_string(), false));

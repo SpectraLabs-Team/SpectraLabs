@@ -21,7 +21,7 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::jobs_api::{context, db_error, submit, to_json, ListJobs};
-use crate::{engine, error_response, error_with_code, json_response, AppState, Identity};
+use crate::{engine, error_response, json_response, AppState, Identity};
 
 /// `POST /api/v1/backtests` body: the `backtest` job payload, plus a priority.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -266,22 +266,7 @@ pub(crate) async fn create_backtest(
         Ok(r) => r,
         Err(e) => return error_response(422, format!("Invalid backtest request: {e}")),
     };
-    let (pool, ws) = match context(&st, &id) {
-        Ok(c) => c,
-        Err(r) => return r,
-    };
-    match spectra_db::optimization::is_holdout_sealed(&pool, ws, req.dataset_version_id).await {
-        Ok(true) => {
-            tracing::warn!(version_id = %req.dataset_version_id, "direct backtest attempt on sealed holdout refused");
-            return error_with_code(
-                403,
-                "holdout_sealed",
-                "This dataset version is a sealed holdout; direct backtests are prohibited. Use /api/v1/optimization/holdout/{id}/evaluate.",
-            );
-        }
-        Ok(false) => {}
-        Err(e) => return db_error(&e),
-    }
+    // `submit` checks the workspace, and the database refuses (and logs) a sealed holdout there.
     let mut payload = serde_json::json!({ "dataset_version_id": req.dataset_version_id.to_string() });
     if let Some(v) = req.strategy_version_id {
         payload["strategy_version_id"] = serde_json::Value::String(v.to_string());

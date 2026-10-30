@@ -86,8 +86,8 @@ async fn queue_depth_counts_newly_enqueued_work() {
 async fn backtest_runs_link_dataset_versions_and_artifacts() {
     use spectra_db::artifacts::{find_for_run, store_for_run, ArtifactBackend, ArtifactStore, NewArtifact};
     use spectra_db::datasets::{
-        insert_backtest_run, register_version, resolve_version, resolve_workspace, NewBacktestRun,
-        NewDatasetVersion,
+        insert_backtest_run, register_version, resolve_version, resolve_workspace, Access, NewBacktestRun,
+        NewDatasetVersion, Resolved,
     };
 
     let Some(pool) = pool().await else { return };
@@ -114,12 +114,16 @@ async fn backtest_runs_link_dataset_versions_and_artifacts() {
     let again = register_version(&pool, &new).await.unwrap();
     assert_eq!((again.id, again.existed), (v1.id, true));
 
-    let resolved = resolve_version(&pool, ws, v1.id).await.unwrap().unwrap();
+    let resolved = resolve_version(&pool, ws, v1.id, Access::engine("test")).await.unwrap().found().unwrap();
     assert_eq!(
         (resolved.checksum.as_str(), resolved.row_count, resolved.dataset_name.as_str()),
         (checksum.as_str(), 2400, name.as_str())
     );
-    assert!(resolve_version(&pool, spectra_db::new_id(), v1.id).await.unwrap().is_none(), "other workspace");
+    assert_eq!(
+        resolve_version(&pool, spectra_db::new_id(), v1.id, Access::engine("test")).await.unwrap(),
+        Resolved::Missing,
+        "other workspace"
+    );
     let listed = spectra_db::datasets::list_versions(&pool, ws, 500).await.unwrap();
     let mine = listed.iter().find(|v| v.id == v1.id).expect("listed");
     assert_eq!(

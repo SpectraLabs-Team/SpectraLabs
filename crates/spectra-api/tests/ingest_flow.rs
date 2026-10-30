@@ -218,7 +218,16 @@ async fn upload_ingest_and_backtest_without_the_command_line() {
 
     // The version is in the artifact store; a worker with an empty local store copies it before a backtest.
     let version_id = Uuid::parse_str(first["dataset_version_id"].as_str().unwrap()).unwrap();
-    let v = spectra_db::datasets::resolve_version(&f.pool, f.ws, version_id).await.unwrap().unwrap();
+    let v = spectra_db::datasets::resolve_version(
+        &f.pool,
+        f.ws,
+        version_id,
+        spectra_db::datasets::Access::engine("test"),
+    )
+    .await
+    .unwrap()
+    .found()
+    .unwrap();
     let blob = v.blob_sha256.clone().expect("stored with the artifacts");
     let fresh = f.dir.join("another-worker");
     ensure_local(&f.store, &fresh, &v.checksum, Some(&blob)).await.unwrap();

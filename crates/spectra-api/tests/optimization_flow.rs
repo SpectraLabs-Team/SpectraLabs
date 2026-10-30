@@ -486,3 +486,132 @@ async fn sweep_export_report_flow() {
     assert_eq!(status, 200, "status: {status}, body: {res_pdf}");
     f.clean_up().await;
 }
+
+/// Seals `ds_ver` with `budget` evaluations and returns the holdout id.
+async fn seal(f: &Fixture, ds_ver: Uuid, name: &str, budget: i32) -> String {
+    let (status, holdout) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/holdout/seal",
+            &json!({ "name": name, "dataset_version_id": ds_ver, "budget": budget }),
+        )
+        .await;
+    assert_eq!(status, 201, "status: {status}, body: {holdout}");
+    holdout["id"].as_str().unwrap().to_string()
+}
+
+async fn access_log(f: &Fixture, holdout_id: &str) -> Vec<(String, String)> {
+    sqlx::query_as(
+        "SELECT action, purpose FROM holdout_access_log WHERE workspace_id = $1 AND holdout_id = $2::uuid \
+         ORDER BY at, id",
+    )
+    .bind(f.ws)
+    .bind(holdout_id)
+    .fetch_all(&f.pool)
+    .await
+    .unwrap()
+}
+
+/// The database is the gate (M4a decision 2): the generic jobs route, which never checked for a
+/// sealed holdout, is refused too, and every refused read and every evaluation is logged.
+#[tokio::test]
+async fn holdout_guard_covers_every_route_and_logs_access() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+    let holdout_id = seal(&f, ds_ver, "Guarded Vault", 2).await;
+
+    // The generic jobs route used to queue a backtest on sealed data.
+    let (status, refused_job) = f
+        .call(
+            "POST",
+            "/api/v1/jobs",
+            &json!({ "kind": "backtest", "payload": { "dataset_version_id": ds_ver.to_string(), "strategy": "buy_and_hold" } }),
+        )
+        .await;
+    assert_eq!(status, 403, "status: {status}, body: {refused_job}");
+    assert_eq!(refused_job["code"], "holdout_sealed");
+
+    let (status, refused_export) =
+        f.call("GET", &format!("/api/v1/datasets/versions/{ds_ver}/export"), &Value::Null).await;
+    assert_eq!(status, 403, "status: {status}, body: {refused_export}");
+    assert_eq!(refused_export["code"], "holdout_sealed");
+
+    let (status, refused_bars) =
+        f.call("GET", &format!("/api/v1/datasets/versions/{ds_ver}/bars"), &Value::Null).await;
+    assert_eq!(status, 403, "status: {status}, body: {refused_bars}");
+
+    // A worker that somehow gets the job is refused by the database as well.
+    let data = spectra_db::datasets::resolve_version(
+        &f.pool,
+        f.ws,
+        ds_ver,
+        spectra_db::datasets::Access::engine("worker-backtest"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(data, spectra_db::datasets::Resolved::Sealed { holdout: "Guarded Vault".into() });
+
+    let (status, eval) = f
+        .call(
+            "POST",
+            &format!("/api/v1/optimization/holdout/{holdout_id}/evaluate"),
+            &json!({ "strategy": "buy_and_hold" }),
+        )
+        .await;
+    assert_eq!(status, 200, "status: {status}, body: {eval}");
+    assert_eq!(eval["evaluation_num"], 1);
+
+    let log = access_log(&f, &holdout_id).await;
+    // Sealing checks the version before the seal exists, so it logs nothing.
+    let expected: Vec<(String, String)> = [
+        ("denied", "job"),
+        ("denied", "export"),
+        ("denied", "bars"),
+        ("denied", "worker-backtest"),
+        ("granted", "evaluate"),
+    ]
+    .iter()
+    .map(|(a, p)| ((*a).to_string(), (*p).to_string()))
+    .collect();
+    assert_eq!(log, expected);
+
+    f.clean_up().await;
+}
+
+/// Concurrent evaluations cannot overspend a holdout: the grant takes the budget row lock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_holdout_evaluations_never_overspend() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+    let holdout_id = seal(&f, ds_ver, "Race Vault", 2).await;
+
+    let path = format!("/api/v1/optimization/holdout/{holdout_id}/evaluate");
+    let body = json!({ "strategy": "buy_and_hold" });
+    let (a, b, c, d, e, g) = tokio::join!(
+        f.call("POST", &path, &body),
+        f.call("POST", &path, &body),
+        f.call("POST", &path, &body),
+        f.call("POST", &path, &body),
+        f.call("POST", &path, &body),
+        f.call("POST", &path, &body),
+    );
+    let results = [a, b, c, d, e, g];
+    let ok = results.iter().filter(|(s, _)| *s == 200).count();
+    let refused =
+        results.iter().filter(|(s, b)| *s == 403 && b["code"] == "holdout_budget_exhausted").count();
+    assert_eq!((ok, refused), (2, 4), "{results:?}");
+
+    let used: i32 = sqlx::query_scalar("SELECT evaluations_used FROM holdout_vault WHERE id = $1::uuid")
+        .bind(&holdout_id)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    assert_eq!(used, 2);
+    let log = access_log(&f, &holdout_id).await;
+    assert_eq!(log.iter().filter(|(a, _)| a == "granted").count(), 2);
+    assert_eq!(log.iter().filter(|(a, _)| a == "exhausted").count(), 4);
+
+    f.clean_up().await;
+}

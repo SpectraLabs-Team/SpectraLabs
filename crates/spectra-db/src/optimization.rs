@@ -368,7 +368,84 @@ pub async fn list_holdouts(pool: &PgPool, workspace_id: Uuid) -> Result<Vec<Hold
     sqlx::query_as(include_str!("../queries/holdout_list.sql")).bind(workspace_id).fetch_all(pool).await
 }
 
-/// Record an evaluation against a sealed holdout and increment its evaluation count.
+/// A granted holdout evaluation: one unit of budget is spent and the grant is logged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoldoutGrant {
+    /// Which evaluation this is (1, 2, ...), the number the result is recorded under.
+    pub evaluation_num: i32,
+    /// The holdout's total budget.
+    pub budget: i32,
+    /// The sealed data. Its checksum is what unlocks the bars.
+    pub data: crate::datasets::DatasetVersion,
+}
+
+/// Spends one evaluation of holdout `holdout_id` and returns its sealed data.
+///
+/// This is the only query that returns a sealed holdout's checksum. The database spends the
+/// budget and writes the grant to `holdout_access_log` before returning it, under the holdout's
+/// row lock, so concurrent evaluations cannot overspend. `None`: no such holdout in the workspace,
+/// or its budget is spent (logged as `exhausted`).
+pub async fn grant_holdout_evaluation(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    holdout_id: Uuid,
+    purpose: &str,
+    user: Option<Uuid>,
+) -> Result<Option<HoldoutGrant>, Error> {
+    type Row = (i32, i32, Uuid, String, i64, String, i32, Option<String>);
+    let row: Option<Row> = sqlx::query_as(include_str!("../queries/holdout_grant.sql"))
+        .bind(workspace_id)
+        .bind(holdout_id)
+        .bind(purpose)
+        .bind(user)
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(|(evaluation_num, budget, id, checksum, row_count, dataset_name, version, blob_sha256)| {
+        HoldoutGrant {
+            evaluation_num,
+            budget,
+            data: crate::datasets::DatasetVersion {
+                id,
+                checksum,
+                row_count,
+                dataset_name,
+                version,
+                blob_sha256,
+            },
+        }
+    }))
+}
+
+/// One entry of a holdout's access log.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
+pub struct HoldoutAccess {
+    pub id: Uuid,
+    pub holdout_id: Uuid,
+    /// `denied`, `granted` or `exhausted`.
+    pub action: String,
+    pub purpose: String,
+    pub evaluation_num: Option<i32>,
+    pub user_id: Option<Uuid>,
+    pub at: DateTime<Utc>,
+}
+
+/// A holdout's access log, newest first (at most `limit`).
+pub async fn holdout_access_log(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    holdout_id: Uuid,
+    limit: i64,
+) -> Result<Vec<HoldoutAccess>, Error> {
+    sqlx::query_as(include_str!("../queries/holdout_access_log.sql"))
+        .bind(workspace_id)
+        .bind(holdout_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+}
+
+/// Records the result of evaluation `evaluation_num`, which [`grant_holdout_evaluation`] granted
+/// (and already counted against the budget).
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_holdout_evaluation(
     pool: &PgPool,
@@ -382,13 +459,6 @@ pub async fn insert_holdout_evaluation(
     evaluated_by: Option<Uuid>,
 ) -> Result<HoldoutEvaluation, Error> {
     let mut tx = pool.begin().await?;
-
-    // Increment used evaluations
-    sqlx::query("UPDATE holdout_vault SET evaluations_used = evaluations_used + 1 WHERE id = $1 AND workspace_id = $2")
-        .bind(holdout_id)
-        .bind(workspace_id)
-        .execute(&mut *tx)
-        .await?;
 
     let id = crate::new_id();
     let eval: HoldoutEvaluation = sqlx::query_as(include_str!("../queries/holdout_eval_insert.sql"))

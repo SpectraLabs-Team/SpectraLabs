@@ -201,9 +201,13 @@ pub(crate) async fn submit(
             .and_then(|p| engine::backtest_job(&p).ok())
             .and_then(|j| Uuid::parse_str(&j.dataset_version_id).ok());
         let Some(version) = version else { return Err(error_response(422, "Invalid backtest payload.")) };
-        match spectra_db::datasets::resolve_version(&pool, ws, version).await {
-            Ok(Some(_)) => {}
-            Ok(None) => {
+        let access = spectra_db::datasets::Access { purpose: "job", user: Uuid::parse_str(&id.user).ok() };
+        match spectra_db::datasets::resolve_version(&pool, ws, version, access).await {
+            Ok(spectra_db::datasets::Resolved::Found(_)) => {}
+            Ok(spectra_db::datasets::Resolved::Sealed { holdout }) => {
+                return Err(crate::optimization_api::sealed_response(&holdout, "backtests"));
+            }
+            Ok(spectra_db::datasets::Resolved::Missing) => {
                 return Err(error_response(
                     422,
                     "dataset_version_id: no such dataset version in this workspace.",

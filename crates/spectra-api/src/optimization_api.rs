@@ -9,7 +9,7 @@ use axum::Extension;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use spectra_db::datasets;
+use spectra_db::datasets::{self, Access, Resolved};
 use spectra_db::jobs::{self, NewJob};
 use spectra_db::optimization::{
     self, HoldoutEvaluation, HoldoutVault, OptimizationSweep, OptimizationTrial, WalkForwardReport,
@@ -27,6 +27,19 @@ use crate::{error_response, error_with_code, AppState, Identity};
 
 const NOT_FOUND: &str = "Resource not found.";
 const FORBIDDEN_VIEWER: &str = "Viewers have read-only access to optimization workflows.";
+
+/// 403 `holdout_sealed`: `what` (e.g. "backtests") may not use a sealed holdout's data directly.
+/// The database has already refused the data and logged the attempt.
+pub(crate) fn sealed_response(holdout: &str, what: &str) -> Response {
+    error_with_code(
+        403,
+        "holdout_sealed",
+        format!(
+            "This dataset version is sealed as holdout '{holdout}', so it cannot be used directly for {what}. \
+             Use /api/v1/optimization/holdout/{{id}}/evaluate."
+        ),
+    )
+}
 
 fn user_of(id: &Identity) -> Option<Uuid> {
     Uuid::parse_str(&id.user).ok()
@@ -397,23 +410,18 @@ pub(crate) async fn queue_sweep(
         Err(e) => return error_response(422, format!("Invalid sweep request: {e}")),
     };
 
-    // Verify dataset version exists
-    match datasets::resolve_version(&pool, ws, req.dataset_version_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return error_response(404, "Dataset version not found in this workspace."),
-        Err(e) => return db_error(&e),
-    }
-
-    // Verify dataset version is not a sealed holdout
-    match optimization::is_holdout_sealed(&pool, ws, req.dataset_version_id).await {
-        Ok(true) => {
-            return error_with_code(
-                403,
-                "holdout_sealed",
-                "This dataset version is a sealed holdout; direct parameter sweeps are prohibited. Use /api/v1/optimization/holdout/{id}/evaluate.",
-            );
-        }
-        Ok(false) => {}
+    // The database refuses (and logs) a sealed holdout: only an evaluation may read it.
+    match datasets::resolve_version(
+        &pool,
+        ws,
+        req.dataset_version_id,
+        Access { purpose: "sweep", user: user_of(&id) },
+    )
+    .await
+    {
+        Ok(Resolved::Found(_)) => {}
+        Ok(Resolved::Sealed { holdout }) => return sealed_response(&holdout, "parameter sweeps"),
+        Ok(Resolved::Missing) => return error_response(404, "Dataset version not found in this workspace."),
         Err(e) => return db_error(&e),
     }
 
@@ -1027,23 +1035,18 @@ pub(crate) async fn queue_walk_forward(
         Err(e) => return error_response(422, format!("Invalid walk-forward request: {e}")),
     };
 
-    // Verify dataset version exists
-    match datasets::resolve_version(&pool, ws, req.dataset_version_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return error_response(404, "Dataset version not found in this workspace."),
-        Err(e) => return db_error(&e),
-    }
-
-    // Verify dataset version is not a sealed holdout
-    match optimization::is_holdout_sealed(&pool, ws, req.dataset_version_id).await {
-        Ok(true) => {
-            return error_with_code(
-                403,
-                "holdout_sealed",
-                "This dataset version is a sealed holdout; direct walk-forward validation is prohibited. Use /api/v1/optimization/holdout/{id}/evaluate.",
-            );
-        }
-        Ok(false) => {}
+    // The database refuses (and logs) a sealed holdout: only an evaluation may read it.
+    match datasets::resolve_version(
+        &pool,
+        ws,
+        req.dataset_version_id,
+        Access { purpose: "walkforward", user: user_of(&id) },
+    )
+    .await
+    {
+        Ok(Resolved::Found(_)) => {}
+        Ok(Resolved::Sealed { holdout }) => return sealed_response(&holdout, "walk-forward validation"),
+        Ok(Resolved::Missing) => return error_response(404, "Dataset version not found in this workspace."),
         Err(e) => return db_error(&e),
     }
 
@@ -1240,23 +1243,23 @@ pub(crate) async fn seal_holdout(
         return error_response(422, "Holdout evaluation budget must be at least 1.");
     }
 
-    // Verify dataset version exists
-    match datasets::resolve_version(&pool, ws, req.dataset_version_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return error_response(404, "Dataset version not found in this workspace."),
-        Err(e) => return db_error(&e),
-    }
-
-    // Verify dataset version is not already sealed
-    match optimization::is_holdout_sealed(&pool, ws, req.dataset_version_id).await {
-        Ok(true) => {
+    match datasets::resolve_version(
+        &pool,
+        ws,
+        req.dataset_version_id,
+        Access { purpose: "seal", user: user_of(&id) },
+    )
+    .await
+    {
+        Ok(Resolved::Found(_)) => {}
+        Ok(Resolved::Sealed { .. }) => {
             return error_with_code(
                 422,
                 "dataset_already_sealed",
                 "This dataset version is already sealed in the holdout vault.",
             );
         }
-        Ok(false) => {}
+        Ok(Resolved::Missing) => return error_response(404, "Dataset version not found in this workspace."),
         Err(e) => return db_error(&e),
     }
 
@@ -1362,25 +1365,25 @@ pub(crate) async fn evaluate_holdout(
         Err(e) => return db_error(&e),
     };
 
-    if holdout.evaluations_used >= holdout.budget {
-        return error_with_code(
-            403,
-            "holdout_budget_exhausted",
-            format!(
-                "Holdout '{}' budget is exhausted ({} of {} evaluations used).",
-                holdout.name, holdout.evaluations_used, holdout.budget
-            ),
-        );
-    }
-
-    let eval_num = holdout.evaluations_used + 1;
-
-    // Load holdout bars
-    let version = match datasets::resolve_version(&pool, ws, holdout.dataset_version_id).await {
-        Ok(Some(v)) => v,
-        Ok(None) => return error_response(404, "Holdout dataset version no longer exists."),
-        Err(e) => return db_error(&e),
-    };
+    // The database spends one evaluation and logs the grant before it hands out the sealed data,
+    // under the holdout's row lock: no read without a logged evaluation, and no overspending.
+    let grant =
+        match optimization::grant_holdout_evaluation(&pool, ws, holdout_id, "evaluate", user_of(&id)).await {
+            Ok(Some(g)) => g,
+            Ok(None) => {
+                return error_with_code(
+                    403,
+                    "holdout_budget_exhausted",
+                    format!(
+                        "Holdout '{}' budget is exhausted ({} of {} evaluations used).",
+                        holdout.name, holdout.budget, holdout.budget
+                    ),
+                );
+            }
+            Err(e) => return db_error(&e),
+        };
+    let eval_num = grant.evaluation_num;
+    let version = grant.data;
 
     let default_dir = std::path::PathBuf::from("data");
     let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);

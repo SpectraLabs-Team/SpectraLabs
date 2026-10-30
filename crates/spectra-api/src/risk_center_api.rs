@@ -16,8 +16,8 @@ use spectra_db::risk_center::{
     RiskLimitsRow,
 };
 use spectra_risk::enforcement::{
-    OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeVerdict,
-    RiskLimits,
+    utilization, LimitUtilization, OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot,
+    PreTradeChecker, PreTradeVerdict, RiskLimits,
 };
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
@@ -1141,7 +1141,7 @@ pub(crate) async fn get_alerts(
 
     let mut alerts = Vec::new();
     let gross = portfolio.gross_exposure();
-    let gross_pct = if limits.max_gross_exposure > 0.0 { gross / limits.max_gross_exposure } else { 0.0 };
+    let gross_pct = utilization(gross, limits.max_gross_exposure);
     if gross_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if gross_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1154,7 +1154,7 @@ pub(crate) async fn get_alerts(
     }
 
     let lev = portfolio.leverage();
-    let lev_pct = if limits.max_leverage > 0.0 { lev / limits.max_leverage } else { 0.0 };
+    let lev_pct = utilization(lev, limits.max_leverage);
     if lev_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if lev_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1167,7 +1167,7 @@ pub(crate) async fn get_alerts(
     }
 
     let dd = portfolio.drawdown_pct();
-    let dd_pct = if limits.max_drawdown_pct > 0.0 { dd / limits.max_drawdown_pct } else { 0.0 };
+    let dd_pct = utilization(dd, limits.max_drawdown_pct);
     if dd_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if dd_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1180,7 +1180,7 @@ pub(crate) async fn get_alerts(
     }
 
     let loss = portfolio.daily_loss();
-    let loss_pct = if limits.max_daily_loss > 0.0 { loss / limits.max_daily_loss } else { 0.0 };
+    let loss_pct = utilization(loss, limits.max_daily_loss);
     if loss_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if loss_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1368,14 +1368,13 @@ pub(crate) async fn get_metrics(
         (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), p.var_pct())
     };
 
-    let gross_pct =
-        if limits.max_gross_exposure > 0.0 { (gross / limits.max_gross_exposure) * 100.0 } else { 0.0 };
-    let net_pct =
-        if limits.max_net_exposure > 0.0 { (net.abs() / limits.max_net_exposure) * 100.0 } else { 0.0 };
-    let lev_pct = if limits.max_leverage > 0.0 { (lev / limits.max_leverage) * 100.0 } else { 0.0 };
-    let dd_pct = if limits.max_drawdown_pct > 0.0 { (dd / limits.max_drawdown_pct) * 100.0 } else { 0.0 };
-    let loss_pct = if limits.max_daily_loss > 0.0 { (loss / limits.max_daily_loss) * 100.0 } else { 0.0 };
-    let var_pct_util = if limits.max_var_pct > 0.0 { (var_pct / limits.max_var_pct) * 100.0 } else { 0.0 };
+    let u = LimitUtilization::new(gross, net, lev, dd, loss, var_pct, &limits);
+    let gross_pct = u.gross_exposure * 100.0;
+    let net_pct = u.net_exposure * 100.0;
+    let lev_pct = u.leverage * 100.0;
+    let dd_pct = u.drawdown * 100.0;
+    let loss_pct = u.daily_loss * 100.0;
+    let var_pct_util = u.var * 100.0;
 
     let summary = RiskMetricsSummaryView {
         workspace_id: ws,

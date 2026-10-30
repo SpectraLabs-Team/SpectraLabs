@@ -173,6 +173,10 @@ jobs:
         run: npm run typecheck
       - name: Lint
         run: npm run lint
+      - name: Learning Center tests
+        # Also part of npm test; run on its own so a broken lesson link, missing metric lesson or
+        # search regression is named in the log instead of hiding inside the full suite.
+        run: npm run test:learn
       - name: Tests
         run: npm test
       - name: Production build

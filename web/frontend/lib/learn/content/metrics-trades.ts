@@ -214,7 +214,7 @@ export const tradeMetrics = [
 
   metricLesson({
     slug: 'slippage',
-    title: 'Slippage',
+    title: 'Slippage Cost',
     level: 'Intermediate',
     summary: 'The difference between the price you expected and the price you got. Backtests model it as an adverse price move on market and stop fills.',
     keywords: ['slippage', 'market impact', 'execution cost', 'spread cost', 'volume slippage'],

@@ -214,6 +214,11 @@ describe('Metric registry', () => {
     for (const f of ['components/studio/OptimizationLab.tsx', 'components/studio/StressPanel.tsx', 'components/studio/BacktestToPaperGap.tsx', 'components/studio/StudioShell.tsx']) {
       assert.match(src(f), /InfoTip|MetricLabel/, `${f} uses the registry`);
     }
+    // Every metric id written as a literal prop (metric="x") must exist in the registry.
+    for (const f of files) {
+      const text = fs.readFileSync(f, 'utf8');
+      for (const m of text.matchAll(/metric=["']([a-z0-9_]+)["']/g)) assert.ok(m[1] in metricDefinitions, `${path.relative(root, f)}: unknown metric "${m[1]}"`);
+    }
     const has = (f, ids) => {
       for (const id of ids) assert.ok((used.get(f) ?? []).includes(id), `${f}: no ⓘ for ${id}`);
     };
@@ -374,6 +379,16 @@ describe('Search', () => {
     assert.deepEqual(top('candlestick'), ['paper-trading/reading-candlestick-charts']);
     assert.ok(top('limit order', 3).includes('fundamentals/market-and-limit-orders'));
     assert.ok(top('bid ask spread', 3).includes('fundamentals/bid-ask-spread'));
+  });
+
+  it('every lesson title is unique and finds its own lesson first (M22 task 3.1)', () => {
+    const titles = new Map();
+    for (const l of LESSONS) {
+      const t = l.title.trim().toLowerCase();
+      assert.ok(!titles.has(t), `duplicate title "${l.title}": ${titles.get(t)} and ${key(l)}`);
+      titles.set(t, key(l));
+      assert.equal(top(l.title)[0], key(l), `searching "${l.title}" should return ${key(l)} first`);
+    }
   });
 
   it('understands common abbreviations and requires every term', () => {

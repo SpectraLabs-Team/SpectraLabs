@@ -138,7 +138,7 @@ export const riskMetrics = [
 
   metricLesson({
     slug: 'volatility',
-    title: 'Volatility',
+    title: 'Annualized Volatility',
     level: 'Beginner',
     featured: true,
     summary: 'How much returns vary from period to period, expressed as an annual standard deviation.',

@@ -385,7 +385,11 @@ impl BacktestResult {
             .journal()
             .iter()
             .filter(|e| e.kind == spectra_core::EntryType::Fill)
-            .map(|e| notional(e.fill.price, e.fill.qty).map_or(0.0, Money::to_f64))
+            .map(|e| {
+                self.ledger
+                    .notional_of(e.fill.instrument, e.fill.price, e.fill.qty)
+                    .map_or(0.0, Money::to_f64)
+            })
             .sum();
         let equity: Vec<f64> = self.equity_curve.iter().map(|p| p.equity.to_f64()).collect();
         annualized_turnover(traded, &equity, periods_per_year)
@@ -973,6 +977,7 @@ fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order]
             spectra_core::EntryType::BorrowFee => 4,
             spectra_core::EntryType::Split => 5,
             spectra_core::EntryType::Dividend => 6,
+            spectra_core::EntryType::Listing => 7,
         });
         h.update_i64(e.ts_ns);
         h.update_i64(e.amount.raw());
@@ -1818,7 +1823,11 @@ fn run_inner<'s>(
                     side: o.side,
                     qty: a.qty,
                     price: a.price,
-                    fee: commission_fee(&cfg.costs.commission, a.qty, notional(a.price, a.qty)?)?,
+                    fee: commission_fee(
+                        &cfg.costs.commission,
+                        a.qty,
+                        ledger.notional_of(o.instrument, a.price, a.qty)?,
+                    )?,
                     ts_ns: ts,
                 };
                 // A strategy must afford a fill on its own books before the account takes it.

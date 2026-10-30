@@ -102,6 +102,7 @@ fn run_script(script: &str) -> String {
             EntryType::BorrowFee => "B",
             EntryType::Split => "S",
             EntryType::Dividend => "V",
+            EntryType::Listing => "L",
         };
         let side = if e.fill.side == Side::Buy { 'B' } else { 'S' };
         writeln!(

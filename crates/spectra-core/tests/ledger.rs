@@ -3,6 +3,7 @@
 //! the gross leverage limit that the C++ engine lacked.
 
 use spectra_core::fixed::{MAX_RAW, SCALE};
+use spectra_core::Ratio;
 use spectra_core::*;
 
 fn m(v: f64) -> Money {
@@ -549,4 +550,88 @@ fn splits_and_dividends_are_journaled_and_replay() {
     assert_eq!(l.apply_dividend(1, Money::ZERO, 4), rej(Reject::InvalidAmount));
     assert_eq!(l.apply_dividend(3, m(1.0), 4), rej(Reject::InvalidFill));
     expect_invariants(&l);
+}
+
+// ---------------------------------------------------------------- M24.1 multipliers
+
+fn r(v: i64) -> Ratio {
+    Ratio::from_units(v).unwrap()
+}
+
+#[test]
+fn futures_pnl_is_multiplier_times_price_move() {
+    // M24.1 task 6: multiplier 50, buy 2 at 100, sell at 103: P&L = 3 * 2 * 50 = 300.
+    let mut l = reference(false, false);
+    l.register_instrument(AAPL, r(50), 0).unwrap();
+    l.deposit(m(100_000.0), 0).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Buy, 2.0, 100.0, 0.0)).unwrap();
+    assert_eq!(l.position(AAPL).cost, m(10_000.0)); // 2 * 100 * 50
+    l.apply_fill(&fill(AAPL, Side::Sell, 2.0, 103.0, 0.0)).unwrap();
+    assert_eq!(l.realized_pnl(), m(300.0));
+    assert_eq!(l.cash(), m(100_300.0));
+    expect_invariants(&l);
+}
+
+#[test]
+fn multiplier_flows_through_marks_and_unrealized() {
+    let mut l = reference(false, false);
+    l.register_instrument(AAPL, r(50), 0).unwrap();
+    l.deposit(m(100_000.0), 0).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Buy, 1.0, 100.0, 0.0)).unwrap();
+    l.mark(AAPL, p(101.0)).unwrap();
+    assert_eq!(l.unrealized_pnl(), Ok(m(50.0)));
+    assert_eq!(l.equity(), Ok(m(100_050.0)));
+    expect_invariants(&l);
+}
+
+#[test]
+fn multiplier_survives_replay() {
+    let mut l = reference(true, false);
+    l.register_instrument(AAPL, r(50), 0).unwrap();
+    l.deposit(m(100_000.0), 0).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Buy, 2.0, 100.0, 1.0)).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Sell, 3.0, 101.0, 1.0)).unwrap(); // flips short through zero
+    expect_invariants(&l);
+    let r2 = Ledger::replay(*l.config(), l.journal()).unwrap();
+    assert_eq!(r2.multiplier(AAPL), r(50));
+    assert_eq!(r2.journal(), l.journal());
+    assert_eq!(r2.realized_pnl(), l.realized_pnl());
+}
+
+#[test]
+fn unit_multiplier_writes_nothing() {
+    let mut l = reference(false, false);
+    l.register_instrument(AAPL, Ratio::ONE, 0).unwrap();
+    assert!(l.journal().is_empty());
+    assert_eq!(l.multiplier(AAPL), Ratio::ONE);
+}
+
+#[test]
+fn multiplier_registration_rules() {
+    let mut l = reference(false, false);
+    assert_eq!(l.register_instrument(AAPL, Ratio::ZERO, 0), rej(Reject::InvalidFill));
+    assert_eq!(l.register_instrument(AAPL, r(-1), 0), rej(Reject::InvalidFill));
+    l.register_instrument(AAPL, r(50), 0).unwrap();
+    assert_eq!(l.register_instrument(AAPL, r(10), 0), rej(Reject::InvalidFill));
+    l.deposit(m(100_000.0), 0).unwrap();
+    l.register_instrument(2, r(10), 0).unwrap();
+    l.apply_fill(&fill(2, Side::Buy, 1.0, 100.0, 0.0)).unwrap();
+    assert_eq!(l.register_instrument(2, r(10), 0), rej(Reject::InvalidFill));
+    expect_invariants(&l);
+}
+
+#[test]
+fn listing_validates_the_instrument_record() {
+    use spectra_core::{Instrument, InstrumentType};
+    let mut l = reference(false, false);
+    let mut fut = Instrument::equity("ESZ6", "USD", p(0.25), Qty::from_raw(SCALE));
+    fut.kind = InstrumentType::Future;
+    fut.multiplier = r(50);
+    fut.expiry_ns = Some(1);
+    l.list(AAPL, &fut, "USD", 0).unwrap();
+    assert_eq!(l.multiplier(AAPL), r(50));
+
+    let eur = Instrument::equity("SAP", "EUR", p(0.01), Qty::from_raw(SCALE));
+    assert_eq!(l.list(2, &eur, "USD", 0), rej(Reject::InvalidFill));
+    assert_eq!(l.multiplier(2), Ratio::ONE);
 }

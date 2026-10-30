@@ -1,14 +1,15 @@
 //! Synchronous pricing with the M24 models: bonds (accrued interest, clean
-//! and dirty prices, yield, duration) and European options (Black-Scholes-
-//! Merton price, Greeks, implied volatility). Nothing is stored; the answer
-//! depends only on the request.
+//! and dirty prices, yield, duration, z-spread over a curve), European
+//! options (Black-Scholes-Merton price, Greeks, implied volatility), discount
+//! curves (bootstrapped from deposits and par swaps) and interest-rate swaps.
+//! Nothing is stored; the answer depends only on the request.
 
 use axum::body::Bytes;
 use axum::extract::rejection::BytesRejection;
 use axum::response::Response;
 use serde::{Deserialize, Serialize};
 use spectra_core::{DayCount, OptionRight, COUPON_FREQUENCIES};
-use spectra_engine::{BondTerms, OptionInputs};
+use spectra_engine::{BondTerms, Curve, CurveQuote, OptionInputs, Swap};
 use utoipa::ToSchema;
 
 use crate::jobs_api::to_json;
@@ -38,6 +39,9 @@ pub struct BondPricingRequest {
     /// Annual yield, compounded `coupon_frequency` times a year.
     #[serde(default, rename = "yield")]
     pub yield_rate: Option<f64>,
+    /// A discount curve to measure the bond's z-spread over (optional).
+    #[serde(default)]
+    pub curve: Option<CurveInput>,
 }
 
 /// A bond priced.
@@ -60,6 +64,8 @@ pub struct BondPricingView {
     pub convexity: f64,
     /// Price change per 100 face for a one basis point move in yield.
     pub dv01: f64,
+    /// Continuously compounded spread over `curve` that reprices the bond, when a curve was given.
+    pub z_spread: Option<f64>,
 }
 
 pub(crate) fn parse_date_ns(raw: &str) -> Option<i64> {
@@ -148,6 +154,14 @@ pub(crate) async fn price_bond(body: Result<Bytes, BytesRejection>) -> Response 
         }
     };
     let r = terms.risk(y, as_of);
+    let z_spread = match req.curve.as_ref().map(CurveInput::build) {
+        None => None,
+        Some(Err(e)) => return invalid_fields(&prefix("curve", e)),
+        Some(Ok(curve)) => match spectra_engine::z_spread(&terms.cash_flows(as_of), &curve, dirty) {
+            Ok(z) => Some(z),
+            Err(e) => return invalid_fields(&[("curve".into(), e.to_string())]),
+        },
+    };
     to_json(
         200,
         &BondPricingView {
@@ -159,6 +173,7 @@ pub(crate) async fn price_bond(body: Result<Bytes, BytesRejection>) -> Response 
             modified_duration: r.modified,
             convexity: r.convexity,
             dv01: r.dv01,
+            z_spread,
         },
     )
 }
@@ -264,6 +279,197 @@ pub(crate) async fn price_option(body: Result<Bytes, BytesRejection>) -> Respons
                 model_status: "awaiting M26 review".into(),
             },
         ),
+        Err(e) => invalid_fields(&[(String::new(), e.to_string())]),
+    }
+}
+
+/// One market quote for a curve bootstrap.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CurveQuoteInput {
+    /// `deposit` (a simple rate to `years`) or `swap` (a par swap rate).
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Maturity, years.
+    pub years: f64,
+    /// The rate, as a fraction (0.04 is 4%).
+    pub rate: f64,
+    /// Fixed payments a year (swaps): 1, 2, 4 or 12.
+    #[serde(default)]
+    pub frequency: Option<u32>,
+}
+
+/// A discount curve: market quotes to bootstrap, or one flat rate.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CurveInput {
+    /// Deposits and par swaps, by increasing maturity.
+    #[serde(default)]
+    pub quotes: Option<Vec<CurveQuoteInput>>,
+    /// A flat continuously compounded rate instead of quotes.
+    #[serde(default)]
+    pub flat_rate: Option<f64>,
+}
+
+fn prefix(p: &str, errors: Vec<(String, String)>) -> Vec<(String, String)> {
+    errors
+        .into_iter()
+        .map(|(f, m)| (if f.is_empty() { p.to_string() } else { format!("{p}.{f}") }, m))
+        .collect()
+}
+
+impl CurveInput {
+    fn build(&self) -> Result<Curve, Vec<(String, String)>> {
+        match (&self.quotes, self.flat_rate) {
+            (Some(q), None) => {
+                let mut errors = Vec::new();
+                let mut quotes = Vec::with_capacity(q.len());
+                for (i, x) in q.iter().enumerate() {
+                    match (x.kind.as_str(), x.frequency) {
+                        ("deposit", None) => {
+                            quotes.push(CurveQuote::Deposit { years: x.years, rate: x.rate });
+                        }
+                        ("swap", Some(frequency)) => {
+                            quotes.push(CurveQuote::Swap { years: x.years, rate: x.rate, frequency });
+                        }
+                        ("deposit", Some(_)) => errors
+                            .push((format!("quotes[{i}].frequency"), "a deposit has no frequency".into())),
+                        ("swap", None) => {
+                            errors
+                                .push((format!("quotes[{i}].frequency"), "a swap needs a frequency".into()));
+                        }
+                        _ => errors.push((format!("quotes[{i}].type"), "must be deposit or swap".into())),
+                    }
+                }
+                if !errors.is_empty() {
+                    return Err(errors);
+                }
+                Curve::bootstrap(&quotes).map_err(|e| vec![("quotes".into(), e.to_string())])
+            }
+            (None, Some(r)) => Curve::flat(r, 50.0).map_err(|e| vec![("flat_rate".into(), e.to_string())]),
+            _ => Err(vec![(String::new(), "give either quotes or flat_rate".into())]),
+        }
+    }
+}
+
+/// `POST /api/v1/pricing/curve` body.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CurveRequest {
+    /// The curve.
+    pub curve: CurveInput,
+    /// Extra maturities (years) to report besides the nodes.
+    #[serde(default)]
+    pub at: Vec<f64>,
+}
+
+/// One point of a curve.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CurvePointView {
+    /// Years.
+    pub years: f64,
+    /// Discount factor.
+    pub discount_factor: f64,
+    /// Continuously compounded zero rate.
+    pub zero_rate: f64,
+}
+
+/// A bootstrapped curve.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CurveView {
+    /// The curve's nodes (log-linear discount factors between them).
+    pub nodes: Vec<CurvePointView>,
+    /// The maturities asked for in `at`.
+    pub points: Vec<CurvePointView>,
+}
+
+fn point(c: &Curve, t: f64) -> CurvePointView {
+    CurvePointView { years: t, discount_factor: c.df(t), zero_rate: c.zero_rate(t) }
+}
+
+/// Bootstrap a discount curve from deposits and par swaps (or build a flat
+/// one); every input quote reprices exactly.
+#[utoipa::path(post, path = "/api/v1/pricing/curve", tag = "pricing", request_body = CurveRequest,
+    responses(
+        (status = 200, body = CurveView),
+        (status = 422, description = "Every problem with the request", body = crate::openapi::ErrorDoc),
+    ))]
+pub(crate) async fn build_curve(body: Result<Bytes, BytesRejection>) -> Response {
+    let req: CurveRequest = match read_body(body) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let curve = match req.curve.build() {
+        Ok(c) => c,
+        Err(e) => return invalid_fields(&prefix("curve", e)),
+    };
+    if req.at.iter().any(|t| !t.is_finite() || *t < 0.0) {
+        return invalid_fields(&[("at".into(), "maturities must be finite and not negative".into())]);
+    }
+    to_json(
+        200,
+        &CurveView {
+            nodes: curve.nodes().iter().skip(1).map(|&(t, _)| point(&curve, t)).collect(),
+            points: req.at.iter().map(|&t| point(&curve, t)).collect(),
+        },
+    )
+}
+
+/// `POST /api/v1/pricing/swap` body: a fixed-for-floating swap from today.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SwapRequest {
+    /// The discount curve.
+    pub curve: CurveInput,
+    /// Notional.
+    pub notional: f64,
+    /// Fixed rate, as a fraction.
+    pub fixed_rate: f64,
+    /// Maturity, years.
+    pub years: f64,
+    /// Fixed payments a year: 1, 2, 4 or 12.
+    pub frequency: u32,
+    /// True for the side that pays fixed and receives floating.
+    pub pay_fixed: bool,
+}
+
+/// A swap valued.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SwapView {
+    /// Present value to the holder.
+    pub pv: f64,
+    /// The fixed rate at which the swap is worth zero.
+    pub par_rate: f64,
+    /// PV change for a one basis point parallel rise in zero rates.
+    pub dv01: f64,
+    /// PV of 1 a year on the fixed schedule.
+    pub annuity: f64,
+}
+
+/// Value a fixed-for-floating interest-rate swap on a curve (single-curve).
+#[utoipa::path(post, path = "/api/v1/pricing/swap", tag = "pricing", request_body = SwapRequest,
+    responses(
+        (status = 200, body = SwapView),
+        (status = 422, description = "Every problem with the request", body = crate::openapi::ErrorDoc),
+    ))]
+pub(crate) async fn price_swap(body: Result<Bytes, BytesRejection>) -> Response {
+    let req: SwapRequest = match read_body(body) {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let curve = match req.curve.build() {
+        Ok(c) => c,
+        Err(e) => return invalid_fields(&prefix("curve", e)),
+    };
+    let swap = Swap {
+        notional: req.notional,
+        fixed_rate: req.fixed_rate,
+        years: req.years,
+        frequency: req.frequency,
+        pay_fixed: req.pay_fixed,
+    };
+    match swap.value(&curve) {
+        Ok(v) => to_json(200, &SwapView { pv: v.pv, par_rate: v.par_rate, dv01: v.dv01, annuity: v.annuity }),
         Err(e) => invalid_fields(&[(String::new(), e.to_string())]),
     }
 }

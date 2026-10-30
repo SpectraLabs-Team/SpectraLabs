@@ -1063,6 +1063,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pricing/curve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bootstrap a discount curve from deposits and par swaps (or build a flat
+         *     one); every input quote reprices exactly. */
+        post: operations["build_curve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricing/option": {
         parameters: {
             query?: never;
@@ -1075,6 +1093,23 @@ export interface paths {
         /** Price a European option (Black-Scholes-Merton with a dividend yield), or
          *     find its implied volatility from a price. */
         post: operations["price_option"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/swap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Value a fixed-for-floating interest-rate swap on a curve (single-curve). */
+        post: operations["price_swap"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2232,6 +2267,7 @@ export interface components {
              * @description Annual coupon rate as a fraction (0.05 is 5%).
              */
             coupon_rate: number;
+            curve?: null | components["schemas"]["CurveInput"];
             /** @description act_act_icma, 30_360, act_360 or act_365f. */
             day_count: string;
             /**
@@ -2289,6 +2325,11 @@ export interface components {
              * @description Annual, compounded `coupon_frequency` times a year.
              */
             yield: number;
+            /**
+             * Format: double
+             * @description Continuously compounded spread over `curve` that reprices the bond, when a curve was given.
+             */
+            z_spread?: number | null;
         };
         /** @description An exchange calendar supported by the platform. */
         CalendarView: {
@@ -2633,6 +2674,68 @@ export interface components {
             strategy_version_id?: string | null;
             test_size: number;
             train_size: number;
+        };
+        /** @description A discount curve: market quotes to bootstrap, or one flat rate. */
+        CurveInput: {
+            /**
+             * Format: double
+             * @description A flat continuously compounded rate instead of quotes.
+             */
+            flat_rate?: number | null;
+            /** @description Deposits and par swaps, by increasing maturity. */
+            quotes?: components["schemas"]["CurveQuoteInput"][] | null;
+        };
+        /** @description One point of a curve. */
+        CurvePointView: {
+            /**
+             * Format: double
+             * @description Discount factor.
+             */
+            discount_factor: number;
+            /**
+             * Format: double
+             * @description Years.
+             */
+            years: number;
+            /**
+             * Format: double
+             * @description Continuously compounded zero rate.
+             */
+            zero_rate: number;
+        };
+        /** @description One market quote for a curve bootstrap. */
+        CurveQuoteInput: {
+            /**
+             * Format: int32
+             * @description Fixed payments a year (swaps): 1, 2, 4 or 12.
+             */
+            frequency?: number | null;
+            /**
+             * Format: double
+             * @description The rate, as a fraction (0.04 is 4%).
+             */
+            rate: number;
+            /** @description `deposit` (a simple rate to `years`) or `swap` (a par swap rate). */
+            type: string;
+            /**
+             * Format: double
+             * @description Maturity, years.
+             */
+            years: number;
+        };
+        /** @description `POST /api/v1/pricing/curve` body. */
+        CurveRequest: {
+            /** @description Extra maturities (years) to report besides the nodes. */
+            at?: number[];
+            /** @description The curve. */
+            curve: components["schemas"]["CurveInput"];
+        };
+        /** @description A bootstrapped curve. */
+        CurveView: {
+            /** @description The curve's nodes (log-linear discount factors between them). */
+            nodes: components["schemas"]["CurvePointView"][];
+            /** @description The maturities asked for in `at`. */
+            points: components["schemas"]["CurvePointView"][];
         };
         /** @description A dataset and its versions. */
         DatasetDetailView: {
@@ -4248,6 +4351,56 @@ export interface components {
             timestamps_have_zone?: boolean | null;
             /** @description Suggested timezone identifier (e.g. `America/New_York`). */
             timezone?: string | null;
+        };
+        /** @description `POST /api/v1/pricing/swap` body: a fixed-for-floating swap from today. */
+        SwapRequest: {
+            /** @description The discount curve. */
+            curve: components["schemas"]["CurveInput"];
+            /**
+             * Format: double
+             * @description Fixed rate, as a fraction.
+             */
+            fixed_rate: number;
+            /**
+             * Format: int32
+             * @description Fixed payments a year: 1, 2, 4 or 12.
+             */
+            frequency: number;
+            /**
+             * Format: double
+             * @description Notional.
+             */
+            notional: number;
+            /** @description True for the side that pays fixed and receives floating. */
+            pay_fixed: boolean;
+            /**
+             * Format: double
+             * @description Maturity, years.
+             */
+            years: number;
+        };
+        /** @description A swap valued. */
+        SwapView: {
+            /**
+             * Format: double
+             * @description PV of 1 a year on the fixed schedule.
+             */
+            annuity: number;
+            /**
+             * Format: double
+             * @description PV change for a one basis point parallel rise in zero rates.
+             */
+            dv01: number;
+            /**
+             * Format: double
+             * @description The fixed rate at which the swap is worth zero.
+             */
+            par_rate: number;
+            /**
+             * Format: double
+             * @description Present value to the holder.
+             */
+            pv: number;
         };
         SweepTrialView: {
             /** Format: date-time */
@@ -7168,6 +7321,38 @@ export interface operations {
             };
         };
     };
+    build_curve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurveRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurveView"];
+                };
+            };
+            /** @description Every problem with the request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     price_option: {
         parameters: {
             query?: never;
@@ -7187,6 +7372,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OptionPricingView"];
+                };
+            };
+            /** @description Every problem with the request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    price_swap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwapRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SwapView"];
                 };
             };
             /** @description Every problem with the request */

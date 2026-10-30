@@ -332,3 +332,75 @@ async fn options_are_priced_and_kept_out_of_paper_trading() {
     assert!(refused["message"].as_str().unwrap_or_default().contains("M26"), "{refused}");
     f.clean_up();
 }
+
+#[tokio::test]
+async fn curves_swaps_and_z_spreads() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let quotes = json!([
+        {"type": "deposit", "years": 0.25, "rate": 0.04},
+        {"type": "deposit", "years": 0.5, "rate": 0.041},
+        {"type": "swap", "years": 1, "rate": 0.042, "frequency": 2},
+        {"type": "swap", "years": 5, "rate": 0.045, "frequency": 2},
+        {"type": "swap", "years": 10, "rate": 0.047, "frequency": 2}
+    ]);
+    let (status, curve) =
+        f.call("POST", "/api/v1/pricing/curve", &json!({"curve": {"quotes": quotes}, "at": [3, 7.5]})).await;
+    assert_eq!(status, 200, "{curve}");
+    assert_eq!(curve["nodes"].as_array().unwrap().len(), 5);
+    assert_eq!(curve["points"].as_array().unwrap().len(), 2);
+    // The 3-month deposit reprices exactly.
+    let df = curve["nodes"][0]["discount_factor"].as_f64().unwrap();
+    assert!((df - 1.0 / (1.0 + 0.04 * 0.25)).abs() < 1e-14, "{curve}");
+
+    // A 5-year swap at its par rate is worth nothing; payer and receiver mirror each other.
+    let swap = |fixed: f64, pay: bool| {
+        json!({"curve": {"quotes": quotes}, "notional": 10_000_000, "fixed_rate": fixed, "years": 5,
+               "frequency": 2, "pay_fixed": pay})
+    };
+    let (status, par) = f.call("POST", "/api/v1/pricing/swap", &swap(0.045, true)).await;
+    assert_eq!(status, 200, "{par}");
+    assert!(par["pv"].as_f64().unwrap().abs() < 1e-4, "{par}");
+    assert!((par["par_rate"].as_f64().unwrap() - 0.045).abs() < 1e-12, "{par}");
+    let (_, payer) = f.call("POST", "/api/v1/pricing/swap", &swap(0.04, true)).await;
+    let (_, receiver) = f.call("POST", "/api/v1/pricing/swap", &swap(0.04, false)).await;
+    assert!(payer["pv"].as_f64().unwrap() > 0.0, "paying below par is worth something");
+    assert!((payer["pv"].as_f64().unwrap() + receiver["pv"].as_f64().unwrap()).abs() < 1e-6);
+    assert!(payer["dv01"].as_f64().unwrap() > 0.0, "a payer gains when rates rise");
+
+    // A bond's z-spread over a flat curve: priced off curve + 100bp, it reads back 100bp.
+    let flat = json!({"flat_rate": 0.03});
+    let (status, zero) = f
+        .call(
+            "POST",
+            "/api/v1/pricing/bond",
+            &json!({"maturity": "2031-01-01", "coupon_rate": 0.05, "coupon_frequency": 1, "day_count": "act_act_icma",
+                    "as_of": "2026-01-01", "yield": 0.05, "curve": flat}),
+        )
+        .await;
+    assert_eq!(status, 200, "{zero}");
+    let z = zero["z_spread"].as_f64().unwrap();
+    // A 5% annual bond priced at par yields 5% annual; over a 3% continuous curve its
+    // spread is near ln(1.05) - 0.03.
+    assert!((z - (1.05f64.ln() - 0.03)).abs() < 1e-3, "{zero}");
+
+    // Every problem with a curve is reported with its field.
+    let (status, bad) = f
+        .call(
+            "POST",
+            "/api/v1/pricing/curve",
+            &json!({"curve": {"quotes": [{"type": "swap", "years": 1, "rate": 0.04}, {"type": "fra", "years": 2, "rate": 0.04}]}}),
+        )
+        .await;
+    assert_eq!(status, 422, "{bad}");
+    let fs = fields(&bad);
+    assert!(
+        fs.contains(&"curve.quotes[0].frequency".to_string())
+            && fs.contains(&"curve.quotes[1].type".to_string()),
+        "{bad}"
+    );
+    let (status, _) =
+        f.call("POST", "/api/v1/pricing/curve", &json!({"curve": {"flat_rate": 0.03, "quotes": []}})).await;
+    assert_eq!(status, 422, "quotes and a flat rate together are refused");
+    f.clean_up();
+}

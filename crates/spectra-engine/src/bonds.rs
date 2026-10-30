@@ -229,6 +229,13 @@ impl BondTerms {
         out
     }
 
+    /// Remaining cash flows at `ts_ns` as `(years from now, amount per 100
+    /// face)`, a period being `1 / frequency` years: for pricing off a curve.
+    pub fn cash_flows(&self, ts_ns: i64) -> Vec<(f64, f64)> {
+        let f = f64::from(self.frequency);
+        self.flows(ts_ns).into_iter().map(|(t, cf)| (t / f, cf)).collect()
+    }
+
     /// Dirty price per 100 face for an annual yield `y` compounded `frequency` times a year.
     pub fn price_from_yield(&self, y: f64, ts_ns: i64) -> f64 {
         let f = f64::from(self.frequency);

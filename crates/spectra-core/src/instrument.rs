@@ -304,7 +304,13 @@ impl Instrument {
                     return Err("a bond's coupon rate must be between 0 and 1".into());
                 }
             }
-            InstrumentType::Swap => return Err("swaps are not supported yet".into()),
+            InstrumentType::Swap => {
+                return Err(
+                    "swap records are not stored: backtesting a swap needs a dated history of curves, \
+                     which datasets do not carry yet; price swaps with POST /api/v1/pricing/swap"
+                        .into(),
+                )
+            }
         }
         Ok(())
     }

@@ -7,6 +7,7 @@ pub mod backtest;
 pub mod bonds;
 pub mod corporate;
 pub mod costs;
+pub mod curves;
 pub mod dsl;
 pub mod futures;
 pub mod instruments;
@@ -26,6 +27,7 @@ pub use backtest::{
 pub use bonds::{BondRisk, BondTerms};
 pub use corporate::{corporate_actions_sha256, CorporateAction, CorporateActionKind, MAX_SPLIT_SHARES};
 pub use costs::{commission_fee, effective_slippage_bps, slipped_price, CommissionModel, CostModel};
+pub use curves::{pv_flows, z_spread, Curve, CurveQuote, Swap, SwapValue};
 pub use futures::{
     Chains, Continuous, RollAdjust, RollRule, DEFAULT_ROLL_BUSINESS_DAYS, MAX_ROLL_BUSINESS_DAYS,
 };

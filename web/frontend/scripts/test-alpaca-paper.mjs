@@ -294,4 +294,11 @@ describe('6. TradingView Pro Real-Time Chart & Coinbase Live Streaming', () => {
     assert.ok(labSource.includes('ws-feed.exchange.coinbase.com'), 'PaperLab must connect to Coinbase WebSocket feed');
     assert.ok(labSource.includes('liveStreamPrice'), 'PaperLab must update liveStreamPrice from feed');
   });
+
+  it('PaperLab supports shrinkable Order Ticket sidebar and chart expand toggle', () => {
+    const labSource = fs.readFileSync(path.resolve(root, 'components/studio/PaperLab.tsx'), 'utf8');
+    assert.ok(labSource.includes('ticketOpen'), 'PaperLab must manage ticketOpen state for shrinkable sidebar');
+    assert.ok(labSource.includes('toggleTicket'), 'PaperLab must provide toggleTicket handler');
+    assert.ok(labSource.includes('chartHeightMode'), 'PaperLab must manage chartHeightMode');
+  });
 });

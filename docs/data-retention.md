@@ -66,7 +66,7 @@ Shortening it deletes more on the next purge run: dry-run first (see `docs/opera
 
 - Decided (Decision 2): runs and drafts are kept until the user or account deletes them. No automatic expiry.
 - Artifact sweep: the worker sweeps unreferenced files every 30 minutes (`spectra-worker.rs`). No grace period is set. Owner to decide whether one is wanted.
-- Decided (Decision 6): an unset `SPECTRA_ACTIVITY_PURGE` means off. The code change is in PR #140 and is pending merge.
+- Decided (Decision 6): an unset `SPECTRA_ACTIVITY_PURGE` means off (`config.rs` and `docs/operations.md`, M28 Decision 6, merged in PR #140).
 
 ## Sign-off
 

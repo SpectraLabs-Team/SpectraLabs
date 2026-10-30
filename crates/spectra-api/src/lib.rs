@@ -49,6 +49,7 @@ pub mod engine;
 pub mod gap_api;
 pub mod identity;
 pub mod ingest;
+pub mod instruments_api;
 pub mod jobs_api;
 pub mod lifecycle_api;
 pub mod observability;
@@ -56,6 +57,7 @@ pub mod openapi;
 pub mod optimization_api;
 pub mod paper_api;
 pub(crate) mod pdf;
+pub mod pricing_api;
 pub mod providers;
 pub mod providers_api;
 pub mod registry_api;
@@ -824,6 +826,23 @@ fn backtest_routes() -> Router<AppState> {
                     .delete(corporate_actions_api::delete_corporate_action_set),
             ),
         )
+        .route(
+            "/api/v1/instruments",
+            only(get(instruments_api::list_instruments).post(instruments_api::create_instrument)),
+        )
+        .route("/api/v1/instruments/{symbol}", only(delete(instruments_api::delete_instrument)))
+        .route(
+            "/api/v1/base-currency",
+            only(get(instruments_api::get_base_currency).put(instruments_api::put_base_currency)),
+        )
+        .route(
+            "/api/v1/fx-rates",
+            only(get(instruments_api::list_fx_rates).post(instruments_api::put_fx_rates)),
+        )
+        .route("/api/v1/pricing/bond", only(post(pricing_api::price_bond)))
+        .route("/api/v1/pricing/option", only(post(pricing_api::price_option)))
+        .route("/api/v1/pricing/curve", only(post(pricing_api::build_curve)))
+        .route("/api/v1/pricing/swap", only(post(pricing_api::price_swap)))
         .route(
             "/api/v1/symbol-changes",
             only(get(lifecycle_api::list_symbol_changes).post(lifecycle_api::create_symbol_change)),

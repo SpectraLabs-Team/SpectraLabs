@@ -4,6 +4,10 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Backup freshness alerts (M28 Task 4). Mounted by the compose monitoring profile.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
 scrape_configs:
   # spectra-api: request latency by route pattern and status.
   - job_name: spectra-api

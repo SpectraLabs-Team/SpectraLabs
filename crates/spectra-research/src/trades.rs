@@ -67,7 +67,8 @@ pub fn extract_trades(ledger: &Ledger) -> Result<TradeExtraction> {
     let mut state: BTreeMap<InstrumentId, Open> = BTreeMap::new();
     for e in ledger.journal() {
         match e.kind {
-            EntryType::Fill => {}
+            // An expiry at zero closes a trade like a fill.
+            EntryType::Fill | EntryType::Expire => {}
             // A split changes the open quantity, not the trade.
             EntryType::Split => {
                 if let Some(s) = state.get_mut(&e.fill.instrument) {
@@ -77,8 +78,8 @@ pub fn extract_trades(ledger: &Ledger) -> Result<TradeExtraction> {
                 }
                 continue;
             }
-            // A dividend is part of the open trade's P&L.
-            EntryType::Dividend => {
+            // A dividend or a bond coupon is part of the open trade's P&L.
+            EntryType::Dividend | EntryType::Coupon => {
                 if let Some(s) = state.get_mut(&e.fill.instrument) {
                     if !s.qty.is_zero() {
                         s.gross = s.gross.checked_add(e.amount)?;

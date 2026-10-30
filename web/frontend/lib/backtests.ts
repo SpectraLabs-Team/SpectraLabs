@@ -152,9 +152,87 @@ export interface StrategySummary {
   realized_pnl: string;
 }
 
+/** One roll, close or settlement the engine made on a futures position. */
+export interface FuturesRoll {
+  ts_ns: number;
+  strategy: number;
+  kind: 'rolled' | 'closed' | 'settled' | 'redeemed' | 'exercised' | 'expired';
+  from: string;
+  to: string | null;
+  qty: string;
+  close_price: string;
+  open_price: string | null;
+  note: string | null;
+}
+
+export interface BondSummary {
+  symbol: string;
+  coupon_rate: number;
+  coupon_frequency: number;
+  day_count: string;
+  maturity: number;
+  as_of?: number;
+  clean_price?: number;
+  dirty_price?: number;
+  accrued_interest?: number;
+  yield_to_maturity?: number;
+  macaulay_duration?: number;
+  modified_duration?: number;
+  convexity?: number;
+  dv01_per_100?: number;
+}
+
+export interface OptionSummary {
+  symbol: string;
+  right: 'call' | 'put';
+  strike: number;
+  expiry: number;
+  underlying: string | null;
+  as_of?: number;
+  price?: number;
+  underlying_price?: number;
+  implied_volatility?: number;
+  delta?: number;
+  gamma?: number;
+  vega?: number;
+  theta?: number;
+}
+
+export interface OptionsSummary {
+  model: string;
+  options: OptionSummary[];
+  settlements: { ts_ns: number; strategy: number; symbol: string; kind: 'exercised' | 'expired'; qty: string; price: string; note: string | null }[];
+  /** The model's review gate, in words. */
+  gaps: string[];
+}
+
+export interface BondsSummary {
+  quote: 'clean' | 'dirty';
+  /** Net coupons received, base currency. */
+  coupons: string;
+  bonds: BondSummary[];
+  redemptions: { ts_ns: number; strategy: number; symbol: string; qty: string; price: string }[];
+  gaps: string[];
+}
+
+export interface FuturesSummary {
+  roll_rule: { business_days_before_expiry: number; adjust: 'ratio' | 'difference' };
+  chains: string[];
+  rolls: FuturesRoll[];
+  /** What the model leaves out (margin), in words. */
+  gaps: string[];
+}
+
 export interface InstrumentSummary {
   instrument: number;
   symbol: string | null;
+  /** M24: absent in summaries stored before instrument types existed (all equity). */
+  type?: 'equity' | 'future' | 'bond' | 'option' | 'swap';
+  currency?: string;
+  multiplier?: string;
+  expiry?: number | null;
+  /** A future's chain or an option's underlying. */
+  underlying?: string | null;
   fills: number;
   traded_notional: N;
   final_qty: string;
@@ -170,6 +248,10 @@ export interface InstrumentSummary {
 export interface Summary {
   schema: string;
   run: {
+    /** M24: the currency the books are kept in; absent before multi-currency. */
+    base_currency?: string;
+    /** M24: currencies converted to the base during the run. */
+    fx_currencies?: string[];
     engine_version: string;
     dataset_sha256: string;
     config_sha256: string;
@@ -214,6 +296,12 @@ export interface Summary {
     avg_holding_days: N;
   };
   instruments: InstrumentSummary[];
+  /** M24.2: present only for runs with futures. */
+  futures?: FuturesSummary;
+  /** M24.3: present only for runs with bonds. */
+  bonds?: BondsSummary;
+  /** M24.4: present only for runs with options. */
+  options?: OptionsSummary;
   benchmark: {
     valid: boolean;
     name?: string;
@@ -313,6 +401,8 @@ export const DOWNLOADS = [
   { kind: 'fills_csv', label: 'Fills', file: 'fills.csv' },
   { kind: 'returns_csv', label: 'Returns', file: 'returns.csv' },
   { kind: 'strategies_csv', label: 'Per strategy', file: 'strategies.csv' },
+  { kind: 'rolls_csv', label: 'Futures rolls', file: 'rolls.csv' },
+  { kind: 'continuous_csv', label: 'Continuous series', file: 'continuous.csv' },
   { kind: 'summary', label: 'Summary', file: 'summary.json' },
   { kind: 'request', label: 'Request', file: 'request.json' },
 ] as const;

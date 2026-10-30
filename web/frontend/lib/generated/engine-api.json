@@ -170,7 +170,7 @@
         "tags": [
           "backtests"
         ],
-        "summary": "A stored file of a finished backtest, as stored (CSV or JSON), with a\ndownload file name. `kind` is one of `summary`, `request`, `equity_csv`,\n`orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`.",
+        "summary": "A stored file of a finished backtest, as stored (CSV or JSON), with a\ndownload file name. `kind` is one of `summary`, `request`, `equity_csv`,\n`orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`, and for a run with\nfutures `rolls_csv` and `continuous_csv`.",
         "operationId": "backtest_artifact",
         "parameters": [
           {
@@ -186,7 +186,7 @@
           {
             "name": "kind",
             "in": "path",
-            "description": "summary, request, equity_csv, orders_csv, fills_csv, returns_csv or strategies_csv",
+            "description": "summary, request, equity_csv, orders_csv, fills_csv, returns_csv, strategies_csv, rolls_csv or continuous_csv",
             "required": true,
             "schema": {
               "type": "string"
@@ -406,6 +406,66 @@
           },
           "409": {
             "description": "The backtest has not succeeded (yet)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/base-currency": {
+      "get": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "The currency the workspace keeps its books in.",
+        "operationId": "get_base_currency",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseCurrencyView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Change the base currency. Earlier runs keep the currency they ran in;\nFX rates are kept per base, so rates against the old base are not reused.",
+        "operationId": "put_base_currency",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaseCurrencyView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseCurrencyView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -1707,6 +1767,172 @@
         }
       }
     },
+    "/api/v1/fx-rates": {
+      "get": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "List FX rates against the base currency.",
+        "operationId": "list_fx_rates",
+        "parameters": [
+          {
+            "name": "currency",
+            "in": "path",
+            "description": "Only this currency.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxRateListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Store FX rates for one currency against the base currency:\n`{\"currency\": \"EUR\", \"rates\": [{\"as_of\": \"2026-01-02\", \"rate\": \"1.0845\"}]}`.\nA rate at an existing time replaces it. All or nothing.",
+        "operationId": "put_fx_rates",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxRateListView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments": {
+      "get": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "List the workspace's instrument records.",
+        "operationId": "list_instruments",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Add an instrument record. The body has the shape of a backtest request's\n`instruments` entry, named by `symbol`.",
+        "operationId": "create_instrument",
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The symbol already has a record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/{symbol}": {
+      "delete": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Delete an instrument record. Runs that used it keep their stored copy.",
+        "operationId": "delete_instrument",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "description": "Symbol",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/jobs": {
       "get": {
         "tags": [
@@ -2853,6 +3079,170 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SyncOrdersResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pricing/bond": {
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "summary": "Price a fixed-coupon bond: accrued interest, clean and dirty price, yield,\nduration, convexity and DV01, from any one of clean price, dirty price or yield.",
+        "operationId": "price_bond",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BondPricingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BondPricingView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pricing/curve": {
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "summary": "Bootstrap a discount curve from deposits and par swaps (or build a flat\none); every input quote reprices exactly.",
+        "operationId": "build_curve",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurveView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pricing/option": {
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "summary": "Price a European option (Black-Scholes-Merton with a dividend yield), or\nfind its implied volatility from a price.",
+        "operationId": "price_option",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionPricingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionPricingView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pricing/swap": {
+      "post": {
+        "tags": [
+          "pricing"
+        ],
+        "summary": "Value a fixed-for-floating interest-rate swap on a curve (single-curve).",
+        "operationId": "price_swap",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwapView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
                 }
               }
             }
@@ -5974,6 +6364,20 @@
           }
         }
       },
+      "BaseCurrencyView": {
+        "type": "object",
+        "description": "The workspace's base currency.",
+        "required": [
+          "base_currency"
+        ],
+        "properties": {
+          "base_currency": {
+            "type": "string",
+            "description": "ISO code, e.g. `USD`."
+          }
+        },
+        "additionalProperties": false
+      },
       "BenchmarkRequest": {
         "type": "object",
         "description": "`POST /api/v1/benchmark` body (also the `benchmark` job payload).",
@@ -6011,6 +6415,142 @@
             "format": "int32",
             "description": "0..5, default 1.",
             "minimum": 0
+          }
+        }
+      },
+      "BondPricingRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/pricing/bond` body. Give exactly one of `clean_price`,\n`dirty_price` or `yield`; the rest are worked out from it.",
+        "required": [
+          "maturity",
+          "coupon_rate",
+          "coupon_frequency",
+          "day_count",
+          "as_of"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "description": "The valuation date (RFC 3339 or YYYY-MM-DD)."
+          },
+          "clean_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Price per 100 face without accrued interest."
+          },
+          "coupon_frequency": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Coupons a year: 1, 2, 4 or 12.",
+            "minimum": 0
+          },
+          "coupon_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "Annual coupon rate as a fraction (0.05 is 5%)."
+          },
+          "curve": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CurveInput",
+                "description": "A discount curve to measure the bond's z-spread over (optional)."
+              }
+            ]
+          },
+          "day_count": {
+            "type": "string",
+            "description": "act_act_icma, 30_360, act_360 or act_365f."
+          },
+          "dirty_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Price per 100 face with accrued interest."
+          },
+          "maturity": {
+            "type": "string",
+            "description": "Maturity date (RFC 3339 or YYYY-MM-DD)."
+          },
+          "yield": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Annual yield, compounded `coupon_frequency` times a year."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BondPricingView": {
+        "type": "object",
+        "description": "A bond priced.",
+        "required": [
+          "clean_price",
+          "dirty_price",
+          "accrued_interest",
+          "yield",
+          "macaulay_duration",
+          "modified_duration",
+          "convexity",
+          "dv01"
+        ],
+        "properties": {
+          "accrued_interest": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 100 face."
+          },
+          "clean_price": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 100 face."
+          },
+          "convexity": {
+            "type": "number",
+            "format": "double",
+            "description": "Years squared."
+          },
+          "dirty_price": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 100 face."
+          },
+          "dv01": {
+            "type": "number",
+            "format": "double",
+            "description": "Price change per 100 face for a one basis point move in yield."
+          },
+          "macaulay_duration": {
+            "type": "number",
+            "format": "double",
+            "description": "Years."
+          },
+          "modified_duration": {
+            "type": "number",
+            "format": "double",
+            "description": "Years."
+          },
+          "yield": {
+            "type": "number",
+            "format": "double",
+            "description": "Annual, compounded `coupon_frequency` times a year."
+          },
+          "z_spread": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Continuously compounded spread over `curve` that reprices the bond, when a curve was given."
           }
         }
       },
@@ -6311,6 +6851,20 @@
             ],
             "description": "Optional point-in-time timestamp (RFC 3339 string or integer nanoseconds)."
           },
+          "base_currency": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The currency the run books in. Default: the workspace's base currency."
+          },
+          "bond_quote": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Whether bond bars are `clean` (default: accrued interest is added at\nevery fill and mark) or `dirty` prices."
+          },
           "config": {
             "type": [
               "object",
@@ -6332,6 +6886,30 @@
             "type": "string",
             "format": "uuid",
             "description": "A dataset version of the caller's workspace."
+          },
+          "futures_roll": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Futures roll rule: `{\"business_days_before_expiry\": 5, \"adjust\": \"ratio\"}`\n(both optional; those are the defaults)."
+          },
+          "fx_rates": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "FX rates by currency: `{\"EUR\": [{\"as_of\", \"rate\"}]}`. Default: the\nworkspace's rates for the currencies the instruments are quoted in."
+          },
+          "instruments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "Instrument records (`[{\"symbol\", \"type\", \"currency\", \"multiplier\", \"tick_size\", ...}]`).\nDefault: the workspace's records that change a run (see `/api/v1/instruments`)."
           },
           "params": {
             "type": [
@@ -6853,6 +7431,138 @@
         },
         "additionalProperties": false
       },
+      "CurveInput": {
+        "type": "object",
+        "description": "A discount curve: market quotes to bootstrap, or one flat rate.",
+        "properties": {
+          "flat_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "A flat continuously compounded rate instead of quotes."
+          },
+          "quotes": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/CurveQuoteInput"
+            },
+            "description": "Deposits and par swaps, by increasing maturity."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CurvePointView": {
+        "type": "object",
+        "description": "One point of a curve.",
+        "required": [
+          "years",
+          "discount_factor",
+          "zero_rate"
+        ],
+        "properties": {
+          "discount_factor": {
+            "type": "number",
+            "format": "double",
+            "description": "Discount factor."
+          },
+          "years": {
+            "type": "number",
+            "format": "double",
+            "description": "Years."
+          },
+          "zero_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "Continuously compounded zero rate."
+          }
+        }
+      },
+      "CurveQuoteInput": {
+        "type": "object",
+        "description": "One market quote for a curve bootstrap.",
+        "required": [
+          "type",
+          "years",
+          "rate"
+        ],
+        "properties": {
+          "frequency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Fixed payments a year (swaps): 1, 2, 4 or 12.",
+            "minimum": 0
+          },
+          "rate": {
+            "type": "number",
+            "format": "double",
+            "description": "The rate, as a fraction (0.04 is 4%)."
+          },
+          "type": {
+            "type": "string",
+            "description": "`deposit` (a simple rate to `years`) or `swap` (a par swap rate)."
+          },
+          "years": {
+            "type": "number",
+            "format": "double",
+            "description": "Maturity, years."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CurveRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/pricing/curve` body.",
+        "required": [
+          "curve"
+        ],
+        "properties": {
+          "at": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "description": "Extra maturities (years) to report besides the nodes."
+          },
+          "curve": {
+            "$ref": "#/components/schemas/CurveInput",
+            "description": "The curve."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CurveView": {
+        "type": "object",
+        "description": "A bootstrapped curve.",
+        "required": [
+          "nodes",
+          "points"
+        ],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurvePointView"
+            },
+            "description": "The curve's nodes (log-linear discount factors between them)."
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurvePointView"
+            },
+            "description": "The maturities asked for in `at`."
+          }
+        }
+      },
       "DatasetDetailView": {
         "type": "object",
         "description": "A dataset and its versions.",
@@ -7115,6 +7825,19 @@
           }
         }
       },
+      "DeletedView": {
+        "type": "object",
+        "description": "Result of a delete.",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "True when something was deleted."
+          }
+        }
+      },
       "DelistingListView": {
         "type": "object",
         "description": "List of delistings.",
@@ -7309,6 +8032,51 @@
           }
         },
         "additionalProperties": false
+      },
+      "FxRateListView": {
+        "type": "object",
+        "description": "FX rates against the workspace's base currency.",
+        "required": [
+          "base_currency",
+          "items"
+        ],
+        "properties": {
+          "base_currency": {
+            "type": "string",
+            "description": "The base the rates are quoted against."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FxRateView"
+            },
+            "description": "Oldest first, by currency."
+          }
+        }
+      },
+      "FxRateView": {
+        "type": "object",
+        "description": "One FX observation.",
+        "required": [
+          "currency",
+          "as_of",
+          "rate"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the rate became known, nanoseconds since the epoch."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Foreign currency."
+          },
+          "rate": {
+            "type": "string",
+            "description": "Base-currency units per unit of `currency`, exact decimal text."
+          }
+        }
       },
       "GapReportDetailView": {
         "type": "object",
@@ -7745,6 +8513,125 @@
         },
         "additionalProperties": false
       },
+      "InstrumentListView": {
+        "type": "object",
+        "description": "The workspace's instruments.",
+        "required": [
+          "base_currency",
+          "items"
+        ],
+        "properties": {
+          "base_currency": {
+            "type": "string",
+            "description": "The base currency records default to."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstrumentView"
+            },
+            "description": "By symbol."
+          }
+        }
+      },
+      "InstrumentView": {
+        "type": "object",
+        "description": "One instrument record.",
+        "required": [
+          "symbol",
+          "type",
+          "currency",
+          "multiplier",
+          "tick_size",
+          "lot_size"
+        ],
+        "properties": {
+          "coupon_frequency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Coupons a year (bonds).",
+            "minimum": 0
+          },
+          "coupon_rate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Annual coupon rate as a fraction (bonds), exact decimal text."
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO currency the price is quoted in."
+          },
+          "day_count": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Day count for accrued interest (bonds): act_act_icma, 30_360, act_360 or act_365f."
+          },
+          "expiry": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Expiry (futures, options), nanoseconds since the epoch."
+          },
+          "lot_size": {
+            "type": "string",
+            "description": "Smallest tradable quantity, exact decimal text."
+          },
+          "maturity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Maturity (bonds), nanoseconds since the epoch."
+          },
+          "multiplier": {
+            "type": "string",
+            "description": "Contract multiplier, exact decimal text."
+          },
+          "right": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`call` or `put` (options)."
+          },
+          "strike": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Strike (options), exact decimal text."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol, unique in the workspace."
+          },
+          "tick_size": {
+            "type": "string",
+            "description": "Smallest price increment, exact decimal text."
+          },
+          "type": {
+            "type": "string",
+            "description": "`equity`, `future`, `bond`, `option` or `swap`."
+          },
+          "underlying": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A future's chain or an option's underlying symbol."
+          }
+        }
+      },
       "JobPage": {
         "type": "object",
         "description": "A page of jobs.",
@@ -8133,6 +9020,120 @@
           "workspace_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "OptionPricingRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/pricing/option` body. Give `volatility` for a price and the\nGreeks, or `price` for the implied volatility (and the Greeks at it).",
+        "required": [
+          "right",
+          "spot",
+          "strike",
+          "years",
+          "rate"
+        ],
+        "properties": {
+          "dividend_yield": {
+            "type": "number",
+            "format": "double",
+            "description": "Continuous dividend (or carry) yield. Default 0."
+          },
+          "price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Option price, to solve for the implied volatility."
+          },
+          "rate": {
+            "type": "number",
+            "format": "double",
+            "description": "Continuously compounded risk-free rate."
+          },
+          "right": {
+            "type": "string",
+            "description": "`call` or `put`."
+          },
+          "spot": {
+            "type": "number",
+            "format": "double",
+            "description": "Underlying price."
+          },
+          "strike": {
+            "type": "number",
+            "format": "double",
+            "description": "Strike."
+          },
+          "volatility": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Annual volatility."
+          },
+          "years": {
+            "type": "number",
+            "format": "double",
+            "description": "Time to expiry in years."
+          }
+        },
+        "additionalProperties": false
+      },
+      "OptionPricingView": {
+        "type": "object",
+        "description": "An option priced by Black-Scholes-Merton.",
+        "required": [
+          "price",
+          "volatility",
+          "delta",
+          "gamma",
+          "vega",
+          "theta",
+          "rho",
+          "model_status"
+        ],
+        "properties": {
+          "delta": {
+            "type": "number",
+            "format": "double",
+            "description": "dPrice/dSpot."
+          },
+          "gamma": {
+            "type": "number",
+            "format": "double",
+            "description": "d²Price/dSpot²."
+          },
+          "model_status": {
+            "type": "string",
+            "description": "The model's review status: it awaits the M26 correctness audit."
+          },
+          "price": {
+            "type": "number",
+            "format": "double",
+            "description": "Theoretical price."
+          },
+          "rho": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 1.00 of rate."
+          },
+          "theta": {
+            "type": "number",
+            "format": "double",
+            "description": "Per year."
+          },
+          "vega": {
+            "type": "number",
+            "format": "double",
+            "description": "Per 1.00 of volatility."
+          },
+          "volatility": {
+            "type": "number",
+            "format": "double",
+            "description": "The volatility used (given, or implied by `price`)."
           }
         }
       },
@@ -10614,6 +11615,82 @@
         },
         "additionalProperties": false
       },
+      "SwapRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/pricing/swap` body: a fixed-for-floating swap from today.",
+        "required": [
+          "curve",
+          "notional",
+          "fixed_rate",
+          "years",
+          "frequency",
+          "pay_fixed"
+        ],
+        "properties": {
+          "curve": {
+            "$ref": "#/components/schemas/CurveInput",
+            "description": "The discount curve."
+          },
+          "fixed_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "Fixed rate, as a fraction."
+          },
+          "frequency": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Fixed payments a year: 1, 2, 4 or 12.",
+            "minimum": 0
+          },
+          "notional": {
+            "type": "number",
+            "format": "double",
+            "description": "Notional."
+          },
+          "pay_fixed": {
+            "type": "boolean",
+            "description": "True for the side that pays fixed and receives floating."
+          },
+          "years": {
+            "type": "number",
+            "format": "double",
+            "description": "Maturity, years."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SwapView": {
+        "type": "object",
+        "description": "A swap valued.",
+        "required": [
+          "pv",
+          "par_rate",
+          "dv01",
+          "annuity"
+        ],
+        "properties": {
+          "annuity": {
+            "type": "number",
+            "format": "double",
+            "description": "PV of 1 a year on the fixed schedule."
+          },
+          "dv01": {
+            "type": "number",
+            "format": "double",
+            "description": "PV change for a one basis point parallel rise in zero rates."
+          },
+          "par_rate": {
+            "type": "number",
+            "format": "double",
+            "description": "The fixed rate at which the swap is worth zero."
+          },
+          "pv": {
+            "type": "number",
+            "format": "double",
+            "description": "Present value to the holder."
+          }
+        }
+      },
       "SweepTrialView": {
         "type": "object",
         "required": [
@@ -11783,6 +12860,14 @@
     {
       "name": "lifecycles",
       "description": "Instrument lifecycles, symbol changes, delistings and universes"
+    },
+    {
+      "name": "instruments",
+      "description": "Instrument records, base currency and FX rates"
+    },
+    {
+      "name": "pricing",
+      "description": "Bond, option, curve and swap pricing with the M24 models"
     },
     {
       "name": "providers",

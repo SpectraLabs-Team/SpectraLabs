@@ -298,6 +298,7 @@ fn failed_strategy_becomes_failed_job_with_readable_message() {
             corporate_actions: Vec::new(),
             as_of: None,
             dsl_code: None,
+            instruments: spectra_backtest::RequestInstruments::default(),
         },
     };
 

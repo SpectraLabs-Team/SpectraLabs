@@ -3,6 +3,7 @@
 //! the gross leverage limit that the C++ engine lacked.
 
 use spectra_core::fixed::{MAX_RAW, SCALE};
+use spectra_core::Ratio;
 use spectra_core::*;
 
 fn m(v: f64) -> Money {
@@ -549,4 +550,194 @@ fn splits_and_dividends_are_journaled_and_replay() {
     assert_eq!(l.apply_dividend(1, Money::ZERO, 4), rej(Reject::InvalidAmount));
     assert_eq!(l.apply_dividend(3, m(1.0), 4), rej(Reject::InvalidFill));
     expect_invariants(&l);
+}
+
+// ---------------------------------------------------------------- M24.1 multipliers
+
+fn r(v: i64) -> Ratio {
+    Ratio::from_units(v).unwrap()
+}
+
+#[test]
+fn futures_pnl_is_multiplier_times_price_move() {
+    // M24.1 task 6: multiplier 50, buy 2 at 100, sell at 103: P&L = 3 * 2 * 50 = 300.
+    let mut l = reference(false, false);
+    l.register_instrument(AAPL, r(50), 0).unwrap();
+    l.deposit(m(100_000.0), 0).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Buy, 2.0, 100.0, 0.0)).unwrap();
+    assert_eq!(l.position(AAPL).cost, m(10_000.0)); // 2 * 100 * 50
+    l.apply_fill(&fill(AAPL, Side::Sell, 2.0, 103.0, 0.0)).unwrap();
+    assert_eq!(l.realized_pnl(), m(300.0));
+    assert_eq!(l.cash(), m(100_300.0));
+    expect_invariants(&l);
+}
+
+#[test]
+fn multiplier_flows_through_marks_and_unrealized() {
+    let mut l = reference(false, false);
+    l.register_instrument(AAPL, r(50), 0).unwrap();
+    l.deposit(m(100_000.0), 0).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Buy, 1.0, 100.0, 0.0)).unwrap();
+    l.mark(AAPL, p(101.0)).unwrap();
+    assert_eq!(l.unrealized_pnl(), Ok(m(50.0)));
+    assert_eq!(l.equity(), Ok(m(100_050.0)));
+    expect_invariants(&l);
+}
+
+#[test]
+fn multiplier_survives_replay() {
+    let mut l = reference(true, false);
+    l.register_instrument(AAPL, r(50), 0).unwrap();
+    l.deposit(m(100_000.0), 0).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Buy, 2.0, 100.0, 1.0)).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Sell, 3.0, 101.0, 1.0)).unwrap(); // flips short through zero
+    expect_invariants(&l);
+    let r2 = Ledger::replay(*l.config(), l.journal()).unwrap();
+    assert_eq!(r2.multiplier(AAPL), r(50));
+    assert_eq!(r2.journal(), l.journal());
+    assert_eq!(r2.realized_pnl(), l.realized_pnl());
+}
+
+#[test]
+fn unit_multiplier_writes_nothing() {
+    let mut l = reference(false, false);
+    l.register_instrument(AAPL, Ratio::ONE, 0).unwrap();
+    assert!(l.journal().is_empty());
+    assert_eq!(l.multiplier(AAPL), Ratio::ONE);
+}
+
+#[test]
+fn multiplier_registration_rules() {
+    let mut l = reference(false, false);
+    assert_eq!(l.register_instrument(AAPL, Ratio::ZERO, 0), rej(Reject::InvalidFill));
+    assert_eq!(l.register_instrument(AAPL, r(-1), 0), rej(Reject::InvalidFill));
+    l.register_instrument(AAPL, r(50), 0).unwrap();
+    assert_eq!(l.register_instrument(AAPL, r(10), 0), rej(Reject::InvalidFill));
+    l.deposit(m(100_000.0), 0).unwrap();
+    l.register_instrument(2, r(10), 0).unwrap();
+    l.apply_fill(&fill(2, Side::Buy, 1.0, 100.0, 0.0)).unwrap();
+    assert_eq!(l.register_instrument(2, r(10), 0), rej(Reject::InvalidFill));
+    expect_invariants(&l);
+}
+
+#[test]
+fn listing_validates_the_instrument_record() {
+    use spectra_core::{Instrument, InstrumentType};
+    let mut l = reference(false, false);
+    let mut fut = Instrument::equity("ESZ6", "USD", p(0.25), Qty::from_raw(SCALE));
+    fut.kind = InstrumentType::Future;
+    fut.multiplier = r(50);
+    fut.expiry_ns = Some(1);
+    l.list(AAPL, &fut, 0).unwrap();
+    assert_eq!(l.multiplier(AAPL), r(50));
+
+    let mut bad = Instrument::equity("SAP", "EUR", p(0.01), Qty::from_raw(SCALE));
+    bad.expiry_ns = Some(1); // an equity cannot expire
+    assert_eq!(l.list(2, &bad, 0), rej(Reject::InvalidFill));
+    assert_eq!(l.multiplier(2), Ratio::ONE);
+}
+
+// ---------------------------------------------------------------- M24.2 marked to market
+
+fn futures_ledger(cash: f64) -> Ledger {
+    let mut l = reference(true, false);
+    l.register_contract(AAPL, r(50), true, 0).unwrap();
+    l.deposit(m(cash), 0).unwrap();
+    l
+}
+
+#[test]
+fn opening_a_future_moves_only_its_fee() {
+    let mut l = futures_ledger(10_000.0);
+    // 10 contracts at 100 x 50 = 50,000 notional on 10,000 of cash: no notional changes hands.
+    l.apply_fill(&fill(AAPL, Side::Buy, 10.0, 100.0, 5.0)).unwrap();
+    assert_eq!(l.cash(), m(9_995.0));
+    assert_eq!(l.position(AAPL).cost, m(50_000.0));
+    assert_eq!(l.position_exposure(AAPL), Ok(m(50_000.0)));
+    l.mark(AAPL, p(101.0)).unwrap();
+    assert_eq!(l.unrealized_pnl(), Ok(m(500.0)));
+    assert_eq!(l.position_value(AAPL), Ok(m(500.0)), "a future's value is its P&L");
+    assert_eq!(l.equity(), Ok(m(10_495.0)));
+    expect_invariants(&l);
+}
+
+#[test]
+fn closing_a_future_settles_its_pnl_to_cash() {
+    let mut l = futures_ledger(10_000.0);
+    l.apply_fill(&fill(AAPL, Side::Buy, 10.0, 100.0, 0.0)).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Sell, 4.0, 103.0, 0.0)).unwrap();
+    assert_eq!(l.realized_pnl(), m(600.0)); // 4 * 3 * 50
+    assert_eq!(l.cash(), m(10_600.0));
+    // A loss bigger than the cash still closes: it is a debt, not a choice.
+    l.apply_fill(&fill(AAPL, Side::Sell, 6.0, 60.0, 0.0)).unwrap();
+    assert_eq!(l.cash(), m(10_600.0 - 6.0 * 40.0 * 50.0));
+    assert!(l.cash().raw() < 0);
+    assert_eq!(l.position(AAPL).qty, Qty::ZERO);
+    expect_invariants(&l);
+    let replayed = Ledger::replay(*l.config(), l.journal()).unwrap();
+    assert!(replayed.is_marked_to_market(AAPL));
+    assert_eq!(replayed.cash(), l.cash());
+}
+
+#[test]
+fn a_future_flips_and_shorts_like_any_position() {
+    let mut l = futures_ledger(10_000.0);
+    l.apply_fill(&fill(AAPL, Side::Buy, 2.0, 100.0, 0.0)).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Sell, 5.0, 98.0, 1.0)).unwrap(); // close 2 at a loss, open 3 short
+    assert_eq!(l.realized_pnl(), m(-200.0));
+    assert_eq!(l.cash(), m(10_000.0 - 200.0 - 1.0));
+    assert_eq!(l.position(AAPL).qty, q(-3.0));
+    l.mark(AAPL, p(97.0)).unwrap();
+    assert_eq!(l.unrealized_pnl(), Ok(m(150.0)));
+    expect_invariants(&l);
+}
+
+#[test]
+fn leverage_counts_a_futures_notional() {
+    let mut l = Ledger::new(LedgerConfig { allow_short: true, ..LedgerConfig::default() }); // 1.0x
+    l.register_contract(AAPL, r(50), true, 0).unwrap();
+    l.deposit(m(10_000.0), 0).unwrap();
+    assert_eq!(l.apply_fill(&fill(AAPL, Side::Buy, 2.0, 100.0, 0.0)), Ok(())); // 10,000 notional: 1.0x
+    assert_eq!(l.apply_fill(&fill(AAPL, Side::Buy, 1.0, 100.0, 0.0)), rej(Reject::LeverageExceeded));
+    // Keeping an exposure (a roll into the next contract) is not a new decision.
+    l.register_contract(2, r(50), true, 0).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Sell, 2.0, 100.0, 0.0)).unwrap();
+    assert_eq!(l.apply_fill_keeping_exposure(&fill(2, Side::Buy, 2.0, 110.0, 0.0)), Ok(()));
+    expect_invariants(&l);
+}
+
+#[test]
+fn listing_a_future_marks_it_to_market() {
+    use spectra_core::{Instrument, InstrumentType};
+    let mut l = reference(false, false);
+    let mut fut = Instrument::equity("ESZ6", "USD", p(0.25), Qty::from_raw(SCALE));
+    fut.kind = InstrumentType::Future;
+    fut.expiry_ns = Some(1); // multiplier 1: still marked to market, so still listed
+    l.list(AAPL, &fut, 0).unwrap();
+    assert!(l.is_marked_to_market(AAPL));
+    assert_eq!(l.journal().len(), 1);
+    assert_eq!(l.journal()[0].kind, EntryType::Listing);
+}
+
+// ---------------------------------------------------------------- M24.4 expiry at zero
+
+#[test]
+fn an_expired_option_closes_at_zero() {
+    let mut l = reference(true, false);
+    l.register_instrument(AAPL, r(100), 0).unwrap();
+    l.deposit(m(10_000.0), 0).unwrap();
+    l.apply_fill(&fill(AAPL, Side::Buy, 2.0, 3.5, 1.0)).unwrap(); // premium 700 + 1 fee
+    l.expire_position(AAPL, 5).unwrap();
+    assert_eq!(l.position(AAPL).qty, Qty::ZERO);
+    assert_eq!(l.realized_pnl(), m(-700.0));
+    assert_eq!(l.cash(), m(10_000.0 - 701.0), "no cash moves at expiry");
+    expect_invariants(&l);
+    // A short keeps the premium.
+    l.register_instrument(2, r(100), 0).unwrap();
+    l.apply_fill(&fill(2, Side::Sell, 1.0, 2.0, 0.0)).unwrap();
+    l.expire_position(2, 6).unwrap();
+    assert_eq!(l.position(2).realized, m(200.0));
+    expect_invariants(&l);
+    assert_eq!(l.expire_position(2, 7), rej(Reject::InvalidFill), "nothing left to expire");
+    assert_eq!(Ledger::replay(*l.config(), l.journal()).unwrap().realized_pnl(), l.realized_pnl());
 }

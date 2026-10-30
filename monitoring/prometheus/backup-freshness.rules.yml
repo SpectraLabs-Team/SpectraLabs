@@ -1,0 +1,29 @@
+# Backup freshness alerts (M28 Task 4). Fed by scripts/check-backup-freshness.sh
+# through FRESHNESS_TEXTFILE, which a node_exporter textfile collector must read.
+# Where the alert is sent is M27's decision; these rules only define when it fires.
+groups:
+  - name: spectra-backups
+    rules:
+      - alert: SpectraBackupStale
+        expr: spectra_backup_stale == 1
+        for: 15m
+        labels:
+          severity: warning
+          component: backup
+        annotations:
+          summary: "Backup of {{ $labels.store }} is stale or missing"
+          description: >-
+            The newest {{ $labels.store }} backup is older than the freshness limit
+            (26 hours by default), or none was found. See docs/operations.md.
+
+      - alert: SpectraBackupCheckMissing
+        expr: time() - spectra_backup_freshness_check_timestamp_seconds > 2 * 3600
+        for: 15m
+        labels:
+          severity: warning
+          component: backup
+        annotations:
+          summary: "The backup freshness check has not run for over 2 hours"
+          description: >-
+            scripts/check-backup-freshness.sh has not written its metrics recently. A stale
+            check hides a stale backup, so check the cron or timer on the backup host.

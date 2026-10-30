@@ -73,7 +73,11 @@ struct SmaCross {
 impl Strategy for SmaCross {
     fn on_bar(&mut self, ctx: &mut Context<'_>, bars: &[Bar]) {
         for b in bars {
-            let h = ctx.history(b.instrument);
+            // Futures: trade the front contract, on the chain's continuous series.
+            if !ctx.is_front(b.instrument) {
+                continue;
+            }
+            let h = ctx.signal_history(b.instrument);
             if h.len() < self.slow.max(self.fast) {
                 continue;
             }

@@ -168,7 +168,65 @@ pub fn artifacts(r: &BacktestResult) -> Vec<Artifact> {
     if !r.strategies.is_empty() {
         out.push(csv("strategies.csv", strategies_csv(r)));
     }
+    if !r.continuous.is_empty() {
+        out.push(csv("rolls.csv", rolls_csv(r)));
+        out.push(csv("continuous.csv", continuous_csv(r)));
+    }
     out
+}
+
+/// Every futures roll, close and settlement the engine made (instrument ids;
+/// the summary names them). Prices are in the base currency.
+pub fn rolls_csv(r: &BacktestResult) -> String {
+    let mut s = String::from("ts_ns,strategy,kind,from,to,qty,close_price,open_price,note\n");
+    for e in &r.rolls {
+        let _ = writeln!(
+            s,
+            "{},{},{},{},{},{},{},{},{}",
+            e.ts_ns,
+            e.strategy,
+            e.kind.as_str(),
+            e.from,
+            e.to.map_or(String::new(), |t| t.to_string()),
+            e.qty,
+            e.close_price,
+            e.open_price.map_or(String::new(), |p| p.to_string()),
+            csv_text(e.note.as_deref().unwrap_or("")),
+        );
+    }
+    s
+}
+
+/// Each futures chain's continuous, back-adjusted series as it stood at the
+/// end of the run (`contract` is the front contract each bar came from).
+pub fn continuous_csv(r: &BacktestResult) -> String {
+    let mut s = String::from("chain,ts_ns,contract,open,high,low,close,volume\n");
+    for (chain, bars) in &r.continuous {
+        for b in bars {
+            let _ = writeln!(
+                s,
+                "{},{},{},{},{},{},{},{}",
+                csv_text(chain),
+                b.ts_ns,
+                b.instrument,
+                b.open,
+                b.high,
+                b.low,
+                b.close,
+                b.volume
+            );
+        }
+    }
+    s
+}
+
+/// A CSV field: quoted when it holds a comma, quote or line break.
+fn csv_text(v: &str) -> String {
+    if v.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", v.replace('"', "\"\""))
+    } else {
+        v.to_string()
+    }
 }
 
 /// A finite number, or `null`.
@@ -257,6 +315,7 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("total_fees", money(r.ledger.total_fees()))
         .with("financing", money(r.ledger.financing()))
         .with("dividends", money(r.ledger.dividends()))
+        .with("coupons", money(r.ledger.coupons()))
         .with("corporate_actions_applied", Json::integer(applied_actions(r) as i64))
         .with("realized_pnl", money(r.ledger.realized_pnl()))
         .with("final_cash", money(r.ledger.cash()))
@@ -285,6 +344,18 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
     } else {
         run.with("corporate_actions", crate::corporate::actions_to_json(&req.corporate_actions)?)
     };
+    let run = run.with("base_currency", Json::string(out.setup.base_currency.clone()));
+    let run = if out.setup.is_trivial() {
+        run
+    } else {
+        run.with("instruments_sha256", Json::string(out.setup.fingerprint())).with("fx_currencies", {
+            let mut a = Json::array();
+            for c in out.setup.foreign_currencies() {
+                a.push(Json::string(c))?;
+            }
+            a
+        })
+    };
     let summary = Json::object()
         .with("schema", Json::string(SUMMARY_SCHEMA))
         .with("run", run)
@@ -298,6 +369,18 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("attribution", compute_pnl_attribution(&r.ledger, Some(&out.symbols), None)?.to_json())
         .with("instruments", instruments_json(out)?)
         .with("benchmark", benchmark_json(out)?);
+    let summary = match futures_json(out)? {
+        Some(f) => summary.with("futures", f),
+        None => summary,
+    };
+    let summary = match bonds_json(out)? {
+        Some(b) => summary.with("bonds", b),
+        None => summary,
+    };
+    let summary = match options_json(out)? {
+        Some(o) => summary.with("options", o),
+        None => summary,
+    };
     if req.is_multi() {
         return Ok(summary.with("strategies", strategies_json(out)?));
     }
@@ -445,32 +528,46 @@ pub fn net_pnl(
 /// P&L and costs per instrument, from the ledger.
 fn instruments_json(out: &BacktestOutput) -> Result<Json> {
     let l = &out.result.ledger;
-    let mut fills: std::collections::BTreeMap<spectra_core::InstrumentId, (i64, f64, Money, Money)> =
+    // (fills, traded notional, borrow fees, dividends, coupons) per instrument.
+    let mut fills: std::collections::BTreeMap<spectra_core::InstrumentId, (i64, f64, Money, Money, Money)> =
         std::collections::BTreeMap::new();
     for e in l.journal() {
-        let slot = fills.entry(e.fill.instrument).or_insert((0, 0.0, Money::ZERO, Money::ZERO));
+        let slot = fills.entry(e.fill.instrument).or_insert((0, 0.0, Money::ZERO, Money::ZERO, Money::ZERO));
         match e.kind {
             EntryType::Fill => {
                 slot.0 += 1;
-                slot.1 += spectra_core::notional(e.fill.price, e.fill.qty)?.to_f64();
+                slot.1 += l.notional_of(e.fill.instrument, e.fill.price, e.fill.qty)?.to_f64();
             }
             EntryType::BorrowFee => slot.2 = slot.2.checked_add(e.amount)?,
             EntryType::Dividend => slot.3 = slot.3.checked_add(e.amount)?,
+            EntryType::Coupon => slot.4 = slot.4.checked_add(e.amount)?,
             _ => {}
         }
     }
     let mut arr = Json::array();
     for (&id, p) in l.positions() {
-        let value = l.position_value(id)?;
-        let unrealized = value.checked_sub(p.cost)?;
-        let (count, traded, borrow, dividends) =
-            fills.get(&id).copied().unwrap_or((0, 0.0, Money::ZERO, Money::ZERO));
-        let net = net_pnl(p.realized, unrealized, p.fees, borrow, dividends)?;
+        // Market value is the notional a position controls; for a future that
+        // notional never changed hands, so its P&L is reported separately.
+        let value = l.position_exposure(id)?;
+        let unrealized = l.position_unrealized(id)?;
+        let (count, traded, borrow, dividends, coupons) =
+            fills.get(&id).copied().unwrap_or((0, 0.0, Money::ZERO, Money::ZERO, Money::ZERO));
+        // Income is income: a coupon adds to net P&L as a dividend does.
+        let net = net_pnl(p.realized, unrealized, p.fees, borrow, dividends.checked_add(coupons)?)?;
         let symbol = out.symbols.get(id as usize).map_or(Json::Null, |s| Json::string(s.clone()));
+        let record = out.setup.instrument(id);
+        let underlying = record.and_then(|r| r.underlying.clone()).map_or(Json::Null, Json::string);
+        let currency = record.map_or(out.setup.base_currency.as_str(), |r| r.currency.as_str());
+        let expiry = record.and_then(|r| r.expiry_ns).map_or(Json::Null, Json::integer);
         arr.push(
             Json::object()
                 .with("instrument", Json::integer(i64::from(id)))
                 .with("symbol", symbol)
+                .with("type", Json::string(out.setup.kind(id).as_str()))
+                .with("currency", Json::string(currency))
+                .with("multiplier", Json::string(l.multiplier(id).to_string()))
+                .with("expiry", expiry)
+                .with("underlying", underlying)
                 .with("fills", Json::integer(count))
                 .with("traded_notional", num(traded))
                 .with("final_qty", Json::string(p.qty.to_string()))
@@ -480,10 +577,256 @@ fn instruments_json(out: &BacktestOutput) -> Result<Json> {
                 .with("fees", money(p.fees))
                 .with("borrow_fees", money(borrow))
                 .with("dividends", money(dividends))
+                .with("coupons", money(coupons))
                 .with("net_pnl", money(net)),
         )?;
     }
     Ok(arr)
+}
+
+/// What the run says about bonds, when it has any: the quote convention,
+/// redemptions, and each bond's yield and interest-rate risk at its last price.
+fn bonds_json(out: &BacktestOutput) -> Result<Option<Json>> {
+    let bonds: Vec<(spectra_core::InstrumentId, spectra_engine::BondTerms)> =
+        out.setup.instruments.keys().filter_map(|&id| out.setup.bond_terms(id).map(|t| (id, t))).collect();
+    if bonds.is_empty() {
+        return Ok(None);
+    }
+    let name = |id: spectra_core::InstrumentId| {
+        out.symbols
+            .get(id as usize)
+            .cloned()
+            .or_else(|| out.setup.instrument(id).map(|i| i.symbol.clone()))
+            .unwrap_or_else(|| format!("#{id}"))
+    };
+    let mut list = Json::array();
+    for (id, terms) in &bonds {
+        let mut j = Json::object()
+            .with("symbol", Json::string(name(*id)))
+            .with("coupon_rate", num(terms.coupon_rate))
+            .with("coupon_frequency", Json::integer(i64::from(terms.frequency)))
+            .with("day_count", Json::string(terms.day_count.as_str()))
+            .with("maturity", Json::integer(terms.maturity_ns));
+        if let Some(&(ts, close)) = out.last_quotes.get(id) {
+            let quoted = close.to_f64();
+            let accrued = terms.accrued(ts);
+            let (clean, dirty) = match out.setup.bond_quote {
+                spectra_engine::BondQuote::Clean => (quoted, quoted + accrued),
+                spectra_engine::BondQuote::Dirty => (quoted - accrued, quoted),
+            };
+            j = j
+                .with("as_of", Json::integer(ts))
+                .with("clean_price", num(clean))
+                .with("dirty_price", num(dirty))
+                .with("accrued_interest", num(accrued));
+            if let Ok(y) = terms.yield_from_price(dirty, ts) {
+                let r = terms.risk(y, ts);
+                j = j
+                    .with("yield_to_maturity", num(y))
+                    .with("macaulay_duration", num(r.macaulay))
+                    .with("modified_duration", num(r.modified))
+                    .with("convexity", num(r.convexity))
+                    .with("dv01_per_100", num(r.dv01));
+            }
+        }
+        list.push(j)?;
+    }
+    let mut redemptions = Json::array();
+    for e in out.result.rolls.iter().filter(|e| e.kind == spectra_engine::RollKind::Redeemed) {
+        redemptions.push(
+            Json::object()
+                .with("ts_ns", Json::integer(e.ts_ns))
+                .with("strategy", Json::integer(e.strategy as i64))
+                .with("symbol", Json::string(name(e.from)))
+                .with("qty", Json::string(e.qty.to_string()))
+                .with("price", Json::string(e.close_price.to_string())),
+        )?;
+    }
+    Ok(Some(
+        Json::object()
+            .with("quote", Json::string(out.setup.bond_quote.as_str()))
+            .with("coupons", money(out.result.ledger.coupons()))
+            .with("bonds", list)
+            .with("redemptions", redemptions)
+            .with("gaps", {
+                let mut g = Json::array();
+                g.push(Json::string(BOND_GAP))?;
+                g
+            }),
+    ))
+}
+
+/// The M26 review gate on the option model, stated with every run that has options.
+pub const OPTION_GATE: &str = "Options are European and cash-settled at expiry against the underlying's last \
+    close. The Black-Scholes-Merton model behind the implied volatility and Greeks awaits the M26 correctness \
+    review; until then options are available in backtests only, not in paper or live trading.";
+
+/// What the run says about options, when it has any: each option's implied
+/// volatility and Greeks at its last price, and every settlement.
+fn options_json(out: &BacktestOutput) -> Result<Option<Json>> {
+    let options: Vec<(spectra_core::InstrumentId, &spectra_core::Instrument)> = out
+        .setup
+        .instruments
+        .iter()
+        .filter(|(_, i)| i.kind == spectra_core::InstrumentType::Option)
+        .map(|(&id, i)| (id, i))
+        .collect();
+    if options.is_empty() {
+        return Ok(None);
+    }
+    let name = |id: spectra_core::InstrumentId| {
+        out.symbols
+            .get(id as usize)
+            .cloned()
+            .or_else(|| out.setup.instrument(id).map(|i| i.symbol.clone()))
+            .unwrap_or_else(|| format!("#{id}"))
+    };
+    // The run's risk-free rate, as a continuously compounded rate for the model.
+    let rate = (1.0 + out.request.config.risk_free_rate).ln();
+    let mut list = Json::array();
+    for (id, inst) in options {
+        let (Some(expiry), Some(strike), Some(right)) = (inst.expiry_ns, inst.strike, inst.option_right)
+        else {
+            continue;
+        };
+        let mut j = Json::object()
+            .with("symbol", Json::string(name(id)))
+            .with("right", Json::string(right.as_str()))
+            .with("strike", num(strike.to_f64()))
+            .with("expiry", Json::integer(expiry))
+            .with("underlying", inst.underlying.clone().map_or(Json::Null, Json::string));
+        let quotes =
+            (out.last_quotes.get(&id), out.setup.underlying_of(id).and_then(|u| out.last_quotes.get(&u)));
+        if let (Some(&(ts, price)), Some(&(_, spot))) = quotes {
+            let years = (expiry - ts) as f64 / (365.25 * 86_400e9);
+            j = j
+                .with("as_of", Json::integer(ts))
+                .with("price", num(price.to_f64()))
+                .with("underlying_price", num(spot.to_f64()));
+            if years > 0.0 {
+                let inputs = spectra_engine::OptionInputs {
+                    right,
+                    spot: spot.to_f64(),
+                    strike: strike.to_f64(),
+                    years,
+                    rate,
+                    dividend_yield: 0.0,
+                    volatility: 0.2,
+                };
+                if let Ok(vol) = inputs.implied_volatility(price.to_f64()) {
+                    if let Ok(v) = (spectra_engine::OptionInputs { volatility: vol, ..inputs }).value() {
+                        j = j
+                            .with("implied_volatility", num(vol))
+                            .with("delta", num(v.delta))
+                            .with("gamma", num(v.gamma))
+                            .with("vega", num(v.vega))
+                            .with("theta", num(v.theta));
+                    }
+                }
+            }
+        }
+        list.push(j)?;
+    }
+    let mut settlements = Json::array();
+    for e in
+        out.result.rolls.iter().filter(|e| {
+            matches!(e.kind, spectra_engine::RollKind::Exercised | spectra_engine::RollKind::Expired)
+        })
+    {
+        settlements.push(
+            Json::object()
+                .with("ts_ns", Json::integer(e.ts_ns))
+                .with("strategy", Json::integer(e.strategy as i64))
+                .with("symbol", Json::string(name(e.from)))
+                .with("kind", Json::string(e.kind.as_str()))
+                .with("qty", Json::string(e.qty.to_string()))
+                .with("price", Json::string(e.close_price.to_string()))
+                .with("note", e.note.as_ref().map_or(Json::Null, |n| Json::string(n.clone()))),
+        )?;
+    }
+    Ok(Some(
+        Json::object()
+            .with("model", Json::string("black_scholes_merton"))
+            .with("options", list)
+            .with("settlements", settlements)
+            .with("gaps", {
+                let mut g = Json::array();
+                g.push(Json::string(OPTION_GATE))?;
+                g
+            }),
+    ))
+}
+
+/// What a bond run does not model, stated in its summary.
+pub const BOND_GAP: &str = "Ex-coupon periods, settlement lags, default and call features are not modelled: \
+    the holder at the close before a coupon date receives the coupon, trades settle at the bar, and every bond \
+    is repaid at par at maturity.";
+
+/// What a futures run does not model (M24.2 task 10), stated in its summary.
+pub const MARGIN_GAP: &str = "Margin is not modelled. Futures are marked to market (no notional changes \
+    hands; P&L settles to cash) and the leverage limit applies to their notional, but no initial margin is \
+    held, margin calls are not simulated, and no interest is paid on posted margin.";
+
+/// What the run says about futures, when it has any: the roll rule, every
+/// roll, close and settlement, and what the model leaves out.
+fn futures_json(out: &BacktestOutput) -> Result<Option<Json>> {
+    let has_futures = out.setup.instruments.values().any(|i| i.kind == spectra_core::InstrumentType::Future);
+    if !has_futures {
+        return Ok(None);
+    }
+    let name = |id: spectra_core::InstrumentId| {
+        out.symbols
+            .get(id as usize)
+            .cloned()
+            .or_else(|| out.setup.instrument(id).map(|i| i.symbol.clone()))
+            .unwrap_or_else(|| format!("#{id}"))
+    };
+    let rule = &out.setup.roll;
+    let mut rolls = Json::array();
+    for e in out.result.rolls.iter().filter(|e| {
+        matches!(
+            e.kind,
+            spectra_engine::RollKind::Rolled
+                | spectra_engine::RollKind::Closed
+                | spectra_engine::RollKind::Settled
+        )
+    }) {
+        rolls.push(
+            Json::object()
+                .with("ts_ns", Json::integer(e.ts_ns))
+                .with("strategy", Json::integer(e.strategy as i64))
+                .with("kind", Json::string(e.kind.as_str()))
+                .with("from", Json::string(name(e.from)))
+                .with("to", e.to.map_or(Json::Null, |t| Json::string(name(t))))
+                .with("qty", Json::string(e.qty.to_string()))
+                .with("close_price", Json::string(e.close_price.to_string()))
+                .with("open_price", e.open_price.map_or(Json::Null, |p| Json::string(p.to_string())))
+                .with("note", e.note.as_ref().map_or(Json::Null, |n| Json::string(n.clone()))),
+        )?;
+    }
+    let mut chains = Json::array();
+    for chain in out.result.continuous.keys() {
+        chains.push(Json::string(chain.clone()))?;
+    }
+    Ok(Some(
+        Json::object()
+            .with(
+                "roll_rule",
+                Json::object()
+                    .with(
+                        "business_days_before_expiry",
+                        Json::integer(i64::from(rule.business_days_before_expiry)),
+                    )
+                    .with("adjust", Json::string(rule.adjust.as_str())),
+            )
+            .with("chains", chains)
+            .with("rolls", rolls)
+            .with("gaps", {
+                let mut gaps = Json::array();
+                gaps.push(Json::string(MARGIN_GAP))?;
+                gaps
+            }),
+    ))
 }
 
 /// The strategy against an equal-weight buy-and-hold of the same bars (no costs).

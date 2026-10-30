@@ -8,6 +8,7 @@ export interface TradingViewWidgetProps {
   interval?: string;
   className?: string;
   height?: number | string;
+  hideSideToolbar?: boolean;
 }
 
 export function toTradingViewSymbol(symbol: string): string {
@@ -102,7 +103,8 @@ export const TradingViewWidget = memo(function TradingViewWidget({
   theme = 'dark',
   interval = 'D',
   className = '',
-  height = 580,
+  height = 620,
+  hideSideToolbar = false,
 }: TradingViewWidgetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -115,7 +117,7 @@ export const TradingViewWidget = memo(function TradingViewWidget({
 
     const widgetHolder = document.createElement('div');
     widgetHolder.className = 'tradingview-widget-container__widget';
-    widgetHolder.style.height = '100%';
+    widgetHolder.style.height = 'calc(100% - 32px)';
     widgetHolder.style.width = '100%';
     container.appendChild(widgetHolder);
 
@@ -153,8 +155,10 @@ export const TradingViewWidget = memo(function TradingViewWidget({
       calendar: false,
       hide_top_toolbar: false,
       hide_legend: false,
-      hide_side_toolbar: false,
+      hide_side_toolbar: hideSideToolbar,
       save_image: true,
+      withdateranges: true,
+      hide_volume: false,
       backgroundColor: theme === 'dark' ? '#0b0f19' : '#ffffff',
       gridColor: theme === 'dark' ? 'rgba(242, 242, 242, 0.06)' : 'rgba(0, 0, 0, 0.06)',
       studies: ['STD;SMA'],
@@ -166,12 +170,16 @@ export const TradingViewWidget = memo(function TradingViewWidget({
     return () => {
       if (container) container.innerHTML = '';
     };
-  }, [symbol, theme, interval]);
+  }, [symbol, theme, interval, hideSideToolbar]);
 
   return (
     <div
       className={`tradingview-widget-container relative w-full rounded-2xl overflow-hidden border border-ink/10 shadow-sm ${className}`}
-      style={{ height: typeof height === 'number' ? `${height}px` : height, minHeight: '520px' }}
+      style={{
+        height: typeof height === 'number' ? `${height}px` : height,
+        minHeight: '520px',
+        width: '100%',
+      }}
       ref={containerRef}
     />
   );

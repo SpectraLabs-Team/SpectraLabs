@@ -48,7 +48,8 @@ export interface paths {
         };
         /** A stored file of a finished backtest, as stored (CSV or JSON), with a
          *     download file name. `kind` is one of `summary`, `request`, `equity_csv`,
-         *     `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`. */
+         *     `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`, and for a run with
+         *     futures `rolls_csv` and `continuous_csv`. */
         get: operations["backtest_artifact"];
         put?: never;
         post?: never;
@@ -121,6 +122,25 @@ export interface paths {
          *     `{kind, total_points, downsampled, points: [[ts_ns, value], ...]}`. */
         get: operations["backtest_series"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/base-currency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The currency the workspace keeps its books in. */
+        get: operations["get_base_currency"];
+        /** Change the base currency. Earlier runs keep the currency they ran in;
+         *     FX rates are kept per base, so rates against the old base are not reused. */
+        put: operations["put_base_currency"];
         post?: never;
         delete?: never;
         options?: never;
@@ -484,6 +504,62 @@ export interface paths {
         put?: never;
         post: operations["create_registry_run"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fx-rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List FX rates against the base currency. */
+        get: operations["list_fx_rates"];
+        put?: never;
+        /** Store FX rates for one currency against the base currency:
+         *     `{"currency": "EUR", "rates": [{"as_of": "2026-01-02", "rate": "1.0845"}]}`.
+         *     A rate at an existing time replaces it. All or nothing. */
+        post: operations["put_fx_rates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instruments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the workspace's instrument records. */
+        get: operations["list_instruments"];
+        put?: never;
+        /** Add an instrument record. The body has the shape of a backtest request's
+         *     `instruments` entry, named by `symbol`. */
+        post: operations["create_instrument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instruments/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an instrument record. Runs that used it keep their stored copy. */
+        delete: operations["delete_instrument"];
         options?: never;
         head?: never;
         patch?: never;
@@ -963,6 +1039,77 @@ export interface paths {
         put?: never;
         /** Sync orders and fills with broker or simulated ledger (Task 10). */
         post: operations["sync_paper_orders"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/bond": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Price a fixed-coupon bond: accrued interest, clean and dirty price, yield,
+         *     duration, convexity and DV01, from any one of clean price, dirty price or yield. */
+        post: operations["price_bond"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/curve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bootstrap a discount curve from deposits and par swaps (or build a flat
+         *     one); every input quote reprices exactly. */
+        post: operations["build_curve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/option": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Price a European option (Black-Scholes-Merton with a dividend yield), or
+         *     find its implied volatility from a price. */
+        post: operations["price_option"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/swap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Value a fixed-for-floating interest-rate swap on a curve (single-curve). */
+        post: operations["price_swap"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2075,6 +2222,11 @@ export interface components {
              */
             total_bars: number;
         };
+        /** @description The workspace's base currency. */
+        BaseCurrencyView: {
+            /** @description ISO code, e.g. `USD`. */
+            base_currency: string;
+        };
         /** @description `POST /api/v1/benchmark` body (also the `benchmark` job payload). */
         BenchmarkRequest: {
             /** @description Portfolio CSV. */
@@ -2094,6 +2246,90 @@ export interface components {
              * @description 0..5, default 1.
              */
             warmups?: number | null;
+        };
+        /** @description `POST /api/v1/pricing/bond` body. Give exactly one of `clean_price`,
+         *     `dirty_price` or `yield`; the rest are worked out from it. */
+        BondPricingRequest: {
+            /** @description The valuation date (RFC 3339 or YYYY-MM-DD). */
+            as_of: string;
+            /**
+             * Format: double
+             * @description Price per 100 face without accrued interest.
+             */
+            clean_price?: number | null;
+            /**
+             * Format: int32
+             * @description Coupons a year: 1, 2, 4 or 12.
+             */
+            coupon_frequency: number;
+            /**
+             * Format: double
+             * @description Annual coupon rate as a fraction (0.05 is 5%).
+             */
+            coupon_rate: number;
+            curve?: null | components["schemas"]["CurveInput"];
+            /** @description act_act_icma, 30_360, act_360 or act_365f. */
+            day_count: string;
+            /**
+             * Format: double
+             * @description Price per 100 face with accrued interest.
+             */
+            dirty_price?: number | null;
+            /** @description Maturity date (RFC 3339 or YYYY-MM-DD). */
+            maturity: string;
+            /**
+             * Format: double
+             * @description Annual yield, compounded `coupon_frequency` times a year.
+             */
+            yield?: number | null;
+        };
+        /** @description A bond priced. */
+        BondPricingView: {
+            /**
+             * Format: double
+             * @description Per 100 face.
+             */
+            accrued_interest: number;
+            /**
+             * Format: double
+             * @description Per 100 face.
+             */
+            clean_price: number;
+            /**
+             * Format: double
+             * @description Years squared.
+             */
+            convexity: number;
+            /**
+             * Format: double
+             * @description Per 100 face.
+             */
+            dirty_price: number;
+            /**
+             * Format: double
+             * @description Price change per 100 face for a one basis point move in yield.
+             */
+            dv01: number;
+            /**
+             * Format: double
+             * @description Years.
+             */
+            macaulay_duration: number;
+            /**
+             * Format: double
+             * @description Years.
+             */
+            modified_duration: number;
+            /**
+             * Format: double
+             * @description Annual, compounded `coupon_frequency` times a year.
+             */
+            yield: number;
+            /**
+             * Format: double
+             * @description Continuously compounded spread over `curve` that reprices the bond, when a curve was given.
+             */
+            z_spread?: number | null;
         };
         /** @description An exchange calendar supported by the platform. */
         CalendarView: {
@@ -2233,6 +2469,11 @@ export interface components {
         CreateBacktest: {
             /** @description Optional point-in-time timestamp (RFC 3339 string or integer nanoseconds). */
             as_of?: string | null;
+            /** @description The currency the run books in. Default: the workspace's base currency. */
+            base_currency?: string | null;
+            /** @description Whether bond bars are `clean` (default: accrued interest is added at
+             *     every fill and mark) or `dirty` prices. */
+            bond_quote?: string | null;
             /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
             config?: Record<string, never> | null;
             /** @description Splits and dividends to apply during the run, on unadjusted prices:
@@ -2244,6 +2485,15 @@ export interface components {
              * @description A dataset version of the caller's workspace.
              */
             dataset_version_id: string;
+            /** @description Futures roll rule: `{"business_days_before_expiry": 5, "adjust": "ratio"}`
+             *     (both optional; those are the defaults). */
+            futures_roll?: Record<string, never> | null;
+            /** @description FX rates by currency: `{"EUR": [{"as_of", "rate"}]}`. Default: the
+             *     workspace's rates for the currencies the instruments are quoted in. */
+            fx_rates?: Record<string, never> | null;
+            /** @description Instrument records (`[{"symbol", "type", "currency", "multiplier", "tick_size", ...}]`).
+             *     Default: the workspace's records that change a run (see `/api/v1/instruments`). */
+            instruments?: Record<string, never>[] | null;
             /** @description Strategy parameters; missing ones take their defaults. */
             params?: Record<string, never> | null;
             /**
@@ -2425,6 +2675,68 @@ export interface components {
             test_size: number;
             train_size: number;
         };
+        /** @description A discount curve: market quotes to bootstrap, or one flat rate. */
+        CurveInput: {
+            /**
+             * Format: double
+             * @description A flat continuously compounded rate instead of quotes.
+             */
+            flat_rate?: number | null;
+            /** @description Deposits and par swaps, by increasing maturity. */
+            quotes?: components["schemas"]["CurveQuoteInput"][] | null;
+        };
+        /** @description One point of a curve. */
+        CurvePointView: {
+            /**
+             * Format: double
+             * @description Discount factor.
+             */
+            discount_factor: number;
+            /**
+             * Format: double
+             * @description Years.
+             */
+            years: number;
+            /**
+             * Format: double
+             * @description Continuously compounded zero rate.
+             */
+            zero_rate: number;
+        };
+        /** @description One market quote for a curve bootstrap. */
+        CurveQuoteInput: {
+            /**
+             * Format: int32
+             * @description Fixed payments a year (swaps): 1, 2, 4 or 12.
+             */
+            frequency?: number | null;
+            /**
+             * Format: double
+             * @description The rate, as a fraction (0.04 is 4%).
+             */
+            rate: number;
+            /** @description `deposit` (a simple rate to `years`) or `swap` (a par swap rate). */
+            type: string;
+            /**
+             * Format: double
+             * @description Maturity, years.
+             */
+            years: number;
+        };
+        /** @description `POST /api/v1/pricing/curve` body. */
+        CurveRequest: {
+            /** @description Extra maturities (years) to report besides the nodes. */
+            at?: number[];
+            /** @description The curve. */
+            curve: components["schemas"]["CurveInput"];
+        };
+        /** @description A bootstrapped curve. */
+        CurveView: {
+            /** @description The curve's nodes (log-linear discount factors between them). */
+            nodes: components["schemas"]["CurvePointView"][];
+            /** @description The maturities asked for in `at`. */
+            points: components["schemas"]["CurvePointView"][];
+        };
         /** @description A dataset and its versions. */
         DatasetDetailView: {
             /**
@@ -2559,6 +2871,11 @@ export interface components {
             /** @description The version was deleted. */
             deleted: boolean;
         };
+        /** @description Result of a delete. */
+        DeletedView: {
+            /** @description True when something was deleted. */
+            deleted: boolean;
+        };
         /** @description List of delistings. */
         DelistingListView: {
             /** @description Items. */
@@ -2636,6 +2953,25 @@ export interface components {
         ExportQuery: {
             /** @description Format to export: currently only `parquet` is supported (default: `parquet`). */
             format?: string | null;
+        };
+        /** @description FX rates against the workspace's base currency. */
+        FxRateListView: {
+            /** @description The base the rates are quoted against. */
+            base_currency: string;
+            /** @description Oldest first, by currency. */
+            items: components["schemas"]["FxRateView"][];
+        };
+        /** @description One FX observation. */
+        FxRateView: {
+            /**
+             * Format: int64
+             * @description When the rate became known, nanoseconds since the epoch.
+             */
+            as_of: number;
+            /** @description Foreign currency. */
+            currency: string;
+            /** @description Base-currency units per unit of `currency`, exact decimal text. */
+            rate: string;
         };
         /** @description Detailed view of a gap report including attribution and trade matches. */
         GapReportDetailView: {
@@ -2796,6 +3132,53 @@ export interface components {
              *     (-720 to 840). Optional if `timezone` is provided.
              */
             utc_offset_minutes?: number | null;
+        };
+        /** @description The workspace's instruments. */
+        InstrumentListView: {
+            /** @description The base currency records default to. */
+            base_currency: string;
+            /** @description By symbol. */
+            items: components["schemas"]["InstrumentView"][];
+        };
+        /** @description One instrument record. */
+        InstrumentView: {
+            /**
+             * Format: int32
+             * @description Coupons a year (bonds).
+             */
+            coupon_frequency?: number | null;
+            /** @description Annual coupon rate as a fraction (bonds), exact decimal text. */
+            coupon_rate?: string | null;
+            /** @description ISO currency the price is quoted in. */
+            currency: string;
+            /** @description Day count for accrued interest (bonds): act_act_icma, 30_360, act_360 or act_365f. */
+            day_count?: string | null;
+            /**
+             * Format: int64
+             * @description Expiry (futures, options), nanoseconds since the epoch.
+             */
+            expiry?: number | null;
+            /** @description Smallest tradable quantity, exact decimal text. */
+            lot_size: string;
+            /**
+             * Format: int64
+             * @description Maturity (bonds), nanoseconds since the epoch.
+             */
+            maturity?: number | null;
+            /** @description Contract multiplier, exact decimal text. */
+            multiplier: string;
+            /** @description `call` or `put` (options). */
+            right?: string | null;
+            /** @description Strike (options), exact decimal text. */
+            strike?: string | null;
+            /** @description Symbol, unique in the workspace. */
+            symbol: string;
+            /** @description Smallest price increment, exact decimal text. */
+            tick_size: string;
+            /** @description `equity`, `future`, `bond`, `option` or `swap`. */
+            type: string;
+            /** @description A future's chain or an option's underlying symbol. */
+            underlying?: string | null;
         };
         /** @description A page of jobs. */
         JobPage: {
@@ -2971,6 +3354,87 @@ export interface components {
             trial_count: number;
             /** Format: uuid */
             workspace_id: string;
+        };
+        /** @description `POST /api/v1/pricing/option` body. Give `volatility` for a price and the
+         *     Greeks, or `price` for the implied volatility (and the Greeks at it). */
+        OptionPricingRequest: {
+            /**
+             * Format: double
+             * @description Continuous dividend (or carry) yield. Default 0.
+             */
+            dividend_yield?: number;
+            /**
+             * Format: double
+             * @description Option price, to solve for the implied volatility.
+             */
+            price?: number | null;
+            /**
+             * Format: double
+             * @description Continuously compounded risk-free rate.
+             */
+            rate: number;
+            /** @description `call` or `put`. */
+            right: string;
+            /**
+             * Format: double
+             * @description Underlying price.
+             */
+            spot: number;
+            /**
+             * Format: double
+             * @description Strike.
+             */
+            strike: number;
+            /**
+             * Format: double
+             * @description Annual volatility.
+             */
+            volatility?: number | null;
+            /**
+             * Format: double
+             * @description Time to expiry in years.
+             */
+            years: number;
+        };
+        /** @description An option priced by Black-Scholes-Merton. */
+        OptionPricingView: {
+            /**
+             * Format: double
+             * @description dPrice/dSpot.
+             */
+            delta: number;
+            /**
+             * Format: double
+             * @description d²Price/dSpot².
+             */
+            gamma: number;
+            /** @description The model's review status: it awaits the M26 correctness audit. */
+            model_status: string;
+            /**
+             * Format: double
+             * @description Theoretical price.
+             */
+            price: number;
+            /**
+             * Format: double
+             * @description Per 1.00 of rate.
+             */
+            rho: number;
+            /**
+             * Format: double
+             * @description Per year.
+             */
+            theta: number;
+            /**
+             * Format: double
+             * @description Per 1.00 of volatility.
+             */
+            vega: number;
+            /**
+             * Format: double
+             * @description The volatility used (given, or implied by `price`).
+             */
+            volatility: number;
         };
         OverfittingResponse: {
             /** Format: double */
@@ -3888,6 +4352,56 @@ export interface components {
             /** @description Suggested timezone identifier (e.g. `America/New_York`). */
             timezone?: string | null;
         };
+        /** @description `POST /api/v1/pricing/swap` body: a fixed-for-floating swap from today. */
+        SwapRequest: {
+            /** @description The discount curve. */
+            curve: components["schemas"]["CurveInput"];
+            /**
+             * Format: double
+             * @description Fixed rate, as a fraction.
+             */
+            fixed_rate: number;
+            /**
+             * Format: int32
+             * @description Fixed payments a year: 1, 2, 4 or 12.
+             */
+            frequency: number;
+            /**
+             * Format: double
+             * @description Notional.
+             */
+            notional: number;
+            /** @description True for the side that pays fixed and receives floating. */
+            pay_fixed: boolean;
+            /**
+             * Format: double
+             * @description Maturity, years.
+             */
+            years: number;
+        };
+        /** @description A swap valued. */
+        SwapView: {
+            /**
+             * Format: double
+             * @description PV of 1 a year on the fixed schedule.
+             */
+            annuity: number;
+            /**
+             * Format: double
+             * @description PV change for a one basis point parallel rise in zero rates.
+             */
+            dv01: number;
+            /**
+             * Format: double
+             * @description The fixed rate at which the swap is worth zero.
+             */
+            par_rate: number;
+            /**
+             * Format: double
+             * @description Present value to the holder.
+             */
+            pv: number;
+        };
         SweepTrialView: {
             /** Format: date-time */
             created_at: string;
@@ -4564,7 +5078,7 @@ export interface operations {
             path: {
                 /** @description Backtest (job) id */
                 id: string;
-                /** @description summary, request, equity_csv, orders_csv, fills_csv, returns_csv or strategies_csv */
+                /** @description summary, request, equity_csv, orders_csv, fills_csv, returns_csv, strategies_csv, rolls_csv or continuous_csv */
                 kind: string;
             };
             cookie?: never;
@@ -4741,6 +5255,56 @@ export interface operations {
             };
             /** @description The backtest has not succeeded (yet) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_base_currency: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaseCurrencyView"];
+                };
+            };
+        };
+    };
+    put_base_currency: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BaseCurrencyView"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaseCurrencyView"];
+                };
+            };
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5736,6 +6300,141 @@ export interface operations {
             };
         };
     };
+    list_fx_rates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Only this currency. */
+                currency: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FxRateListView"];
+                };
+            };
+        };
+    };
+    put_fx_rates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FxRateListView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_instruments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentListView"];
+                };
+            };
+        };
+    };
+    create_instrument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentView"];
+                };
+            };
+            /** @description The symbol already has a record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every problem with the record */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_instrument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Symbol */
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     list_jobs: {
         parameters: {
             query?: {
@@ -6586,6 +7285,134 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SyncOrdersResponse"];
+                };
+            };
+        };
+    };
+    price_bond: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BondPricingRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BondPricingView"];
+                };
+            };
+            /** @description Every problem with the request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    build_curve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurveRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurveView"];
+                };
+            };
+            /** @description Every problem with the request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    price_option: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OptionPricingRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OptionPricingView"];
+                };
+            };
+            /** @description Every problem with the request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    price_swap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwapRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SwapView"];
+                };
+            };
+            /** @description Every problem with the request */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
         };

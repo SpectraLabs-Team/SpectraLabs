@@ -24,6 +24,7 @@ pub mod corporate_actions;
 pub mod datasets;
 pub mod gap;
 pub mod identity;
+pub mod instruments;
 pub mod jobs;
 pub mod lifecycle;
 pub mod optimization;

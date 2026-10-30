@@ -21,7 +21,10 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use crate::fixed::{notional, prorate, scale_money, ArithmeticError, Money, Price, Qty, Ratio};
+use crate::fixed::{
+    notional_with_multiplier, prorate, scale_money, ArithmeticError, Money, Price, Qty, Ratio,
+};
+use crate::instrument::Instrument;
 
 /// Identifies an instrument within one ledger.
 pub type InstrumentId = u32;
@@ -152,6 +155,10 @@ pub enum EntryType {
     /// position, < 0 paid on a short one; `fill.qty` is the position it was
     /// paid on.
     Dividend,
+    /// The contract multiplier of `fill.instrument`, written only when it is
+    /// not 1: `fill.qty` holds the multiplier as a fixed-point number. No cash
+    /// moves. Written before the instrument's first fill, so replay sees it first.
+    Listing,
 }
 
 /// One accepted operation.
@@ -224,6 +231,8 @@ pub struct Ledger {
     dividends: Money,
     positions: BTreeMap<InstrumentId, Position>,
     marks: BTreeMap<InstrumentId, Price>,
+    /// Contract multipliers other than 1. An instrument not listed has multiplier 1.
+    multipliers: BTreeMap<InstrumentId, Ratio>,
     journal: Vec<JournalEntry>,
 }
 
@@ -233,6 +242,76 @@ impl Ledger {
     /// An empty ledger with the given policy.
     pub fn new(cfg: LedgerConfig) -> Self {
         Self { cfg, ..Self::default() }
+    }
+
+    /// Set the contract multiplier of `instrument` (M24.1). Must happen before
+    /// the instrument trades, and only once. A multiplier of 1 changes nothing
+    /// and writes no journal entry, so equity books are unchanged.
+    ///
+    /// # Errors
+    /// `InvalidFill` if the multiplier is not positive, the instrument already
+    /// has a position, or it already has a multiplier; overflow.
+    pub fn register_instrument(
+        &mut self,
+        instrument: InstrumentId,
+        multiplier: Ratio,
+        ts_ns: i64,
+    ) -> Result<()> {
+        if multiplier.raw() <= 0
+            || self.positions.get(&instrument).is_some_and(|p| !p.qty.is_zero() || !p.cost.is_zero())
+            || self.multipliers.contains_key(&instrument)
+        {
+            return Err(Reject::InvalidFill.into());
+        }
+        if multiplier.raw() == crate::fixed::SCALE {
+            return Ok(());
+        }
+        self.journal.push(JournalEntry {
+            seq: self.journal.len() as u64,
+            kind: EntryType::Listing,
+            ts_ns,
+            amount: Money::ZERO,
+            fill: Fill { instrument, qty: Qty::from_raw(multiplier.raw()), ts_ns, ..Fill::default() },
+            realized: Money::ZERO,
+            cash_after: self.cash,
+        });
+        self.multipliers.insert(instrument, multiplier);
+        Ok(())
+    }
+
+    /// The contract multiplier of `instrument` (1 unless registered).
+    pub fn multiplier(&self, instrument: InstrumentId) -> Ratio {
+        self.multipliers.get(&instrument).copied().unwrap_or(Ratio::ONE)
+    }
+
+    /// Registers an instrument from its record, after validating it against the
+    /// run's base currency (decision 2: refused, never converted).
+    ///
+    /// # Errors
+    /// The validation message as `InvalidFill`, or what [`Self::register_instrument`] returns.
+    pub fn list(
+        &mut self,
+        id: InstrumentId,
+        inst: &Instrument,
+        base_currency: &str,
+        ts_ns: i64,
+    ) -> Result<()> {
+        inst.validate(base_currency).map_err(|_| LedgerError::Rejected(Reject::InvalidFill))?;
+        self.register_instrument(id, inst.multiplier, ts_ns)
+    }
+
+    /// Value of `qty` units of `instrument` at `price`, times its multiplier
+    /// (the notional every fill and mark uses).
+    ///
+    /// # Errors
+    /// Overflow.
+    pub fn notional_of(
+        &self,
+        instrument: InstrumentId,
+        price: Price,
+        qty: Qty,
+    ) -> std::result::Result<Money, ArithmeticError> {
+        notional_with_multiplier(price, qty, self.multiplier(instrument))
     }
 
     /// Add cash.
@@ -451,7 +530,7 @@ impl Ledger {
         }
         // Notional is rounded exactly once per fill; every other number for
         // this fill derives from it, so cash and cost basis never drift apart.
-        let n = notional(f.price, f.qty)?;
+        let n = self.notional_of(f.instrument, f.price, f.qty)?;
         if n.raw() <= 0 {
             return Err(Reject::InvalidFill.into()); // rounds to zero
         }
@@ -486,7 +565,7 @@ impl Ledger {
             let released = if cur.qty.signum() > 0 { released_abs } else { released_abs.checked_neg()? };
 
             // Split the single rounded notional so the parts add back to `n`.
-            let n_close = if closed == abs_f { n } else { notional(f.price, closed)? };
+            let n_close = if closed == abs_f { n } else { self.notional_of(f.instrument, f.price, closed)? };
             let n_open = n.checked_sub(n_close)?;
 
             let close_value = if cur.qty.signum() > 0 { n_close } else { n_close.checked_neg()? };
@@ -526,7 +605,7 @@ impl Ledger {
     fn check_leverage(&self, f: &Fill, new_qty: Qty, new_cash: Money, limit: Ratio) -> Result<()> {
         let mut equity = new_cash;
         let mut gross = Money::ZERO;
-        let traded = notional(f.price, new_qty)?;
+        let traded = self.notional_of(f.instrument, f.price, new_qty)?;
         equity = equity.checked_add(traded)?;
         gross = gross.checked_add(traded.checked_abs()?)?;
         for (&id, p) in &self.positions {
@@ -561,7 +640,7 @@ impl Ledger {
             return Ok(Money::ZERO);
         }
         match self.marks.get(&id) {
-            Some(&px) => notional(px, p.qty),
+            Some(&px) => self.notional_of(id, px, p.qty),
             None => Ok(p.cost),
         }
     }
@@ -662,6 +741,10 @@ impl Ledger {
                 EntryType::BorrowFee => out.charge_borrow_fee(e.fill.instrument, e.amount, e.ts_ns),
                 EntryType::Split => out.split_quantity(e.fill.instrument, e.fill.qty, e.ts_ns),
                 EntryType::Dividend => out.apply_dividend(e.fill.instrument, e.amount, e.ts_ns),
+                EntryType::Listing => {
+                    let m = Ratio::from_raw(e.fill.qty.raw());
+                    out.register_instrument(e.fill.instrument, m, e.ts_ns)
+                }
             };
             if let Err(err) = r {
                 return Err(format!("replay: journal entry {} rejected: {err}", e.seq));
@@ -705,7 +788,8 @@ impl Ledger {
                 }
                 EntryType::Fill => {
                     let f = &e.fill;
-                    let n = notional(f.price, f.qty)?;
+                    let mult = t.mults.get(&f.instrument).copied().unwrap_or(Ratio::ONE);
+                    let n = notional_with_multiplier(f.price, f.qty, mult)?;
                     let buy = f.side == Side::Buy;
                     t.cash =
                         t.cash.checked_sub(if buy { n } else { n.checked_neg()? })?.checked_sub(f.fee)?;
@@ -729,6 +813,9 @@ impl Ledger {
                     t.cash = t.cash.checked_add(e.amount)?;
                     t.dividends = t.dividends.checked_add(e.amount)?;
                 }
+                EntryType::Listing => {
+                    t.mults.insert(e.fill.instrument, Ratio::from_raw(e.fill.qty.raw()));
+                }
             }
             if e.cash_after != t.cash {
                 return Err(fail(format!("cash_after mismatch at seq {}", e.seq)));
@@ -741,7 +828,11 @@ impl Ledger {
         use InvariantFailure::Violated as fail;
 
         // 1. Independent recomputation from the journal alone.
-        let JournalTotals { cash, net, fees, realized, financing, dividends, qty } = self.journal_totals()?;
+        let JournalTotals { cash, net, fees, realized, financing, dividends, qty, mults } =
+            self.journal_totals()?;
+        if mults != self.multipliers {
+            return Err(fail("contract multipliers differ from journal".into()));
+        }
         if cash != self.cash {
             return Err(fail(format!("cash {} != journal {cash}", self.cash)));
         }
@@ -839,6 +930,7 @@ impl Ledger {
             || r.fees != self.fees
             || r.financing != self.financing
             || r.dividends != self.dividends
+            || r.multipliers != self.multipliers
         {
             return Err(fail("replayed totals differ".into()));
         }
@@ -858,6 +950,7 @@ struct JournalTotals {
     financing: Money,
     dividends: Money,
     qty: BTreeMap<InstrumentId, Qty>,
+    mults: BTreeMap<InstrumentId, Ratio>,
 }
 
 enum InvariantFailure {

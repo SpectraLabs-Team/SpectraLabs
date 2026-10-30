@@ -10,6 +10,7 @@ pub mod bar;
 pub mod cfmt;
 pub mod error;
 pub mod fixed;
+pub mod instrument;
 pub mod json;
 pub mod ledger;
 pub mod rng;
@@ -17,7 +18,10 @@ pub mod sha256;
 
 pub use bar::{bars_sha256, timestamp_offsets, validate_bars, Bar};
 pub use error::{Error, Result};
-pub use fixed::{notional, prorate, ArithmeticError, Bps, Fixed, Money, Price, Qty, Ratio, SCALE};
+pub use fixed::{
+    notional, notional_with_multiplier, prorate, ArithmeticError, Bps, Fixed, Money, Price, Qty, Ratio, SCALE,
+};
+pub use instrument::{Instrument, InstrumentType, DEFAULT_BASE_CURRENCY};
 pub use json::Json;
 pub use ledger::{
     EntryType, Fill, InstrumentId, JournalEntry, Ledger, LedgerConfig, LedgerError, Position, Reject, Side,

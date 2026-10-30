@@ -321,6 +321,19 @@ pub fn notional(price: Price, qty: Qty) -> Result<Money, ArithmeticError> {
     narrow(div_round_half_away(prod, i128::from(SCALE))).map(Money::from_raw)
 }
 
+/// `price * qty * multiplier`, rounded half away from zero to money precision
+/// with a single rounding. A multiplier of exactly 1 is [`notional`].
+///
+/// # Errors
+/// [`ArithmeticError::Overflow`].
+pub fn notional_with_multiplier(price: Price, qty: Qty, multiplier: Ratio) -> Result<Money, ArithmeticError> {
+    if multiplier.raw() == SCALE {
+        return notional(price, qty);
+    }
+    let prod = i128::from(price.raw()) * i128::from(qty.raw()) * i128::from(multiplier.raw());
+    narrow(div_round_half_away(prod, i128::from(SCALE) * i128::from(SCALE))).map(Money::from_raw)
+}
+
 /// `amount * part / whole`, rounded half away from zero.
 ///
 /// # Errors

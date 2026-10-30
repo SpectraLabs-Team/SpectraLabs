@@ -225,15 +225,19 @@ async fn handle_get_positions(
 
     if let Some((pool, ws)) = db_ctx {
         let positions = risk_center::get_positions(pool, ws, None).await.unwrap_or_default();
+        // M24.1 task 2: the asset class comes from the instrument record. A symbol with no
+        // record is a cash equity, as every symbol was before instrument types existed.
+        let types = spectra_db::instruments::instrument_types(pool, ws).await.unwrap_or_default();
         let views: Vec<JsonValue> = positions
             .into_iter()
             .map(|p| {
                 let mkt_val = (p.qty * p.price).abs();
+                let kind = types.get(&p.symbol).copied().unwrap_or(spectra_core::InstrumentType::Equity);
                 json!({
                     "asset_id": Uuid::now_v7().to_string(),
                     "symbol": p.symbol,
                     "exchange": "NASDAQ",
-                    "asset_class": "us_equity",
+                    "asset_class": kind.broker_asset_class().unwrap_or("unsupported"),
                     "qty": p.qty.to_string(),
                     "avg_entry_price": format!("{:.2}", p.price),
                     "side": if p.qty >= 0.0 { "long" } else { "short" },

@@ -179,7 +179,7 @@ pub fn compute_pnl_attribution(
         match e.kind {
             EntryType::Fill => {
                 commission_fees = commission_fees.checked_add(e.fill.fee)?;
-                let n = spectra_core::notional(e.fill.price, e.fill.qty)?.to_f64();
+                let n = ledger.notional_of(e.fill.instrument, e.fill.price, e.fill.qty)?.to_f64();
                 total_notional += n;
             }
             EntryType::BorrowFee => {

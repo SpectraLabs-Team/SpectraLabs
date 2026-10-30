@@ -131,6 +131,12 @@ The script verifies the checksum, restores, then checks the tables, the applied 
 every workspace's registry hash chain, and exits non-zero on any problem. It refuses to run when
 `RESTORE_DATABASE_URL` equals `DATABASE_URL`.
 
+Monthly restore check from cron (1st of each month at 04:00 UTC) against a scratch database:
+
+```bash
+0 4 1 * * cd /srv/spectralabs && RESTORE_DATABASE_URL=postgres://.../spectra_restore_check scripts/monthly-restore-check.sh /var/backups/spectra
+```
+
 To recover production: stop `api`, `worker` and `frontend`, restore into the production database
 with the same script, start them again, and check `/ready`.
 

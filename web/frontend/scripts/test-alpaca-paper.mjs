@@ -180,6 +180,44 @@ describe('4. TradingView-Style Interactive Chart & Symbols', () => {
     assert.ok(labSource.includes('addToWatchlist'), 'PaperLab must allow adding symbols to watchlist');
     assert.ok(labSource.includes('removeFromWatchlist'), 'PaperLab must allow removing symbols from watchlist');
   });
+
+  it('TradingChart clamps candle width and uses minSlots so single bars never expand to giant blocks', () => {
+    const chartSource = fs.readFileSync(
+      path.resolve(root, 'components/studio/TradingChart.tsx'),
+      'utf8'
+    );
+    assert.ok(chartSource.includes('minSlots'), 'TradingChart must define minSlots for sparse data');
+    assert.ok(chartSource.includes('candleSlotWidth'), 'TradingChart must space candles on a slot grid');
+    assert.ok(chartSource.includes('LIVE'), 'TradingChart must display live real-time status pill');
+  });
+
+  it('alpaca.ts calculates start timestamps and PaperLab implements real-time auto-refresh', () => {
+    const alpacaSource = fs.readFileSync(
+      path.resolve(root, 'lib/alpaca.ts'),
+      'utf8'
+    );
+    assert.ok(
+      alpacaSource.includes('computeAlpacaStartTime'),
+      'alpaca.ts must define computeAlpacaStartTime to prevent single-day truncation'
+    );
+    assert.ok(
+      alpacaSource.includes('start='),
+      'getAlpacaBars must pass start parameter to Alpaca Data API'
+    );
+
+    const labSource = fs.readFileSync(
+      path.resolve(root, 'components/studio/PaperLab.tsx'),
+      'utf8'
+    );
+    assert.ok(
+      labSource.includes('tickInterval') || labSource.includes('setInterval'),
+      'PaperLab must have real-time interval polling'
+    );
+    assert.ok(
+      labSource.includes('backfillHistoricalBars'),
+      'PaperLab must backfill historical bars if live feed returns sparse bars'
+    );
+  });
 });
 
 describe('5. Order Execution Flow, Confirmation & Idempotency', () => {

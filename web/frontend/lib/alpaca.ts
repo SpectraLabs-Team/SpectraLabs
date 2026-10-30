@@ -259,6 +259,37 @@ export async function getAlpacaAssets(): Promise<AlpacaAsset[]> {
   return Array.isArray(res) ? res : [];
 }
 
+export function computeAlpacaStartTime(timeframe = '1Day', limit = 100): string {
+  const now = Date.now();
+  let ms: number;
+  switch (timeframe) {
+    case '1Min':
+      ms = Math.max(limit * 60 * 1000 * 2, 4 * 86_400_000);
+      break;
+    case '5Min':
+      ms = Math.max(limit * 5 * 60 * 1000 * 2, 7 * 86_400_000);
+      break;
+    case '15Min':
+      ms = Math.max(limit * 15 * 60 * 1000 * 2, 14 * 86_400_000);
+      break;
+    case '1Hour':
+      ms = Math.max(limit * 60 * 60 * 1000 * 2, 45 * 86_400_000);
+      break;
+    case '1Day':
+      ms = Math.max(limit * 86_400_000 * 1.8, 180 * 86_400_000);
+      break;
+    case '1Week':
+      ms = Math.max(limit * 7 * 86_400_000 * 1.5, 730 * 86_400_000);
+      break;
+    case '1Month':
+      ms = Math.max(limit * 30 * 86_400_000 * 1.5, 1825 * 86_400_000);
+      break;
+    default:
+      ms = 180 * 86_400_000;
+  }
+  return new Date(now - ms).toISOString();
+}
+
 export async function getAlpacaBars(
   symbol: string,
   timeframe = '1Day',
@@ -266,9 +297,10 @@ export async function getAlpacaBars(
 ): Promise<{ bars: CandleBar[]; symbol: string; source: string }> {
   // Use Alpaca Data API v2 with feed=iex (free tier accessible)
   const sym = symbol.toUpperCase().trim();
+  const start = computeAlpacaStartTime(timeframe, limit);
   try {
     const res = await engineRequest<{ bars?: Record<string, any[]> | any[] }>(
-      `stocks/${encodeURIComponent(sym)}/bars?timeframe=${timeframe}&limit=${limit}&feed=iex&sort=asc`
+      `stocks/${encodeURIComponent(sym)}/bars?timeframe=${timeframe}&limit=${limit}&start=${encodeURIComponent(start)}&feed=iex&sort=asc`
     );
 
     let rawList: any[] = [];

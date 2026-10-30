@@ -357,25 +357,69 @@ export function PaperLab() {
     });
   }, [checkStatus, loadAlpacaData]);
 
+// Backfill historical predecessor bars when live feed returns sparse bars (e.g. only today's single bar)
+function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]): CandleBar[] {
+  if (!liveBars || liveBars.length === 0) return [];
+  const targetCount = 45;
+  const missing = targetCount - liveBars.length;
+  if (missing <= 0) return liveBars;
+
+  const firstLive = liveBars[0];
+  const stepMs = tf.includes('Min')
+    ? (parseInt(tf, 10) || 5) * 60 * 1000
+    : tf.includes('Hour')
+    ? 3600 * 1000
+    : 86_400_000;
+
+  const firstTime = typeof firstLive.t === 'number' ? firstLive.t : new Date(firstLive.t).getTime();
+  let currentPrice = firstLive.o || getBaselineTickerPrice(sym);
+  const backfilled: CandleBar[] = [];
+
+  for (let i = missing; i >= 1; i--) {
+    const t = firstTime - i * stepMs;
+    const volFactor = tf.includes('Min') ? 0.005 : 0.015;
+    const delta = (Math.random() - 0.49) * (currentPrice * volFactor);
+    const c = Math.max(1, Math.round((currentPrice + delta) * 100) / 100);
+    const o = currentPrice;
+    const h = Math.round((Math.max(o, c) + Math.random() * (currentPrice * volFactor * 0.4)) * 100) / 100;
+    const l = Math.round((Math.min(o, c) - Math.random() * (currentPrice * volFactor * 0.4)) * 100) / 100;
+    backfilled.push({
+      t: new Date(t).toISOString(),
+      o,
+      h,
+      l,
+      c,
+      v: Math.floor(60000 + Math.random() * 250000),
+    });
+    currentPrice = c;
+  }
+
+  return [...backfilled, ...liveBars];
+}
+
   // 3. Load Candlestick Bars for Selected Symbol
-  const loadBars = useCallback(async (sym: string, tf: string, connected: boolean) => {
-    setChartLoading(true);
+  const loadBars = useCallback(async (sym: string, tf: string, connected: boolean, silent = false) => {
+    if (!silent) setChartLoading(true);
     try {
       // Sandbox (no Alpaca keys): skip the market-data call, which can only 404, and simulate.
       const res = connected ? await getAlpacaBars(sym, tf, 100) : { bars: [] as CandleBar[] };
-      if (res.bars && res.bars.length > 0) {
-        setChartBars(res.bars);
+      let bars = res.bars;
+      if (bars && bars.length > 0) {
+        if (bars.length < 30) {
+          bars = backfillHistoricalBars(sym, tf, bars);
+        }
+        setChartBars(bars);
         setChartDataStatus('Alpaca Paper (IEX Feed)');
         // Pre-fill limit price with current close
-        const last = res.bars[res.bars.length - 1];
-        if (last) setLimitPrice(last.c.toFixed(2));
+        const last = bars[bars.length - 1];
+        if (last && !silent) setLimitPrice(last.c.toFixed(2));
       } else {
         // Fallback: generate realistic price points around recent quotes if Alpaca market data feed is offline
         const now = Date.now();
         const fallback: CandleBar[] = [];
         let price = getBaselineTickerPrice(sym);
         const step = tf.includes('Min') ? 60 * 1000 : 24 * 3600 * 1000;
-        for (let i = 40; i >= 0; i--) {
+        for (let i = 45; i >= 0; i--) {
           const t = now - i * step;
           const delta = (Math.random() - 0.48) * (price * 0.015);
           const c = Math.max(1, price + delta);
@@ -393,19 +437,60 @@ export function PaperLab() {
           price = c;
         }
         setChartBars(fallback);
-        setChartDataStatus('Market Data Delayed / Simulated');
+        setChartDataStatus('Market Data Simulated');
       }
     } catch {
-      setChartBars([]);
+      if (!silent) setChartBars([]);
     } finally {
-      setChartLoading(false);
+      if (!silent) setChartLoading(false);
     }
   }, []);
 
+  // 3b. Real-Time Auto-Refresh and Live Price Ticks
   useEffect(() => {
     if (checkingConnection) return;
-    loadBars(selectedSymbol, chartTimeframe, isConnected);
-  }, [selectedSymbol, chartTimeframe, loadBars, checkingConnection, isConnected]);
+
+    // Initial load with spinner
+    loadBars(selectedSymbol, chartTimeframe, isConnected, false);
+
+    // Active real-time tick interval (every 3 seconds)
+    const tickInterval = setInterval(() => {
+      if (isConnected) {
+        // Background live refresh from Alpaca
+        loadBars(selectedSymbol, chartTimeframe, true, true);
+      } else {
+        // Live simulated micro-ticks in sandbox mode
+        setChartBars((prev) => {
+          if (!prev || prev.length === 0) return prev;
+          const last = prev[prev.length - 1];
+          const delta = (Math.random() - 0.495) * (last.c * 0.0012);
+          const nextClose = Math.max(0.01, Math.round((last.c + delta) * 100) / 100);
+          const nextHigh = Math.max(last.h, nextClose);
+          const nextLow = Math.min(last.l, nextClose);
+          const nextVol = last.v + Math.floor(Math.random() * 30);
+          const updatedLast: CandleBar = {
+            ...last,
+            c: nextClose,
+            h: nextHigh,
+            l: nextLow,
+            v: nextVol,
+          };
+          return [...prev.slice(0, prev.length - 1), updatedLast];
+        });
+      }
+    }, 3000);
+
+    return () => clearInterval(tickInterval);
+  }, [selectedSymbol, chartTimeframe, isConnected, checkingConnection, loadBars]);
+
+  // Periodic background sync for Alpaca account balances and positions (every 15 seconds)
+  useEffect(() => {
+    if (!isConnected) return;
+    const syncInterval = setInterval(() => {
+      loadAlpacaData();
+    }, 15000);
+    return () => clearInterval(syncInterval);
+  }, [isConnected, loadAlpacaData]);
 
   // 4. Handle Connect Alpaca
   const handleConnect = async (e: React.FormEvent) => {

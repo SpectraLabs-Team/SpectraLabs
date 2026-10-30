@@ -102,6 +102,23 @@ async fn run(cmd: &str, pool: &spectra_db::PgPool) -> Result<(), String> {
             ver.can_read_workspaces,
             ver.cannot_write_users
         );
+
+        let backup_user = std::env::var("POSTGRES_BACKUP_USER").unwrap_or_else(|_| "spectra_backup".into());
+        let backup_pw = std::env::var("POSTGRES_BACKUP_PASSWORD").ok();
+        let b_outcome = spectra_db::roles::provision_backup_role(pool, &backup_user, backup_pw.as_deref())
+            .await
+            .map_err(|e| format!("provision backup role: {e}"))?;
+        let b_ver = spectra_db::roles::verify_backup_role(pool, &backup_user)
+            .await
+            .map_err(|e| format!("verify backup role: {e}"))?;
+        eprintln!(
+            "spectra-db: provisioned backup role '{}' (created: {}, connect: {}, read_all: {}, cannot_write: {})",
+            b_outcome.role_name,
+            b_outcome.created,
+            b_ver.can_connect,
+            b_ver.can_read_all,
+            b_ver.cannot_write
+        );
     }
     if cmd == "seed" {
         let email = std::env::var("ADMIN_EMAIL").map_err(|_| "ADMIN_EMAIL is not set".to_string())?;

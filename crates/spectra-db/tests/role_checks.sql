@@ -42,6 +42,35 @@ BEGIN
     IF has_table_privilege('test_spectra_app', 'schema_migrations', 'UPDATE') THEN
         RAISE EXCEPTION 'test_spectra_app unexpectedly has UPDATE on schema_migrations';
     END IF;
+
+    -- 5. Create and test backup role (read-only for pg_dump)
+    EXECUTE 'CREATE ROLE test_spectra_backup WITH LOGIN';
+    EXECUTE 'GRANT USAGE ON SCHEMA public TO test_spectra_backup';
+    EXECUTE 'GRANT SELECT ON ALL TABLES IN SCHEMA public TO test_spectra_backup';
+    EXECUTE 'GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO test_spectra_backup';
+    EXECUTE 'REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public FROM test_spectra_backup';
+
+    -- test_spectra_backup CAN read all tables
+    IF NOT has_table_privilege('test_spectra_backup', 'workspaces', 'SELECT') THEN
+        RAISE EXCEPTION 'test_spectra_backup cannot SELECT from workspaces';
+    END IF;
+    IF NOT has_table_privilege('test_spectra_backup', 'users', 'SELECT') THEN
+        RAISE EXCEPTION 'test_spectra_backup cannot SELECT from users';
+    END IF;
+    IF NOT has_table_privilege('test_spectra_backup', 'jobs', 'SELECT') THEN
+        RAISE EXCEPTION 'test_spectra_backup cannot SELECT from jobs';
+    END IF;
+
+    -- test_spectra_backup CANNOT write anywhere
+    IF has_table_privilege('test_spectra_backup', 'jobs', 'INSERT') THEN
+        RAISE EXCEPTION 'test_spectra_backup unexpectedly has INSERT on jobs';
+    END IF;
+    IF has_table_privilege('test_spectra_backup', 'users', 'INSERT') THEN
+        RAISE EXCEPTION 'test_spectra_backup unexpectedly has INSERT on users';
+    END IF;
+    IF has_table_privilege('test_spectra_backup', 'workspaces', 'DELETE') THEN
+        RAISE EXCEPTION 'test_spectra_backup unexpectedly has DELETE on workspaces';
+    END IF;
 END $$;
 
 \echo 'service role separation checks passed'

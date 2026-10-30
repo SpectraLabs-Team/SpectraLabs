@@ -191,7 +191,7 @@ exits with code 3; run it again later.
 **Before the first production run**, or after changing the retention period: run the dry run against
 production, and check the number is what you expect.
 
-**Turning it on.** Check the dry-run count on production (`npm run activity:purge -- --dry-run`). Once confirmed and the retention policy is signed off, set `SPECTRA_ACTIVITY_PURGE=on`, restart the workers, then check the first `activity purge removed` log line.
+**Turning it on.** Check the dry-run count on production (`npm run activity:purge -- --dry-run`). Once confirmed and the retention policy is signed off, set `SPECTRA_ACTIVITY_PURGE=on`, restart the workers, then check the first `activity purge removed` log line. An unset SPECTRA_ACTIVITY_PURGE means off. Set it to on only after the dry run.
 
 **Checking it works.** Each run logs `activity purge removed N daily activity row(s)` (or
 `activity purge failed: ...` at error level, which goes to Sentry when `SENTRY_DSN` is set). The

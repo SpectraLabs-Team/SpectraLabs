@@ -48,13 +48,27 @@ function terms(query: string): string[][] {
     .map((t) => [t, ...(SYNONYMS[t] ?? [])]);
 }
 
+const isBreak = (c: string | undefined) => c === undefined || c === ' ' || c === '-';
+
+/** Whether `t` occurs in `field` starting at a word boundary (any occurrence, not just the first). */
+function startsWord(field: string, t: string): boolean {
+  for (let i = field.indexOf(t); i >= 0; i = field.indexOf(t, i + 1)) if (isBreak(field[i - 1])) return true;
+  return false;
+}
+
+/** Whether `phrase` occurs in `field` as whole words ("es" is not in "stress testing"). */
+function hasWords(field: string, phrase: string): boolean {
+  for (let i = field.indexOf(phrase); i >= 0; i = field.indexOf(phrase, i + 1)) {
+    if (isBreak(field[i - 1]) && isBreak(field[i + phrase.length])) return true;
+  }
+  return false;
+}
+
 function scoreField(field: string, alternatives: string[], weightWord: number, weightAny: number): number {
   let best = 0;
   for (const t of alternatives) {
-    const i = field.indexOf(t);
-    if (i < 0) continue;
-    const wordStart = i === 0 || field[i - 1] === ' ' || field[i - 1] === '-';
-    best = Math.max(best, wordStart ? weightWord : weightAny);
+    if (field.indexOf(t) < 0) continue;
+    best = Math.max(best, startsWord(field, t) ? weightWord : weightAny);
   }
   return best;
 }
@@ -89,9 +103,9 @@ export function searchLessons<T extends Searchable>(entries: T[], query: string,
     }
     if (!all) continue;
     if (title === phrase) total += 200;
-    else if (title.startsWith(phrase)) total += 120;
-    else if (title.includes(phrase)) total += 80;
-    else if (keywords.includes(phrase)) total += 40;
+    else if (title.startsWith(phrase) && isBreak(title[phrase.length])) total += 120;
+    else if (hasWords(title, phrase)) total += 80;
+    else if (hasWords(keywords, phrase)) total += 40;
     scored.push({ e, s: total });
   }
   // Ties: the shorter (more general) title first, then alphabetical.

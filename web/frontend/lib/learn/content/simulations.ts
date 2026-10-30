@@ -53,7 +53,7 @@ export const simulations: Lesson[] = [
     title: 'How Simulated Trades Are Executed',
     level: 'Intermediate',
     summary: 'Orders placed on one bar fill on a later bar, at prices the bar actually traded, after costs.',
-    keywords: ['fill model', 'execution', 'next bar', 'look ahead', 'costs'],
+    keywords: ['fill model', 'simulated execution', 'next bar', 'look ahead', 'costs'],
     blocks: [
       { type: 'p', text: 'The Spectra backtester follows a strict timing contract so results never use information the strategy could not have had.' },
       { type: 'list', ordered: true, items: [
@@ -97,7 +97,7 @@ export const simulations: Lesson[] = [
     level: 'Intermediate',
     featured: true,
     summary: 'Costs, fills, data quality, annualization and leverage settings can each turn a winning backtest into a losing one.',
-    keywords: ['assumptions', 'costs', 'sensitivity', 'bias', 'survivorship', 'look ahead'],
+    keywords: ['assumptions', 'cost assumptions', 'sensitivity', 'bias', 'survivorship', 'look ahead'],
     blocks: [
       { type: 'p', text: 'Every simulation embeds assumptions. The important ones, and where you set them in a Spectra backtest:' },
       { type: 'table', head: ['Assumption', 'Setting', 'Effect if too optimistic'], rows: [
@@ -233,7 +233,7 @@ export const simulations: Lesson[] = [
     title: 'Walk-Forward Analysis & In/Out-of-Sample Sharpe',
     level: 'Advanced',
     summary: 'Optimize on one window, test on the next, roll forward and repeat: the honest way to evaluate a parameter search.',
-    keywords: ['walk forward', 'in sample', 'out of sample', 'is', 'oos', 'train test', 'rolling', 'anchored'],
+    keywords: ['walk forward', 'in sample', 'out of sample', 'oos', 'train test', 'rolling', 'anchored'],
     blocks: [
       { type: 'p', text: 'Walk-forward analysis splits history into consecutive **train** and **test** windows. Parameters are chosen on each train window and evaluated, unchanged, on the following test window. Stitching the test windows together gives an out-of-sample record of the whole procedure.' },
       { type: 'list', items: ['**Rolling** windows keep a fixed train length; **anchored** windows grow from the start of the data.', '**In-sample mean Sharpe**: average Sharpe of the chosen parameters on their train windows.', '**Out-of-sample mean Sharpe**: average Sharpe of the same parameters on the test windows that followed.'] },

@@ -165,7 +165,7 @@ export const engine: Lesson[] = [
     title: 'Position Management',
     level: 'Beginner',
     summary: 'How the engine tracks quantity, average cost and P&L for each position as fills arrive.',
-    keywords: ['positions', 'average cost', 'mark to market', 'flip'],
+    keywords: ['average cost', 'mark to market', 'flip'],
     blocks: [
       { type: 'p', text: 'A position is the signed quantity you hold in one instrument: positive for long, negative for short. For each position the ledger keeps the quantity, the total cost, the realized P&L and the fees.' },
       { type: 'h', text: 'Average cost accounting' },

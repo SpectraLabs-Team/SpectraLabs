@@ -361,6 +361,47 @@ describe('Calculations match the engine', () => {
     assert.match(text('metrics/slippage'), /\$50\.02/);
   });
 
+  // M22 task 2.2: each tooltip formula in the registry is pinned to the calc.ts function that
+  // implements it. The check evaluates the formula as written, independently of calc.ts, on a real
+  // engine equity curve. Editing a tooltip formula, or changing calc.ts so it no longer matches the
+  // tooltip, fails here.
+  it('tooltip formulas in the registry match calc.ts', () => {
+    const fx = JSON.parse(src('scripts/fixtures/learn-engine-run.json'));
+    const eq = fx.equity;
+    const ppy = fx.periods_per_year;
+    const rf = 0.03; // non-zero so the risk-free term is exercised (the fixture itself uses 0)
+    const r = calc.returnsFromEquity(eq);
+    const n = eq.length - 1;
+    const avg = (x) => x.reduce((a, b) => a + b, 0) / x.length;
+    const stdev = (x) => Math.sqrt(x.reduce((a, v) => a + (v - avg(x)) ** 2, 0) / (x.length - 1));
+    const dds = (() => { let p = eq[0]; return eq.map((e) => { p = Math.max(p, e); return (p - e) / p; }); })();
+    const m = calc.equityMetrics(eq, ppy, rf);
+    const d = calc.drawdownStats(eq);
+    const pnl = [400, -100, 350, -150, -120, 250, -80, -90, 500, -60, 0];
+    const t = calc.tradeStats(pnl);
+    const wins = pnl.filter((x) => x > 0);
+    const losses = pnl.filter((x) => x < 0);
+    const pinned = {
+      total_return: ['E_end / E_start − 1', eq.at(-1) / eq[0] - 1, m.totalReturn],
+      annualized_return: ['(E_end / E_start)^(ppy / n) − 1', (eq.at(-1) / eq[0]) ** (ppy / n) - 1, m.annualizedReturn],
+      cagr: ['(Π(1 + r))^(ppy / n) − 1', r.reduce((a, x) => a * (1 + x), 1) ** (ppy / n) - 1, m.annualizedReturn],
+      annualized_volatility: ['stdev(r) × √ppy', stdev(r) * Math.sqrt(ppy), m.annualizedVolatility],
+      max_drawdown: ['max (peak − equity) / peak', Math.max(...dds), d.maxDrawdown],
+      ulcer_index: ['√mean(drawdown²)', Math.sqrt(avg(dds.map((x) => x * x))), d.ulcerIndex],
+      sharpe_ratio: ['(mean(r) − rf/ppy) / stdev(r) × √ppy', ((avg(r) - rf / ppy) / stdev(r)) * Math.sqrt(ppy), m.sharpe],
+      sortino_ratio: ['(mean(r) − rf/ppy) / downside dev × √ppy', ((avg(r) - rf / ppy) / Math.sqrt(avg(r.map((x) => Math.min(x - rf / ppy, 0) ** 2)))) * Math.sqrt(ppy), m.sortino],
+      win_rate: ['winning trades / all trades', wins.length / pnl.length, t.winRate],
+      profit_factor: ['Σ wins / |Σ losses|', avg(wins) * wins.length / Math.abs(losses.reduce((a, b) => a + b, 0)), t.profitFactor],
+      payoff_ratio: ['average win / average loss', avg(wins) / Math.abs(avg(losses)), t.payoffRatio],
+      expectancy: ['total net P&L / trades', pnl.reduce((a, b) => a + b, 0) / pnl.length, t.expectancy],
+    };
+    for (const [id, [formula, fromFormula, fromCalc]] of Object.entries(pinned)) {
+      assert.ok(id in metricDefinitions, `${id} is not in the registry`);
+      assert.equal(metricDefinitions[id].formula, formula, `${id}: tooltip formula changed; update calc.ts and this check together`);
+      assert.ok(Number.isFinite(fromCalc) && Math.abs(fromFormula - fromCalc) <= 1e-9 * Math.max(1, Math.abs(fromCalc)), `${id}: tooltip formula gives ${fromFormula}, calc.ts gives ${fromCalc}`);
+    }
+  });
+
   it('parses pasted numbers, including thousands separators', () => {
     assert.deepEqual(calc.parseNumbers('100, 105 98.5\n110'), [100, 105, 98.5, 110]);
     assert.deepEqual(calc.parseNumbers('$100,000 $1,002,500 -40'), [100000, 1002500, -40]);
@@ -389,6 +430,20 @@ describe('Search', () => {
       titles.set(t, key(l));
       assert.equal(top(l.title)[0], key(l), `searching "${l.title}" should return ${key(l)} first`);
     }
+  });
+
+  it('every lesson keyword ranks its own lesson in the top three (M22 task 3.2)', () => {
+    for (const l of LESSONS) {
+      for (const k of l.keywords ?? []) {
+        const rank = top(k, 10).indexOf(key(l));
+        assert.ok(rank >= 0 && rank < 3, `keyword "${k}" ranks ${key(l)} ${rank < 0 ? 'outside the top 10' : `#${rank + 1}`}: make it more specific or drop it`);
+      }
+    }
+  });
+
+  it('short queries match whole words, not fragments of titles', () => {
+    assert.ok(top('es', 3).includes('metrics/expected-shortfall'), '"es" is expected shortfall, not "stress"');
+    assert.ok(top('te', 3).includes('metrics/information-ratio'), '"te" is tracking error');
   });
 
   it('understands common abbreviations and requires every term', () => {

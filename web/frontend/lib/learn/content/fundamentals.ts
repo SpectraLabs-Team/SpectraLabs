@@ -153,7 +153,7 @@ export const fundamentals: Lesson[] = [
     title: 'Volatility',
     level: 'Beginner',
     summary: 'How much and how fast prices move. Volatility drives risk, position size and option prices.',
-    keywords: ['volatility', 'risk', 'standard deviation', 'vix', 'range'],
+    keywords: ['volatility', 'standard deviation', 'vix', 'range'],
     blocks: [
       { type: 'p', text: 'Volatility describes the size of price swings. A stock that moves 3% on a typical day is more volatile than one that moves 0.5%. It is usually measured as the standard deviation of returns and quoted per year.' },
       { type: 'formula', tex: String.raw`\sigma_{\text{annual}} \approx \sigma_{\text{daily}} \times \sqrt{252}` },

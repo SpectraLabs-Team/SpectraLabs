@@ -142,7 +142,7 @@ export const riskMetrics = [
     level: 'Beginner',
     featured: true,
     summary: 'How much returns vary from period to period, expressed as an annual standard deviation.',
-    keywords: ['standard deviation', 'annualized volatility', 'risk', 'sigma', 'vol'],
+    keywords: ['standard deviation', 'annualized volatility', 'sigma', 'vol'],
     what: [
       'Volatility measures the spread of returns around their average. In a backtest it is the standard deviation of the equity curve’s period returns, scaled to a year. In the Risk & Stress Lab it is the model volatility used for the Monte Carlo simulation.',
     ],

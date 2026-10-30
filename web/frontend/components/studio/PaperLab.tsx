@@ -38,6 +38,10 @@ import {
   Zap,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import {
   cancelAlpacaOrder,
@@ -164,6 +168,21 @@ export function PaperLab() {
       try { localStorage.setItem('paper.watchlistOpen', o ? '0' : '1'); } catch {}
       return !o;
     });
+
+  const [ticketOpen, setTicketOpen] = useState(true);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('paper.ticketOpen');
+      if (saved !== null) setTicketOpen(saved === '1');
+    } catch {}
+  }, []);
+  const toggleTicket = () =>
+    setTicketOpen((o) => {
+      try { localStorage.setItem('paper.ticketOpen', o ? '0' : '1'); } catch {}
+      return !o;
+    });
+
+  const [chartHeightMode, setChartHeightMode] = useState<'standard' | 'tall'>('standard');
   const [connectModalOpen, setConnectModalOpen] = useState(false);
 
   // Connection state
@@ -1181,7 +1200,14 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
       </div>
 
       {/* Main TradingView-Style 3-Column Dashboard */}
-      <div className="grid items-start gap-4 lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_320px]">
+      <div
+        className={cn(
+          'grid items-start gap-4',
+          ticketOpen
+            ? 'lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_320px]'
+            : 'lg:grid-cols-[auto_minmax(0,1fr)] xl:grid-cols-[auto_minmax(0,1fr)_auto]'
+        )}
+      >
         {/* LEFT PANEL: Stock Search & Watchlist */}
         {!watchlistOpen ? (
           <button
@@ -1432,36 +1458,59 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
               </span>
             </div>
 
-            {/* Engine Switcher */}
-            <div className="flex items-center gap-1 rounded-lg border border-ink/10 bg-ink/[0.04] p-0.5 text-[11px]">
+            {/* Engine & Height Controls */}
+            <div className="flex items-center gap-2">
+              {/* Height Switcher */}
               <button
                 type="button"
-                onClick={() => setChartEngine('tradingview')}
-                className={cn(
-                  'flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition',
-                  chartEngine === 'tradingview'
-                    ? 'bg-panel text-accent shadow-sm'
-                    : 'text-ink/60 hover:text-ink'
-                )}
-                title="TradingView Real-Time Chart with live exchange quotes and indicators"
+                onClick={() => setChartHeightMode((m) => (m === 'standard' ? 'tall' : 'standard'))}
+                className="flex items-center gap-1 rounded-lg border border-ink/10 bg-ink/[0.04] px-2.5 py-1 text-[11px] font-semibold text-ink/70 hover:text-ink hover:bg-ink/[0.08] transition"
+                title={chartHeightMode === 'standard' ? 'Expand chart height (760px)' : 'Standard chart height (620px)'}
               >
-                <Activity className="h-3 w-3 text-emerald-400" />
-                TradingView Pro
-              </button>
-              <button
-                type="button"
-                onClick={() => setChartEngine('spectra')}
-                className={cn(
-                  'flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition',
-                  chartEngine === 'spectra'
-                    ? 'bg-panel text-accent shadow-sm'
-                    : 'text-ink/60 hover:text-ink'
+                {chartHeightMode === 'standard' ? (
+                  <>
+                    <Maximize2 className="h-3 w-3" />
+                    <span className="hidden sm:inline">Expand</span>
+                  </>
+                ) : (
+                  <>
+                    <Minimize2 className="h-3 w-3" />
+                    <span className="hidden sm:inline">Compact</span>
+                  </>
                 )}
-                title="Spectra Canvas Chart Engine"
-              >
-                <BarChart2 className="h-3 w-3" />
-                Spectra Engine
               </button>
+
+              {/* Engine Switcher */}
+              <div className="flex items-center gap-1 rounded-lg border border-ink/10 bg-ink/[0.04] p-0.5 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setChartEngine('tradingview')}
+                  className={cn(
+                    'flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition',
+                    chartEngine === 'tradingview'
+                      ? 'bg-panel text-accent shadow-sm'
+                      : 'text-ink/60 hover:text-ink'
+                  )}
+                  title="TradingView Real-Time Chart with live exchange quotes and indicators"
+                >
+                  <Activity className="h-3 w-3 text-emerald-400" />
+                  TradingView Pro
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChartEngine('spectra')}
+                  className={cn(
+                    'flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition',
+                    chartEngine === 'spectra'
+                      ? 'bg-panel text-accent shadow-sm'
+                      : 'text-ink/60 hover:text-ink'
+                  )}
+                  title="Spectra Canvas Chart Engine"
+                >
+                  <BarChart2 className="h-3 w-3" />
+                  Spectra Engine
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1470,7 +1519,7 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
               symbol={selectedSymbol}
               theme="dark"
               interval={chartTimeframe}
-              height={580}
+              height={chartHeightMode === 'tall' ? 760 : 620}
             />
           ) : (
             <TradingChart
@@ -1488,6 +1537,36 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
         </div>
 
         {/* RIGHT PANEL: Institutional Order Ticket */}
+        {!ticketOpen ? (
+          <button
+            type="button"
+            onClick={toggleTicket}
+            data-tour="paper-ticket"
+            title="Expand Order Ticket"
+            className="flex items-center gap-2 rounded-2xl border border-ink/10 bg-panel px-3 py-2 text-xs font-semibold text-ink/70 transition hover:text-ink lg:h-full lg:w-11 lg:flex-col lg:px-0 lg:py-4 hover:border-accent/40 group shadow-sm"
+          >
+            <PanelRightOpen className="h-4 w-4 text-accent transition group-hover:scale-110" />
+            <span className="font-mono text-[11px] font-bold text-accent lg:[writing-mode:vertical-rl]">
+              {selectedSymbol}
+            </span>
+            <span className="font-mono text-[10px] text-ink/65 lg:[writing-mode:vertical-rl]">
+              {formatCurrency(currentSymbolPrice)}
+            </span>
+            <span className="text-[11px] text-ink/75 font-medium lg:[writing-mode:vertical-rl]">
+              Order Ticket
+            </span>
+            <span
+              className={cn(
+                'mt-auto rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider',
+                orderSide === 'buy'
+                  ? 'bg-emerald-500/15 text-emerald-500'
+                  : 'bg-rose-500/15 text-rose-500'
+              )}
+            >
+              {orderSide}
+            </span>
+          </button>
+        ) : (
         <div data-tour="paper-ticket" className="flex flex-col lg:col-span-2 xl:col-span-1 rounded-2xl border border-ink/10 bg-panel p-4 text-ink">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1496,9 +1575,19 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
                 {selectedSymbol}
               </span>
             </div>
-            <span className="font-mono text-[11px] font-bold text-ink/80">
-              {formatCurrency(currentSymbolPrice)}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[11px] font-bold text-ink/80">
+                {formatCurrency(currentSymbolPrice)}
+              </span>
+              <button
+                type="button"
+                onClick={toggleTicket}
+                title="Shrink Order Ticket (Expand Chart)"
+                className="rounded p-1 text-ink/50 hover:bg-ink/[0.06] hover:text-ink transition"
+              >
+                <PanelRightClose className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
 
           {/* Mode Pill Indicator */}
@@ -1813,6 +1902,7 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
             )}
           </button>
         </div>
+        )}
       </div>
 
       {/* Confirmation Modal */}

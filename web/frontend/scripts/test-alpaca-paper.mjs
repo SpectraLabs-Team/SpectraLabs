@@ -92,6 +92,14 @@ describe('2. Engine Routes & Role-Based Access for Alpaca Paper Trading', () => 
       engineRoutes.routePolicyKey('api/alpaca/stocks/TSLA/bars'),
       'api/alpaca/stocks/{symbol}/bars'
     );
+    assert.equal(
+      engineRoutes.routePolicyKey('api/v1/alpaca/crypto/bars'),
+      'api/v1/alpaca/crypto/bars'
+    );
+    assert.equal(
+      engineRoutes.routePolicyKey('api/alpaca/crypto/bars'),
+      'api/alpaca/crypto/bars'
+    );
   });
 
   it('all Alpaca mutation endpoints require editor role or higher', () => {
@@ -216,6 +224,18 @@ describe('4. TradingView-Style Interactive Chart & Symbols', () => {
     assert.ok(
       labSource.includes('backfillHistoricalBars'),
       'PaperLab must backfill historical bars if live feed returns sparse bars'
+    );
+    assert.ok(
+      labSource.includes('SOL/USD'),
+      'PaperLab must support Solana SOL/USD'
+    );
+    assert.ok(
+      labSource.includes('getRealtimeQuote'),
+      'PaperLab must call getRealtimeQuote for active live price ticks'
+    );
+    assert.ok(
+      labSource.includes('priceTickFlash') || labSource.includes('priceFlash'),
+      'PaperLab must implement price flash animations on live ticks'
     );
   });
 });

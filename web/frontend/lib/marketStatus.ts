@@ -18,12 +18,20 @@ export interface MarketSessionInfo {
 export interface CuratedAsset {
   symbol: string;
   name: string;
-  category: 'tech' | 'etfs' | 'volatility';
+  category: 'crypto' | 'tech' | 'etfs' | 'volatility';
   defaultPrice: number;
   changePct: number;
 }
 
 export const CURATED_WATCHLIST_ITEMS: CuratedAsset[] = [
+  // 24/7 Live Crypto Assets
+  { symbol: 'SOL/USD', name: 'Solana', category: 'crypto', defaultPrice: 95.2, changePct: 2.85 },
+  { symbol: 'BTC/USD', name: 'Bitcoin', category: 'crypto', defaultPrice: 68500.0, changePct: 1.45 },
+  { symbol: 'ETH/USD', name: 'Ethereum', category: 'crypto', defaultPrice: 2540.0, changePct: -0.65 },
+  { symbol: 'DOGE/USD', name: 'Dogecoin', category: 'crypto', defaultPrice: 0.165, changePct: 5.2 },
+  { symbol: 'AVAX/USD', name: 'Avalanche', category: 'crypto', defaultPrice: 28.4, changePct: 1.8 },
+  { symbol: 'LINK/USD', name: 'Chainlink', category: 'crypto', defaultPrice: 12.1, changePct: -1.2 },
+
   // Mega-Cap Tech
   { symbol: 'AAPL', name: 'Apple Inc.', category: 'tech', defaultPrice: 185.0, changePct: 1.24 },
   { symbol: 'NVDA', name: 'NVIDIA Corporation', category: 'tech', defaultPrice: 180.0, changePct: 3.42 },
@@ -52,15 +60,39 @@ export const CURATED_WATCHLIST_ITEMS: CuratedAsset[] = [
 
 export const WATCHLIST_CATEGORY_LABELS: Record<string, string> = {
   my: 'My Watchlist',
+  crypto: 'Crypto 24/7',
   tech: 'Mega Tech',
   etfs: 'Indices & ETFs',
   volatility: 'High Beta',
 };
 
+export function isCryptoSymbol(symbol: string): boolean {
+  const s = symbol.toUpperCase().trim();
+  return (
+    s.includes('/') ||
+    s.endsWith('USD') ||
+    s.endsWith('USDT') ||
+    ['SOL', 'BTC', 'ETH', 'DOGE', 'AVAX', 'LINK', 'ADA', 'LTC', 'SHIB', 'UNI', 'DOT', 'NEAR'].includes(s)
+  );
+}
+
 /**
- * Returns current US Equity market session information in America/New_York timezone.
+ * Returns current US Equity or Crypto market session information.
+ * Crypto is 24/7/365 Open.
  */
-export function getMarketSession(now = new Date()): MarketSessionInfo {
+export function getMarketSession(now = new Date(), symbol?: string): MarketSessionInfo {
+  // 24/7 continuous session for crypto
+  if (symbol && isCryptoSymbol(symbol)) {
+    return {
+      session: 'open',
+      label: 'Crypto 24/7 Open',
+      badgeTone: 'profit',
+      description: 'Continuous 24/7 Global Liquid Market',
+      isRegularHours: true,
+      formattedTimeEt: '24/7 LIVE',
+    };
+  }
+
   // Extract ET components
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York',
@@ -145,6 +177,16 @@ export function getMarketSession(now = new Date()): MarketSessionInfo {
  * Returns baseline fallback price for any known ticker.
  */
 export function getBaselineTickerPrice(symbol: string): number {
-  const match = CURATED_WATCHLIST_ITEMS.find((a) => a.symbol.toUpperCase() === symbol.toUpperCase());
-  return match?.defaultPrice ?? 175.0;
+  const clean = symbol.toUpperCase().trim();
+  const match = CURATED_WATCHLIST_ITEMS.find((a) => {
+    const aSym = a.symbol.toUpperCase();
+    return aSym === clean || aSym.replace('/', '') === clean.replace('/', '');
+  });
+  if (match) return match.defaultPrice;
+  if (clean.includes('SOL')) return 95.2;
+  if (clean.includes('BTC')) return 68500.0;
+  if (clean.includes('ETH')) return 2540.0;
+  if (clean.includes('DOGE')) return 0.165;
+  if (clean === 'ORCL') return 131.8;
+  return 175.0;
 }

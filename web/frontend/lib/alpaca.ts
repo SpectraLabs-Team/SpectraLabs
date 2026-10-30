@@ -231,15 +231,39 @@ export async function getAlpacaOrders(status = 'all', limit = 100): Promise<Alpa
   return Array.isArray(res) ? res : [];
 }
 
+export interface RealtimeQuote {
+  symbol: string;
+  price: number;
+  change: number;
+  changePct: number;
+  high: number;
+  low: number;
+  volume: number;
+  source: string;
+  timestamp: number;
+}
+
+export function isCryptoPair(symbol: string): boolean {
+  const s = symbol.toUpperCase().trim();
+  return (
+    s.includes('/') ||
+    s.endsWith('USD') ||
+    s.endsWith('USDT') ||
+    ['SOL', 'BTC', 'ETH', 'DOGE', 'AVAX', 'LINK', 'ADA', 'LTC', 'SHIB', 'UNI', 'DOT', 'NEAR'].includes(s)
+  );
+}
+
 export async function createAlpacaOrder(params: CreateOrderParams): Promise<AlpacaOrder> {
+  const sym = params.symbol.toUpperCase().trim();
+  const isCrypto = isCryptoPair(sym);
   return engineRequest<AlpacaOrder>('orders', {
     method: 'POST',
     body: JSON.stringify({
-      symbol: params.symbol.toUpperCase().trim(),
+      symbol: sym,
       qty: String(params.qty),
       side: params.side,
       type: params.type,
-      time_in_force: params.time_in_force || 'day',
+      time_in_force: isCrypto ? 'gtc' : params.time_in_force || 'day',
       limit_price: params.limit_price !== undefined ? String(params.limit_price) : undefined,
       stop_price: params.stop_price !== undefined ? String(params.stop_price) : undefined,
       client_order_id: params.client_order_id || `sl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -255,8 +279,22 @@ export async function cancelAlpacaOrder(orderId: string): Promise<boolean> {
 }
 
 export async function getAlpacaAssets(): Promise<AlpacaAsset[]> {
-  const res = await engineRequest<AlpacaAsset[]>('assets?status=active&asset_class=us_equity');
-  return Array.isArray(res) ? res : [];
+  try {
+    const [equities, cryptos] = await Promise.allSettled([
+      engineRequest<AlpacaAsset[]>('assets?status=active&asset_class=us_equity'),
+      engineRequest<AlpacaAsset[]>('assets?status=active&asset_class=crypto'),
+    ]);
+    const list: AlpacaAsset[] = [];
+    if (equities.status === 'fulfilled' && Array.isArray(equities.value)) {
+      list.push(...equities.value);
+    }
+    if (cryptos.status === 'fulfilled' && Array.isArray(cryptos.value)) {
+      list.push(...cryptos.value);
+    }
+    return list;
+  } catch {
+    return [];
+  }
 }
 
 export function computeAlpacaStartTime(timeframe = '1Day', limit = 100): string {
@@ -290,18 +328,41 @@ export function computeAlpacaStartTime(timeframe = '1Day', limit = 100): string 
   return new Date(now - ms).toISOString();
 }
 
+export async function getRealtimeQuote(symbol: string): Promise<RealtimeQuote | null> {
+  try {
+    const res = await fetch(`/api/paper/market/quote?symbol=${encodeURIComponent(symbol.toUpperCase().trim())}`, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ok) {
+        return data as RealtimeQuote;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 export async function getAlpacaBars(
   symbol: string,
   timeframe = '1Day',
   limit = 100
 ): Promise<{ bars: CandleBar[]; symbol: string; source: string }> {
-  // Use Alpaca Data API v2 with feed=iex (free tier accessible)
   const sym = symbol.toUpperCase().trim();
+  const isCrypto = isCryptoPair(sym);
   const start = computeAlpacaStartTime(timeframe, limit);
+
+  // 1. Try Alpaca Data API
   try {
-    const res = await engineRequest<{ bars?: Record<string, any[]> | any[] }>(
-      `stocks/${encodeURIComponent(sym)}/bars?timeframe=${timeframe}&limit=${limit}&start=${encodeURIComponent(start)}&feed=iex&sort=asc`
-    );
+    const endpoint = isCrypto
+      ? `crypto/bars?symbols=${encodeURIComponent(sym)}&timeframe=${timeframe}&limit=${limit}&start=${encodeURIComponent(start)}&sort=asc`
+      : `stocks/${encodeURIComponent(sym)}/bars?timeframe=${timeframe}&limit=${limit}&start=${encodeURIComponent(start)}&feed=iex&sort=asc`;
+
+    const res = await engineRequest<{ bars?: Record<string, any[]> | any[] }>(endpoint);
 
     let rawList: any[] = [];
     if (res && res.bars) {
@@ -312,7 +373,7 @@ export async function getAlpacaBars(
       }
     }
 
-    if (rawList && rawList.length > 0) {
+    if (rawList && rawList.length >= 25) {
       const bars: CandleBar[] = rawList.map((b) => ({
         t: b.t,
         o: Number(b.o),
@@ -323,11 +384,34 @@ export async function getAlpacaBars(
         n: b.n ? Number(b.n) : undefined,
         vw: b.vw ? Number(b.vw) : undefined,
       }));
-      return { bars, symbol: sym, source: 'alpaca-iex' };
+      return { bars, symbol: sym, source: isCrypto ? 'Alpaca Crypto' : 'Alpaca Paper (IEX Feed)' };
     }
   } catch (err) {
-    // If market data endpoint fails or is unauthorized, log gently
-    console.warn(`[Alpaca] Market data bars request for ${sym} failed:`, err);
+    console.warn(`[Alpaca] Direct bars request for ${sym} failed or returned sparse data, querying real-time market service:`, err);
+  }
+
+  // 2. Query Dedicated Real-Time Market Data Provider (Coinbase 24/7 for Crypto, Yahoo Finance for Stocks)
+  try {
+    const res = await fetch(
+      `/api/paper/market/bars?symbol=${encodeURIComponent(sym)}&timeframe=${encodeURIComponent(timeframe)}&limit=${limit}`,
+      {
+        method: 'GET',
+        credentials: 'same-origin',
+        cache: 'no-store',
+      }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.ok && Array.isArray(data.bars) && data.bars.length > 0) {
+        return {
+          bars: data.bars,
+          symbol: data.symbol || sym,
+          source: data.source || (isCrypto ? 'Coinbase Pro (24/7 Feed)' : 'Real-Time Market Feed'),
+        };
+      }
+    }
+  } catch (marketErr) {
+    console.warn(`[Market API] Fallback bars request for ${sym} failed:`, marketErr);
   }
 
   return { bars: [], symbol: sym, source: 'unavailable' };

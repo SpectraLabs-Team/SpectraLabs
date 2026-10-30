@@ -13,7 +13,7 @@ import {
   TrendingUp,
   Zap,
 } from 'lucide-react';
-import { formatCurrency, formatPercent } from '@/lib/utils';
+import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import type { CandleBar } from '@/lib/alpaca';
 import { useTheme } from '@/lib/theme';
 
@@ -27,6 +27,7 @@ export interface TradingChartProps {
   loading?: boolean;
   onRefresh?: () => void;
   className?: string;
+  priceFlash?: 'up' | 'down' | null;
 }
 
 export const TIMEFRAMES = [
@@ -49,6 +50,7 @@ export function TradingChart({
   loading = false,
   onRefresh,
   className = '',
+  priceFlash = null,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -503,7 +505,13 @@ export function TradingChart({
           </div>
 
           <div className="flex items-baseline gap-2">
-            <span className="font-mono text-xl font-bold">
+            <span
+              className={cn(
+                'font-mono text-xl font-bold transition-all duration-300 rounded px-1',
+                priceFlash === 'up' && 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/30 scale-105',
+                priceFlash === 'down' && 'bg-rose-500/20 text-rose-400 ring-1 ring-rose-500/30 scale-105'
+              )}
+            >
               {formatCurrency(latestPrice)}
             </span>
             <span

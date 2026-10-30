@@ -11,6 +11,7 @@ pub mod dsl;
 pub mod futures;
 pub mod instruments;
 pub mod metrics;
+pub mod options;
 pub mod performance;
 pub mod rebalance;
 
@@ -34,4 +35,5 @@ pub use metrics::{
     nearest_rank_index, returns_from_curve, returns_from_equity, DrawdownStats, EquityPoint, Metrics,
     TailStats,
 };
+pub use options::{norm_cdf, norm_pdf, OptionInputs, OptionValue};
 pub use rebalance::{RebalanceConfig, RebalanceRule, Rebalancer, WeightStrategy};

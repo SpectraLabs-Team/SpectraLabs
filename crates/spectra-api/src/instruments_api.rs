@@ -48,6 +48,8 @@ pub struct InstrumentView {
     pub coupon_frequency: Option<u32>,
     /// Day count for accrued interest (bonds): act_act_icma, 30_360, act_360 or act_365f.
     pub day_count: Option<String>,
+    /// `call` or `put` (options).
+    pub right: Option<String>,
 }
 
 impl From<&Instrument> for InstrumentView {
@@ -66,6 +68,7 @@ impl From<&Instrument> for InstrumentView {
             underlying: i.underlying.clone(),
             coupon_frequency: i.coupon_frequency,
             day_count: i.day_count.map(|d| d.as_str().to_string()),
+            right: i.option_right.map(|r| r.as_str().to_string()),
         }
     }
 }
@@ -377,6 +380,29 @@ pub(crate) async fn put_fx_rates(
             },
         ),
         Err(e) => db_error(&e),
+    }
+}
+
+/// M24.4: options are backtest-only until the M26 review signs off on the
+/// option model. The refusal for a paper or live order in `symbol`, if it is
+/// an option. Fails closed: an order is not sent unless its type is known.
+pub(crate) async fn refuse_options(
+    pool: &spectra_db::PgPool,
+    ws: uuid::Uuid,
+    symbol: &str,
+) -> Option<Response> {
+    match spectra_db::instruments::instrument_types(pool, ws).await {
+        Ok(types) => {
+            let s = symbol.trim();
+            let is_option = |k: &str| types.get(k) == Some(&spectra_core::InstrumentType::Option);
+            (is_option(s) || is_option(&s.to_uppercase())).then(|| {
+                error_response(
+                    422,
+                    "Options are available in backtests only until the M26 model review signs off.",
+                )
+            })
+        }
+        Err(_) => Some(error_response(503, "Could not check the instrument type; the order was not sent.")),
     }
 }
 

@@ -84,3 +84,24 @@ async fn bond_terms_round_trip_and_are_required() {
     missing.day_count = None;
     assert!(create_instrument(&pool, ws, &missing).await.is_err());
 }
+
+#[tokio::test]
+async fn option_terms_round_trip_and_are_required() {
+    let Some(pool) = pool().await else { return };
+    let ws = workspace(&pool).await;
+    let symbol = format!("OPT-{}", Uuid::now_v7().simple());
+    let mut o = Instrument::equity(symbol.clone(), "USD", Price::from_raw(SCALE / 100), Qty::from_raw(SCALE));
+    o.kind = InstrumentType::Option;
+    o.multiplier = Ratio::from_units(100).unwrap();
+    o.expiry_ns = Some(1_798_675_200_000_000_000);
+    o.strike = Some(Price::from_raw(600 * SCALE));
+    o.option_right = Some(spectra_core::OptionRight::Put);
+    o.underlying = Some("SPY".into());
+    create_instrument(&pool, ws, &o).await.unwrap();
+    let rows = list_instruments(&pool, ws).await.unwrap();
+    assert_eq!(rows.iter().find(|r| r.instrument.symbol == symbol).unwrap().instrument, o);
+    let mut missing = o.clone();
+    missing.symbol = format!("OPT2-{}", Uuid::now_v7().simple());
+    missing.option_right = None;
+    assert!(create_instrument(&pool, ws, &missing).await.is_err(), "the table needs the right");
+}

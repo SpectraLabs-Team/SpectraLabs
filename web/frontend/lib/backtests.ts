@@ -156,7 +156,7 @@ export interface StrategySummary {
 export interface FuturesRoll {
   ts_ns: number;
   strategy: number;
-  kind: 'rolled' | 'closed' | 'settled' | 'redeemed';
+  kind: 'rolled' | 'closed' | 'settled' | 'redeemed' | 'exercised' | 'expired';
   from: string;
   to: string | null;
   qty: string;
@@ -180,6 +180,30 @@ export interface BondSummary {
   modified_duration?: number;
   convexity?: number;
   dv01_per_100?: number;
+}
+
+export interface OptionSummary {
+  symbol: string;
+  right: 'call' | 'put';
+  strike: number;
+  expiry: number;
+  underlying: string | null;
+  as_of?: number;
+  price?: number;
+  underlying_price?: number;
+  implied_volatility?: number;
+  delta?: number;
+  gamma?: number;
+  vega?: number;
+  theta?: number;
+}
+
+export interface OptionsSummary {
+  model: string;
+  options: OptionSummary[];
+  settlements: { ts_ns: number; strategy: number; symbol: string; kind: 'exercised' | 'expired'; qty: string; price: string; note: string | null }[];
+  /** The model's review gate, in words. */
+  gaps: string[];
 }
 
 export interface BondsSummary {
@@ -276,6 +300,8 @@ export interface Summary {
   futures?: FuturesSummary;
   /** M24.3: present only for runs with bonds. */
   bonds?: BondsSummary;
+  /** M24.4: present only for runs with options. */
+  options?: OptionsSummary;
   benchmark: {
     valid: boolean;
     name?: string;

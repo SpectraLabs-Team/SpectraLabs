@@ -60,7 +60,7 @@ pub struct RequestInstruments {
 /// Request fields this module reads.
 pub const FIELDS: [&str; 5] = ["base_currency", "instruments", "fx_rates", "futures_roll", "bond_quote"];
 
-const INSTRUMENT_FIELDS: [&str; 14] = [
+const INSTRUMENT_FIELDS: [&str; 15] = [
     "symbol",
     "instrument",
     "type",
@@ -75,6 +75,7 @@ const INSTRUMENT_FIELDS: [&str; 14] = [
     "underlying",
     "coupon_frequency",
     "day_count",
+    "right",
 ];
 
 fn err(errors: &mut Vec<FieldError>, field: impl Into<String>, message: impl Into<String>) {
@@ -259,6 +260,16 @@ fn parse_one(
             None
         }
     };
+    let option_right = match item.find("right") {
+        None | Some(Json::Null) => None,
+        Some(Json::String(r)) if spectra_core::OptionRight::parse(r.trim()).is_some() => {
+            spectra_core::OptionRight::parse(r.trim())
+        }
+        Some(_) => {
+            err(errors, format!("{p}right"), "must be \"call\" or \"put\"");
+            None
+        }
+    };
     let mut when = |name: &str| match item.find(name) {
         None | Some(Json::Null) => None,
         Some(v) => timestamp(v).map(|t| t.0).or_else(|| {
@@ -294,6 +305,7 @@ fn parse_one(
         underlying,
         coupon_frequency,
         day_count,
+        option_right,
     };
     if let Err(e) = inst.validate() {
         err(errors, whole, e);
@@ -440,6 +452,25 @@ impl RequestInstruments {
             };
             setup.instruments.insert(id, inst.clone());
         }
+        // Each option's underlying, by symbol (or "#<id>" in a dataset without symbols).
+        for (&id, inst) in &setup.instruments {
+            if inst.kind != InstrumentType::Option {
+                continue;
+            }
+            let Some(u) = inst.underlying.as_deref() else { continue };
+            let found =
+                symbols.iter().position(|x| x == u).and_then(|k| u32::try_from(k).ok()).or_else(|| {
+                    u.strip_prefix('#').and_then(|n| n.parse::<u32>().ok()).filter(|_| symbols.is_empty())
+                });
+            match found {
+                Some(uid) => {
+                    setup.underlying_ids.insert(id, uid);
+                }
+                None => {
+                    return Err(format!("option {}: its underlying {u} is not in this dataset", inst.symbol))
+                }
+            }
+        }
         // Only the series the resolved instruments need.
         for ccy in setup.foreign_currencies().into_iter().map(str::to_string).collect::<Vec<_>>() {
             if let Some(series) = self.fx.get(&ccy) {
@@ -504,6 +535,9 @@ impl RequestInstruments {
                 }
                 if let Some(d) = i.day_count {
                     j = j.with("day_count", Json::string(d.as_str()));
+                }
+                if let Some(r) = i.option_right {
+                    j = j.with("right", Json::string(r.as_str()));
                 }
                 list.push(j)?;
             }

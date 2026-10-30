@@ -377,6 +377,10 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         Some(b) => summary.with("bonds", b),
         None => summary,
     };
+    let summary = match options_json(out)? {
+        Some(o) => summary.with("options", o),
+        None => summary,
+    };
     if req.is_multi() {
         return Ok(summary.with("strategies", strategies_json(out)?));
     }
@@ -652,6 +656,107 @@ fn bonds_json(out: &BacktestOutput) -> Result<Option<Json>> {
     ))
 }
 
+/// The M26 review gate on the option model, stated with every run that has options.
+pub const OPTION_GATE: &str = "Options are European and cash-settled at expiry against the underlying's last \
+    close. The Black-Scholes-Merton model behind the implied volatility and Greeks awaits the M26 correctness \
+    review; until then options are available in backtests only, not in paper or live trading.";
+
+/// What the run says about options, when it has any: each option's implied
+/// volatility and Greeks at its last price, and every settlement.
+fn options_json(out: &BacktestOutput) -> Result<Option<Json>> {
+    let options: Vec<(spectra_core::InstrumentId, &spectra_core::Instrument)> = out
+        .setup
+        .instruments
+        .iter()
+        .filter(|(_, i)| i.kind == spectra_core::InstrumentType::Option)
+        .map(|(&id, i)| (id, i))
+        .collect();
+    if options.is_empty() {
+        return Ok(None);
+    }
+    let name = |id: spectra_core::InstrumentId| {
+        out.symbols
+            .get(id as usize)
+            .cloned()
+            .or_else(|| out.setup.instrument(id).map(|i| i.symbol.clone()))
+            .unwrap_or_else(|| format!("#{id}"))
+    };
+    // The run's risk-free rate, as a continuously compounded rate for the model.
+    let rate = (1.0 + out.request.config.risk_free_rate).ln();
+    let mut list = Json::array();
+    for (id, inst) in options {
+        let (Some(expiry), Some(strike), Some(right)) = (inst.expiry_ns, inst.strike, inst.option_right)
+        else {
+            continue;
+        };
+        let mut j = Json::object()
+            .with("symbol", Json::string(name(id)))
+            .with("right", Json::string(right.as_str()))
+            .with("strike", num(strike.to_f64()))
+            .with("expiry", Json::integer(expiry))
+            .with("underlying", inst.underlying.clone().map_or(Json::Null, Json::string));
+        let quotes =
+            (out.last_quotes.get(&id), out.setup.underlying_of(id).and_then(|u| out.last_quotes.get(&u)));
+        if let (Some(&(ts, price)), Some(&(_, spot))) = quotes {
+            let years = (expiry - ts) as f64 / (365.25 * 86_400e9);
+            j = j
+                .with("as_of", Json::integer(ts))
+                .with("price", num(price.to_f64()))
+                .with("underlying_price", num(spot.to_f64()));
+            if years > 0.0 {
+                let inputs = spectra_engine::OptionInputs {
+                    right,
+                    spot: spot.to_f64(),
+                    strike: strike.to_f64(),
+                    years,
+                    rate,
+                    dividend_yield: 0.0,
+                    volatility: 0.2,
+                };
+                if let Ok(vol) = inputs.implied_volatility(price.to_f64()) {
+                    if let Ok(v) = (spectra_engine::OptionInputs { volatility: vol, ..inputs }).value() {
+                        j = j
+                            .with("implied_volatility", num(vol))
+                            .with("delta", num(v.delta))
+                            .with("gamma", num(v.gamma))
+                            .with("vega", num(v.vega))
+                            .with("theta", num(v.theta));
+                    }
+                }
+            }
+        }
+        list.push(j)?;
+    }
+    let mut settlements = Json::array();
+    for e in
+        out.result.rolls.iter().filter(|e| {
+            matches!(e.kind, spectra_engine::RollKind::Exercised | spectra_engine::RollKind::Expired)
+        })
+    {
+        settlements.push(
+            Json::object()
+                .with("ts_ns", Json::integer(e.ts_ns))
+                .with("strategy", Json::integer(e.strategy as i64))
+                .with("symbol", Json::string(name(e.from)))
+                .with("kind", Json::string(e.kind.as_str()))
+                .with("qty", Json::string(e.qty.to_string()))
+                .with("price", Json::string(e.close_price.to_string()))
+                .with("note", e.note.as_ref().map_or(Json::Null, |n| Json::string(n.clone()))),
+        )?;
+    }
+    Ok(Some(
+        Json::object()
+            .with("model", Json::string("black_scholes_merton"))
+            .with("options", list)
+            .with("settlements", settlements)
+            .with("gaps", {
+                let mut g = Json::array();
+                g.push(Json::string(OPTION_GATE))?;
+                g
+            }),
+    ))
+}
+
 /// What a bond run does not model, stated in its summary.
 pub const BOND_GAP: &str = "Ex-coupon periods, settlement lags, default and call features are not modelled: \
     the holder at the close before a coupon date receives the coupon, trades settle at the bar, and every bond \
@@ -678,7 +783,14 @@ fn futures_json(out: &BacktestOutput) -> Result<Option<Json>> {
     };
     let rule = &out.setup.roll;
     let mut rolls = Json::array();
-    for e in out.result.rolls.iter().filter(|e| e.kind != spectra_engine::RollKind::Redeemed) {
+    for e in out.result.rolls.iter().filter(|e| {
+        matches!(
+            e.kind,
+            spectra_engine::RollKind::Rolled
+                | spectra_engine::RollKind::Closed
+                | spectra_engine::RollKind::Settled
+        )
+    }) {
         rolls.push(
             Json::object()
                 .with("ts_ns", Json::integer(e.ts_ns))

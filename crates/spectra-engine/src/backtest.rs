@@ -357,6 +357,10 @@ pub enum RollKind {
     Settled,
     /// A bond repaid at par at maturity.
     Redeemed,
+    /// An option in the money at expiry, cash-settled at its intrinsic value.
+    Exercised,
+    /// An option out of the money at expiry, closed at zero.
+    Expired,
 }
 
 impl RollKind {
@@ -367,6 +371,8 @@ impl RollKind {
             Self::Closed => "closed",
             Self::Settled => "settled",
             Self::Redeemed => "redeemed",
+            Self::Exercised => "exercised",
+            Self::Expired => "expired",
         }
     }
 }
@@ -1103,6 +1109,7 @@ fn hash_result(curve: &[EquityPoint], journal: &[JournalEntry], orders: &[Order]
             spectra_core::EntryType::Dividend => 6,
             spectra_core::EntryType::Listing => 7,
             spectra_core::EntryType::Coupon => 8,
+            spectra_core::EntryType::Expire => 9,
         });
         h.update_i64(e.ts_ns);
         h.update_i64(e.amount.raw());
@@ -1932,6 +1939,93 @@ fn pay_coupons(
     Ok(())
 }
 
+/// Settles every option position once its expiry has come (M24.4): in the
+/// money, cash-settled at its intrinsic value against the underlying's last
+/// close at or before expiry; otherwise closed at zero. European, cash-settled.
+#[allow(clippy::too_many_arguments)]
+fn settle_options(
+    setup: &InstrumentSetup,
+    ts: i64,
+    history: &BTreeMap<InstrumentId, Vec<Bar>>,
+    ledger: &mut Ledger,
+    sleeves: &mut [Ledger],
+    rolls: &mut Vec<RollEvent>,
+    fill_orders: &mut Vec<OrderId>,
+) -> std::result::Result<Vec<(usize, Fill)>, RunError> {
+    let mut out = Vec::new();
+    let owners = sleeves.len().max(1);
+    for (&id, inst) in &setup.instruments {
+        if inst.kind != InstrumentType::Option {
+            continue;
+        }
+        let (Some(expiry), Some(strike), Some(right)) = (inst.expiry_ns, inst.strike, inst.option_right)
+        else {
+            continue;
+        };
+        if ts < expiry {
+            continue;
+        }
+        let held = (0..owners).any(|o| !sleeves.get(o).unwrap_or(ledger).position(id).qty.is_zero());
+        if !held {
+            continue;
+        }
+        // The underlying's last close known at expiry (never a later one).
+        let spot = setup
+            .underlying_of(id)
+            .and_then(|u| history.get(&u))
+            .and_then(|h| h.iter().rev().find(|b| b.ts_ns <= expiry))
+            .map(|b| b.close);
+        let intrinsic = spot.map_or(0.0, |s| right.intrinsic(s.to_f64(), strike.to_f64()));
+        let settle_px = if intrinsic > 0.0 {
+            Some(setup.fx_convert(id, Price::from_f64(intrinsic)?, ts)?).filter(|p| p.raw() > 0)
+        } else {
+            None
+        };
+        let note =
+            spot.is_none().then(|| "no underlying price at or before expiry; closed at zero".to_string());
+        for owner in 0..owners {
+            let qty = sleeves.get(owner).unwrap_or(ledger).position(id).qty;
+            if qty.is_zero() {
+                continue;
+            }
+            let abs = qty.checked_abs()?;
+            let settled_fill = match settle_px {
+                Some(px) if !ledger.notional_of(id, px, abs)?.is_zero() => {
+                    let side = if qty.raw() > 0 { Side::Sell } else { Side::Buy };
+                    Some(Fill { instrument: id, side, qty: abs, price: px, fee: Money::ZERO, ts_ns: ts })
+                }
+                _ => None,
+            };
+            if let Some(f) = settled_fill {
+                apply_engine_fill(ledger, sleeves, owner, &f, false).map_err(ledger_err)?;
+                fill_orders.push(0);
+                out.push((owner, f));
+            } else {
+                match sleeves.get_mut(owner) {
+                    Some(book) => book.expire_position(id, ts).map_err(ledger_err)?,
+                    None => ledger.expire_position(id, ts).map_err(ledger_err)?,
+                }
+            }
+            rolls.push(RollEvent {
+                ts_ns: ts,
+                strategy: owner,
+                from: id,
+                to: None,
+                qty,
+                close_price: settled_fill.map_or(Price::ZERO, |f| f.price),
+                open_price: None,
+                kind: if settled_fill.is_some() { RollKind::Exercised } else { RollKind::Expired },
+                note: note.clone(),
+            });
+        }
+        // In a multi-strategy run the account's own position expires once, after its strategies'.
+        if !sleeves.is_empty() && !ledger.position(id).qty.is_zero() {
+            ledger.expire_position(id, ts).map_err(ledger_err)?;
+        }
+    }
+    Ok(out)
+}
+
 /// Repays every bond position at par (100) once its maturity has come.
 fn redeem_bonds(
     setup: &InstrumentSetup,
@@ -2002,8 +2096,9 @@ fn check_setup(setup: &InstrumentSetup, bars: &[Bar]) -> std::result::Result<(),
 /// Why the engine cannot trade `inst` yet, if it cannot.
 fn unsupported(inst: &Instrument) -> Option<&'static str> {
     match inst.kind {
-        InstrumentType::Equity | InstrumentType::Future | InstrumentType::Bond => None,
-        InstrumentType::Option => Some("option trading needs the option model (expiry settlement)"),
+        InstrumentType::Equity | InstrumentType::Future | InstrumentType::Bond | InstrumentType::Option => {
+            None
+        }
         InstrumentType::Swap => Some("swap trading needs a curve model"),
     }
 }
@@ -2056,6 +2151,7 @@ fn run_inner<'s>(
     let sessions = SessionRule::new(cfg.exchange, interval);
     let chains = Chains::new(setup, &setup.roll, cfg.exchange);
     let has_bonds = setup.instruments.values().any(|i| i.kind == InstrumentType::Bond);
+    let has_options = setup.instruments.values().any(|i| i.kind == InstrumentType::Option);
     let mut prev_ts: Option<i64> = None;
     let mut continuous = Continuous::default();
     let mut rolls: Vec<RollEvent> = Vec::new();
@@ -2194,6 +2290,17 @@ fn run_inner<'s>(
         let mut fills: Vec<(usize, Fill)> = Vec::new();
         // Bonds: coupons on the positions held at the previous close, then
         // redemption at maturity (M24.3).
+        if has_options {
+            fills.extend(settle_options(
+                setup,
+                ts,
+                &history,
+                &mut ledger,
+                &mut sleeves,
+                &mut rolls,
+                &mut fill_orders,
+            )?);
+        }
         if has_bonds {
             pay_coupons(setup, prev_ts, ts, &mut ledger, &mut sleeves)?;
             fills.extend(redeem_bonds(setup, ts, &mut ledger, &mut sleeves, &mut rolls, &mut fill_orders)?);

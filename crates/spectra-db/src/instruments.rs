@@ -28,12 +28,13 @@ pub struct InstrumentRow {
 pub async fn create_instrument(pool: &PgPool, workspace_id: Uuid, inst: &Instrument) -> Result<Uuid, Error> {
     let row = sqlx::query(
         "INSERT INTO instruments (workspace_id, symbol, instrument_type, currency, multiplier, tick_size,
-             lot_size, expiry, strike, maturity, coupon_rate, underlying, coupon_frequency, day_count)
+             lot_size, expiry, strike, maturity, coupon_rate, underlying, coupon_frequency, day_count,
+             option_right)
          VALUES ($1, $2, $3, $4,
              ($5::bigint)::numeric / 100000000, ($6::bigint)::numeric / 100000000, ($7::bigint)::numeric / 100000000,
              to_timestamp(($8::bigint / 1000)::double precision / 1000000), ($9::bigint)::numeric / 100000000,
              to_timestamp(($10::bigint / 1000)::double precision / 1000000), ($11::bigint)::numeric / 100000000,
-             $12, $13, $14)
+             $12, $13, $14, $15)
          RETURNING id",
     )
     .bind(workspace_id)
@@ -50,6 +51,7 @@ pub async fn create_instrument(pool: &PgPool, workspace_id: Uuid, inst: &Instrum
     .bind(inst.underlying.as_deref())
     .bind(inst.coupon_frequency.and_then(|f| i16::try_from(f).ok()))
     .bind(inst.day_count.map(spectra_core::DayCount::as_str))
+    .bind(inst.option_right.map(spectra_core::OptionRight::as_str))
     .fetch_one(pool)
     .await?;
     Ok(row.get("id"))
@@ -72,6 +74,7 @@ pub async fn list_instruments(pool: &PgPool, workspace_id: Uuid) -> Result<Vec<I
                 underlying,
                 coupon_frequency,
                 day_count,
+                option_right,
                 created_at
          FROM instruments WHERE workspace_id = $1 ORDER BY symbol",
     )
@@ -97,6 +100,10 @@ fn row_to_instrument(r: &sqlx::postgres::PgRow) -> Result<InstrumentRow, Error> 
         coupon_rate: r.get::<Option<i64>, _>("coupon_rate").map(Ratio::from_raw),
         underlying: r.get("underlying"),
         coupon_frequency: r.get::<Option<i16>, _>("coupon_frequency").and_then(|f| u32::try_from(f).ok()),
+        option_right: match r.get::<Option<&str>, _>("option_right") {
+            None => None,
+            Some(o) => Some(spectra_core::OptionRight::parse(o).ok_or_else(|| bad("option right"))?),
+        },
         day_count: match r.get::<Option<&str>, _>("day_count") {
             None => None,
             Some(d) => Some(spectra_core::DayCount::parse(d).ok_or_else(|| bad("day count"))?),

@@ -271,3 +271,64 @@ async fn bond_pricing_round_trips_and_validates() {
     }
     f.clean_up();
 }
+
+#[tokio::test]
+async fn options_are_priced_and_kept_out_of_paper_trading() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    spectra_db::identity::ensure_identity(&f.pool, Some(f.user), f.ws).await.unwrap();
+
+    // Hull: S = K = 100, one year, r = 5%, vol 20%: call 10.4506.
+    let (status, body) = f
+        .call(
+            "POST",
+            "/api/v1/pricing/option",
+            &json!({"right": "call", "spot": 100, "strike": 100, "years": 1, "rate": 0.05, "volatility": 0.2}),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert!((body["price"].as_f64().unwrap() - 10.450_583_572_185_565).abs() < 1e-9, "{body}");
+    assert_eq!(body["model_status"], "awaiting M26 review");
+    // And the implied volatility from that price.
+    let (status, back) = f
+        .call(
+            "POST",
+            "/api/v1/pricing/option",
+            &json!({"right": "call", "spot": 100, "strike": 100, "years": 1, "rate": 0.05, "price": body["price"]}),
+        )
+        .await;
+    assert_eq!(status, 200, "{back}");
+    assert!((back["volatility"].as_f64().unwrap() - 0.2).abs() < 1e-9, "{back}");
+    let (status, bad) = f
+        .call(
+            "POST",
+            "/api/v1/pricing/option",
+            &json!({"right": "straddle", "spot": 100, "strike": 100, "years": 1, "rate": 0.05}),
+        )
+        .await;
+    assert_eq!(status, 422, "{bad}");
+    assert!(fields(&bad).contains(&"right".to_string()), "{bad}");
+
+    // An option record, then a paper order for it: refused until M26 signs off.
+    let (status, created) = f
+        .call(
+            "POST",
+            "/api/v1/instruments",
+            &json!({"symbol": "SPY261218C00600000", "type": "option", "right": "call", "strike": 600,
+                    "multiplier": 100, "tick_size": 0.01, "expiry": "2026-12-18", "underlying": "SPY"}),
+        )
+        .await;
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(created["right"], "call");
+    let (status, refused) = f
+        .call(
+            "POST",
+            "/api/v1/paper/orders",
+            &json!({"strategy_id": spectra_db::new_id(), "symbol": "SPY261218C00600000", "side": "buy",
+                    "order_type": "market", "qty": 1}),
+        )
+        .await;
+    assert_eq!(status, 422, "{refused}");
+    assert!(refused["message"].as_str().unwrap_or_default().contains("M26"), "{refused}");
+    f.clean_up();
+}

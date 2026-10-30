@@ -104,6 +104,7 @@ fn run_script(script: &str) -> String {
             EntryType::Dividend => "V",
             EntryType::Listing => "L",
             EntryType::Coupon => "C",
+            EntryType::Expire => "X",
         };
         let side = if e.fill.side == Side::Buy { 'B' } else { 'S' };
         writeln!(

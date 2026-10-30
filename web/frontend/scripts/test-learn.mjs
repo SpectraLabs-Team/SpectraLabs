@@ -402,6 +402,16 @@ describe('Calculations match the engine', () => {
     }
   });
 
+  // The speed-up is computed in the browser, so its tooltip is pinned to the expression in the
+  // Benchmark Lab (the Rust drift test lists it as pinned here).
+  it('the speed-up tooltip matches how the Benchmark Lab computes it', () => {
+    assert.equal(metricDefinitions.parallel_speedup.formula, 'p50(CPU) / p50(Parallel)');
+    const lab = src('components/studio/BenchmarkLab.tsx');
+    assert.match(lab, /CPU: cpu\?\.latency_ms\.p50/, 'the CPU column is the p50 latency');
+    assert.match(lab, /Parallel: par\?\.latency_ms\.p50/, 'the Parallel column is the p50 latency');
+    assert.match(lab, /s\.CPU \/ s\.Parallel/, 'speed-up is CPU over Parallel');
+  });
+
   it('parses pasted numbers, including thousands separators', () => {
     assert.deepEqual(calc.parseNumbers('100, 105 98.5\n110'), [100, 105, 98.5, 110]);
     assert.deepEqual(calc.parseNumbers('$100,000 $1,002,500 -40'), [100000, 1002500, -40]);

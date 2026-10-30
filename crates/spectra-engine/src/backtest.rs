@@ -387,16 +387,24 @@ impl BacktestResult {
             .filter(|e| e.kind == spectra_core::EntryType::Fill)
             .map(|e| notional(e.fill.price, e.fill.qty).map_or(0.0, Money::to_f64))
             .sum();
-        let n = self.equity_curve.len();
-        if n < 2 {
-            return 0.0;
-        }
-        let mean_eq = self.equity_curve.iter().map(|p| p.equity.to_f64()).sum::<f64>() / n as f64;
-        if mean_eq <= 0.0 {
-            return 0.0;
-        }
-        traded / mean_eq * periods_per_year / (n - 1) as f64
+        let equity: Vec<f64> = self.equity_curve.iter().map(|p| p.equity.to_f64()).collect();
+        annualized_turnover(traded, &equity, periods_per_year)
     }
+}
+
+/// Annualized turnover: `traded notional / mean equity × periods_per_year / n`, where `n` is the
+/// number of periods (`equity.len() - 1`). 0 with fewer than two equity points or a non-positive
+/// mean equity.
+pub fn annualized_turnover(traded_notional: f64, equity: &[f64], periods_per_year: f64) -> f64 {
+    let n = equity.len();
+    if n < 2 {
+        return 0.0;
+    }
+    let mean_eq = equity.iter().sum::<f64>() / n as f64;
+    if mean_eq <= 0.0 {
+        return 0.0;
+    }
+    traded_notional / mean_eq * periods_per_year / (n - 1) as f64
 }
 
 /// A trading strategy. Callbacks run on the engine's thread; a strategy object

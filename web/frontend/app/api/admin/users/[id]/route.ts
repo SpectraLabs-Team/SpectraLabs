@@ -7,15 +7,21 @@ import { requireAdmin, requireRecentAuth } from '@/lib/server/requireUser';
 export const dynamic = 'force-dynamic';
 type Ctx = { params: Promise<{ id: string }> };
 
-/** One account in detail: profile, security, workspaces, devices, recent activity. Admins only; the view is audit-logged. */
+/**
+ * One account in detail: profile, security, workspaces, devices, recent activity. Admins only; the
+ * view is audit-logged. IP addresses and browser strings are left out unless `?reveal=ips`, and
+ * revealing them is logged separately (`admin.user.ips_revealed`).
+ */
 export async function GET(req: Request, props: Ctx) {
   const params = await props.params;
   const { auth, res } = await requireAdmin();
   if (res) return res;
-  const detail = await getAdminUserDetail(params.id);
+  const reveal = new URL(req.url).searchParams.get('reveal') === 'ips';
+  const detail = await getAdminUserDetail(params.id, { ips: reveal });
   if (!detail) return NextResponse.json({ ok: false, error: 'Account not found.' }, { status: 404 });
   if (detail.user.id !== auth.user.id) {
-    await audit({ action: 'admin.user.viewed', actor: auth.user, target: { type: 'user', id: detail.user.id }, details: { email: detail.user.email } }, requestMeta(req));
+    const action = reveal ? 'admin.user.ips_revealed' : 'admin.user.viewed';
+    await audit({ action, actor: auth.user, target: { type: 'user', id: detail.user.id }, details: { email: detail.user.email } }, requestMeta(req));
   }
   return NextResponse.json({ ok: true, ...detail }, { headers: { 'Cache-Control': 'no-store' } });
 }

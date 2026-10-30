@@ -37,6 +37,7 @@ export const AUDIT_ACTIONS = [
   'admin.user.disabled',
   'admin.user.enabled',
   'admin.user.viewed',
+  'admin.user.ips_revealed',
   'admin.directory.viewed',
   'admin.analytics.viewed',
   // Workspaces and membership
@@ -67,6 +68,7 @@ export const AUDIT_ACTIONS = [
   'kill_switch.used',
   // The audit log itself
   'audit.exported',
+  'audit.viewed',
   // Site-wide spikes of failed sign-ins or code emails (lib/server/spikes.ts)
   'security.alert',
 ] as const;

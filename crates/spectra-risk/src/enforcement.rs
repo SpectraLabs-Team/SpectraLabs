@@ -171,6 +171,58 @@ impl PortfolioSnapshot {
     }
 }
 
+/// How much of a limit is in use: `value / limit` (1.0 = at the limit). 0 when the limit is not
+/// set (`limit <= 0`).
+pub fn utilization(value: f64, limit: f64) -> f64 {
+    if limit > 0.0 {
+        value / limit
+    } else {
+        0.0
+    }
+}
+
+/// How much of each risk limit a portfolio is using, as fractions of the limit (1.0 = at the
+/// limit; 0 for a limit that is not set). These are the figures behind the Risk Center's
+/// utilization tooltips:
+///
+/// - gross exposure: `gross exposure / max gross exposure`
+/// - net exposure: `|net exposure| / max net exposure`
+/// - leverage: `(gross exposure / equity) / max leverage`
+/// - drawdown: `((peak equity - equity) / peak equity) / max drawdown`
+/// - daily loss: `(start-of-day equity - equity) / max daily loss`
+/// - VaR: `1-day 99% VaR (fraction of equity) / max VaR`
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LimitUtilization {
+    pub gross_exposure: f64,
+    pub net_exposure: f64,
+    pub leverage: f64,
+    pub drawdown: f64,
+    pub daily_loss: f64,
+    pub var: f64,
+}
+
+impl LimitUtilization {
+    /// Utilization from already-computed portfolio figures (`var_pct` is a fraction of equity).
+    pub fn new(
+        gross: f64,
+        net: f64,
+        leverage: f64,
+        drawdown: f64,
+        daily_loss: f64,
+        var_pct: f64,
+        limits: &RiskLimits,
+    ) -> Self {
+        Self {
+            gross_exposure: utilization(gross, limits.max_gross_exposure),
+            net_exposure: utilization(net.abs(), limits.max_net_exposure),
+            leverage: utilization(leverage, limits.max_leverage),
+            drawdown: utilization(drawdown, limits.max_drawdown_pct),
+            daily_loss: utilization(daily_loss, limits.max_daily_loss),
+            var: utilization(var_pct, limits.max_var_pct),
+        }
+    }
+}
+
 /// Details of a specific limit violation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RiskBreach {

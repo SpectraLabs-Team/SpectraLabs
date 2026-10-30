@@ -41,8 +41,8 @@ SELECT pg_temp.check((SELECT version FROM r4) = 1 AND (SELECT id FROM r4) <> (SE
 
 -- Resolve only inside the owning workspace.
 SELECT id AS v1 FROM r1 \gset
-CREATE TEMP TABLE s1 AS EXECUTE dataset_version_resolve('00000000-0000-7000-8000-0000000000c1', :'v1');
-CREATE TEMP TABLE s2 AS EXECUTE dataset_version_resolve('00000000-0000-7000-8000-0000000000d1', :'v1');
+CREATE TEMP TABLE s1 AS EXECUTE dataset_version_resolve('00000000-0000-7000-8000-0000000000c1', :'v1', 'test', NULL);
+CREATE TEMP TABLE s2 AS EXECUTE dataset_version_resolve('00000000-0000-7000-8000-0000000000d1', :'v1', 'test', NULL);
 SELECT pg_temp.check((SELECT checksum FROM s1) = :'sum1' AND (SELECT row_count FROM s1) = 2400
                      AND (SELECT dataset_name FROM s1) = 'spy daily' AND (SELECT version FROM s1) = 1, 'resolve');
 SELECT pg_temp.check((SELECT count(*) FROM s2) = 0, 'another workspace cannot resolve it');

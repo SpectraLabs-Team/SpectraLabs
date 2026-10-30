@@ -54,8 +54,8 @@ pub use copula::{
     PositionRiskContribution,
 };
 pub use enforcement::{
-    OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeResult,
-    PreTradeVerdict, ProjectedMetrics, RiskBreach, RiskLimits,
+    utilization, LimitUtilization, OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot,
+    PreTradeChecker, PreTradeResult, PreTradeVerdict, ProjectedMetrics, RiskBreach, RiskLimits,
 };
 pub use evt::EvtTailModel;
 pub use garch::{Egarch11, Garch11, GjrGarch11};

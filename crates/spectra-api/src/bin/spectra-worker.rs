@@ -28,7 +28,7 @@ use spectra_api::ingest::{self, IngestEnv, IngestOutcome};
 use spectra_api::{engine, observability, shutdown_signal};
 use spectra_core::{Json, ENGINE_VERSION};
 use spectra_db::artifacts::{store_for_run, ArtifactBackend, NewArtifact};
-use spectra_db::datasets;
+use spectra_db::datasets::{self, Access, Resolved};
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
 use spectra_db::optimization;
 use spectra_db::{PgPool, PoolConfig};
@@ -1033,9 +1033,22 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         .and_then(serde_json::Value::as_str)
         .and_then(|v| Uuid::parse_str(v).ok())
     {
-        let version = match datasets::resolve_version(&ctx.pool, job.workspace_id, version).await {
-            Ok(Some(v)) => v,
-            Ok(None) => {
+        let version = match datasets::resolve_version(
+            &ctx.pool,
+            job.workspace_id,
+            version,
+            Access::engine("worker-survival"),
+        )
+        .await
+        {
+            Ok(Resolved::Found(v)) => v,
+            Ok(Resolved::Sealed { holdout }) => {
+                let message = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+                fail_job(&ctx, &job, started, &message, false).await;
+                drop(permit);
+                return;
+            }
+            Ok(Resolved::Missing) => {
                 fail_job(&ctx, &job, started, "The source dataset version no longer exists.", false).await;
                 drop(permit);
                 return;
@@ -1266,9 +1279,22 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
         .and_then(serde_json::Value::as_str)
         .and_then(|id| Uuid::parse_str(id).ok());
 
-    let version = match datasets::resolve_version(&ctx.pool, job.workspace_id, version_id).await {
-        Ok(Some(v)) => v,
-        Ok(None) => {
+    let version = match datasets::resolve_version(
+        &ctx.pool,
+        job.workspace_id,
+        version_id,
+        Access::engine("worker-sweep"),
+    )
+    .await
+    {
+        Ok(Resolved::Found(v)) => v,
+        Ok(Resolved::Sealed { holdout }) => {
+            let message = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+            fail_job(&ctx, &job, started, &message, false).await;
+            drop(permit);
+            return;
+        }
+        Ok(Resolved::Missing) => {
             fail_job(&ctx, &job, started, "Dataset version no longer exists in workspace.", false).await;
             drop(permit);
             return;
@@ -1617,9 +1643,22 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
         return;
     };
 
-    let version = match datasets::resolve_version(&ctx.pool, job.workspace_id, version_id).await {
-        Ok(Some(v)) => v,
-        Ok(None) => {
+    let version = match datasets::resolve_version(
+        &ctx.pool,
+        job.workspace_id,
+        version_id,
+        Access::engine("worker-walkforward"),
+    )
+    .await
+    {
+        Ok(Resolved::Found(v)) => v,
+        Ok(Resolved::Sealed { holdout }) => {
+            let message = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+            fail_job(&ctx, &job, started, &message, false).await;
+            drop(permit);
+            return;
+        }
+        Ok(Resolved::Missing) => {
             fail_job(&ctx, &job, started, "Dataset version no longer exists in workspace.", false).await;
             drop(permit);
             return;
@@ -1786,11 +1825,7 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
 
     match outcome {
         Ok(wf_res) => {
-            let eff_ratio = if wf_res.mean_in_sample_objective.abs() > 1e-9 {
-                wf_res.mean_out_of_sample_objective / wf_res.mean_in_sample_objective
-            } else {
-                0.0
-            };
+            let eff_ratio = wf_res.efficiency();
 
             let folds_vec: Vec<serde_json::Value> = wf_res
                 .folds

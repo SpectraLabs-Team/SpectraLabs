@@ -854,10 +854,7 @@ pub fn benchmark_with_progress(
                         .with("p50", num(percentile(&sc, 0.5)))
                         .with("p95", num(percentile(&sc, 0.95))),
                 )
-                .with(
-                    "paths_per_second",
-                    num(if median > 0.0 { simulations as f64 * 1000.0 / median } else { 0.0 }),
-                )
+                .with("paths_per_second", num(paths_per_second(simulations, median)))
                 .with("samples_ms", Json::Array(total.iter().map(|v| num(*v)).collect())),
         );
     }
@@ -866,6 +863,15 @@ pub fn benchmark_with_progress(
         .with("requested_repetitions", Json::integer(repetitions as i64))
         .with("warmups", Json::integer(warmups as i64))
         .with("benchmarks", Json::Array(results)))
+}
+
+/// Monte Carlo throughput: `paths × 1000 / median latency (ms)`. 0 when the median is not positive.
+pub fn paths_per_second(paths: u64, median_latency_ms: f64) -> f64 {
+    if median_latency_ms > 0.0 {
+        paths as f64 * 1000.0 / median_latency_ms
+    } else {
+        0.0
+    }
 }
 
 /// The interpolated quantile of unsorted values (exposed for callers that

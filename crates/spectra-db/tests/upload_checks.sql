@@ -60,7 +60,7 @@ SELECT pg_temp.check((SELECT source->>'filename' FROM dataset_versions WHERE id 
 CREATE TEMP TABLE qc AS EXECUTE artifact_quota(:'ws', :'bars', 5000);
 SELECT pg_temp.check((SELECT used FROM qc) = 900 AND (SELECT present FROM qc), 'dataset file counted');
 SELECT id AS r1 FROM r1 \gset
-CREATE TEMP TABLE rv AS EXECUTE dataset_version_resolve(:'ws', :'r1');
+CREATE TEMP TABLE rv AS EXECUTE dataset_version_resolve(:'ws', :'r1', 'test', NULL);
 SELECT pg_temp.check((SELECT blob_sha256 FROM rv) = :'bars', 'resolve returns the blob');
 
 -- A command-line version (no blob) gains one when the same content is ingested again.

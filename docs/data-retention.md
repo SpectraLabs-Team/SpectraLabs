@@ -1,6 +1,6 @@
 # Data retention: accounts, activity and security records (M21)
 
-Owner: product owner. Status: **draft, awaiting the owner's sign-off.**
+Owner: product owner. Status: **approved by owner for the accounts, activity and workspace periods (M28 Decisions 1, 2 and 3).** The workspace section is still to be finished for review.
 Covers the personal data the account system and admin console keep, and the workspace content
 described in "Workspace content" below (M28).
 
@@ -20,9 +20,9 @@ This document and that page must say the same thing.
 
 We don't record the pages people view, their clicks or what they type. Only daily activity totals.
 
-## Workspace content (M28, draft)
+## Workspace content (M28)
 
-Status: **draft, pending owner sign-off.** The keep periods here are proposed, not final. Each
+Status: **approved by owner (M28 Decisions 1 and 2).** Each
 row says what the code does today; anything not yet confirmed is marked "to confirm".
 
 | Data | Where | Kept for | Removed by | After the account is deleted |
@@ -64,11 +64,11 @@ Shortening it deletes more on the next purge run: dry-run first (see `docs/opera
 
 ## Open points for the owner
 
-- Runs and drafts have no automatic expiry. Decide whether they need one (Decision 2 in the M28 plan).
-- Artifact sweep timing: the worker sweeps unreferenced files every 30 minutes (`spectra-worker.rs`). Owner to confirm if an explicit grace period before removal is desired.
-- An unset `SPECTRA_ACTIVITY_PURGE` means **off** (`config.rs` and `docs/operations.md`, M28 Decision 6).
+- Decided (Decision 2): runs and drafts are kept until the user or account deletes them. No automatic expiry.
+- Artifact sweep: the worker sweeps unreferenced files every 30 minutes (`spectra-worker.rs`). No grace period is set. Owner to decide whether one is wanted.
+- Decided (Decision 6): an unset `SPECTRA_ACTIVITY_PURGE` means off (`config.rs` and `docs/operations.md`, M28 Decision 6, merged in PR #140).
 
 ## Sign-off
 
-- Owner: _name_
-- Date: _to fill in_
+- Owner: product owner (name to fill in)
+- Decisions 1, 2 and 3 recorded: 2026-10-30. Sign-off date to fill in.

@@ -36,7 +36,7 @@ describe('report client helpers', () => {
   });
 
   it('names every report type the API can return', () => {
-    const api = src('../../crates/spectra-db/migrations/20261101000001_reports.sql');
+    const api = src('../../crates/spectra-db/migrations/20261101000002_reports.sql');
     const types = api.match(/report_type IN \(([^)]*)\)/)[1].match(/'([a-z_]+)'/g).map((s) => s.slice(1, -1));
     assert.deepEqual(Object.keys(r.REPORT_TYPE_LABEL).sort(), types.sort());
   });

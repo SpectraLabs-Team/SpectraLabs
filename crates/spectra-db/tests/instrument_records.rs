@@ -28,6 +28,7 @@ async fn future_round_trips_exactly() {
     let mut fut = Instrument::equity(symbol.clone(), "USD", Price::from_raw(SCALE / 4), Qty::from_raw(SCALE));
     fut.kind = InstrumentType::Future;
     fut.multiplier = Ratio::from_units(50).unwrap();
+    fut.underlying = Some("ES".into());
     // A nanosecond-precision expiry: whole microseconds survive, the sub-microsecond part is dropped by Postgres.
     fut.expiry_ns = Some(1_798_675_200_000_000_000);
     create_instrument(&pool, ws, &fut).await.unwrap();
@@ -40,7 +41,7 @@ async fn future_round_trips_exactly() {
 }
 
 #[tokio::test]
-async fn refuses_a_future_without_expiry() {
+async fn refuses_rows_that_break_their_type() {
     let Some(pool) = pool().await else { return };
     let ws = workspace(&pool).await;
     let mut fut = Instrument::equity(
@@ -50,5 +51,14 @@ async fn refuses_a_future_without_expiry() {
         Qty::from_raw(SCALE),
     );
     fut.kind = InstrumentType::Future;
-    assert!(create_instrument(&pool, ws, &fut).await.is_err());
+    assert!(create_instrument(&pool, ws, &fut).await.is_err(), "a future without an expiry");
+    // An equity cannot carry an underlying (the table checks it, not only the Rust code).
+    let mut eq = Instrument::equity(
+        format!("EQ-{}", Uuid::now_v7().simple()),
+        "USD",
+        Price::from_raw(1),
+        Qty::from_raw(SCALE),
+    );
+    eq.underlying = Some("X".into());
+    assert!(create_instrument(&pool, ws, &eq).await.is_err(), "an equity with an underlying");
 }

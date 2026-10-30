@@ -41,9 +41,13 @@ use std::time::{Duration, Instant};
 
 use spectra_core::cfmt::fmt_g17;
 use spectra_core::{
-    bars_sha256, notional, validate_bars, Bar, Error, Fill, InstrumentId, JournalEntry, Ledger, LedgerConfig,
-    LedgerError, Money, Price, Qty, Ratio, Reject, Result, Sha256, Side, ENGINE_VERSION, SCALE,
+    bars_sha256, notional, validate_bars, Bar, Error, Fill, Instrument, InstrumentId, InstrumentType,
+    JournalEntry, Ledger, LedgerConfig, LedgerError, Money, Price, Qty, Ratio, Reject, Result, Sha256, Side,
+    ENGINE_VERSION, SCALE,
 };
+
+use crate::futures::{Chains, Continuous};
+use crate::instruments::InstrumentSetup;
 
 use crate::corporate::{
     apply_order, corporate_actions_sha256, split_price, split_qty, CorporateAction, CorporateActionKind,
@@ -335,6 +339,56 @@ pub struct BacktestResult {
     /// Starting cash not allocated to any strategy (a multi-strategy run whose
     /// weights add up to less than 1), with the interest it earned.
     pub unallocated: Option<Ledger>,
+    /// Futures rolls, closes and settlements the engine made (M24.2), in order.
+    /// Their fills are in the journal; the events say why.
+    pub rolls: Vec<RollEvent>,
+    /// Each futures chain's continuous, back-adjusted series as it stood at the end.
+    pub continuous: BTreeMap<String, Vec<Bar>>,
+}
+
+/// What the engine did with a futures position at its roll date.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RollKind {
+    /// Closed and the same position opened in the next contract.
+    Rolled,
+    /// Closed without reopening (see the event's note).
+    Closed,
+    /// Still open at expiry with no price to trade at: settled at its last mark.
+    Settled,
+}
+
+impl RollKind {
+    /// Name used in output.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Rolled => "rolled",
+            Self::Closed => "closed",
+            Self::Settled => "settled",
+        }
+    }
+}
+
+/// One roll, close or settlement of a futures position.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RollEvent {
+    /// When it happened.
+    pub ts_ns: i64,
+    /// The strategy whose position it was (0 in a single-strategy run).
+    pub strategy: usize,
+    /// The contract closed.
+    pub from: InstrumentId,
+    /// The contract opened, when the position was rolled.
+    pub to: Option<InstrumentId>,
+    /// The position closed (signed: short < 0).
+    pub qty: Qty,
+    /// Price the old contract was closed at (base currency).
+    pub close_price: Price,
+    /// Price the new contract was opened at (base currency).
+    pub open_price: Option<Price>,
+    /// What happened.
+    pub kind: RollKind,
+    /// Why a position was not reopened, when it was not.
+    pub note: Option<String>,
 }
 
 /// One strategy's part of a multi-strategy run.
@@ -591,9 +645,68 @@ pub struct Context<'a> {
     step: i64,
     seed: u64,
     strategy: usize,
+    setup: &'a InstrumentSetup,
+    chains: &'a Chains,
+    continuous: &'a Continuous,
 }
 
 impl Context<'_> {
+    /// False only for a future that is not its chain's front contract now
+    /// (it has passed its roll date, or an earlier contract has not).
+    /// Strategies enter positions in front contracts only.
+    pub fn is_front(&self, instrument: InstrumentId) -> bool {
+        self.chains.is_front(instrument, self.now)
+    }
+    /// The front contract of futures chain `chain` now.
+    pub fn front_contract(&self, chain: &str) -> Option<InstrumentId> {
+        self.chains.front(chain, self.now)
+    }
+    /// The futures chain `instrument` belongs to, if it is a future.
+    pub fn chain(&self, instrument: InstrumentId) -> Option<&str> {
+        self.chains.chain(instrument)
+    }
+    /// Bars to compute signals on: a future's chain as one continuous,
+    /// back-adjusted series (rolls up to now only); any other instrument's own
+    /// history, exactly as [`Self::history`].
+    pub fn signal_history(&self, instrument: InstrumentId) -> &[Bar] {
+        match self.chains.chain(instrument) {
+            Some(chain) => self.continuous.series(chain),
+            None => self.history(instrument),
+        }
+    }
+    /// The run's record of `instrument`, if it has one (none means a plain
+    /// equity in the base currency).
+    pub fn instrument(&self, instrument: InstrumentId) -> Option<&Instrument> {
+        self.setup.instrument(instrument)
+    }
+    /// The currency the books are kept in.
+    pub fn base_currency(&self) -> &str {
+        &self.setup.base_currency
+    }
+    /// Contract multiplier of `instrument` (1 for equities).
+    pub fn multiplier(&self, instrument: InstrumentId) -> Ratio {
+        self.book.multiplier(instrument)
+    }
+    /// Base-currency value of one unit of `instrument` at quoted `price`: the
+    /// price converted at the FX rate in force now, times the multiplier.
+    /// For a plain equity in the base currency it is exactly `price`.
+    pub fn unit_value(&self, instrument: InstrumentId, price: Price) -> Option<f64> {
+        let base = self.setup.to_base(instrument, price, self.now).ok()?;
+        let m = self.book.multiplier(instrument);
+        if m == Ratio::ONE {
+            Some(base.to_f64())
+        } else {
+            Some(base.to_f64() * m.to_f64())
+        }
+    }
+    /// The smallest tradable quantity of `instrument`, when a record that
+    /// changes the run sets one (a plain equity record does not).
+    pub fn lot_size(&self, instrument: InstrumentId) -> Option<Qty> {
+        self.setup
+            .instrument(instrument)
+            .filter(|i| !i.is_plain_equity(&self.setup.base_currency))
+            .map(|i| i.lot_size)
+    }
     /// Current timestamp.
     pub fn now(&self) -> i64 {
         self.now
@@ -636,9 +749,15 @@ impl Context<'_> {
     pub fn ledger_policy(&self) -> LedgerConfig {
         *self.book.config()
     }
-    /// Marked value of a position (negative for shorts).
+    /// Marked value of a position (negative for shorts): what it adds to
+    /// equity. For a future that is its unrealized P&L; see [`Self::position_exposure`].
     pub fn position_value(&self, instrument: InstrumentId) -> Money {
         self.book.position_value(instrument).unwrap_or_default()
+    }
+    /// Signed notional a position controls at its mark (the same as
+    /// [`Self::position_value`] for anything but a future).
+    pub fn position_exposure(&self, instrument: InstrumentId) -> Money {
+        self.book.position_exposure(instrument).unwrap_or_default()
     }
 
     fn submit(&mut self, spec: OrderSpec) -> OrderId {
@@ -866,6 +985,8 @@ const fn reject_code(r: Option<Reject>) -> u64 {
         Some(Reject::ShortNotAllowed) => 4,
         Some(Reject::LeverageExceeded) => 5,
         Some(Reject::RiskLimitExceeded) => 6,
+        Some(Reject::ContractExpired) => 7,
+        Some(Reject::ContractRolled) => 8,
     }
 }
 
@@ -1228,7 +1349,8 @@ fn financing_charges(ledger: &Ledger, rates: [i128; 3]) -> Result<Vec<Charge>> {
     let mut cash = ledger.cash();
     if borrow != 0 {
         for (&id, p) in ledger.positions() {
-            if p.qty.raw() >= 0 {
+            // No stock is borrowed to short a future.
+            if p.qty.raw() >= 0 || ledger.is_marked_to_market(id) {
                 continue;
             }
             let fee = apply_rate(ledger.position_value(id)?.checked_abs()?, borrow)?;
@@ -1262,7 +1384,7 @@ fn gross_of(ledger: &Ledger) -> Result<Money> {
     let mut gross = Money::ZERO;
     for (&id, p) in ledger.positions() {
         if !p.qty.is_zero() {
-            gross = gross.checked_add(ledger.position_value(id)?.checked_abs()?)?;
+            gross = gross.checked_add(ledger.position_exposure(id)?.checked_abs()?)?;
         }
     }
     Ok(gross)
@@ -1318,7 +1440,7 @@ pub fn run_backtest_controlled(
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<BacktestResult, RunError> {
-    run_inner(bars, &[], &mut [strategy], None, cfg, ctl)
+    run_inner(bars, &[], &mut [strategy], None, &InstrumentSetup::default(), cfg, ctl)
 }
 
 /// [`run_backtest_controlled`] on unadjusted prices with the instruments'
@@ -1336,7 +1458,26 @@ pub fn run_backtest_with_actions(
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<BacktestResult, RunError> {
-    run_inner(bars, actions, &mut [strategy], None, cfg, ctl)
+    run_inner(bars, actions, &mut [strategy], None, &InstrumentSetup::default(), cfg, ctl)
+}
+
+/// [`run_backtest_with_actions`] with instrument records, a base currency and
+/// FX rates (see [`crate::instruments`]). With a trivial setup it is exactly
+/// [`run_backtest_with_actions`]; otherwise the setup's fingerprint is part of
+/// `config_sha256`.
+///
+/// # Errors
+/// As [`run_backtest_with_actions`], and [`RunError::Engine`] for an invalid
+/// setup, an instrument type the engine cannot trade yet, or a missing FX rate.
+pub fn run_backtest_with_setup(
+    bars: &[Bar],
+    actions: &[CorporateAction],
+    setup: &InstrumentSetup,
+    strategy: &mut dyn Strategy,
+    cfg: &BacktestConfig,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestResult, RunError> {
+    run_inner(bars, actions, &mut [strategy], None, setup, cfg, ctl)
 }
 
 /// Runs several strategies on one shared account. Each strategy gets
@@ -1370,9 +1511,25 @@ pub fn run_multi_backtest(
 ///
 /// # Errors
 /// As [`run_multi_backtest`] and [`run_backtest_with_actions`].
-pub fn run_multi_backtest_with_actions<'a>(
+pub fn run_multi_backtest_with_actions(
     bars: &[Bar],
     actions: &[CorporateAction],
+    allocations: &mut [Allocation<'_>],
+    cfg: &BacktestConfig,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestResult, RunError> {
+    run_multi_backtest_with_setup(bars, actions, &InstrumentSetup::default(), allocations, cfg, ctl)
+}
+
+/// [`run_multi_backtest_with_actions`] with an instrument setup (see
+/// [`run_backtest_with_setup`]).
+///
+/// # Errors
+/// As [`run_multi_backtest_with_actions`] and [`run_backtest_with_setup`].
+pub fn run_multi_backtest_with_setup<'a>(
+    bars: &[Bar],
+    actions: &[CorporateAction],
+    setup: &InstrumentSetup,
     allocations: &mut [Allocation<'a>],
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
@@ -1396,7 +1553,7 @@ pub fn run_multi_backtest_with_actions<'a>(
     }
     let mut strategies: Vec<&mut (dyn Strategy + 'a)> =
         allocations.iter_mut().map(|a| &mut *a.strategy).collect();
-    run_inner(bars, actions, &mut strategies, Some(&weights), cfg, ctl)
+    run_inner(bars, actions, &mut strategies, Some(&weights), setup, cfg, ctl)
 }
 
 /// Each strategy's own books in a multi-strategy run.
@@ -1559,15 +1716,205 @@ fn prepare_actions(actions: &[CorporateAction], bars: &[Bar]) -> Result<Vec<Corp
     Ok(sorted)
 }
 
+/// The books a strategy trades on: its own in a multi-strategy run, else the account.
+fn ledger_for<'l>(account: &'l Ledger, sleeves: &'l [Ledger], strategy: usize) -> &'l Ledger {
+    sleeves.get(strategy).unwrap_or(account)
+}
+
+/// Applies an engine-made fill to the strategy's books and the account: the
+/// strategy must afford it on its own books first, as with any fill. With
+/// `keep_exposure` (a roll's reopening leg) the leverage limit is not applied:
+/// the books already carried that exposure.
+fn apply_engine_fill(
+    ledger: &mut Ledger,
+    sleeves: &mut [Ledger],
+    owner: usize,
+    f: &Fill,
+    keep_exposure: bool,
+) -> std::result::Result<(), LedgerError> {
+    let apply =
+        |l: &mut Ledger| if keep_exposure { l.apply_fill_keeping_exposure(f) } else { l.apply_fill(f) };
+    match sleeves.get_mut(owner) {
+        Some(book) => {
+            if keep_exposure {
+                book.check_fill_keeping_exposure(f)?;
+            } else {
+                book.check_fill(f)?;
+            }
+            apply(ledger)?;
+            apply(book)
+        }
+        None => apply(ledger),
+    }
+}
+
+/// What the futures roll needs for one timestamp.
+struct RollCtx<'r> {
+    chains: &'r Chains,
+    setup: &'r InstrumentSetup,
+    cfg: &'r BacktestConfig,
+    ts: i64,
+    group: &'r [Bar],
+    session_open: bool,
+    rolls: &'r mut Vec<RollEvent>,
+    fill_orders: &'r mut Vec<OrderId>,
+}
+
+impl RollCtx<'_> {
+    /// The fill of `qty` of `id` at this timestamp's open, through the cost model.
+    fn trade_at_open(&self, ledger: &Ledger, id: InstrumentId, side: Side, qty: Qty) -> Result<Option<Fill>> {
+        if !self.session_open {
+            return Ok(None);
+        }
+        let Some(bar) = find_bar(self.group, id) else { return Ok(None) };
+        let price =
+            self.setup.to_base(id, market_price(bar.open, side, bar, qty, self.cfg, 0.0)?, self.ts)?;
+        let fee = commission_fee(&self.cfg.costs.commission, qty, ledger.notional_of(id, price, qty)?)?;
+        Ok(Some(Fill { instrument: id, side, qty, price, fee, ts_ns: self.ts }))
+    }
+
+    /// Rolls, closes or settles every futures position past its roll date.
+    /// Order id 0 marks the engine's own fills in `fill_orders`.
+    fn roll(
+        &mut self,
+        ledger: &mut Ledger,
+        sleeves: &mut [Ledger],
+    ) -> std::result::Result<Vec<(usize, Fill)>, RunError> {
+        let mut out = Vec::new();
+        let contracts: Vec<(InstrumentId, i64)> = self.chains.contracts().collect();
+        let owners = sleeves.len().max(1);
+        for (id, roll_at) in contracts {
+            if self.ts < roll_at {
+                continue;
+            }
+            let expired = self.chains.expiry(id).is_some_and(|e| self.ts >= e);
+            for owner in 0..owners {
+                let book: &Ledger = sleeves.get(owner).unwrap_or(ledger);
+                let qty = book.position(id).qty;
+                if qty.is_zero() {
+                    continue;
+                }
+                let abs = qty.checked_abs()?;
+                let (close_side, open_side) =
+                    if qty.raw() > 0 { (Side::Sell, Side::Buy) } else { (Side::Buy, Side::Sell) };
+                let (close, settled) = match self.trade_at_open(ledger, id, close_side, abs)? {
+                    Some(f) => (f, false),
+                    None if expired => {
+                        // No price to trade at, and the contract is gone: final settlement at the last mark.
+                        let Some(mark) = book.mark_price(id) else { continue };
+                        (
+                            Fill {
+                                instrument: id,
+                                side: close_side,
+                                qty: abs,
+                                price: mark,
+                                fee: Money::ZERO,
+                                ts_ns: self.ts,
+                            },
+                            true,
+                        )
+                    }
+                    None => continue, // no price yet: try at the next timestamp
+                };
+                let mut event = RollEvent {
+                    ts_ns: self.ts,
+                    strategy: owner,
+                    from: id,
+                    to: None,
+                    qty,
+                    close_price: close.price,
+                    open_price: None,
+                    kind: if settled { RollKind::Settled } else { RollKind::Closed },
+                    note: None,
+                };
+                match apply_engine_fill(ledger, sleeves, owner, &close, false) {
+                    Ok(()) => {
+                        self.fill_orders.push(0);
+                        out.push((owner, close));
+                    }
+                    Err(LedgerError::Rejected(r)) => {
+                        // A close can only be refused for the fee; keep the position and say why.
+                        event.kind = RollKind::Closed;
+                        event.note = Some(format!("closing was rejected: {}", r.as_str()));
+                        self.rolls.push(event);
+                        continue;
+                    }
+                    Err(e) => return Err(ledger_err(e).into()),
+                }
+                if settled {
+                    event.note = Some("no price before expiry; settled at the last mark".into());
+                    self.rolls.push(event);
+                    continue;
+                }
+                let Some(next) = self.chains.next_after(id) else {
+                    event.note = Some("no later contract in the chain; the position was closed".into());
+                    self.rolls.push(event);
+                    continue;
+                };
+                match self.trade_at_open(ledger, next, open_side, abs)? {
+                    None => {
+                        event.note =
+                            Some("the next contract has no price now; the position was closed".into());
+                    }
+                    Some(open) => match apply_engine_fill(ledger, sleeves, owner, &open, true) {
+                        Ok(()) => {
+                            self.fill_orders.push(0);
+                            event.kind = RollKind::Rolled;
+                            event.to = Some(next);
+                            event.open_price = Some(open.price);
+                            out.push((owner, open));
+                        }
+                        Err(LedgerError::Rejected(r)) => {
+                            event.note =
+                                Some(format!("reopening in the next contract was rejected: {}", r.as_str()));
+                        }
+                        Err(e) => return Err(ledger_err(e).into()),
+                    },
+                }
+                self.rolls.push(event);
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// Refuses a setup the engine cannot run: an invalid record or rate series,
+/// or an instrument type whose model is not in this engine yet.
+fn check_setup(setup: &InstrumentSetup, bars: &[Bar]) -> std::result::Result<(), RunError> {
+    setup.validate()?;
+    let used: BTreeSet<InstrumentId> = bars.iter().map(|b| b.instrument).collect();
+    for (id, inst) in &setup.instruments {
+        if !used.contains(id) {
+            continue;
+        }
+        if let Some(why) = unsupported(inst) {
+            return Err(Error::InvalidArgument(format!("instrument {}: {why}", inst.symbol)).into());
+        }
+    }
+    Ok(())
+}
+
+/// Why the engine cannot trade `inst` yet, if it cannot.
+fn unsupported(inst: &Instrument) -> Option<&'static str> {
+    match inst.kind {
+        InstrumentType::Equity | InstrumentType::Future => None,
+        InstrumentType::Bond => Some("bond trading needs the bond model (coupons and accrued interest)"),
+        InstrumentType::Option => Some("option trading needs the option model (expiry settlement)"),
+        InstrumentType::Swap => Some("swap trading needs a curve model"),
+    }
+}
+
 fn run_inner<'s>(
     bars: &[Bar],
     actions: &[CorporateAction],
     strategies: &mut [&mut (dyn Strategy + 's)],
     weights: Option<&[Ratio]>,
+    setup: &InstrumentSetup,
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<BacktestResult, RunError> {
     let started = Instant::now();
+    check_setup(setup, bars)?;
     check_size(bars, &ctl.limits)?;
     if let Some(err) = validate_bars(bars) {
         return Err(Error::InvalidArgument(format!("invalid bars: {err}")).into());
@@ -1603,6 +1950,9 @@ fn run_inner<'s>(
     let financed = !fin.is_zero();
     let interval = check_uniform_intervals(bars)?;
     let sessions = SessionRule::new(cfg.exchange, interval);
+    let chains = Chains::new(setup, &setup.roll, cfg.exchange);
+    let mut continuous = Continuous::default();
+    let mut rolls: Vec<RollEvent> = Vec::new();
     let actions = prepare_actions(actions, bars)?;
     let mut next_action = 0usize;
     let progress_every = ctl.progress_every.max(1);
@@ -1626,6 +1976,13 @@ fn run_inner<'s>(
     // Each strategy's own books; empty in a single-strategy run, where the
     // strategy sees the account.
     let mut sleeves: Vec<Ledger> = books.as_mut().map(|b| std::mem::take(&mut b.ledgers)).unwrap_or_default();
+    // Contract multipliers, on the account and on every strategy's own books.
+    for (&id, inst) in setup.effective() {
+        ledger.list(id, inst, first_ts).map_err(ledger_err)?;
+        for book in &mut sleeves {
+            book.list(id, inst, first_ts).map_err(ledger_err)?;
+        }
+    }
 
     // Orders placed in on_start are stamped just before the first bar so they can fill on it.
     let start_ts = if first_ts > i64::MIN { first_ts - 1 } else { first_ts };
@@ -1640,6 +1997,9 @@ fn run_inner<'s>(
             step: -1,
             seed: cfg.seed,
             strategy: s,
+            setup,
+            chains: &chains,
+            continuous: &continuous,
         };
         strategy.on_start(&mut ctx);
     }
@@ -1675,6 +2035,9 @@ fn run_inner<'s>(
         let ts = bars[i].ts_ns;
         for b in group {
             history.entry(b.instrument).or_default().push(*b);
+        }
+        if !chains.is_empty() {
+            continuous.update(&chains, ts, group, &history, setup.roll.adjust)?;
         }
 
         if cfg.risk_limits.is_some() {
@@ -1721,7 +2084,22 @@ fn run_inner<'s>(
 
         // 1. Fill orders submitted at earlier timestamps, in submission order.
         let session_open = sessions.is_open(ts);
-        let mut fills: Vec<(usize, Fill)> = Vec::new();
+        // Futures past their roll date roll first, at this timestamp's open (M24.2).
+        let mut fills: Vec<(usize, Fill)> = if chains.is_empty() {
+            Vec::new()
+        } else {
+            let mut ctx = RollCtx {
+                chains: &chains,
+                setup,
+                cfg,
+                ts,
+                group,
+                session_open,
+                rolls: &mut rolls,
+                fill_orders: &mut fill_orders,
+            };
+            ctx.roll(&mut ledger, &mut sleeves)?
+        };
         if session_open {
             for k in open.candidates(group, &orders) {
                 if !orders[k].state.is_open() || step - orders[k].submit_step < min_wait {
@@ -1741,16 +2119,26 @@ fn run_inner<'s>(
                 let o = &mut orders[k];
 
                 if let Some(ref limits) = cfg.risk_limits {
+                    // Risk limits see per-unit values in the base currency, multiplier included.
+                    let unit = |id: InstrumentId, px: f64| {
+                        let m = ledger.multiplier(id);
+                        if m == Ratio::ONE {
+                            px
+                        } else {
+                            px * m.to_f64()
+                        }
+                    };
+                    let fill_px = setup.to_base(o.instrument, a.price, ts)?.to_f64();
                     let mut positions = std::collections::HashMap::new();
                     for (&inst, pos) in ledger.positions() {
                         if !pos.qty.is_zero() {
                             let mark_price =
-                                ledger.mark_price(inst).map_or(a.price.to_f64(), spectra_core::Fixed::to_f64);
+                                ledger.mark_price(inst).map_or(fill_px, spectra_core::Fixed::to_f64);
                             positions.insert(
                                 format!("INST_{inst}"),
                                 spectra_risk::enforcement::PositionSnapshot {
                                     qty: pos.qty.to_f64(),
-                                    price: mark_price,
+                                    price: unit(inst, mark_price),
                                 },
                             );
                         }
@@ -1769,7 +2157,7 @@ fn run_inner<'s>(
                             Side::Sell => spectra_risk::enforcement::OrderSide::Sell,
                         },
                         qty: a.qty.to_f64(),
-                        price: a.price.to_f64(),
+                        price: unit(o.instrument, fill_px),
                     };
                     let res = spectra_risk::enforcement::PreTradeChecker::evaluate(
                         limits,
@@ -1818,15 +2206,35 @@ fn run_inner<'s>(
                     }
                 }
 
+                // A contract cannot trade at or after its expiry.
+                if setup.instrument(o.instrument).and_then(|i| i.expiry_ns).is_some_and(|e| ts >= e) {
+                    o.state = OrderState::Rejected;
+                    o.reject_reason = Some(Reject::ContractExpired);
+                    open.remove(&orders[k], k);
+                    continue;
+                }
+                // Past its roll date, a future only closes: new exposure goes in the next contract.
+                if chains.roll_ts(o.instrument).is_some_and(|r| ts >= r) {
+                    let held = ledger_for(&ledger, &sleeves, o.strategy).position(o.instrument).qty;
+                    let signed = if o.side == Side::Buy { a.qty } else { a.qty.checked_neg()? };
+                    if held.checked_add(signed)?.checked_abs()? > held.checked_abs()? {
+                        o.state = OrderState::Rejected;
+                        o.reject_reason = Some(Reject::ContractRolled);
+                        open.remove(&orders[k], k);
+                        continue;
+                    }
+                }
+                // Quoted price to the base currency, at the rate known now.
+                let base_price = setup.to_base(o.instrument, a.price, ts)?;
                 let f = Fill {
                     instrument: o.instrument,
                     side: o.side,
                     qty: a.qty,
-                    price: a.price,
+                    price: base_price,
                     fee: commission_fee(
                         &cfg.costs.commission,
                         a.qty,
-                        ledger.notional_of(o.instrument, a.price, a.qty)?,
+                        ledger.notional_of(o.instrument, base_price, a.qty)?,
                     )?,
                     ts_ns: ts,
                 };
@@ -1872,9 +2280,10 @@ fn run_inner<'s>(
 
         // 2. Mark to the close and record equity.
         for b in group {
-            let mut marked = ledger.mark(b.instrument, b.close);
+            let close = setup.to_base(b.instrument, b.close, ts)?;
+            let mut marked = ledger.mark(b.instrument, close);
             for book in &mut sleeves {
-                marked = marked.and_then(|()| book.mark(b.instrument, b.close));
+                marked = marked.and_then(|()| book.mark(b.instrument, close));
             }
             if marked.is_err() {
                 return Err(Error::Internal("validated bar produced an invalid mark".into()).into());
@@ -1901,6 +2310,9 @@ fn run_inner<'s>(
                 step,
                 seed: cfg.seed,
                 strategy: s,
+                setup,
+                chains: &chains,
+                continuous: &continuous,
             };
             for a in &applied {
                 strategy.on_corporate_action(&mut ctx, a);
@@ -1927,6 +2339,10 @@ fn run_inner<'s>(
     // Written only when there are actions, so runs without them keep their fingerprints.
     if !actions.is_empty() {
         canonical.push_str(&format!("corporate_actions={};", corporate_actions_sha256(&actions)));
+    }
+    // Written only for a setup that changes the run, so equity runs keep their fingerprints.
+    if !setup.is_trivial() {
+        canonical.push_str(&format!("instruments={};", setup.fingerprint()));
     }
     let config_sha256 = spectra_core::sha256_hex(canonical.as_bytes());
     let mut per_strategy = Vec::with_capacity(sleeves.len());
@@ -1963,5 +2379,7 @@ fn run_inner<'s>(
         fill_orders,
         strategies: per_strategy,
         unallocated,
+        rolls,
+        continuous: continuous.all().clone(),
     })
 }

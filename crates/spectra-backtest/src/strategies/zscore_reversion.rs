@@ -98,7 +98,11 @@ fn zscore(h: &[Bar], n: usize) -> Option<f64> {
 impl Strategy for ZScore {
     fn on_bar(&mut self, ctx: &mut Context<'_>, bars: &[Bar]) {
         for b in bars {
-            let h = ctx.history(b.instrument);
+            // Futures: trade the front contract, on the chain's continuous series.
+            if !ctx.is_front(b.instrument) {
+                continue;
+            }
+            let h = ctx.signal_history(b.instrument);
             // With an execution delay, wait for the last order instead of stacking another.
             let waiting = self
                 .last_order

@@ -21,7 +21,7 @@ pub use error::{Error, Result};
 pub use fixed::{
     notional, notional_with_multiplier, prorate, ArithmeticError, Bps, Fixed, Money, Price, Qty, Ratio, SCALE,
 };
-pub use instrument::{Instrument, InstrumentType, DEFAULT_BASE_CURRENCY};
+pub use instrument::{is_currency_code, Instrument, InstrumentType, DEFAULT_BASE_CURRENCY};
 pub use json::Json;
 pub use ledger::{
     EntryType, Fill, InstrumentId, JournalEntry, Ledger, LedgerConfig, LedgerError, Position, Reject, Side,

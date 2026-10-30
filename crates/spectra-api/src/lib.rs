@@ -49,6 +49,7 @@ pub mod engine;
 pub mod gap_api;
 pub mod identity;
 pub mod ingest;
+pub mod instruments_api;
 pub mod jobs_api;
 pub mod lifecycle_api;
 pub mod observability;
@@ -823,6 +824,19 @@ fn backtest_routes() -> Router<AppState> {
                 get(corporate_actions_api::get_corporate_action_set)
                     .delete(corporate_actions_api::delete_corporate_action_set),
             ),
+        )
+        .route(
+            "/api/v1/instruments",
+            only(get(instruments_api::list_instruments).post(instruments_api::create_instrument)),
+        )
+        .route("/api/v1/instruments/{symbol}", only(delete(instruments_api::delete_instrument)))
+        .route(
+            "/api/v1/base-currency",
+            only(get(instruments_api::get_base_currency).put(instruments_api::put_base_currency)),
+        )
+        .route(
+            "/api/v1/fx-rates",
+            only(get(instruments_api::list_fx_rates).post(instruments_api::put_fx_rates)),
         )
         .route(
             "/api/v1/symbol-changes",

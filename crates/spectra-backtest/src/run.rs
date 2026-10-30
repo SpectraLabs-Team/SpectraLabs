@@ -29,13 +29,14 @@
 
 use spectra_core::{Bar, Json, Ratio, Result, SCALE};
 use spectra_engine::{
-    run_backtest_with_actions, run_multi_backtest_with_actions, Allocation, BacktestConfig, BacktestResult,
-    RunControl, RunError,
+    run_backtest_with_setup, run_multi_backtest_with_setup, Allocation, BacktestConfig, BacktestResult,
+    InstrumentSetup, RunControl, RunError,
 };
 use spectra_research::ParamSet;
 
 use crate::config::{config_to_user_json, parse_config, stored_config_json, ConfigError, FieldError};
 use crate::corporate::{actions_to_json, parse_actions, resolve, RequestAction};
+use crate::instruments::RequestInstruments;
 use crate::strategies::{builtin, BuiltinStrategy};
 
 /// A validated request: a known strategy, complete parameters and a configuration.
@@ -58,6 +59,8 @@ pub struct BacktestRequest {
     pub as_of: Option<i64>,
     /// Optional user-authored DSL script for custom strategies.
     pub dsl_code: Option<String>,
+    /// Instrument records, base currency and FX rates (M24); empty for an all-equity run.
+    pub instruments: RequestInstruments,
 }
 
 /// One strategy of a multi-strategy request.
@@ -74,8 +77,19 @@ pub struct StrategyAllocation {
 /// Most strategies in one request.
 pub const MAX_REQUEST_STRATEGIES: usize = 10;
 
-const REQUEST_FIELDS: [&str; 7] =
-    ["strategy", "params", "strategies", "config", "corporate_actions", "as_of", "dsl_code"];
+const REQUEST_FIELDS: [&str; 11] = [
+    "strategy",
+    "params",
+    "strategies",
+    "config",
+    "corporate_actions",
+    "as_of",
+    "dsl_code",
+    "base_currency",
+    "instruments",
+    "fx_rates",
+    "futures_roll",
+];
 const ENTRY_FIELDS: [&str; 3] = ["strategy", "params", "weight"];
 
 fn field_error(field: impl Into<String>, message: impl Into<String>) -> FieldError {
@@ -190,6 +204,7 @@ impl BacktestRequest {
             corporate_actions: Vec::new(),
             as_of: None,
             dsl_code: None,
+            instruments: RequestInstruments::default(),
         })
     }
 
@@ -224,6 +239,7 @@ impl BacktestRequest {
                 corporate_actions: Vec::new(),
                 as_of: None,
                 dsl_code: None,
+                instruments: RequestInstruments::default(),
             }),
             _ => Err(ConfigError { errors }),
         }
@@ -440,6 +456,7 @@ impl BacktestRequest {
             Some(Ok(s)) => Some(s.to_string()),
             _ => None,
         };
+        let instruments = RequestInstruments::parse(doc, &mut errors);
 
         match (multi, strategy, params, config, actions) {
             (Some(Some(entries)), _, _, Some(config), Some(corporate_actions)) if errors.is_empty() => {
@@ -451,6 +468,7 @@ impl BacktestRequest {
                     corporate_actions,
                     as_of,
                     dsl_code,
+                    instruments: instruments.unwrap_or_default(),
                 })
             }
             (None, Some(strategy), Some(params), Some(config), Some(corporate_actions))
@@ -464,6 +482,7 @@ impl BacktestRequest {
                     corporate_actions,
                     as_of,
                     dsl_code,
+                    instruments: instruments.unwrap_or_default(),
                 })
             }
             _ => Err(ConfigError { errors }),
@@ -481,6 +500,7 @@ impl BacktestRequest {
         if let Some(ts) = self.as_of {
             doc = doc.with("as_of", Json::integer(ts));
         }
+        doc = self.instruments.write_into(doc)?;
         if self.corporate_actions.is_empty() {
             return Ok(doc);
         }
@@ -530,6 +550,8 @@ pub struct BacktestOutput {
     pub benchmark: Vec<f64>,
     /// Symbol of each instrument id, when known (for per-instrument output).
     pub symbols: Vec<String>,
+    /// The instrument setup the run used (records, base currency, FX rates).
+    pub setup: InstrumentSetup,
 }
 
 /// Builds the strategy and runs it under `ctl`, on a dataset whose symbols
@@ -561,6 +583,11 @@ pub fn run_request_on(
 ) -> std::result::Result<BacktestOutput, RunError> {
     let actions = resolve(&request.corporate_actions, symbols)
         .map_err(|m| RunError::Engine(spectra_core::Error::InvalidArgument(m)))?;
+    let setup: InstrumentSetup = request
+        .instruments
+        .resolve(symbols)
+        .map_err(|m| RunError::Engine(spectra_core::Error::InvalidArgument(m)))?;
+    let setup_ref = &setup;
     let mut ctl = std::panic::AssertUnwindSafe(ctl);
     let run_res = std::panic::catch_unwind(move || {
         if let Some(code) = &request.dsl_code {
@@ -571,7 +598,7 @@ pub fn run_request_on(
                 overrides.insert(k.clone(), *v);
             }
             let mut strategy = Box::new(spectra_engine::dsl::DslStrategy::new(program, &overrides));
-            run_backtest_with_actions(bars, &actions, strategy.as_mut(), &request.config, *ctl)
+            run_backtest_with_setup(bars, &actions, setup_ref, strategy.as_mut(), &request.config, *ctl)
         } else if request.is_multi() {
             let mut built = Vec::with_capacity(request.strategies.len());
             for a in &request.strategies {
@@ -582,10 +609,10 @@ pub fn run_request_on(
                 .zip(&request.strategies)
                 .map(|(s, a)| Allocation { strategy: s.as_mut(), weight: a.weight })
                 .collect();
-            run_multi_backtest_with_actions(bars, &actions, &mut allocations, &request.config, *ctl)
+            run_multi_backtest_with_setup(bars, &actions, setup_ref, &mut allocations, &request.config, *ctl)
         } else {
             let mut strategy = request.strategy.build(&request.params)?;
-            run_backtest_with_actions(bars, &actions, strategy.as_mut(), &request.config, *ctl)
+            run_backtest_with_setup(bars, &actions, setup_ref, strategy.as_mut(), &request.config, *ctl)
         }
     });
 
@@ -605,5 +632,5 @@ pub fn run_request_on(
         }
     };
     let benchmark = spectra_research::benchmark_returns(bars);
-    Ok(BacktestOutput { request: request.clone(), result, benchmark, symbols: symbols.to_vec() })
+    Ok(BacktestOutput { request: request.clone(), result, benchmark, symbols: symbols.to_vec(), setup })
 }

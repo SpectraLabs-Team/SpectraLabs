@@ -143,7 +143,7 @@ impl<S: WeightStrategy> Rebalancer<S> {
                 self.changed
                     || (equity > 0.0
                         && self.universe(ctx).into_iter().any(|id| {
-                            let actual = ctx.position_value(id).to_f64() / equity;
+                            let actual = ctx.position_exposure(id).to_f64() / equity;
                             (actual - self.targets.get(&id).copied().unwrap_or(0.0)).abs() > th
                         }))
             }
@@ -152,12 +152,14 @@ impl<S: WeightStrategy> Rebalancer<S> {
 
     /// The order (side, quantity) that moves `id` to its target, if any.
     fn trade_for(&self, ctx: &Context<'_>, id: InstrumentId, equity: f64) -> Option<(Side, Qty)> {
-        let close = ctx.history(id).last()?.close.to_f64();
+        // Base-currency value of one unit (price converted, times the multiplier);
+        // exactly the close for a plain equity.
+        let close = ctx.unit_value(id, ctx.history(id).last()?.close)?;
         if close <= 0.0 {
             return None;
         }
         let want = self.targets.get(&id).copied().unwrap_or(0.0) * equity / close;
-        let lot = self.cfg.lot_size.raw();
+        let lot = effective_lot(self.cfg.lot_size.raw(), ctx.lot_size(id).map(spectra_core::Fixed::raw));
         let want_raw = (want * spectra_core::SCALE as f64).trunc();
         if !want_raw.is_finite() || want_raw.abs() >= 9.0e18 {
             return None;
@@ -214,5 +216,35 @@ impl<S: WeightStrategy> Strategy for Rebalancer<S> {
             self.changed = false;
         }
         self.bar += 1;
+    }
+}
+
+/// The lot a rebalancer trades in: the strategy's lot, raised to a whole
+/// multiple of the instrument's own lot when the instrument sets one.
+fn effective_lot(strategy_lot: i64, instrument_lot: Option<i64>) -> i64 {
+    match instrument_lot {
+        Some(inst) if inst > 0 => {
+            if strategy_lot <= inst {
+                inst
+            } else {
+                ((strategy_lot + inst - 1) / inst).saturating_mul(inst)
+            }
+        }
+        _ => strategy_lot,
+    }
+}
+
+#[cfg(test)]
+mod lot_tests {
+    use super::effective_lot;
+
+    #[test]
+    fn instrument_lot_wins_when_coarser() {
+        assert_eq!(effective_lot(0, None), 0);
+        assert_eq!(effective_lot(100, None), 100);
+        assert_eq!(effective_lot(0, Some(1)), 1);
+        assert_eq!(effective_lot(1, Some(5)), 5);
+        assert_eq!(effective_lot(7, Some(5)), 10);
+        assert_eq!(effective_lot(10, Some(5)), 10);
     }
 }

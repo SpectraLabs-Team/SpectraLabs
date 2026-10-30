@@ -20,6 +20,9 @@ import {
   type Catalog,
   type DatasetVersion,
   type DownloadKind,
+  type FuturesRoll,
+  type FuturesSummary,
+  type InstrumentSummary,
   type MonthlyReturn,
   type Series,
   type StoredRequest,
@@ -407,18 +410,32 @@ function Results({
         />
       )}
 
-      {summary.instruments.length > 0 && (
+      {summary.instruments.length > 0 && (() => {
+        const multiAsset = isMultiAsset(summary.instruments, summary.run.base_currency);
+        const instrumentHeaders = multiAsset
+          ? ['Instrument', 'Type', 'Currency', 'Multiplier', ...INSTRUMENT_VALUE_HEADERS]
+          : ['Instrument', ...INSTRUMENT_VALUE_HEADERS];
+        return (
         <GlassCard as="section" className="overflow-hidden">
           <div className="border-b border-ink/[0.06] px-5 py-4">
             <h3 className="text-sm font-semibold text-ink">Per instrument</h3>
-            <p className="mt-0.5 text-xs text-ink/50">Net P&amp;L = realized + unrealized − fees − borrow fees.</p>
+            <p className="mt-0.5 text-xs text-ink/50">
+              Net P&amp;L = realized + unrealized − fees − borrow fees.
+              {multiAsset && summary.run.base_currency && (
+                <> Values in {summary.run.base_currency}
+                  {summary.run.fx_currencies && summary.run.fx_currencies.length > 0 && (
+                    <>, converted from {summary.run.fx_currencies.join(', ')} at the rate known at each bar</>
+                  )}
+                  .</>
+              )}
+            </p>
           </div>
           <div className="max-h-[420px] overflow-auto">
             <table className="w-full min-w-[820px] text-[12.5px]">
               <thead className="sticky top-0 bg-panel/95 backdrop-blur">
                 <tr className="text-left text-[10.5px] uppercase tracking-wider text-ink/45">
-                  {['Instrument', 'Fills', 'Traded', 'Final qty', 'Market value', 'Realized', 'Unrealized', 'Fees', 'Borrow', 'Net P&L'].map((h, i) => (
-                    <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 ? 'pl-5 text-left' : 'text-right', i === 9 && 'pr-5')}>
+                  {instrumentHeaders.map((h, i) => (
+                    <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 || (multiAsset && i <= 2) ? 'pl-5 text-left' : 'text-right', i === instrumentHeaders.length - 1 && 'pr-5')}>
                       <HeaderLabel h={h} />
                     </th>
                   ))}
@@ -432,6 +449,17 @@ function Results({
                     return (
                       <tr key={r.instrument} className="border-t border-ink/[0.04]">
                         <td className="py-2 pl-5 pr-3 font-sans text-ink/90">{r.symbol ?? `#${r.instrument}`}</td>
+                        {multiAsset && (
+                          <>
+                            <td className="px-3 py-2 font-sans text-ink/70">
+                              {r.type ?? 'equity'}
+                              {r.underlying && <span className="ml-1 text-ink/45">{r.underlying}</span>}
+                              {r.expiry != null && <span className="ml-1 text-ink/45">exp {expiryDate(r.expiry)}</span>}
+                            </td>
+                            <td className="px-3 py-2 font-sans text-ink/70">{r.currency ?? summary.run.base_currency ?? ''}</td>
+                            <td className="px-3 py-2 text-right text-ink/70">{multiplierText(r.multiplier)}</td>
+                          </>
+                        )}
                         <td className="px-3 py-2 text-right text-ink/70">{int(r.fills)}</td>
                         <td className="px-3 py-2 text-right text-ink/70">{cash(r.traded_notional, 0)}</td>
                         <td className="px-3 py-2 text-right text-ink/70">{Number(r.final_qty).toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
@@ -448,7 +476,10 @@ function Results({
             </table>
           </div>
         </GlassCard>
-      )}
+        );
+      })()}
+
+      {summary.futures && <FuturesCard futures={summary.futures} />}
 
       {b.run_id && <ExperimentLineageCard runId={b.run_id} />}
 
@@ -506,6 +537,90 @@ function Results({
         </GlassCard>
       </div>
     </div>
+  );
+}
+
+const INSTRUMENT_VALUE_HEADERS = ['Fills', 'Traded', 'Final qty', 'Market value', 'Realized', 'Unrealized', 'Fees', 'Borrow', 'Net P&L'];
+
+/** True when any instrument is not a plain equity in the base currency (M24); the equity-only view is unchanged otherwise. */
+function isMultiAsset(rows: InstrumentSummary[], base?: string): boolean {
+  return rows.some(
+    (r) =>
+      (r.type !== undefined && r.type !== 'equity') ||
+      (r.multiplier !== undefined && Number(r.multiplier) !== 1) ||
+      (r.currency !== undefined && base !== undefined && r.currency !== base),
+  );
+}
+
+function multiplierText(m?: string): string {
+  if (m === undefined) return '1';
+  return Number(m).toLocaleString('en-US', { maximumFractionDigits: 8 });
+}
+
+function expiryDate(ns: number): string {
+  return new Date(ns / 1e6).toISOString().slice(0, 10);
+}
+
+const ROLL_KIND_LABEL: Record<FuturesRoll['kind'], string> = {
+  rolled: 'Rolled',
+  closed: 'Closed',
+  settled: 'Settled at expiry',
+};
+
+/** M24.2: the roll rule, every roll the engine made, and what the futures model leaves out. */
+function FuturesCard({ futures }: { futures: FuturesSummary }) {
+  const rule = futures.roll_rule;
+  return (
+    <GlassCard as="section" className="overflow-hidden">
+      <div className="border-b border-ink/[0.06] px-5 py-4">
+        <h3 className="text-sm font-semibold text-ink">Futures rolls</h3>
+        <p className="mt-0.5 text-xs text-ink/50">
+          {futures.chains.length > 0 && <>{futures.chains.join(', ')}: </>}
+          rolled {rule.business_days_before_expiry} business day{rule.business_days_before_expiry === 1 ? '' : 's'} before expiry
+          at the open; signals use a {rule.adjust}-adjusted continuous series.
+        </p>
+      </div>
+      {futures.rolls.length === 0 ? (
+        <p className="px-5 py-4 text-xs text-ink/55">No positions were open at a roll date.</p>
+      ) : (
+        <div className="max-h-[320px] overflow-auto">
+          <table className="w-full min-w-[720px] text-[12.5px]">
+            <thead className="sticky top-0 bg-panel/95 backdrop-blur">
+              <tr className="text-left text-[10.5px] uppercase tracking-wider text-ink/45">
+                {['Date', 'What', 'From', 'To', 'Qty', 'Closed at', 'Opened at'].map((h, i) => (
+                  <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 && 'pl-5', i >= 4 && 'text-right', i === 6 && 'pr-5')}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="num">
+              {futures.rolls.map((e, i) => (
+                <tr key={`${e.ts_ns}-${e.strategy}-${e.from}-${i}`} className="border-t border-ink/[0.04] align-top">
+                  <td className="py-2 pl-5 pr-3 font-sans text-ink/80">{expiryDate(e.ts_ns)}</td>
+                  <td className="px-3 py-2 font-sans text-ink/80">
+                    {ROLL_KIND_LABEL[e.kind]}
+                    {e.note && <div className="mt-0.5 max-w-[260px] text-[11px] text-ink/50">{e.note}</div>}
+                  </td>
+                  <td className="px-3 py-2 font-sans text-ink/80">{e.from}</td>
+                  <td className="px-3 py-2 font-sans text-ink/80">{e.to ?? '—'}</td>
+                  <td className="px-3 py-2 text-right text-ink/70">{Number(e.qty).toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
+                  <td className="px-3 py-2 text-right text-ink/70">{cash(e.close_price)}</td>
+                  <td className="py-2 pl-3 pr-5 text-right text-ink/70">{e.open_price ? cash(e.open_price) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {futures.gaps.length > 0 && (
+        <div className="border-t border-ink/[0.06] px-5 py-3 text-xs text-ink/55">
+          {futures.gaps.map((g) => (
+            <p key={g}>{g}</p>
+          ))}
+        </div>
+      )}
+    </GlassCard>
   );
 }
 

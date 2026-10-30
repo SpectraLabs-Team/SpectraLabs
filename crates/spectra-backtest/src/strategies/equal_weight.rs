@@ -79,10 +79,13 @@ struct EqualWeight {
 }
 
 impl WeightStrategy for EqualWeight {
-    fn weights(&mut self, _ctx: &Context<'_>, bars: &[Bar]) -> Option<Vec<(InstrumentId, f64)>> {
-        let before = self.seen.len();
-        self.seen.extend(bars.iter().map(|b| b.instrument));
-        if self.seen.len() == before && before > 0 {
+    fn weights(&mut self, ctx: &Context<'_>, bars: &[Bar]) -> Option<Vec<(InstrumentId, f64)>> {
+        // Futures: weight each chain's front contract only. A contract past its
+        // roll date drops out; the engine has already rolled its position.
+        let before = self.seen.clone();
+        self.seen.retain(|&id| ctx.is_front(id));
+        self.seen.extend(bars.iter().map(|b| b.instrument).filter(|&id| ctx.is_front(id)));
+        if self.seen == before && !before.is_empty() {
             return None; // same universe, same targets
         }
         let w = 1.0 / self.seen.len() as f64;

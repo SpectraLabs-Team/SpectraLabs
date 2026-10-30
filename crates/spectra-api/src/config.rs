@@ -302,7 +302,7 @@ pub struct WorkerConfig {
     /// Most instruments one backtest may trade (`SPECTRA_BACKTEST_MAX_INSTRUMENTS`).
     pub backtest_max_instruments: usize,
     /// `SPECTRA_ACTIVITY_PURGE`: every six hours, delete daily activity rows older than the
-    /// retention window (default on). Turn off to pause deletions.
+    /// retention window (default off; unset means off). Turn on to run deletions.
     pub activity_purge: bool,
 }
 
@@ -378,11 +378,11 @@ impl WorkerConfig {
         });
         let data_dir = val("SPECTRA_DATA_DIR").map_or_else(|| std::path::PathBuf::from("data"), Into::into);
         let activity_purge = match val("SPECTRA_ACTIVITY_PURGE").as_deref().map(parse_bool) {
-            None => true,
+            None => false,
             Some(Some(on)) => on,
             Some(None) => {
                 problems.push("SPECTRA_ACTIVITY_PURGE must be on or off".into());
-                true
+                false
             }
         };
         if problems.is_empty() {
@@ -491,9 +491,9 @@ mod tests {
     }
 
     #[test]
-    fn worker_activity_purge_is_on_unless_switched_off() {
+    fn worker_activity_purge_is_off_unless_switched_on() {
         let db = ("DATABASE_URL", "postgres://u:p@localhost/db");
-        assert!(WorkerConfig::from_lookup(lookup(&[db])).unwrap().activity_purge);
+        assert!(!WorkerConfig::from_lookup(lookup(&[db])).unwrap().activity_purge);
         assert!(
             !WorkerConfig::from_lookup(lookup(&[db, ("SPECTRA_ACTIVITY_PURGE", "off")]))
                 .unwrap()

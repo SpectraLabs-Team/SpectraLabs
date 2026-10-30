@@ -20,6 +20,7 @@ import {
   type Catalog,
   type DatasetVersion,
   type DownloadKind,
+  type InstrumentSummary,
   type MonthlyReturn,
   type Series,
   type StoredRequest,
@@ -407,18 +408,32 @@ function Results({
         />
       )}
 
-      {summary.instruments.length > 0 && (
+      {summary.instruments.length > 0 && (() => {
+        const multiAsset = isMultiAsset(summary.instruments, summary.run.base_currency);
+        const instrumentHeaders = multiAsset
+          ? ['Instrument', 'Type', 'Currency', 'Multiplier', ...INSTRUMENT_VALUE_HEADERS]
+          : ['Instrument', ...INSTRUMENT_VALUE_HEADERS];
+        return (
         <GlassCard as="section" className="overflow-hidden">
           <div className="border-b border-ink/[0.06] px-5 py-4">
             <h3 className="text-sm font-semibold text-ink">Per instrument</h3>
-            <p className="mt-0.5 text-xs text-ink/50">Net P&amp;L = realized + unrealized − fees − borrow fees.</p>
+            <p className="mt-0.5 text-xs text-ink/50">
+              Net P&amp;L = realized + unrealized − fees − borrow fees.
+              {multiAsset && summary.run.base_currency && (
+                <> Values in {summary.run.base_currency}
+                  {summary.run.fx_currencies && summary.run.fx_currencies.length > 0 && (
+                    <>, converted from {summary.run.fx_currencies.join(', ')} at the rate known at each bar</>
+                  )}
+                  .</>
+              )}
+            </p>
           </div>
           <div className="max-h-[420px] overflow-auto">
             <table className="w-full min-w-[820px] text-[12.5px]">
               <thead className="sticky top-0 bg-panel/95 backdrop-blur">
                 <tr className="text-left text-[10.5px] uppercase tracking-wider text-ink/45">
-                  {['Instrument', 'Fills', 'Traded', 'Final qty', 'Market value', 'Realized', 'Unrealized', 'Fees', 'Borrow', 'Net P&L'].map((h, i) => (
-                    <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 ? 'pl-5 text-left' : 'text-right', i === 9 && 'pr-5')}>
+                  {instrumentHeaders.map((h, i) => (
+                    <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 || (multiAsset && i <= 2) ? 'pl-5 text-left' : 'text-right', i === instrumentHeaders.length - 1 && 'pr-5')}>
                       <HeaderLabel h={h} />
                     </th>
                   ))}
@@ -432,6 +447,16 @@ function Results({
                     return (
                       <tr key={r.instrument} className="border-t border-ink/[0.04]">
                         <td className="py-2 pl-5 pr-3 font-sans text-ink/90">{r.symbol ?? `#${r.instrument}`}</td>
+                        {multiAsset && (
+                          <>
+                            <td className="px-3 py-2 font-sans text-ink/70">
+                              {r.type ?? 'equity'}
+                              {r.expiry != null && <span className="ml-1 text-ink/45">exp {expiryDate(r.expiry)}</span>}
+                            </td>
+                            <td className="px-3 py-2 font-sans text-ink/70">{r.currency ?? summary.run.base_currency ?? ''}</td>
+                            <td className="px-3 py-2 text-right text-ink/70">{multiplierText(r.multiplier)}</td>
+                          </>
+                        )}
                         <td className="px-3 py-2 text-right text-ink/70">{int(r.fills)}</td>
                         <td className="px-3 py-2 text-right text-ink/70">{cash(r.traded_notional, 0)}</td>
                         <td className="px-3 py-2 text-right text-ink/70">{Number(r.final_qty).toLocaleString('en-US', { maximumFractionDigits: 4 })}</td>
@@ -448,7 +473,8 @@ function Results({
             </table>
           </div>
         </GlassCard>
-      )}
+        );
+      })()}
 
       {b.run_id && <ExperimentLineageCard runId={b.run_id} />}
 
@@ -507,6 +533,27 @@ function Results({
       </div>
     </div>
   );
+}
+
+const INSTRUMENT_VALUE_HEADERS = ['Fills', 'Traded', 'Final qty', 'Market value', 'Realized', 'Unrealized', 'Fees', 'Borrow', 'Net P&L'];
+
+/** True when any instrument is not a plain equity in the base currency (M24); the equity-only view is unchanged otherwise. */
+function isMultiAsset(rows: InstrumentSummary[], base?: string): boolean {
+  return rows.some(
+    (r) =>
+      (r.type !== undefined && r.type !== 'equity') ||
+      (r.multiplier !== undefined && Number(r.multiplier) !== 1) ||
+      (r.currency !== undefined && base !== undefined && r.currency !== base),
+  );
+}
+
+function multiplierText(m?: string): string {
+  if (m === undefined) return '1';
+  return Number(m).toLocaleString('en-US', { maximumFractionDigits: 8 });
+}
+
+function expiryDate(ns: number): string {
+  return new Date(ns / 1e6).toISOString().slice(0, 10);
 }
 
 /**

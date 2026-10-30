@@ -128,6 +128,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/base-currency": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The currency the workspace keeps its books in. */
+        get: operations["get_base_currency"];
+        /** Change the base currency. Earlier runs keep the currency they ran in;
+         *     FX rates are kept per base, so rates against the old base are not reused. */
+        put: operations["put_base_currency"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/benchmark": {
         parameters: {
             query?: never;
@@ -484,6 +503,62 @@ export interface paths {
         put?: never;
         post: operations["create_registry_run"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fx-rates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List FX rates against the base currency. */
+        get: operations["list_fx_rates"];
+        put?: never;
+        /** Store FX rates for one currency against the base currency:
+         *     `{"currency": "EUR", "rates": [{"as_of": "2026-01-02", "rate": "1.0845"}]}`.
+         *     A rate at an existing time replaces it. All or nothing. */
+        post: operations["put_fx_rates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instruments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the workspace's instrument records. */
+        get: operations["list_instruments"];
+        put?: never;
+        /** Add an instrument record. The body has the shape of a backtest request's
+         *     `instruments` entry, named by `symbol`. */
+        post: operations["create_instrument"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instruments/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete an instrument record. Runs that used it keep their stored copy. */
+        delete: operations["delete_instrument"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2075,6 +2150,11 @@ export interface components {
              */
             total_bars: number;
         };
+        /** @description The workspace's base currency. */
+        BaseCurrencyView: {
+            /** @description ISO code, e.g. `USD`. */
+            base_currency: string;
+        };
         /** @description `POST /api/v1/benchmark` body (also the `benchmark` job payload). */
         BenchmarkRequest: {
             /** @description Portfolio CSV. */
@@ -2233,6 +2313,8 @@ export interface components {
         CreateBacktest: {
             /** @description Optional point-in-time timestamp (RFC 3339 string or integer nanoseconds). */
             as_of?: string | null;
+            /** @description The currency the run books in. Default: the workspace's base currency. */
+            base_currency?: string | null;
             /** @description Configuration in the user form (`preset`, `initial_cash`, `slippage_bps`, ...). */
             config?: Record<string, never> | null;
             /** @description Splits and dividends to apply during the run, on unadjusted prices:
@@ -2244,6 +2326,12 @@ export interface components {
              * @description A dataset version of the caller's workspace.
              */
             dataset_version_id: string;
+            /** @description FX rates by currency: `{"EUR": [{"as_of", "rate"}]}`. Default: the
+             *     workspace's rates for the currencies the instruments are quoted in. */
+            fx_rates?: Record<string, never> | null;
+            /** @description Instrument records (`[{"symbol", "type", "currency", "multiplier", "tick_size", ...}]`).
+             *     Default: the workspace's records that change a run (see `/api/v1/instruments`). */
+            instruments?: Record<string, never>[] | null;
             /** @description Strategy parameters; missing ones take their defaults. */
             params?: Record<string, never> | null;
             /**
@@ -2559,6 +2647,11 @@ export interface components {
             /** @description The version was deleted. */
             deleted: boolean;
         };
+        /** @description Result of a delete. */
+        DeletedView: {
+            /** @description True when something was deleted. */
+            deleted: boolean;
+        };
         /** @description List of delistings. */
         DelistingListView: {
             /** @description Items. */
@@ -2636,6 +2729,25 @@ export interface components {
         ExportQuery: {
             /** @description Format to export: currently only `parquet` is supported (default: `parquet`). */
             format?: string | null;
+        };
+        /** @description FX rates against the workspace's base currency. */
+        FxRateListView: {
+            /** @description The base the rates are quoted against. */
+            base_currency: string;
+            /** @description Oldest first, by currency. */
+            items: components["schemas"]["FxRateView"][];
+        };
+        /** @description One FX observation. */
+        FxRateView: {
+            /**
+             * Format: int64
+             * @description When the rate became known, nanoseconds since the epoch.
+             */
+            as_of: number;
+            /** @description Foreign currency. */
+            currency: string;
+            /** @description Base-currency units per unit of `currency`, exact decimal text. */
+            rate: string;
         };
         /** @description Detailed view of a gap report including attribution and trade matches. */
         GapReportDetailView: {
@@ -2796,6 +2908,42 @@ export interface components {
              *     (-720 to 840). Optional if `timezone` is provided.
              */
             utc_offset_minutes?: number | null;
+        };
+        /** @description The workspace's instruments. */
+        InstrumentListView: {
+            /** @description The base currency records default to. */
+            base_currency: string;
+            /** @description By symbol. */
+            items: components["schemas"]["InstrumentView"][];
+        };
+        /** @description One instrument record. */
+        InstrumentView: {
+            /** @description Annual coupon rate as a fraction (bonds), exact decimal text. */
+            coupon_rate?: string | null;
+            /** @description ISO currency the price is quoted in. */
+            currency: string;
+            /**
+             * Format: int64
+             * @description Expiry (futures, options), nanoseconds since the epoch.
+             */
+            expiry?: number | null;
+            /** @description Smallest tradable quantity, exact decimal text. */
+            lot_size: string;
+            /**
+             * Format: int64
+             * @description Maturity (bonds), nanoseconds since the epoch.
+             */
+            maturity?: number | null;
+            /** @description Contract multiplier, exact decimal text. */
+            multiplier: string;
+            /** @description Strike (options), exact decimal text. */
+            strike?: string | null;
+            /** @description Symbol, unique in the workspace. */
+            symbol: string;
+            /** @description Smallest price increment, exact decimal text. */
+            tick_size: string;
+            /** @description `equity`, `future`, `bond`, `option` or `swap`. */
+            type: string;
         };
         /** @description A page of jobs. */
         JobPage: {
@@ -4750,6 +4898,56 @@ export interface operations {
             };
         };
     };
+    get_base_currency: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaseCurrencyView"];
+                };
+            };
+        };
+    };
+    put_base_currency: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BaseCurrencyView"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaseCurrencyView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     benchmark_handler: {
         parameters: {
             query?: never;
@@ -5727,6 +5925,141 @@ export interface operations {
             };
             /** @description Invalid dataset or request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_fx_rates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Only this currency. */
+                currency: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FxRateListView"];
+                };
+            };
+        };
+    };
+    put_fx_rates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FxRateListView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_instruments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentListView"];
+                };
+            };
+        };
+    };
+    create_instrument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InstrumentView"];
+                };
+            };
+            /** @description The symbol already has a record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Every problem with the record */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_instrument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Symbol */
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedView"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

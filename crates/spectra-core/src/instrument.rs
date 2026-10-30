@@ -4,8 +4,9 @@
 //! existed: multiplier 1, no expiry, no strike, no coupon. Other types carry
 //! their own nullable fields, and each type validates its own (decision 1).
 //!
-//! Stage 1 accepts one base currency and refuses any instrument in another
-//! currency rather than converting it (decision 2).
+//! An instrument may be quoted in any currency. A run converts it to the
+//! run's base currency with point-in-time FX rates, and refuses it when no
+//! rate series exists (decision 2): never a silent 1:1 conversion.
 
 use std::fmt;
 
@@ -89,8 +90,13 @@ pub struct Instrument {
     pub coupon_rate: Option<Ratio>,
 }
 
-/// The base currency of stage 1 when a workspace does not say otherwise.
+/// The base currency of a workspace that has not chosen one.
 pub const DEFAULT_BASE_CURRENCY: &str = "USD";
+
+/// True for a three-letter upper-case ISO 4217 style code.
+pub fn is_currency_code(s: &str) -> bool {
+    s.len() == 3 && s.chars().all(|c| c.is_ascii_uppercase())
+}
 
 impl Instrument {
     /// A cash equity in `currency`: multiplier 1, tick and lot size as given.
@@ -114,22 +120,17 @@ impl Instrument {
         }
     }
 
-    /// Checks the record against the run's base currency.
+    /// Checks the record's own fields: symbol, currency code, positive
+    /// multiplier, tick and lot size, and the fields its type needs.
     ///
     /// # Errors
     /// The first problem found, in words that name the field.
-    pub fn validate(&self, base_currency: &str) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         if self.symbol.trim().is_empty() {
             return Err("symbol is required".into());
         }
-        if self.currency.len() != 3 || !self.currency.chars().all(|c| c.is_ascii_uppercase()) {
+        if !is_currency_code(&self.currency) {
             return Err(format!("currency \"{}\" must be a three-letter ISO code", self.currency));
-        }
-        if self.currency != base_currency {
-            return Err(format!(
-                "currency {} differs from the run's base currency {base_currency}; multi-currency is not supported yet",
-                self.currency
-            ));
         }
         if self.multiplier.raw() <= 0 {
             return Err("multiplier must be positive".into());
@@ -141,6 +142,16 @@ impl Instrument {
             return Err("lot size must be positive".into());
         }
         self.validate_type_fields()
+    }
+
+    /// True for a record that changes nothing about a run: an equity quoted in
+    /// `base_currency` with multiplier 1 and lot size 1. Runs leave these out
+    /// of their fingerprint, so storing such a record never moves a result.
+    pub fn is_plain_equity(&self, base_currency: &str) -> bool {
+        self.kind == InstrumentType::Equity
+            && self.currency == base_currency
+            && self.multiplier == Ratio::ONE
+            && self.lot_size == Qty::ONE
     }
 
     fn validate_type_fields(&self) -> Result<(), String> {
@@ -207,25 +218,27 @@ mod tests {
     #[test]
     fn equity_validates() {
         let e = Instrument::equity("AAPL", "USD", Price::from_raw(1), lot());
-        assert_eq!(e.validate("USD"), Ok(()));
+        assert_eq!(e.validate(), Ok(()));
+        assert!(e.is_plain_equity("USD"));
+        assert!(!e.is_plain_equity("EUR"));
     }
 
     #[test]
-    fn refuses_other_currency() {
-        let e = Instrument::equity("SAP", "EUR", Price::from_raw(1), lot());
-        assert!(e.validate("USD").unwrap_err().contains("base currency"));
+    fn refuses_bad_currency_code() {
+        let e = Instrument::equity("SAP", "eur", Price::from_raw(1), lot());
+        assert!(e.validate().unwrap_err().contains("ISO"));
     }
 
     #[test]
     fn refuses_bad_multiplier_and_tick() {
         let mut e = Instrument::equity("AAPL", "USD", Price::from_raw(1), lot());
         e.multiplier = Ratio::ZERO;
-        assert!(e.validate("USD").unwrap_err().contains("multiplier"));
+        assert!(e.validate().unwrap_err().contains("multiplier"));
         let mut e = Instrument::equity("AAPL", "USD", Price::ZERO, lot());
-        assert!(e.validate("USD").unwrap_err().contains("tick"));
+        assert!(e.validate().unwrap_err().contains("tick"));
         e.tick_size = Price::from_raw(1);
         e.lot_size = Qty::ZERO;
-        assert!(e.validate("USD").unwrap_err().contains("lot"));
+        assert!(e.validate().unwrap_err().contains("lot"));
     }
 
     #[test]
@@ -233,26 +246,26 @@ mod tests {
         let mut f = Instrument::equity("ESZ6", "USD", Price::from_raw(1), lot());
         f.kind = InstrumentType::Future;
         f.multiplier = Ratio::from_units(50).unwrap();
-        assert!(f.validate("USD").unwrap_err().contains("expiry"));
+        assert!(f.validate().unwrap_err().contains("expiry"));
         f.expiry_ns = Some(1);
-        assert_eq!(f.validate("USD"), Ok(()));
+        assert_eq!(f.validate(), Ok(()));
 
         let mut o = f.clone();
         o.kind = InstrumentType::Option;
-        assert!(o.validate("USD").unwrap_err().contains("strike"));
+        assert!(o.validate().unwrap_err().contains("strike"));
         o.strike = Some(px(100));
-        assert_eq!(o.validate("USD"), Ok(()));
+        assert_eq!(o.validate(), Ok(()));
 
         let mut b = Instrument::equity("UST10", "USD", Price::from_raw(1), lot());
         b.kind = InstrumentType::Bond;
-        assert!(b.validate("USD").unwrap_err().contains("maturity"));
+        assert!(b.validate().unwrap_err().contains("maturity"));
 
         let mut e = Instrument::equity("AAPL", "USD", Price::from_raw(1), lot());
         e.expiry_ns = Some(1);
-        assert!(e.validate("USD").unwrap_err().contains("cannot have an expiry"));
+        assert!(e.validate().unwrap_err().contains("cannot have an expiry"));
         e.expiry_ns = None;
         e.multiplier = Ratio::from_units(2).unwrap();
-        assert!(e.validate("USD").unwrap_err().contains("must be 1"));
+        assert!(e.validate().unwrap_err().contains("must be 1"));
     }
 
     #[test]

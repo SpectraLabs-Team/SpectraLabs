@@ -55,6 +55,8 @@ pub enum Reject {
     LeverageExceeded,
     /// Pre-trade risk limit exceeded or emergency kill switch active.
     RiskLimitExceeded,
+    /// The contract has expired (or passed its last trading point) and cannot trade.
+    ContractExpired,
 }
 
 impl Reject {
@@ -67,6 +69,7 @@ impl Reject {
             Self::ShortNotAllowed => "ShortNotAllowed",
             Self::LeverageExceeded => "LeverageExceeded",
             Self::RiskLimitExceeded => "RiskLimitExceeded",
+            Self::ContractExpired => "ContractExpired",
         }
     }
 }
@@ -284,19 +287,14 @@ impl Ledger {
         self.multipliers.get(&instrument).copied().unwrap_or(Ratio::ONE)
     }
 
-    /// Registers an instrument from its record, after validating it against the
-    /// run's base currency (decision 2: refused, never converted).
+    /// Registers an instrument from its record, after validating its fields.
+    /// Currency conversion is the run's job, not the ledger's: the ledger books
+    /// everything in one currency.
     ///
     /// # Errors
-    /// The validation message as `InvalidFill`, or what [`Self::register_instrument`] returns.
-    pub fn list(
-        &mut self,
-        id: InstrumentId,
-        inst: &Instrument,
-        base_currency: &str,
-        ts_ns: i64,
-    ) -> Result<()> {
-        inst.validate(base_currency).map_err(|_| LedgerError::Rejected(Reject::InvalidFill))?;
+    /// `InvalidFill` for an invalid record, or what [`Self::register_instrument`] returns.
+    pub fn list(&mut self, id: InstrumentId, inst: &Instrument, ts_ns: i64) -> Result<()> {
+        inst.validate().map_err(|_| LedgerError::Rejected(Reject::InvalidFill))?;
         self.register_instrument(id, inst.multiplier, ts_ns)
     }
 

@@ -131,7 +131,7 @@ fn print(out: &mut String, name: &str, r: &BacktestResult) {
             Some(Reject::InvalidFill) => 2,
             Some(Reject::InsufficientCash) => 3,
             Some(Reject::ShortNotAllowed) => 4,
-            Some(Reject::LeverageExceeded | Reject::RiskLimitExceeded) => {
+            Some(Reject::LeverageExceeded | Reject::RiskLimitExceeded | Reject::ContractExpired) => {
                 panic!("not possible under the reference policy")
             }
         }] += 1;

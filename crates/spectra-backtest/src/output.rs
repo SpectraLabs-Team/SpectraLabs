@@ -285,6 +285,18 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
     } else {
         run.with("corporate_actions", crate::corporate::actions_to_json(&req.corporate_actions)?)
     };
+    let run = run.with("base_currency", Json::string(out.setup.base_currency.clone()));
+    let run = if out.setup.is_trivial() {
+        run
+    } else {
+        run.with("instruments_sha256", Json::string(out.setup.fingerprint())).with("fx_currencies", {
+            let mut a = Json::array();
+            for c in out.setup.foreign_currencies() {
+                a.push(Json::string(c))?;
+            }
+            a
+        })
+    };
     let summary = Json::object()
         .with("schema", Json::string(SUMMARY_SCHEMA))
         .with("run", run)
@@ -452,7 +464,7 @@ fn instruments_json(out: &BacktestOutput) -> Result<Json> {
         match e.kind {
             EntryType::Fill => {
                 slot.0 += 1;
-                slot.1 += spectra_core::notional(e.fill.price, e.fill.qty)?.to_f64();
+                slot.1 += l.notional_of(e.fill.instrument, e.fill.price, e.fill.qty)?.to_f64();
             }
             EntryType::BorrowFee => slot.2 = slot.2.checked_add(e.amount)?,
             EntryType::Dividend => slot.3 = slot.3.checked_add(e.amount)?,
@@ -467,10 +479,17 @@ fn instruments_json(out: &BacktestOutput) -> Result<Json> {
             fills.get(&id).copied().unwrap_or((0, 0.0, Money::ZERO, Money::ZERO));
         let net = net_pnl(p.realized, unrealized, p.fees, borrow, dividends)?;
         let symbol = out.symbols.get(id as usize).map_or(Json::Null, |s| Json::string(s.clone()));
+        let record = out.setup.instrument(id);
+        let currency = record.map_or(out.setup.base_currency.as_str(), |r| r.currency.as_str());
+        let expiry = record.and_then(|r| r.expiry_ns).map_or(Json::Null, Json::integer);
         arr.push(
             Json::object()
                 .with("instrument", Json::integer(i64::from(id)))
                 .with("symbol", symbol)
+                .with("type", Json::string(out.setup.kind(id).as_str()))
+                .with("currency", Json::string(currency))
+                .with("multiplier", Json::string(l.multiplier(id).to_string()))
+                .with("expiry", expiry)
                 .with("fills", Json::integer(count))
                 .with("traded_notional", num(traded))
                 .with("final_qty", Json::string(p.qty.to_string()))

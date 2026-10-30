@@ -41,9 +41,12 @@ use std::time::{Duration, Instant};
 
 use spectra_core::cfmt::fmt_g17;
 use spectra_core::{
-    bars_sha256, notional, validate_bars, Bar, Error, Fill, InstrumentId, JournalEntry, Ledger, LedgerConfig,
-    LedgerError, Money, Price, Qty, Ratio, Reject, Result, Sha256, Side, ENGINE_VERSION, SCALE,
+    bars_sha256, notional, validate_bars, Bar, Error, Fill, Instrument, InstrumentId, InstrumentType,
+    JournalEntry, Ledger, LedgerConfig, LedgerError, Money, Price, Qty, Ratio, Reject, Result, Sha256, Side,
+    ENGINE_VERSION, SCALE,
 };
+
+use crate::instruments::InstrumentSetup;
 
 use crate::corporate::{
     apply_order, corporate_actions_sha256, split_price, split_qty, CorporateAction, CorporateActionKind,
@@ -591,9 +594,43 @@ pub struct Context<'a> {
     step: i64,
     seed: u64,
     strategy: usize,
+    setup: &'a InstrumentSetup,
 }
 
 impl Context<'_> {
+    /// The run's record of `instrument`, if it has one (none means a plain
+    /// equity in the base currency).
+    pub fn instrument(&self, instrument: InstrumentId) -> Option<&Instrument> {
+        self.setup.instrument(instrument)
+    }
+    /// The currency the books are kept in.
+    pub fn base_currency(&self) -> &str {
+        &self.setup.base_currency
+    }
+    /// Contract multiplier of `instrument` (1 for equities).
+    pub fn multiplier(&self, instrument: InstrumentId) -> Ratio {
+        self.book.multiplier(instrument)
+    }
+    /// Base-currency value of one unit of `instrument` at quoted `price`: the
+    /// price converted at the FX rate in force now, times the multiplier.
+    /// For a plain equity in the base currency it is exactly `price`.
+    pub fn unit_value(&self, instrument: InstrumentId, price: Price) -> Option<f64> {
+        let base = self.setup.to_base(instrument, price, self.now).ok()?;
+        let m = self.book.multiplier(instrument);
+        if m == Ratio::ONE {
+            Some(base.to_f64())
+        } else {
+            Some(base.to_f64() * m.to_f64())
+        }
+    }
+    /// The smallest tradable quantity of `instrument`, when a record that
+    /// changes the run sets one (a plain equity record does not).
+    pub fn lot_size(&self, instrument: InstrumentId) -> Option<Qty> {
+        self.setup
+            .instrument(instrument)
+            .filter(|i| !i.is_plain_equity(&self.setup.base_currency))
+            .map(|i| i.lot_size)
+    }
     /// Current timestamp.
     pub fn now(&self) -> i64 {
         self.now
@@ -866,6 +903,7 @@ const fn reject_code(r: Option<Reject>) -> u64 {
         Some(Reject::ShortNotAllowed) => 4,
         Some(Reject::LeverageExceeded) => 5,
         Some(Reject::RiskLimitExceeded) => 6,
+        Some(Reject::ContractExpired) => 7,
     }
 }
 
@@ -1318,7 +1356,7 @@ pub fn run_backtest_controlled(
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<BacktestResult, RunError> {
-    run_inner(bars, &[], &mut [strategy], None, cfg, ctl)
+    run_inner(bars, &[], &mut [strategy], None, &InstrumentSetup::default(), cfg, ctl)
 }
 
 /// [`run_backtest_controlled`] on unadjusted prices with the instruments'
@@ -1336,7 +1374,26 @@ pub fn run_backtest_with_actions(
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<BacktestResult, RunError> {
-    run_inner(bars, actions, &mut [strategy], None, cfg, ctl)
+    run_inner(bars, actions, &mut [strategy], None, &InstrumentSetup::default(), cfg, ctl)
+}
+
+/// [`run_backtest_with_actions`] with instrument records, a base currency and
+/// FX rates (see [`crate::instruments`]). With a trivial setup it is exactly
+/// [`run_backtest_with_actions`]; otherwise the setup's fingerprint is part of
+/// `config_sha256`.
+///
+/// # Errors
+/// As [`run_backtest_with_actions`], and [`RunError::Engine`] for an invalid
+/// setup, an instrument type the engine cannot trade yet, or a missing FX rate.
+pub fn run_backtest_with_setup(
+    bars: &[Bar],
+    actions: &[CorporateAction],
+    setup: &InstrumentSetup,
+    strategy: &mut dyn Strategy,
+    cfg: &BacktestConfig,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestResult, RunError> {
+    run_inner(bars, actions, &mut [strategy], None, setup, cfg, ctl)
 }
 
 /// Runs several strategies on one shared account. Each strategy gets
@@ -1370,9 +1427,25 @@ pub fn run_multi_backtest(
 ///
 /// # Errors
 /// As [`run_multi_backtest`] and [`run_backtest_with_actions`].
-pub fn run_multi_backtest_with_actions<'a>(
+pub fn run_multi_backtest_with_actions(
     bars: &[Bar],
     actions: &[CorporateAction],
+    allocations: &mut [Allocation<'_>],
+    cfg: &BacktestConfig,
+    ctl: &mut RunControl<'_>,
+) -> std::result::Result<BacktestResult, RunError> {
+    run_multi_backtest_with_setup(bars, actions, &InstrumentSetup::default(), allocations, cfg, ctl)
+}
+
+/// [`run_multi_backtest_with_actions`] with an instrument setup (see
+/// [`run_backtest_with_setup`]).
+///
+/// # Errors
+/// As [`run_multi_backtest_with_actions`] and [`run_backtest_with_setup`].
+pub fn run_multi_backtest_with_setup<'a>(
+    bars: &[Bar],
+    actions: &[CorporateAction],
+    setup: &InstrumentSetup,
     allocations: &mut [Allocation<'a>],
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
@@ -1396,7 +1469,7 @@ pub fn run_multi_backtest_with_actions<'a>(
     }
     let mut strategies: Vec<&mut (dyn Strategy + 'a)> =
         allocations.iter_mut().map(|a| &mut *a.strategy).collect();
-    run_inner(bars, actions, &mut strategies, Some(&weights), cfg, ctl)
+    run_inner(bars, actions, &mut strategies, Some(&weights), setup, cfg, ctl)
 }
 
 /// Each strategy's own books in a multi-strategy run.
@@ -1559,15 +1632,43 @@ fn prepare_actions(actions: &[CorporateAction], bars: &[Bar]) -> Result<Vec<Corp
     Ok(sorted)
 }
 
+/// Refuses a setup the engine cannot run: an invalid record or rate series,
+/// or an instrument type whose model is not in this engine yet.
+fn check_setup(setup: &InstrumentSetup, bars: &[Bar]) -> std::result::Result<(), RunError> {
+    setup.validate()?;
+    let used: BTreeSet<InstrumentId> = bars.iter().map(|b| b.instrument).collect();
+    for (id, inst) in &setup.instruments {
+        if !used.contains(id) {
+            continue;
+        }
+        if let Some(why) = unsupported(inst) {
+            return Err(Error::InvalidArgument(format!("instrument {}: {why}", inst.symbol)).into());
+        }
+    }
+    Ok(())
+}
+
+/// Why the engine cannot trade `inst` yet, if it cannot.
+fn unsupported(inst: &Instrument) -> Option<&'static str> {
+    match inst.kind {
+        InstrumentType::Equity | InstrumentType::Future => None,
+        InstrumentType::Bond => Some("bond trading needs the bond model (coupons and accrued interest)"),
+        InstrumentType::Option => Some("option trading needs the option model (expiry settlement)"),
+        InstrumentType::Swap => Some("swap trading needs a curve model"),
+    }
+}
+
 fn run_inner<'s>(
     bars: &[Bar],
     actions: &[CorporateAction],
     strategies: &mut [&mut (dyn Strategy + 's)],
     weights: Option<&[Ratio]>,
+    setup: &InstrumentSetup,
     cfg: &BacktestConfig,
     ctl: &mut RunControl<'_>,
 ) -> std::result::Result<BacktestResult, RunError> {
     let started = Instant::now();
+    check_setup(setup, bars)?;
     check_size(bars, &ctl.limits)?;
     if let Some(err) = validate_bars(bars) {
         return Err(Error::InvalidArgument(format!("invalid bars: {err}")).into());
@@ -1626,6 +1727,13 @@ fn run_inner<'s>(
     // Each strategy's own books; empty in a single-strategy run, where the
     // strategy sees the account.
     let mut sleeves: Vec<Ledger> = books.as_mut().map(|b| std::mem::take(&mut b.ledgers)).unwrap_or_default();
+    // Contract multipliers, on the account and on every strategy's own books.
+    for (&id, inst) in setup.effective() {
+        ledger.list(id, inst, first_ts).map_err(ledger_err)?;
+        for book in &mut sleeves {
+            book.list(id, inst, first_ts).map_err(ledger_err)?;
+        }
+    }
 
     // Orders placed in on_start are stamped just before the first bar so they can fill on it.
     let start_ts = if first_ts > i64::MIN { first_ts - 1 } else { first_ts };
@@ -1640,6 +1748,7 @@ fn run_inner<'s>(
             step: -1,
             seed: cfg.seed,
             strategy: s,
+            setup,
         };
         strategy.on_start(&mut ctx);
     }
@@ -1741,16 +1850,26 @@ fn run_inner<'s>(
                 let o = &mut orders[k];
 
                 if let Some(ref limits) = cfg.risk_limits {
+                    // Risk limits see per-unit values in the base currency, multiplier included.
+                    let unit = |id: InstrumentId, px: f64| {
+                        let m = ledger.multiplier(id);
+                        if m == Ratio::ONE {
+                            px
+                        } else {
+                            px * m.to_f64()
+                        }
+                    };
+                    let fill_px = setup.to_base(o.instrument, a.price, ts)?.to_f64();
                     let mut positions = std::collections::HashMap::new();
                     for (&inst, pos) in ledger.positions() {
                         if !pos.qty.is_zero() {
                             let mark_price =
-                                ledger.mark_price(inst).map_or(a.price.to_f64(), spectra_core::Fixed::to_f64);
+                                ledger.mark_price(inst).map_or(fill_px, spectra_core::Fixed::to_f64);
                             positions.insert(
                                 format!("INST_{inst}"),
                                 spectra_risk::enforcement::PositionSnapshot {
                                     qty: pos.qty.to_f64(),
-                                    price: mark_price,
+                                    price: unit(inst, mark_price),
                                 },
                             );
                         }
@@ -1769,7 +1888,7 @@ fn run_inner<'s>(
                             Side::Sell => spectra_risk::enforcement::OrderSide::Sell,
                         },
                         qty: a.qty.to_f64(),
-                        price: a.price.to_f64(),
+                        price: unit(o.instrument, fill_px),
                     };
                     let res = spectra_risk::enforcement::PreTradeChecker::evaluate(
                         limits,
@@ -1818,15 +1937,24 @@ fn run_inner<'s>(
                     }
                 }
 
+                // A contract cannot trade at or after its expiry.
+                if setup.instrument(o.instrument).and_then(|i| i.expiry_ns).is_some_and(|e| ts >= e) {
+                    o.state = OrderState::Rejected;
+                    o.reject_reason = Some(Reject::ContractExpired);
+                    open.remove(&orders[k], k);
+                    continue;
+                }
+                // Quoted price to the base currency, at the rate known now.
+                let base_price = setup.to_base(o.instrument, a.price, ts)?;
                 let f = Fill {
                     instrument: o.instrument,
                     side: o.side,
                     qty: a.qty,
-                    price: a.price,
+                    price: base_price,
                     fee: commission_fee(
                         &cfg.costs.commission,
                         a.qty,
-                        ledger.notional_of(o.instrument, a.price, a.qty)?,
+                        ledger.notional_of(o.instrument, base_price, a.qty)?,
                     )?,
                     ts_ns: ts,
                 };
@@ -1872,9 +2000,10 @@ fn run_inner<'s>(
 
         // 2. Mark to the close and record equity.
         for b in group {
-            let mut marked = ledger.mark(b.instrument, b.close);
+            let close = setup.to_base(b.instrument, b.close, ts)?;
+            let mut marked = ledger.mark(b.instrument, close);
             for book in &mut sleeves {
-                marked = marked.and_then(|()| book.mark(b.instrument, b.close));
+                marked = marked.and_then(|()| book.mark(b.instrument, close));
             }
             if marked.is_err() {
                 return Err(Error::Internal("validated bar produced an invalid mark".into()).into());
@@ -1901,6 +2030,7 @@ fn run_inner<'s>(
                 step,
                 seed: cfg.seed,
                 strategy: s,
+                setup,
             };
             for a in &applied {
                 strategy.on_corporate_action(&mut ctx, a);
@@ -1927,6 +2057,10 @@ fn run_inner<'s>(
     // Written only when there are actions, so runs without them keep their fingerprints.
     if !actions.is_empty() {
         canonical.push_str(&format!("corporate_actions={};", corporate_actions_sha256(&actions)));
+    }
+    // Written only for a setup that changes the run, so equity runs keep their fingerprints.
+    if !setup.is_trivial() {
+        canonical.push_str(&format!("instruments={};", setup.fingerprint()));
     }
     let config_sha256 = spectra_core::sha256_hex(canonical.as_bytes());
     let mut per_strategy = Vec::with_capacity(sleeves.len());

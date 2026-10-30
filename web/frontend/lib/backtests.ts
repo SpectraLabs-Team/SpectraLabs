@@ -155,6 +155,11 @@ export interface StrategySummary {
 export interface InstrumentSummary {
   instrument: number;
   symbol: string | null;
+  /** M24: absent in summaries stored before instrument types existed (all equity). */
+  type?: 'equity' | 'future' | 'bond' | 'option' | 'swap';
+  currency?: string;
+  multiplier?: string;
+  expiry?: number | null;
   fills: number;
   traded_notional: N;
   final_qty: string;
@@ -170,6 +175,10 @@ export interface InstrumentSummary {
 export interface Summary {
   schema: string;
   run: {
+    /** M24: the currency the books are kept in; absent before multi-currency. */
+    base_currency?: string;
+    /** M24: currencies converted to the base during the run. */
+    fx_currencies?: string[];
     engine_version: string;
     dataset_sha256: string;
     config_sha256: string;

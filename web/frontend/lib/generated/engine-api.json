@@ -417,6 +417,66 @@
         }
       }
     },
+    "/api/v1/base-currency": {
+      "get": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "The currency the workspace keeps its books in.",
+        "operationId": "get_base_currency",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseCurrencyView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Change the base currency. Earlier runs keep the currency they ran in;\nFX rates are kept per base, so rates against the old base are not reused.",
+        "operationId": "put_base_currency",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaseCurrencyView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaseCurrencyView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/benchmark": {
       "post": {
         "tags": [
@@ -1696,6 +1756,172 @@
           },
           "422": {
             "description": "Invalid dataset or request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/fx-rates": {
+      "get": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "List FX rates against the base currency.",
+        "operationId": "list_fx_rates",
+        "parameters": [
+          {
+            "name": "currency",
+            "in": "path",
+            "description": "Only this currency.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxRateListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Store FX rates for one currency against the base currency:\n`{\"currency\": \"EUR\", \"rates\": [{\"as_of\": \"2026-01-02\", \"rate\": \"1.0845\"}]}`.\nA rate at an existing time replaces it. All or nothing.",
+        "operationId": "put_fx_rates",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxRateListView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments": {
+      "get": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "List the workspace's instrument records.",
+        "operationId": "list_instruments",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Add an instrument record. The body has the shape of a backtest request's\n`instruments` entry, named by `symbol`.",
+        "operationId": "create_instrument",
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstrumentView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The symbol already has a record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Every problem with the record",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/{symbol}": {
+      "delete": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Delete an instrument record. Runs that used it keep their stored copy.",
+        "operationId": "delete_instrument",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "description": "Symbol",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -5974,6 +6200,20 @@
           }
         }
       },
+      "BaseCurrencyView": {
+        "type": "object",
+        "description": "The workspace's base currency.",
+        "required": [
+          "base_currency"
+        ],
+        "properties": {
+          "base_currency": {
+            "type": "string",
+            "description": "ISO code, e.g. `USD`."
+          }
+        },
+        "additionalProperties": false
+      },
       "BenchmarkRequest": {
         "type": "object",
         "description": "`POST /api/v1/benchmark` body (also the `benchmark` job payload).",
@@ -6311,6 +6551,13 @@
             ],
             "description": "Optional point-in-time timestamp (RFC 3339 string or integer nanoseconds)."
           },
+          "base_currency": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The currency the run books in. Default: the workspace's base currency."
+          },
           "config": {
             "type": [
               "object",
@@ -6332,6 +6579,23 @@
             "type": "string",
             "format": "uuid",
             "description": "A dataset version of the caller's workspace."
+          },
+          "fx_rates": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "FX rates by currency: `{\"EUR\": [{\"as_of\", \"rate\"}]}`. Default: the\nworkspace's rates for the currencies the instruments are quoted in."
+          },
+          "instruments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "Instrument records (`[{\"symbol\", \"type\", \"currency\", \"multiplier\", \"tick_size\", ...}]`).\nDefault: the workspace's records that change a run (see `/api/v1/instruments`)."
           },
           "params": {
             "type": [
@@ -7115,6 +7379,19 @@
           }
         }
       },
+      "DeletedView": {
+        "type": "object",
+        "description": "Result of a delete.",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean",
+            "description": "True when something was deleted."
+          }
+        }
+      },
       "DelistingListView": {
         "type": "object",
         "description": "List of delistings.",
@@ -7309,6 +7586,51 @@
           }
         },
         "additionalProperties": false
+      },
+      "FxRateListView": {
+        "type": "object",
+        "description": "FX rates against the workspace's base currency.",
+        "required": [
+          "base_currency",
+          "items"
+        ],
+        "properties": {
+          "base_currency": {
+            "type": "string",
+            "description": "The base the rates are quoted against."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FxRateView"
+            },
+            "description": "Oldest first, by currency."
+          }
+        }
+      },
+      "FxRateView": {
+        "type": "object",
+        "description": "One FX observation.",
+        "required": [
+          "currency",
+          "as_of",
+          "rate"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the rate became known, nanoseconds since the epoch."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Foreign currency."
+          },
+          "rate": {
+            "type": "string",
+            "description": "Base-currency units per unit of `currency`, exact decimal text."
+          }
+        }
       },
       "GapReportDetailView": {
         "type": "object",
@@ -7744,6 +8066,95 @@
           }
         },
         "additionalProperties": false
+      },
+      "InstrumentListView": {
+        "type": "object",
+        "description": "The workspace's instruments.",
+        "required": [
+          "base_currency",
+          "items"
+        ],
+        "properties": {
+          "base_currency": {
+            "type": "string",
+            "description": "The base currency records default to."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InstrumentView"
+            },
+            "description": "By symbol."
+          }
+        }
+      },
+      "InstrumentView": {
+        "type": "object",
+        "description": "One instrument record.",
+        "required": [
+          "symbol",
+          "type",
+          "currency",
+          "multiplier",
+          "tick_size",
+          "lot_size"
+        ],
+        "properties": {
+          "coupon_rate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Annual coupon rate as a fraction (bonds), exact decimal text."
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO currency the price is quoted in."
+          },
+          "expiry": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Expiry (futures, options), nanoseconds since the epoch."
+          },
+          "lot_size": {
+            "type": "string",
+            "description": "Smallest tradable quantity, exact decimal text."
+          },
+          "maturity": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Maturity (bonds), nanoseconds since the epoch."
+          },
+          "multiplier": {
+            "type": "string",
+            "description": "Contract multiplier, exact decimal text."
+          },
+          "strike": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Strike (options), exact decimal text."
+          },
+          "symbol": {
+            "type": "string",
+            "description": "Symbol, unique in the workspace."
+          },
+          "tick_size": {
+            "type": "string",
+            "description": "Smallest price increment, exact decimal text."
+          },
+          "type": {
+            "type": "string",
+            "description": "`equity`, `future`, `bond`, `option` or `swap`."
+          }
+        }
       },
       "JobPage": {
         "type": "object",
@@ -11783,6 +12194,10 @@
     {
       "name": "lifecycles",
       "description": "Instrument lifecycles, symbol changes, delistings and universes"
+    },
+    {
+      "name": "instruments",
+      "description": "Instrument records, base currency and FX rates"
     },
     {
       "name": "providers",

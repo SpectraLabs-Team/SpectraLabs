@@ -61,6 +61,19 @@ pub struct CreateBacktest {
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub as_of: Option<serde_json::Value>,
+    /// The currency the run books in. Default: the workspace's base currency.
+    #[serde(default)]
+    pub base_currency: Option<String>,
+    /// Instrument records (`[{"symbol", "type", "currency", "multiplier", "tick_size", ...}]`).
+    /// Default: the workspace's records that change a run (see `/api/v1/instruments`).
+    #[serde(default)]
+    #[schema(value_type = Option<Vec<Object>>)]
+    pub instruments: Option<Vec<serde_json::Value>>,
+    /// FX rates by currency: `{"EUR": [{"as_of", "rate"}]}`. Default: the
+    /// workspace's rates for the currencies the instruments are quoted in.
+    #[serde(default)]
+    #[schema(value_type = Option<Object>)]
+    pub fx_rates: Option<serde_json::Value>,
     /// -10..10; higher runs first. Default 0.
     #[serde(default)]
     pub priority: i32,
@@ -288,6 +301,21 @@ pub(crate) async fn create_backtest(
     }
     if let Some(a) = req.as_of {
         payload["as_of"] = a;
+    }
+    if let Some(b) = req.base_currency {
+        payload["base_currency"] = serde_json::Value::String(b);
+    }
+    if let Some(list) = req.instruments {
+        payload["instruments"] = serde_json::Value::Array(list);
+    }
+    if let Some(fx) = req.fx_rates {
+        payload["fx_rates"] = fx;
+    }
+    // Snapshot the workspace's instrument data into the run, so it reproduces.
+    if let Ok((pool, ws)) = crate::jobs_api::context(&st, &id) {
+        if let Err(e) = crate::instruments_api::embed_instruments(&pool, ws, &mut payload).await {
+            return db_error(&e);
+        }
     }
     match submit(&st, &id, spectra_backtest::JOB_KIND.to_string(), payload, req.priority).await {
         Ok(job) => to_json(202, &BacktestView::from(job)),

@@ -628,10 +628,11 @@ fn listing_validates_the_instrument_record() {
     fut.kind = InstrumentType::Future;
     fut.multiplier = r(50);
     fut.expiry_ns = Some(1);
-    l.list(AAPL, &fut, "USD", 0).unwrap();
+    l.list(AAPL, &fut, 0).unwrap();
     assert_eq!(l.multiplier(AAPL), r(50));
 
-    let eur = Instrument::equity("SAP", "EUR", p(0.01), Qty::from_raw(SCALE));
-    assert_eq!(l.list(2, &eur, "USD", 0), rej(Reject::InvalidFill));
+    let mut bad = Instrument::equity("SAP", "EUR", p(0.01), Qty::from_raw(SCALE));
+    bad.expiry_ns = Some(1); // an equity cannot expire
+    assert_eq!(l.list(2, &bad, 0), rej(Reject::InvalidFill));
     assert_eq!(l.multiplier(2), Ratio::ONE);
 }

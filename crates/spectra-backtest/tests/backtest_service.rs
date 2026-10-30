@@ -532,7 +532,13 @@ fn summary_writes_null_for_non_finite_ratios() {
     }
     let req = BacktestRequest::new("buy_and_hold", &ParamSet::default(), BacktestConfig::default()).unwrap();
     let result = run_backtest(&bars, &mut OneTrade(0), &req.config).unwrap();
-    let out = BacktestOutput { request: req, result, benchmark: Vec::new(), symbols: Vec::new() };
+    let out = BacktestOutput {
+        request: req,
+        result,
+        benchmark: Vec::new(),
+        symbols: Vec::new(),
+        setup: spectra_engine::InstrumentSetup::default(),
+    };
     let s = summary_json(&out).unwrap();
     let t = s.find("trades").unwrap();
     assert_eq!(t.find("wins").unwrap().as_int().unwrap(), 1);

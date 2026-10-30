@@ -39,7 +39,14 @@ impl Strategy for BuyAndHold {
         self.done = true;
         let budget = ctx.cash().to_f64() * self.allocation / bars.len() as f64;
         for b in bars {
-            let units = (budget / b.close.to_f64()).floor();
+            // Base-currency value of one unit (FX and multiplier included); the close for a plain equity.
+            let Some(unit) = ctx.unit_value(b.instrument, b.close).filter(|u| *u > 0.0) else { continue };
+            let mut units = (budget / unit).floor();
+            if let Some(lot) =
+                ctx.lot_size(b.instrument).map(spectra_core::Fixed::to_f64).filter(|l| *l > 0.0)
+            {
+                units = (units / lot).floor() * lot;
+            }
             if units >= 1.0 {
                 if let Ok(q) = Qty::from_units(units as i64) {
                     ctx.market(b.instrument, Side::Buy, q);

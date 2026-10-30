@@ -88,6 +88,9 @@ pub struct Instrument {
     pub maturity_ns: Option<i64>,
     /// Annual coupon rate as a fraction (bonds): 0.05 is 5%.
     pub coupon_rate: Option<Ratio>,
+    /// What the contract is on: a future's chain (contracts with the same
+    /// underlying roll into each other, e.g. `ES`), or an option's underlying symbol.
+    pub underlying: Option<String>,
 }
 
 /// The base currency of a workspace that has not chosen one.
@@ -117,6 +120,7 @@ impl Instrument {
             strike: None,
             maturity_ns: None,
             coupon_rate: None,
+            underlying: None,
         }
     }
 
@@ -140,6 +144,9 @@ impl Instrument {
         }
         if self.lot_size.raw() <= 0 {
             return Err("lot size must be positive".into());
+        }
+        if self.underlying.as_deref().is_some_and(|u| u.trim().is_empty()) {
+            return Err("underlying must not be blank".into());
         }
         self.validate_type_fields()
     }
@@ -175,6 +182,7 @@ impl Instrument {
                 forbid(self.strike.is_some(), "a strike")?;
                 forbid(self.maturity_ns.is_some(), "a maturity")?;
                 forbid(self.coupon_rate.is_some(), "a coupon rate")?;
+                forbid(self.underlying.is_some(), "an underlying")?;
                 if self.multiplier != Ratio::ONE {
                     return Err("an equity's multiplier must be 1".into());
                 }
@@ -196,6 +204,7 @@ impl Instrument {
                 need(self.coupon_rate.is_some(), "a coupon rate")?;
                 forbid(self.expiry_ns.is_some(), "an expiry")?;
                 forbid(self.strike.is_some(), "a strike")?;
+                forbid(self.underlying.is_some(), "an underlying")?;
             }
             InstrumentType::Swap => return Err("swaps are not supported yet".into()),
         }

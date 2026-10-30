@@ -77,7 +77,7 @@ pub struct StrategyAllocation {
 /// Most strategies in one request.
 pub const MAX_REQUEST_STRATEGIES: usize = 10;
 
-const REQUEST_FIELDS: [&str; 10] = [
+const REQUEST_FIELDS: [&str; 11] = [
     "strategy",
     "params",
     "strategies",
@@ -88,6 +88,7 @@ const REQUEST_FIELDS: [&str; 10] = [
     "base_currency",
     "instruments",
     "fx_rates",
+    "futures_roll",
 ];
 const ENTRY_FIELDS: [&str; 3] = ["strategy", "params", "weight"];
 

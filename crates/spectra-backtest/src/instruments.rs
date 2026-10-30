@@ -27,7 +27,7 @@ use spectra_core::{
     is_currency_code, Fixed, Instrument, InstrumentId, InstrumentType, Json, Price, Qty, Ratio, Result,
     DEFAULT_BASE_CURRENCY,
 };
-use spectra_engine::{FxRate, InstrumentSetup};
+use spectra_engine::{FxRate, InstrumentSetup, RollAdjust, RollRule, MAX_ROLL_BUSINESS_DAYS};
 
 use crate::config::FieldError;
 
@@ -51,12 +51,14 @@ pub struct RequestInstruments {
     pub fx: BTreeMap<String, Vec<FxRate>>,
     /// The FX timestamps as given, for the stored form.
     fx_text: BTreeMap<String, Vec<String>>,
+    /// The futures roll rule, when the request sets one (else the default).
+    pub roll: Option<RollRule>,
 }
 
 /// Request fields this module reads.
-pub const FIELDS: [&str; 3] = ["base_currency", "instruments", "fx_rates"];
+pub const FIELDS: [&str; 4] = ["base_currency", "instruments", "fx_rates", "futures_roll"];
 
-const INSTRUMENT_FIELDS: [&str; 11] = [
+const INSTRUMENT_FIELDS: [&str; 12] = [
     "symbol",
     "instrument",
     "type",
@@ -68,6 +70,7 @@ const INSTRUMENT_FIELDS: [&str; 11] = [
     "strike",
     "maturity",
     "coupon_rate",
+    "underlying",
 ];
 
 fn err(errors: &mut Vec<FieldError>, field: impl Into<String>, message: impl Into<String>) {
@@ -92,6 +95,38 @@ fn timestamp(v: &Json) -> Option<(i64, String)> {
             .map(|t| (t.ts_ns, s.trim().to_string())),
         _ => None,
     }
+}
+
+/// Reads `futures_roll`: `{"business_days_before_expiry": 5, "adjust": "ratio"}`,
+/// both optional (defaults: [`RollRule::default`]).
+fn parse_roll(v: &Json, errors: &mut Vec<FieldError>) -> Option<RollRule> {
+    let Ok(entries) = v.entries() else {
+        err(errors, "futures_roll", "must be an object {business_days_before_expiry, adjust}");
+        return None;
+    };
+    let before = errors.len();
+    let mut rule = RollRule::default();
+    for (k, val) in entries {
+        match (k.as_str(), val) {
+            ("business_days_before_expiry", Json::Int(n))
+                if (0..=i64::from(MAX_ROLL_BUSINESS_DAYS)).contains(n) =>
+            {
+                rule.business_days_before_expiry = *n as u32;
+            }
+            ("business_days_before_expiry", _) => err(
+                errors,
+                "futures_roll.business_days_before_expiry",
+                format!("must be a whole number from 0 to {MAX_ROLL_BUSINESS_DAYS}"),
+            ),
+            ("adjust", Json::String(a)) => match RollAdjust::parse(a.trim()) {
+                Some(m) => rule.adjust = m,
+                None => err(errors, "futures_roll.adjust", "must be \"ratio\" or \"difference\""),
+            },
+            ("adjust", _) => err(errors, "futures_roll.adjust", "must be \"ratio\" or \"difference\""),
+            (other, _) => err(errors, format!("futures_roll.{other}"), "unknown field"),
+        }
+    }
+    (errors.len() == before).then_some(rule)
 }
 
 /// Reads one instrument record (the shape of an `instruments` entry), with
@@ -190,6 +225,14 @@ fn parse_one(
             }
         },
     };
+    let underlying = match item.find("underlying") {
+        None | Some(Json::Null) => None,
+        Some(Json::String(u)) if !u.trim().is_empty() => Some(u.trim().to_string()),
+        Some(_) => {
+            err(errors, format!("{p}underlying"), "must be a non-empty string");
+            None
+        }
+    };
     let mut when = |name: &str| match item.find(name) {
         None | Some(Json::Null) => None,
         Some(v) => timestamp(v).map(|t| t.0).or_else(|| {
@@ -222,6 +265,7 @@ fn parse_one(
         strike: strike.map(Price::from_raw),
         maturity_ns: maturity,
         coupon_rate: coupon,
+        underlying,
     };
     if let Err(e) = inst.validate() {
         err(errors, whole, e);
@@ -233,7 +277,10 @@ fn parse_one(
 impl RequestInstruments {
     /// True when the request says nothing about instruments.
     pub fn is_empty(&self) -> bool {
-        self.base_currency.is_none() && self.instruments.is_empty() && self.fx.is_empty()
+        self.base_currency.is_none()
+            && self.instruments.is_empty()
+            && self.fx.is_empty()
+            && self.roll.is_none()
     }
 
     /// The base currency the run books in.
@@ -268,6 +315,9 @@ impl RequestInstruments {
         }
         if let Some(fx) = doc.find("fx_rates").filter(|v| !v.is_null()) {
             Self::parse_fx(fx, &mut out, errors);
+        }
+        if let Some(r) = doc.find("futures_roll").filter(|v| !v.is_null()) {
+            out.roll = parse_roll(r, errors);
         }
         // One record per instrument.
         for (i, (r, _)) in out.instruments.iter().enumerate() {
@@ -331,8 +381,11 @@ impl RequestInstruments {
     /// # Errors
     /// A message for a record naming an id outside the dataset.
     pub fn resolve(&self, symbols: &[String]) -> std::result::Result<InstrumentSetup, String> {
-        let mut setup =
-            InstrumentSetup { base_currency: self.base().to_string(), ..InstrumentSetup::default() };
+        let mut setup = InstrumentSetup {
+            base_currency: self.base().to_string(),
+            roll: self.roll.unwrap_or_default(),
+            ..InstrumentSetup::default()
+        };
         for (i, (r, inst)) in self.instruments.iter().enumerate() {
             let id = match r {
                 InstrumentRef::Symbol(s) => {
@@ -367,6 +420,17 @@ impl RequestInstruments {
         if let Some(b) = &self.base_currency {
             doc = doc.with("base_currency", Json::string(b.clone()));
         }
+        if let Some(r) = &self.roll {
+            doc = doc.with(
+                "futures_roll",
+                Json::object()
+                    .with(
+                        "business_days_before_expiry",
+                        Json::integer(i64::from(r.business_days_before_expiry)),
+                    )
+                    .with("adjust", Json::string(r.adjust.as_str())),
+            );
+        }
         if !self.instruments.is_empty() {
             let mut list = Json::array();
             for (r, i) in &self.instruments {
@@ -391,6 +455,9 @@ impl RequestInstruments {
                 }
                 if let Some(c) = i.coupon_rate {
                     j = j.with("coupon_rate", Json::string(c.to_string()));
+                }
+                if let Some(u) = &i.underlying {
+                    j = j.with("underlying", Json::string(u.clone()));
                 }
                 list.push(j)?;
             }

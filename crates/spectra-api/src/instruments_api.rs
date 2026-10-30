@@ -42,6 +42,8 @@ pub struct InstrumentView {
     pub maturity: Option<i64>,
     /// Annual coupon rate as a fraction (bonds), exact decimal text.
     pub coupon_rate: Option<String>,
+    /// A future's chain or an option's underlying symbol.
+    pub underlying: Option<String>,
 }
 
 impl From<&Instrument> for InstrumentView {
@@ -57,6 +59,7 @@ impl From<&Instrument> for InstrumentView {
             strike: i.strike.map(|p| p.to_string()),
             maturity: i.maturity_ns,
             coupon_rate: i.coupon_rate.map(|r| r.to_string()),
+            underlying: i.underlying.clone(),
         }
     }
 }

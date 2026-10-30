@@ -37,6 +37,11 @@ impl Strategy for BuyAndHold {
             return;
         }
         self.done = true;
+        // Futures: only each chain's front contract; the engine rolls it.
+        let bars: Vec<&Bar> = bars.iter().filter(|b| ctx.is_front(b.instrument)).collect();
+        if bars.is_empty() {
+            return;
+        }
         let budget = ctx.cash().to_f64() * self.allocation / bars.len() as f64;
         for b in bars {
             // Base-currency value of one unit (FX and multiplier included); the close for a plain equity.

@@ -74,6 +74,11 @@ pub struct CreateBacktest {
     #[serde(default)]
     #[schema(value_type = Option<Object>)]
     pub fx_rates: Option<serde_json::Value>,
+    /// Futures roll rule: `{"business_days_before_expiry": 5, "adjust": "ratio"}`
+    /// (both optional; those are the defaults).
+    #[serde(default)]
+    #[schema(value_type = Option<Object>)]
+    pub futures_roll: Option<serde_json::Value>,
     /// -10..10; higher runs first. Default 0.
     #[serde(default)]
     pub priority: i32,
@@ -239,8 +244,17 @@ pub struct DatasetListQuery {
 }
 
 /// Stored files of a finished backtest that `/artifacts/{kind}` serves.
-pub const DOWNLOADABLE_ARTIFACTS: [&str; 7] =
-    ["summary", "request", "equity_csv", "orders_csv", "fills_csv", "returns_csv", "strategies_csv"];
+pub const DOWNLOADABLE_ARTIFACTS: [&str; 9] = [
+    "summary",
+    "request",
+    "equity_csv",
+    "orders_csv",
+    "fills_csv",
+    "returns_csv",
+    "strategies_csv",
+    "rolls_csv",
+    "continuous_csv",
+];
 
 /// `GET /api/v1/backtests/{id}/series` query.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -310,6 +324,9 @@ pub(crate) async fn create_backtest(
     }
     if let Some(fx) = req.fx_rates {
         payload["fx_rates"] = fx;
+    }
+    if let Some(r) = req.futures_roll {
+        payload["futures_roll"] = r;
     }
     // Snapshot the workspace's instrument data into the run, so it reproduces.
     if let Ok((pool, ws)) = crate::jobs_api::context(&st, &id) {
@@ -826,11 +843,12 @@ pub(crate) async fn list_datasets(
 
 /// A stored file of a finished backtest, as stored (CSV or JSON), with a
 /// download file name. `kind` is one of `summary`, `request`, `equity_csv`,
-/// `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`.
+/// `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`, and for a run with
+/// futures `rolls_csv` and `continuous_csv`.
 #[utoipa::path(get, path = "/api/v1/backtests/{id}/artifacts/{kind}", tag = "backtests",
     params(
         ("id" = Uuid, Path, description = "Backtest (job) id"),
-        ("kind" = String, Path, description = "summary, request, equity_csv, orders_csv, fills_csv, returns_csv or strategies_csv"),
+        ("kind" = String, Path, description = "summary, request, equity_csv, orders_csv, fills_csv, returns_csv, strategies_csv, rolls_csv or continuous_csv"),
     ),
     responses(
         (status = 200, description = "The file"),

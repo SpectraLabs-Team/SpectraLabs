@@ -28,11 +28,12 @@ pub struct InstrumentRow {
 pub async fn create_instrument(pool: &PgPool, workspace_id: Uuid, inst: &Instrument) -> Result<Uuid, Error> {
     let row = sqlx::query(
         "INSERT INTO instruments (workspace_id, symbol, instrument_type, currency, multiplier, tick_size,
-             lot_size, expiry, strike, maturity, coupon_rate)
+             lot_size, expiry, strike, maturity, coupon_rate, underlying)
          VALUES ($1, $2, $3, $4,
              ($5::bigint)::numeric / 100000000, ($6::bigint)::numeric / 100000000, ($7::bigint)::numeric / 100000000,
              to_timestamp(($8::bigint / 1000)::double precision / 1000000), ($9::bigint)::numeric / 100000000,
-             to_timestamp(($10::bigint / 1000)::double precision / 1000000), ($11::bigint)::numeric / 100000000)
+             to_timestamp(($10::bigint / 1000)::double precision / 1000000), ($11::bigint)::numeric / 100000000,
+             $12)
          RETURNING id",
     )
     .bind(workspace_id)
@@ -46,6 +47,7 @@ pub async fn create_instrument(pool: &PgPool, workspace_id: Uuid, inst: &Instrum
     .bind(inst.strike.map(spectra_core::Fixed::raw))
     .bind(inst.maturity_ns)
     .bind(inst.coupon_rate.map(spectra_core::Fixed::raw))
+    .bind(inst.underlying.as_deref())
     .fetch_one(pool)
     .await?;
     Ok(row.get("id"))
@@ -65,6 +67,7 @@ pub async fn list_instruments(pool: &PgPool, workspace_id: Uuid) -> Result<Vec<I
                 (strike * 100000000)::bigint AS strike,
                 (extract(epoch from maturity) * 1000000000)::bigint AS maturity_ns,
                 (coupon_rate * 100000000)::bigint AS coupon_rate,
+                underlying,
                 created_at
          FROM instruments WHERE workspace_id = $1 ORDER BY symbol",
     )
@@ -88,6 +91,7 @@ fn row_to_instrument(r: &sqlx::postgres::PgRow) -> Result<InstrumentRow, Error> 
         strike: r.get::<Option<i64>, _>("strike").map(Price::from_raw),
         maturity_ns: r.get("maturity_ns"),
         coupon_rate: r.get::<Option<i64>, _>("coupon_rate").map(Ratio::from_raw),
+        underlying: r.get("underlying"),
     };
     Ok(InstrumentRow { id: r.get("id"), instrument, created_at: r.get("created_at") })
 }

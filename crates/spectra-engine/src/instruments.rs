@@ -15,6 +15,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::futures::RollRule;
 use spectra_core::fixed::{div_round_half_away, narrow};
 use spectra_core::{
     is_currency_code, sha256_hex, Error, Instrument, InstrumentId, InstrumentType, Price, Result,
@@ -93,12 +94,15 @@ pub struct InstrumentSetup {
     pub instruments: BTreeMap<InstrumentId, Instrument>,
     /// Rate series by currency code, each strictly increasing in time.
     pub fx: BTreeMap<String, Vec<FxRate>>,
+    /// When futures roll and how continuous series are adjusted (decision 3).
+    pub roll: RollRule,
 }
 
 impl Default for InstrumentSetup {
     fn default() -> Self {
         Self {
             base_currency: DEFAULT_BASE_CURRENCY.into(),
+            roll: RollRule::default(),
             instruments: BTreeMap::new(),
             fx: BTreeMap::new(),
         }
@@ -146,6 +150,7 @@ impl InstrumentSetup {
     /// [`Error::InvalidArgument`] naming the first problem.
     pub fn validate(&self) -> Result<()> {
         let bad = |m: String| Error::InvalidArgument(m);
+        self.roll.validate()?;
         if !is_currency_code(&self.base_currency) {
             return Err(bad(format!(
                 "base currency \"{}\" must be a three-letter ISO code",
@@ -243,6 +248,13 @@ impl InstrumentSetup {
                 opt_i64(i.maturity_ns),
                 opt_i64(i.coupon_rate.map(spectra_core::Ratio::raw)),
             ));
+            if let Some(u) = &i.underlying {
+                s.push_str(&format!("underlying={u};"));
+            }
+        }
+        // The roll rule changes only runs that have futures.
+        if self.effective().any(|(_, i)| i.kind == InstrumentType::Future) {
+            s.push_str(&self.roll.canonical());
         }
         for ccy in self.foreign_currencies() {
             if let Some(series) = self.fx.get(ccy) {

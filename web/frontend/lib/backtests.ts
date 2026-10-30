@@ -152,6 +152,27 @@ export interface StrategySummary {
   realized_pnl: string;
 }
 
+/** One roll, close or settlement the engine made on a futures position. */
+export interface FuturesRoll {
+  ts_ns: number;
+  strategy: number;
+  kind: 'rolled' | 'closed' | 'settled';
+  from: string;
+  to: string | null;
+  qty: string;
+  close_price: string;
+  open_price: string | null;
+  note: string | null;
+}
+
+export interface FuturesSummary {
+  roll_rule: { business_days_before_expiry: number; adjust: 'ratio' | 'difference' };
+  chains: string[];
+  rolls: FuturesRoll[];
+  /** What the model leaves out (margin), in words. */
+  gaps: string[];
+}
+
 export interface InstrumentSummary {
   instrument: number;
   symbol: string | null;
@@ -160,6 +181,8 @@ export interface InstrumentSummary {
   currency?: string;
   multiplier?: string;
   expiry?: number | null;
+  /** A future's chain or an option's underlying. */
+  underlying?: string | null;
   fills: number;
   traded_notional: N;
   final_qty: string;
@@ -223,6 +246,8 @@ export interface Summary {
     avg_holding_days: N;
   };
   instruments: InstrumentSummary[];
+  /** M24.2: present only for runs with futures. */
+  futures?: FuturesSummary;
   benchmark: {
     valid: boolean;
     name?: string;
@@ -322,6 +347,8 @@ export const DOWNLOADS = [
   { kind: 'fills_csv', label: 'Fills', file: 'fills.csv' },
   { kind: 'returns_csv', label: 'Returns', file: 'returns.csv' },
   { kind: 'strategies_csv', label: 'Per strategy', file: 'strategies.csv' },
+  { kind: 'rolls_csv', label: 'Futures rolls', file: 'rolls.csv' },
+  { kind: 'continuous_csv', label: 'Continuous series', file: 'continuous.csv' },
   { kind: 'summary', label: 'Summary', file: 'summary.json' },
   { kind: 'request', label: 'Request', file: 'request.json' },
 ] as const;

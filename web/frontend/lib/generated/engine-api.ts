@@ -48,7 +48,8 @@ export interface paths {
         };
         /** A stored file of a finished backtest, as stored (CSV or JSON), with a
          *     download file name. `kind` is one of `summary`, `request`, `equity_csv`,
-         *     `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`. */
+         *     `orders_csv`, `fills_csv`, `returns_csv`, `strategies_csv`, and for a run with
+         *     futures `rolls_csv` and `continuous_csv`. */
         get: operations["backtest_artifact"];
         put?: never;
         post?: never;
@@ -2326,6 +2327,9 @@ export interface components {
              * @description A dataset version of the caller's workspace.
              */
             dataset_version_id: string;
+            /** @description Futures roll rule: `{"business_days_before_expiry": 5, "adjust": "ratio"}`
+             *     (both optional; those are the defaults). */
+            futures_roll?: Record<string, never> | null;
             /** @description FX rates by currency: `{"EUR": [{"as_of", "rate"}]}`. Default: the
              *     workspace's rates for the currencies the instruments are quoted in. */
             fx_rates?: Record<string, never> | null;
@@ -2944,6 +2948,8 @@ export interface components {
             tick_size: string;
             /** @description `equity`, `future`, `bond`, `option` or `swap`. */
             type: string;
+            /** @description A future's chain or an option's underlying symbol. */
+            underlying?: string | null;
         };
         /** @description A page of jobs. */
         JobPage: {
@@ -4712,7 +4718,7 @@ export interface operations {
             path: {
                 /** @description Backtest (job) id */
                 id: string;
-                /** @description summary, request, equity_csv, orders_csv, fills_csv, returns_csv or strategies_csv */
+                /** @description summary, request, equity_csv, orders_csv, fills_csv, returns_csv, strategies_csv, rolls_csv or continuous_csv */
                 kind: string;
             };
             cookie?: never;

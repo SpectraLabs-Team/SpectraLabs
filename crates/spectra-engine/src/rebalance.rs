@@ -143,7 +143,7 @@ impl<S: WeightStrategy> Rebalancer<S> {
                 self.changed
                     || (equity > 0.0
                         && self.universe(ctx).into_iter().any(|id| {
-                            let actual = ctx.position_value(id).to_f64() / equity;
+                            let actual = ctx.position_exposure(id).to_f64() / equity;
                             (actual - self.targets.get(&id).copied().unwrap_or(0.0)).abs() > th
                         }))
             }

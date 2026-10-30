@@ -208,6 +208,8 @@ pub fn run_job(
             "orders.csv" => "orders_csv",
             "fills.csv" => "fills_csv",
             "strategies.csv" => "strategies_csv",
+            "rolls.csv" => "rolls_csv",
+            "continuous.csv" => "continuous_csv",
             _ => "returns_csv",
         };
         files.push(JobFile { kind, file_name: a.name, media_type: a.media_type, bytes: a.bytes });

@@ -183,6 +183,58 @@ jobs:
           GMAIL_USER: ci-not-a-real-account@example.test
           GMAIL_APP_PASSWORD: ci-only-placeholder-not-a-real-password
 
+  admin-gate:
+    name: Admin role-gate E2E tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: [test, web]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: web/frontend
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      AUTH_SECRET: ci-only-auth-secret-value-at-least-32-bytes
+      GMAIL_USER: ci-not-a-real-account@example.test
+      GMAIL_APP_PASSWORD: ci-only-placeholder-not-a-real-password
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+      - run: npm ci
+      - name: Install Chromium for Playwright
+        run: npx playwright install chromium --with-deps
+      - name: Build Next.js app
+        run: npm run build
+      - name: Start app and run admin role-gate tests
+        run: |
+          trap 'kill $app_pid 2>/dev/null || true' EXIT
+          npm start &
+          app_pid=$!
+          ready=false
+          for attempt in $(seq 1 45); do
+            if curl -sS -o /dev/null http://localhost:3000 2>/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            echo "::error::Next.js app did not respond on http://localhost:3000"
+            exit 1
+          fi
+          npm run test:admin-gate
+
   containers:
     name: Docker images and Compose profiles
     runs-on: ubuntu-24.04

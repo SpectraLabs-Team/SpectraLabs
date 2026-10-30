@@ -8,6 +8,7 @@ import {
   ArrowDownRight,
   ArrowRight,
   ArrowUpRight,
+  BarChart2,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -61,6 +62,7 @@ import { Badge, ErrorNote, GlassCard, Spinner } from '@/components/ui/primitives
 import { useToast } from '@/components/ui/StudioToast';
 import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import { TradingChart } from './TradingChart';
+import { TradingViewWidget } from './TradingViewWidget';
 import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 import {
   CURATED_WATCHLIST_ITEMS,
@@ -201,6 +203,8 @@ export function PaperLab() {
   const [chartTimeframe, setChartTimeframe] = useState('1Day');
   const [chartLoading, setChartLoading] = useState(false);
   const [chartDataStatus, setChartDataStatus] = useState('Alpaca Paper (IEX Feed)');
+  const [chartEngine, setChartEngine] = useState<'tradingview' | 'spectra'>('tradingview');
+  const [liveStreamPrice, setLiveStreamPrice] = useState<number | null>(null);
 
   // Upgraded Order Ticket state
   const [orderSide, setOrderSide] = useState<'buy' | 'sell'>('buy');
@@ -362,10 +366,10 @@ export function PaperLab() {
     });
   }, [checkStatus, loadAlpacaData]);
 
-// Backfill historical predecessor bars when live feed returns sparse bars (e.g. only today's single bar)
+// Backfill historical predecessor bars when live feed returns sparse bars
 function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]): CandleBar[] {
   if (!liveBars || liveBars.length === 0) return [];
-  const targetCount = 45;
+  const targetCount = 30;
   const missing = targetCount - liveBars.length;
   if (missing <= 0) return liveBars;
 
@@ -377,26 +381,19 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     : 86_400_000;
 
   const firstTime = typeof firstLive.t === 'number' ? firstLive.t : new Date(firstLive.t).getTime();
-  let currentPrice = firstLive.o || getBaselineTickerPrice(sym);
+  const currentPrice = firstLive.o || getBaselineTickerPrice(sym);
   const backfilled: CandleBar[] = [];
 
   for (let i = missing; i >= 1; i--) {
     const t = firstTime - i * stepMs;
-    const volFactor = tf.includes('Min') ? 0.005 : 0.015;
-    const delta = (Math.random() - 0.49) * (currentPrice * volFactor);
-    const c = Math.max(1, Math.round((currentPrice + delta) * 100) / 100);
-    const o = currentPrice;
-    const h = Math.round((Math.max(o, c) + Math.random() * (currentPrice * volFactor * 0.4)) * 100) / 100;
-    const l = Math.round((Math.min(o, c) - Math.random() * (currentPrice * volFactor * 0.4)) * 100) / 100;
     backfilled.push({
       t: new Date(t).toISOString(),
-      o,
-      h,
-      l,
-      c,
-      v: Math.floor(60000 + Math.random() * 250000),
+      o: currentPrice,
+      h: currentPrice,
+      l: currentPrice,
+      c: currentPrice,
+      v: firstLive.v || 10000,
     });
-    currentPrice = c;
   }
 
   return [...backfilled, ...liveBars];
@@ -418,30 +415,8 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
         const last = bars[bars.length - 1];
         if (last && !silent) setLimitPrice(last.c.toFixed(2));
       } else {
-        // Fallback: generate realistic price points around recent quotes if external feed is offline
-        const now = Date.now();
-        const fallback: CandleBar[] = [];
-        let price = getBaselineTickerPrice(sym);
-        const step = tf.includes('Min') ? 60 * 1000 : 24 * 3600 * 1000;
-        for (let i = 45; i >= 0; i--) {
-          const t = now - i * step;
-          const delta = (Math.random() - 0.48) * (price * 0.015);
-          const c = Math.max(1, price + delta);
-          const o = price;
-          const h = Math.max(o, c) + Math.random() * (price * 0.005);
-          const l = Math.min(o, c) - Math.random() * (price * 0.005);
-          fallback.push({
-            t,
-            o: Math.round(o * 100) / 100,
-            h: Math.round(h * 100) / 100,
-            l: Math.round(l * 100) / 100,
-            c: Math.round(c * 100) / 100,
-            v: Math.floor(100000 + Math.random() * 400000),
-          });
-          price = c;
-        }
-        setChartBars(fallback);
-        setChartDataStatus(isCryptoPair(sym) ? 'Coinbase Pro (24/7 Feed)' : 'Market Data Simulated');
+        setChartBars([]);
+        setChartDataStatus(isCryptoPair(sym) ? 'Coinbase Pro (24/7 Feed)' : 'Real-Time Market Feed');
       }
     } catch {
       if (!silent) setChartBars([]);
@@ -450,32 +425,122 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     }
   }, []);
 
-  // 3b. Real-Time Auto-Refresh and Live Price Ticks
+  // 3a. Real-Time Coinbase WebSocket for sub-second crypto ticks
+  useEffect(() => {
+    if (!isCryptoSymbol(selectedSymbol)) return;
+
+    const cleanBase = selectedSymbol.toUpperCase().replace('/USD', '').replace('USD', '').trim();
+    const productId = `${cleanBase}-USD`;
+    let ws: WebSocket | null = null;
+    let isCancelled = false;
+
+    try {
+      ws = new WebSocket('wss://ws-feed.exchange.coinbase.com');
+      ws.onopen = () => {
+        if (isCancelled || !ws) return;
+        ws.send(
+          JSON.stringify({
+            type: 'subscribe',
+            product_ids: [productId],
+            channels: ['ticker'],
+          })
+        );
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'ticker' && data.price) {
+            const price = parseFloat(data.price);
+            if (!isNaN(price) && price > 0) {
+              setLiveStreamPrice((prev) => {
+                if (prev) {
+                  if (price > prev) {
+                    setPriceTickFlash('up');
+                    setTimeout(() => setPriceTickFlash(null), 500);
+                  } else if (price < prev) {
+                    setPriceTickFlash('down');
+                    setTimeout(() => setPriceTickFlash(null), 500);
+                  }
+                }
+                return price;
+              });
+              setChartDataStatus('Coinbase Pro (Real-Time Sub-Second Stream)');
+
+              setChartBars((prev) => {
+                if (!prev || prev.length === 0) return prev;
+                const last = prev[prev.length - 1];
+                const nextHigh = Math.max(last.h, price);
+                const nextLow = Math.min(last.l, price);
+                return [
+                  ...prev.slice(0, prev.length - 1),
+                  {
+                    ...last,
+                    c: price,
+                    h: nextHigh,
+                    l: nextLow,
+                  },
+                ];
+              });
+            }
+          }
+        } catch {
+          // ignore
+        }
+      };
+    } catch {
+      // ignore
+    }
+
+    return () => {
+      isCancelled = true;
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        try {
+          ws.close();
+        } catch {
+          // ignore
+        }
+      }
+    };
+  }, [selectedSymbol]);
+
+  // 3b. Real-Time Auto-Refresh and Live Price Ticks for Stocks & REST fallback
   useEffect(() => {
     if (checkingConnection) return;
+
+    // Reset liveStreamPrice when switching symbol so it doesn't carry over
+    setLiveStreamPrice(null);
 
     // Initial load with spinner
     loadBars(selectedSymbol, chartTimeframe, isConnected, false);
 
-    // Active real-time tick interval (every 2.8 seconds)
+    const isCrypto = isCryptoSymbol(selectedSymbol);
+    const pollInterval = isCrypto ? 3500 : 1200;
+
     const tickInterval = setInterval(async () => {
       try {
         const quote = await getRealtimeQuote(selectedSymbol);
         if (quote && quote.price > 0) {
-          setChartDataStatus(quote.source || (isCryptoPair(selectedSymbol) ? 'Coinbase Pro (24/7 Feed)' : 'Real-Time Market Feed'));
+          setLiveStreamPrice((prev) => {
+            if (prev) {
+              if (quote.price > prev) {
+                setPriceTickFlash('up');
+                setTimeout(() => setPriceTickFlash(null), 500);
+              } else if (quote.price < prev) {
+                setPriceTickFlash('down');
+                setTimeout(() => setPriceTickFlash(null), 500);
+              }
+            }
+            return quote.price;
+          });
+          setChartDataStatus(quote.source || (isCrypto ? 'Coinbase Pro (24/7 Feed)' : 'Real-Time Market Feed'));
+
           setChartBars((prev) => {
             if (!prev || prev.length === 0) return prev;
             const last = prev[prev.length - 1];
-            if (quote.price > last.c) {
-              setPriceTickFlash('up');
-              setTimeout(() => setPriceTickFlash(null), 600);
-            } else if (quote.price < last.c) {
-              setPriceTickFlash('down');
-              setTimeout(() => setPriceTickFlash(null), 600);
-            }
             const nextHigh = Math.max(last.h, quote.high || quote.price);
             const nextLow = Math.min(last.l, quote.low || quote.price);
-            const nextVol = quote.volume && quote.volume > last.v ? quote.volume : last.v + 15;
+            const nextVol = quote.volume && quote.volume > last.v ? quote.volume : last.v;
             const updatedLast: CandleBar = {
               ...last,
               c: quote.price,
@@ -485,37 +550,11 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
             };
             return [...prev.slice(0, prev.length - 1), updatedLast];
           });
-          return;
         }
       } catch {
         // ignore
       }
-
-      // Micro-tick animation fallback when external quote is rate-limited
-      setChartBars((prev) => {
-        if (!prev || prev.length === 0) return prev;
-        const last = prev[prev.length - 1];
-        const delta = (Math.random() - 0.495) * (last.c * 0.001);
-        const nextClose = Math.max(0.01, Math.round((last.c + delta) * 100) / 100);
-        if (nextClose > last.c) {
-          setPriceTickFlash('up');
-          setTimeout(() => setPriceTickFlash(null), 600);
-        } else if (nextClose < last.c) {
-          setPriceTickFlash('down');
-          setTimeout(() => setPriceTickFlash(null), 600);
-        }
-        const nextHigh = Math.max(last.h, nextClose);
-        const nextLow = Math.min(last.l, nextClose);
-        const updatedLast: CandleBar = {
-          ...last,
-          c: nextClose,
-          h: nextHigh,
-          l: nextLow,
-          v: last.v + Math.floor(Math.random() * 20),
-        };
-        return [...prev.slice(0, prev.length - 1), updatedLast];
-      });
-    }, 2800);
+    }, pollInterval);
 
     return () => clearInterval(tickInterval);
   }, [selectedSymbol, chartTimeframe, isConnected, checkingConnection, loadBars]);
@@ -660,11 +699,15 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
 
   // Current Price & Calculations
   const currentSymbolPrice = useMemo(() => {
+    if (liveStreamPrice && liveStreamPrice > 0) return liveStreamPrice;
+    if (chartBars.length > 0) {
+      const last = chartBars[chartBars.length - 1];
+      if (last && last.c > 0) return last.c;
+    }
     const pos = effectivePositions.find((p) => p.symbol === selectedSymbol);
-    if (pos) return parseFloat(pos.current_price);
-    if (chartBars.length > 0) return chartBars[chartBars.length - 1].c;
+    if (pos && parseFloat(pos.current_price) > 0) return parseFloat(pos.current_price);
     return parseFloat(limitPrice) || getBaselineTickerPrice(selectedSymbol);
-  }, [effectivePositions, selectedSymbol, chartBars, limitPrice]);
+  }, [liveStreamPrice, chartBars, effectivePositions, selectedSymbol, limitPrice]);
 
   // Sizing Calculations: Shares vs Notional ($)
   const effectiveShares = useMemo(() => {
@@ -1373,18 +1416,75 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
         )}
 
         {/* CENTER PANEL: Interactive Candlestick Chart */}
-        <div data-tour="paper-chart" className="flex flex-col">
-          <TradingChart
-            symbol={selectedSymbol}
-            bars={chartBars}
-            currentPrice={currentSymbolPrice}
-            timeframe={chartTimeframe}
-            onTimeframeChange={(tf) => setChartTimeframe(tf)}
-            dataStatus={chartDataStatus}
-            loading={chartLoading}
-            onRefresh={() => loadBars(selectedSymbol, chartTimeframe, isConnected)}
-            priceFlash={priceTickFlash}
-          />
+        <div data-tour="paper-chart" className="flex flex-col gap-2">
+          {/* Chart Engine & Mode Header */}
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 font-mono text-[11px] font-bold text-accent">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                {chartEngine === 'tradingview' ? 'TradingView Pro (Live Exchange)' : chartDataStatus}
+              </span>
+              <span className="rounded bg-ink/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-ink/60">
+                {selectedSymbol}
+              </span>
+            </div>
+
+            {/* Engine Switcher */}
+            <div className="flex items-center gap-1 rounded-lg border border-ink/10 bg-ink/[0.04] p-0.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setChartEngine('tradingview')}
+                className={cn(
+                  'flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition',
+                  chartEngine === 'tradingview'
+                    ? 'bg-panel text-accent shadow-sm'
+                    : 'text-ink/60 hover:text-ink'
+                )}
+                title="TradingView Real-Time Chart with live exchange quotes and indicators"
+              >
+                <Activity className="h-3 w-3 text-emerald-400" />
+                TradingView Pro
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartEngine('spectra')}
+                className={cn(
+                  'flex items-center gap-1 rounded-md px-2.5 py-1 font-semibold transition',
+                  chartEngine === 'spectra'
+                    ? 'bg-panel text-accent shadow-sm'
+                    : 'text-ink/60 hover:text-ink'
+                )}
+                title="Spectra Canvas Chart Engine"
+              >
+                <BarChart2 className="h-3 w-3" />
+                Spectra Engine
+              </button>
+            </div>
+          </div>
+
+          {chartEngine === 'tradingview' ? (
+            <TradingViewWidget
+              symbol={selectedSymbol}
+              theme="dark"
+              interval={chartTimeframe}
+              height={580}
+            />
+          ) : (
+            <TradingChart
+              symbol={selectedSymbol}
+              bars={chartBars}
+              currentPrice={currentSymbolPrice}
+              timeframe={chartTimeframe}
+              onTimeframeChange={(tf) => setChartTimeframe(tf)}
+              dataStatus={chartDataStatus}
+              loading={chartLoading}
+              onRefresh={() => loadBars(selectedSymbol, chartTimeframe, isConnected)}
+              priceFlash={priceTickFlash}
+            />
+          )}
         </div>
 
         {/* RIGHT PANEL: Institutional Order Ticket */}

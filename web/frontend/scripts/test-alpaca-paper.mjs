@@ -270,3 +270,28 @@ describe('5. Order Execution Flow, Confirmation & Idempotency', () => {
     assert.ok(labSource.includes('handleCancelOrder'), 'PaperLab must support cancelling open orders');
   });
 });
+
+describe('6. TradingView Pro Real-Time Chart & Coinbase Live Streaming', () => {
+  it('TradingViewWidget component embeds official advanced chart widget and maps symbols', () => {
+    const tvPath = path.resolve(root, 'components/studio/TradingViewWidget.tsx');
+    assert.ok(fs.existsSync(tvPath), 'TradingViewWidget component must exist');
+    const tvSource = fs.readFileSync(tvPath, 'utf8');
+    assert.ok(tvSource.includes('embed-widget-advanced-chart.js'), 'Must load official TradingView advanced chart embed');
+    assert.ok(tvSource.includes('toTradingViewSymbol'), 'Must export toTradingViewSymbol');
+    assert.ok(tvSource.includes('COINBASE:SOLUSD'), 'Must map SOL to COINBASE:SOLUSD');
+    assert.ok(tvSource.includes('ORCL') && tvSource.includes('NYSE:'), 'Must map ORCL to NYSE exchange');
+  });
+
+  it('PaperLab supports switching between TradingView and Spectra engines', () => {
+    const labSource = fs.readFileSync(path.resolve(root, 'components/studio/PaperLab.tsx'), 'utf8');
+    assert.ok(labSource.includes('TradingViewWidget'), 'PaperLab must import TradingViewWidget');
+    assert.ok(labSource.includes('chartEngine'), 'PaperLab must manage chartEngine state');
+    assert.ok(labSource.includes('TradingView Pro'), 'PaperLab must offer TradingView Pro mode');
+  });
+
+  it('PaperLab connects to Coinbase WebSocket for sub-second real crypto ticks', () => {
+    const labSource = fs.readFileSync(path.resolve(root, 'components/studio/PaperLab.tsx'), 'utf8');
+    assert.ok(labSource.includes('ws-feed.exchange.coinbase.com'), 'PaperLab must connect to Coinbase WebSocket feed');
+    assert.ok(labSource.includes('liveStreamPrice'), 'PaperLab must update liveStreamPrice from feed');
+  });
+});

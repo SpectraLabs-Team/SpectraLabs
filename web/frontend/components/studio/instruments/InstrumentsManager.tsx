@@ -174,16 +174,26 @@ export function InstrumentsManager() {
   const handleSeedSamples = async () => {
     setSeeding(true);
     let count = 0;
+    let lastError = '';
     try {
       for (const contract of SAMPLE_CONTRACTS) {
         try {
           await createInstrument(contract);
           count++;
-        } catch {
-          // Skip if already exists
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!msg.toLowerCase().includes('already has') && !msg.toLowerCase().includes('already exists')) {
+            lastError = msg;
+          }
         }
       }
-      success('Sample Contracts Added', `Registered ${count} sample multi-asset contracts.`);
+      if (count > 0) {
+        success('Sample Contracts Added', `Registered ${count} sample multi-asset contracts.`);
+      } else if (lastError) {
+        toastError('Seeding Failed', lastError);
+      } else {
+        success('Contracts Ready', 'All sample multi-asset contracts are already registered.');
+      }
       await load();
     } catch (err) {
       toastError('Seeding Failed', err instanceof Error ? err.message : 'Error adding samples');

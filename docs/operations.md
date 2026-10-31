@@ -122,7 +122,7 @@ directory off the host (another region or provider): a backup on the same disk i
 
 ### Production install record & cron setup (M28 Task 1)
 
-Nightly database backups are configured on the production host:
+Nightly database backups are configured on the production host. **Status: not yet confirmed.** Ops to check `/var/backups/spectra/backup.log` for a successful run and update this line with the date.
 
 ```bash
 0 2 * * * cd /srv/spectralabs && ( [ -f /srv/spectralabs/.env ] && export $(grep -v '^#' /srv/spectralabs/.env | xargs) ); BACKUP_KEEP_DAYS=14 BACKUP_KEEP_WEEKLY_DAYS=90 scripts/backup-postgres.sh /var/backups/spectra >> /var/backups/spectra/backup.log 2>&1
@@ -155,6 +155,21 @@ Monthly restore check from cron (1st of each month at 04:00 UTC) against a scrat
 
 To recover production: stop `api`, `worker` and `frontend`, restore into the production database
 with the same script, start them again, and check `/ready`.
+
+### Production checklist (M28 open items)
+
+Run these on production with ops access. Record each result in this file once done.
+
+1. **Nightly backup (Task 1):** confirm a successful run in `backup.log` and a new `spectra-*.dump` plus `.sha256` in `/var/backups/spectra`. Then update the install record above.
+2. **Off-host copy (Task 5), Cloudflare R2:**
+   - Create a bucket on R2 that is separate from the production artifact bucket.
+   - Create an API token limited to that bucket. Do not reuse production keys.
+   - Set in the copy job's environment only: `OFFHOST_TARGET=s3://<bucket>/spectra`, `OFFHOST_AWS_ACCESS_KEY_ID`, `OFFHOST_AWS_SECRET_ACCESS_KEY`, `OFFHOST_AWS_REGION=auto`, `OFFHOST_AWS_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`, and `ARTIFACT_S3_BUCKET` (so the script refuses the live bucket).
+   - Run `scripts/copy-offhost.sh /var/backups/spectra` once by hand and confirm it prints `offhost: verified`.
+   - Set the bucket lifecycle rule on R2 to match the owner's retention decision (M28 Decision 5). The script never deletes.
+3. **Monthly restore test (Task 6):** install `0 4 1 * *` with `RESTORE_DATABASE_URL` pointing at a scratch database. Two `PASS` lines in a row are needed before Task 6 is done.
+4. **Activity purge (Task 9):** run `npm run activity:purge -- --dry-run` on production and record the count. Only after the owner signs the retention policy, set `SPECTRA_ACTIVITY_PURGE=on`, restart the workers, and check the first `activity purge removed` log line.
+5. **Freshness alerts (Task 4):** the metrics need the node_exporter textfile collector on the backup host, pointed at the `FRESHNESS_TEXTFILE` path. Alert routing is decided by M27.
 
 ## Registry anchoring
 

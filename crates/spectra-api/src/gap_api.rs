@@ -168,12 +168,12 @@ pub(crate) async fn handle_analyze_gap(
     };
 
     // Resolve strategy_id to an existing strategies(id) in this workspace.
-    // The incoming ID could be a strategies.id, strategy_versions.id, or runs.id.
+    // The incoming ID could be a strategies.id, strategy_versions.id, runs.id, or jobs.id.
     let resolved_strategy_id = match sqlx::query_scalar::<_, Uuid>(
         "SELECT COALESCE(
             (SELECT id FROM strategies WHERE id = $1 AND workspace_id = $2),
             (SELECT strategy_id FROM strategy_versions WHERE id = $1 AND workspace_id = $2),
-            (SELECT sv.strategy_id FROM runs r JOIN strategy_versions sv ON r.strategy_version_id = sv.id WHERE r.id = $1 AND r.workspace_id = $2),
+            (SELECT sv.strategy_id FROM runs r JOIN strategy_versions sv ON r.strategy_version_id = sv.id WHERE (r.id = $1 OR r.job_id = $1) AND r.workspace_id = $2),
             (SELECT id FROM strategies WHERE workspace_id = $2 ORDER BY created_at DESC LIMIT 1)
         )"
     )
@@ -183,21 +183,30 @@ pub(crate) async fn handle_analyze_gap(
     .await
     {
         Ok(Some(id)) => id,
-        _ => req.strategy_id,
-    };
-
-    let resolved_run_id = if let Some(rid) = req.backtest_run_id {
-        Some(rid)
-    } else {
-        sqlx::query_scalar::<_, Uuid>(
-            "SELECT id FROM runs WHERE id = $1 AND workspace_id = $2"
+        _ => sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM strategies WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 1",
         )
-        .bind(req.strategy_id)
         .bind(ws)
         .fetch_optional(&pool)
         .await
         .unwrap_or(None)
+        .unwrap_or(req.strategy_id),
     };
+
+    // Resolve backtest_run_id to a verified runs(id) in this workspace (or None).
+    let candidate_run_id = req.backtest_run_id.unwrap_or(req.strategy_id);
+    let resolved_run_id = sqlx::query_scalar::<_, Uuid>(
+        "SELECT COALESCE(
+            (SELECT id FROM runs WHERE id = $1 AND workspace_id = $2),
+            (SELECT id FROM runs WHERE job_id = $1 AND workspace_id = $2),
+            (SELECT r.id FROM runs r WHERE r.workspace_id = $2 ORDER BY r.created_at DESC LIMIT 1)
+        )"
+    )
+    .bind(candidate_run_id)
+    .bind(ws)
+    .fetch_optional(&pool)
+    .await
+    .unwrap_or(None);
 
     // 1. Gather paper fills: either from input or from database orders
     let mut paper_fills = if let Some(supplied) = req.paper_fills {

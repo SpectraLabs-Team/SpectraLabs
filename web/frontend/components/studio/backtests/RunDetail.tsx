@@ -1036,7 +1036,7 @@ export function RunDetail({
       )}
       {b.status === 'succeeded' && (
         <GlassCard className="p-5">
-          <BacktestToPaperGap strategyId={b.request.strategy_version_id || b.id} runId={b.id} />
+          <BacktestToPaperGap strategyId={b.request.strategy_version_id || b.run_id || b.id} runId={b.run_id || b.id} />
         </GlassCard>
       )}
 

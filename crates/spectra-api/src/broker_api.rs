@@ -227,12 +227,17 @@ async fn handle_get_positions(
         let positions = risk_center::get_positions(pool, ws, None).await.unwrap_or_default();
         // M24.1 task 2: the asset class comes from the instrument record. A symbol with no
         // record is a cash equity, as every symbol was before instrument types existed.
-        let types = spectra_db::instruments::instrument_types(pool, ws).await.unwrap_or_default();
+        let records = match crate::instruments_api::order_instruments(pool, ws).await {
+            Ok(r) => r,
+            Err(r) => return r,
+        };
         let views: Vec<JsonValue> = positions
             .into_iter()
             .map(|p| {
-                let mkt_val = (p.qty * p.price).abs();
-                let kind = types.get(&p.symbol).copied().unwrap_or(spectra_core::InstrumentType::Equity);
+                let mkt_val =
+                    (p.qty * p.price * crate::instruments_api::multiplier_of(&records, &p.symbol)).abs();
+                let kind = crate::instruments_api::record_of(&records, &p.symbol)
+                    .map_or(spectra_core::InstrumentType::Equity, |i| i.kind);
                 json!({
                     "asset_id": Uuid::now_v7().to_string(),
                     "symbol": p.symbol,
@@ -285,19 +290,46 @@ async fn handle_create_order(
         _ => return error_response(422, "Side must be 'buy' or 'sell'."),
     };
 
-    // M24.4: options are backtest-only until the M26 review signs off (fails closed).
-    if let Some((pool, ws)) = db_ctx {
-        if let Some(refusal) = crate::instruments_api::refuse_options(pool, ws, &order_req.symbol).await {
-            return refusal;
-        }
+    // M24: the instrument record decides the contract multiplier, refuses a contract past its
+    // expiry, and gives an option's OCC symbol for the broker. Fails closed when records cannot
+    // be read. Without a database there are no records: every symbol is a cash equity.
+    let records = match db_ctx {
+        Some((pool, ws)) => match crate::instruments_api::order_instruments(pool, ws).await {
+            Ok(r) => r,
+            Err(r) => return r,
+        },
+        None => HashMap::new(),
+    };
+    let record = crate::instruments_api::record_of(&records, &order_req.symbol);
+    let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
+    if let Some(refusal) = crate::instruments_api::refuse_expired(record, now_ns) {
+        return refusal;
     }
+    let broker_symbol = match record {
+        Some(inst) if inst.kind == spectra_core::InstrumentType::Option => {
+            match crate::instruments_api::occ_symbol(inst) {
+                Some(occ) => occ,
+                None => {
+                    return error_response(
+                        422,
+                        format!(
+                            "Option {} has no OCC symbol (underlying of 1-6 letters and a strike in thousandths).",
+                            inst.symbol
+                        ),
+                    )
+                }
+            }
+        }
+        _ => order_req.symbol.clone(),
+    };
+    let mult = |sym: &str| crate::instruments_api::multiplier_of(&records, sym);
 
     let Some((pool, ws)) = db_ctx else {
         // Direct forwarding without database pre-trade checks
         if let Some((key_id, secret_key)) = creds {
             let client = reqwest::Client::new();
             let forward_body = json!({
-                "symbol": &order_req.symbol,
+                "symbol": &broker_symbol,
                 "qty": qty.to_string(),
                 "side": &order_req.side,
                 "type": order_req.order_type.as_deref().unwrap_or("market"),
@@ -403,7 +435,8 @@ async fn handle_create_order(
         if p.symbol == order_req.symbol && order_req.parse_limit_price().is_none() && p.price > 0.0 {
             symbol_price = p.price;
         }
-        positions.insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price });
+        // Risk sees value per unit: price times the contract multiplier.
+        positions.insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol) });
     }
     let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
         (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
@@ -414,7 +447,12 @@ async fn handle_create_order(
     let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
 
     // 4. Run pre-trade check
-    let candidate = OrderCandidate { symbol: order_req.symbol.clone(), side, qty, price: symbol_price };
+    let candidate = OrderCandidate {
+        symbol: order_req.symbol.clone(),
+        side,
+        qty,
+        price: symbol_price * mult(&order_req.symbol),
+    };
     let eval_res = PreTradeChecker::evaluate(&limits, &portfolio, &candidate, kill_switch_active);
 
     // If order is rejected: STOP BEFORE REACHING BROKER!
@@ -510,7 +548,7 @@ async fn handle_create_order(
     if let Some((key_id, secret_key)) = creds {
         let client = reqwest::Client::new();
         let forward_body = json!({
-            "symbol": &order_req.symbol,
+            "symbol": &broker_symbol,
             "qty": approved_qty.to_string(),
             "side": &order_req.side,
             "type": order_req.order_type.as_deref().unwrap_or("market"),
@@ -556,7 +594,7 @@ async fn handle_create_order(
     let _ = risk_center::upsert_position(pool, ws, None, &order_req.symbol, new_qty, symbol_price).await;
 
     // Update balance in DB
-    let notional = approved_qty * symbol_price;
+    let notional = approved_qty * symbol_price * mult(&order_req.symbol);
     let new_cash = match side {
         OrderSide::Buy => cash - notional,
         OrderSide::Sell => cash + notional,

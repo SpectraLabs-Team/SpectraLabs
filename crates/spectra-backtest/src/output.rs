@@ -663,10 +663,12 @@ fn bonds_json(out: &BacktestOutput) -> Result<Option<Json>> {
     ))
 }
 
-/// The M26 review gate on the option model, stated with every run that has options.
-pub const OPTION_GATE: &str = "Options are European and cash-settled at expiry against the underlying's last \
-    close. The Black-Scholes-Merton model behind the implied volatility and Greeks awaits the M26 correctness \
-    review; until then options are available in backtests only, not in paper or live trading.";
+/// What the option model assumes, stated with every run that has options.
+pub const OPTION_GATE: &str =
+    "Options are European and cash-settled at expiry against the underlying's last \
+    close; early exercise, dividends and the volatility surface are not modelled. Implied volatility and the \
+    Greeks use Black-Scholes-Merton at the run's risk-free rate; the model's formulas are listed for the M26 \
+    correctness audit.";
 
 /// What the run says about options, when it has any: each option's implied
 /// volatility and Greeks at its last price, and every settlement.

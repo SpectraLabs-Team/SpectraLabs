@@ -383,27 +383,94 @@ pub(crate) async fn put_fx_rates(
     }
 }
 
-/// M24.4: options are backtest-only until the M26 review signs off on the
-/// option model. The refusal for a paper or live order in `symbol`, if it is
-/// an option. Fails closed: an order is not sent unless its type is known.
-pub(crate) async fn refuse_options(
+/// The workspace's instrument records by symbol, for paper and broker
+/// orders. Fails closed: on a database error the order is not sent.
+#[allow(clippy::result_large_err)] // the error is the finished response
+pub(crate) async fn order_instruments(
     pool: &spectra_db::PgPool,
     ws: uuid::Uuid,
-    symbol: &str,
-) -> Option<Response> {
-    match spectra_db::instruments::instrument_types(pool, ws).await {
-        Ok(types) => {
-            let s = symbol.trim();
-            let is_option = |k: &str| types.get(k) == Some(&spectra_core::InstrumentType::Option);
-            (is_option(s) || is_option(&s.to_uppercase())).then(|| {
-                error_response(
-                    422,
-                    "Options are available in backtests only until the M26 model review signs off.",
-                )
-            })
-        }
-        Err(_) => Some(error_response(503, "Could not check the instrument type; the order was not sent.")),
+) -> Result<std::collections::HashMap<String, Instrument>, Response> {
+    match spectra_db::instruments::list_instruments(pool, ws).await {
+        Ok(rows) => Ok(rows.into_iter().map(|r| (r.instrument.symbol.clone(), r.instrument)).collect()),
+        Err(_) => Err(error_response(503, "Could not load the instrument records; the order was not sent.")),
     }
+}
+
+/// The record of `symbol` among `records` (exact, then upper case).
+pub(crate) fn record_of<'a>(
+    records: &'a std::collections::HashMap<String, Instrument>,
+    symbol: &str,
+) -> Option<&'a Instrument> {
+    let s = symbol.trim();
+    records.get(s).or_else(|| records.get(&s.to_uppercase()))
+}
+
+/// Cash per unit of price per unit of quantity: the contract multiplier
+/// (1 for a symbol without a record, a cash equity).
+pub(crate) fn multiplier_of(records: &std::collections::HashMap<String, Instrument>, symbol: &str) -> f64 {
+    record_of(records, symbol).map_or(1.0, |i| i.multiplier.to_f64())
+}
+
+/// The refusal for an order in a contract at or after its expiry (a bond or
+/// swap: its maturity), as backtests refuse it.
+pub(crate) fn refuse_expired(inst: Option<&Instrument>, now_ns: i64) -> Option<Response> {
+    let inst = inst?;
+    let end = inst.expiry_ns.or(inst.maturity_ns)?;
+    (now_ns >= end).then(|| {
+        error_response(422, format!("{} expired or matured; it can no longer be traded.", inst.symbol))
+    })
+}
+
+/// The OCC option symbol brokers trade an option record under:
+/// root, expiry `YYMMDD`, `C` or `P`, strike × 1000 in eight digits
+/// (`AAPL260918C00190000`). `None` for anything else, or a strike that is not
+/// a whole number of thousandths.
+pub(crate) fn occ_symbol(inst: &Instrument) -> Option<String> {
+    if inst.kind != spectra_core::InstrumentType::Option {
+        return None;
+    }
+    let root = inst.underlying.as_deref()?.trim().to_uppercase();
+    if root.is_empty() || root.len() > 6 || !root.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') {
+        return None;
+    }
+    let (y, m, d) = spectra_engine::bonds::civil_from_days(inst.expiry_ns?.div_euclid(86_400_000_000_000));
+    let right = match inst.option_right? {
+        spectra_core::OptionRight::Call => 'C',
+        spectra_core::OptionRight::Put => 'P',
+    };
+    // Strike raw is 1e-8 units; thousandths are raw / 100_000.
+    let raw = inst.strike?.raw();
+    if raw <= 0 || raw % 100_000 != 0 {
+        return None;
+    }
+    let thousandths = raw / 100_000;
+    if thousandths > 99_999_999 {
+        return None;
+    }
+    Some(format!("{root}{:02}{m:02}{d:02}{right}{thousandths:08}", y.rem_euclid(100)))
+}
+
+/// The instrument setup for an engine run over `symbols` (a paper strategy
+/// step): the workspace's base currency, records, FX rates and curves, read
+/// the same way a backtest request reads them. Fails closed.
+#[allow(clippy::result_large_err)] // the error is the finished response
+pub(crate) async fn setup_for(
+    pool: &spectra_db::PgPool,
+    ws: uuid::Uuid,
+    symbols: &[String],
+) -> Result<spectra_engine::InstrumentSetup, Response> {
+    let mut payload = serde_json::json!({});
+    if embed_instruments(pool, ws, &mut payload).await.is_err() {
+        return Err(error_response(503, "Could not load the instrument records; nothing was run."));
+    }
+    let doc = Json::parse(&payload.to_string())
+        .map_err(|e| error_response(500, format!("Could not read the instrument records: {e}")))?;
+    let mut errors = Vec::new();
+    let Some(request) = spectra_backtest::RequestInstruments::parse(&doc, &mut errors) else {
+        let fields: Vec<(String, String)> = errors.into_iter().map(|e| (e.field, e.message)).collect();
+        return Err(invalid_fields(&fields));
+    };
+    request.resolve(symbols).map_err(|m| error_response(422, m))
 }
 
 /// One quote of a curve snapshot.
@@ -695,4 +762,48 @@ pub(crate) async fn embed_instruments(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use spectra_core::{InstrumentType, OptionRight, Price, Qty, Ratio};
+
+    fn option(underlying: &str, strike: f64, expiry: &str, right: OptionRight) -> Instrument {
+        let mut o = Instrument::equity("X", "USD", Price::from_f64(0.01).unwrap(), Qty::ONE);
+        o.kind = InstrumentType::Option;
+        o.multiplier = Ratio::from_units(100).unwrap();
+        o.strike = Some(Price::from_f64(strike).unwrap());
+        o.option_right = Some(right);
+        o.underlying = Some(underlying.into());
+        o.expiry_ns =
+            spectra_data::parse_timestamp(expiry, &spectra_data::TimeOptions::default()).map(|t| t.ts_ns);
+        o
+    }
+
+    #[test]
+    fn occ_symbols() {
+        assert_eq!(
+            occ_symbol(&option("AAPL", 190.0, "2026-09-18", OptionRight::Call)).unwrap(),
+            "AAPL260918C00190000"
+        );
+        assert_eq!(
+            occ_symbol(&option("spy", 412.5, "2027-01-15", OptionRight::Put)).unwrap(),
+            "SPY270115P00412500"
+        );
+        assert!(occ_symbol(&option("TOOLONGX", 10.0, "2027-01-15", OptionRight::Put)).is_none());
+        assert!(occ_symbol(&option("SPY", 10.0001, "2027-01-15", OptionRight::Put)).is_none()); // not in thousandths
+        let mut equity = option("SPY", 10.0, "2027-01-15", OptionRight::Put);
+        equity.kind = InstrumentType::Equity;
+        assert!(occ_symbol(&equity).is_none());
+    }
+
+    #[test]
+    fn expired_contracts_are_refused() {
+        let o = option("SPY", 100.0, "2027-01-15", OptionRight::Call);
+        let expiry = o.expiry_ns.unwrap();
+        assert!(refuse_expired(Some(&o), expiry - 1).is_none());
+        assert!(refuse_expired(Some(&o), expiry).is_some());
+        assert!(refuse_expired(None, i64::MAX).is_none()); // no record: a cash equity
+    }
 }

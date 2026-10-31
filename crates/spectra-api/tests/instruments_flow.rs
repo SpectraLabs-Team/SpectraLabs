@@ -273,7 +273,7 @@ async fn bond_pricing_round_trips_and_validates() {
 }
 
 #[tokio::test]
-async fn options_are_priced_and_kept_out_of_paper_trading() {
+async fn options_are_priced_and_trade_on_paper_with_their_multiplier() {
     let Some(pool) = pool().await else { return };
     let f = Fixture::new(pool);
     spectra_db::identity::ensure_identity(&f.pool, Some(f.user), f.ws).await.unwrap();
@@ -309,27 +309,58 @@ async fn options_are_priced_and_kept_out_of_paper_trading() {
     assert_eq!(status, 422, "{bad}");
     assert!(fields(&bad).contains(&"right".to_string()), "{bad}");
 
-    // An option record, then a paper order for it: refused until M26 signs off.
+    // An option record trades on paper with its multiplier: one contract at 3.50 costs 350
+    // (plus the paper path's slippage and fee).
     let (status, created) = f
         .call(
             "POST",
             "/api/v1/instruments",
-            &json!({"symbol": "SPY261218C00600000", "type": "option", "right": "call", "strike": 600,
-                    "multiplier": 100, "tick_size": 0.01, "expiry": "2026-12-18", "underlying": "SPY"}),
+            &json!({"symbol": "SPY301220C00600000", "type": "option", "right": "call", "strike": 600,
+                    "multiplier": 100, "tick_size": 0.01, "expiry": "2030-12-20", "underlying": "SPY"}),
         )
         .await;
     assert_eq!(status, 201, "{created}");
     assert_eq!(created["right"], "call");
+    let strategy = spectra_db::new_id();
+    let (status, order) = f
+        .call(
+            "POST",
+            "/api/v1/paper/orders",
+            &json!({"strategy_id": strategy, "symbol": "SPY301220C00600000", "side": "buy",
+                    "order_type": "market", "qty": 1, "fill_price": 3.5}),
+        )
+        .await;
+    assert_eq!(status, 201, "{order}");
+    let (status, account) =
+        f.call("GET", &format!("/api/v1/paper/account?strategy_id={strategy}"), &Value::Null).await;
+    assert_eq!(status, 200, "{account}");
+    let paid = 100_000.0 - account["cash"].as_f64().unwrap();
+    let expected = 3.5 * 1.0005 * 100.0 + 1.0;
+    assert!((paid - expected).abs() < 1e-6, "paid {paid}, expected {expected}: {account}");
+    // Equity values the contract at its price times 100: only the slippage and fee are lost.
+    let equity = account["equity"].as_f64().unwrap();
+    assert!((100_000.0 - equity - 1.0).abs() < 1e-6, "{account}");
+
+    // A contract past its expiry does not trade.
+    let (status, _) = f
+        .call(
+            "POST",
+            "/api/v1/instruments",
+            &json!({"symbol": "SPY200117P00300000", "type": "option", "right": "put", "strike": 300,
+                    "multiplier": 100, "tick_size": 0.01, "expiry": "2020-01-17", "underlying": "SPY"}),
+        )
+        .await;
+    assert_eq!(status, 201);
     let (status, refused) = f
         .call(
             "POST",
             "/api/v1/paper/orders",
-            &json!({"strategy_id": spectra_db::new_id(), "symbol": "SPY261218C00600000", "side": "buy",
-                    "order_type": "market", "qty": 1}),
+            &json!({"strategy_id": strategy, "symbol": "SPY200117P00300000", "side": "buy",
+                    "order_type": "market", "qty": 1, "fill_price": 1}),
         )
         .await;
     assert_eq!(status, 422, "{refused}");
-    assert!(refused["message"].as_str().unwrap_or_default().contains("M26"), "{refused}");
+    assert!(refused["message"].as_str().unwrap_or_default().contains("expired"), "{refused}");
     f.clean_up();
 }
 

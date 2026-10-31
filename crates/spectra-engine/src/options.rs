@@ -6,9 +6,9 @@
 //! functions", 2005): accurate to about 1e-14 and computed the same way on
 //! every platform, so prices reproduce exactly.
 //!
-//! Model review: this model is gated on the M26 correctness audit. Until
-//! M26 signs it off, it prices and settles options in backtests but is not
-//! offered for live or paper trading.
+//! Model review: the formulas here are listed for the M26 correctness audit
+//! (task 5a). Options trade in backtests and on paper; the audit checks this
+//! model against reference values.
 
 use spectra_core::{Error, OptionRight, Result};
 

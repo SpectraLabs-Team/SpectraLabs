@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from '@/lib/auth';
 import { getSamplePortfolio } from '@/lib/api';
 import { DEFAULT_PAPER, paperAccount, type PaperAccount, type PaperSettings } from '@/lib/paperLedger';
@@ -9,6 +9,15 @@ import { PRESETS } from '@/lib/presets';
 import type { BackendRequest, Position, RiskResult } from '@/lib/types';
 import { useEngineHealth, type EngineState } from '@/lib/useEngineHealth';
 import { useToast } from '@/components/ui/StudioToast';
+import {
+  ensureImported,
+  getUserState,
+  readCache,
+  StateSaver,
+  writeCache,
+  type PortfolioValue,
+  type StateEntry,
+} from '@/lib/userState';
 
 type Source = 'engine sample' | 'bundled sample' | 'uploaded' | 'pasted' | 'edited' | 'preset';
 
@@ -78,16 +87,51 @@ interface PortfolioCtx {
 }
 
 const Ctx = createContext<PortfolioCtx | null>(null);
-/** Per-account storage keys, so two people on one browser never see each other's book. */
-const portfolioKey = (email?: string) => `spectra-portfolio-${email || 'guest'}`;
-const paperKey = (email?: string) => `spectra-paper-${email || 'guest'}`;
-const riskParamsKey = (email?: string) => `spectra-risk-params-${email || 'guest'}`;
 const SOURCES: Source[] = ['engine sample', 'bundled sample', 'uploaded', 'pasted', 'edited', 'preset'];
+
+/** A saved book parsed back into positions, or null when it is missing or unusable. */
+function bookFrom(v: PortfolioValue | null | undefined): { positions: Position[]; source: Source } | null {
+  if (!v || typeof v.csv !== 'string') return null;
+  const parsed = parseCsv(v.csv);
+  if (!parsed.positions.length || parsed.errors.length) return null;
+  return {
+    positions: parsed.positions,
+    source: SOURCES.includes(v.source as Source) ? (v.source as Source) : 'edited',
+  };
+}
+
+function paperFrom(v: unknown): PaperSettings | null {
+  const p = v as Partial<PaperSettings> | null;
+  if (!p || !Number.isFinite(p.startingCapital) || !Number.isFinite(p.leverageLimit)) return null;
+  return { startingCapital: p.startingCapital!, leverageLimit: p.leverageLimit! };
+}
+
+function riskFrom(v: unknown): RiskLabParams | null {
+  const rp = v as Partial<RiskLabParams> | null;
+  if (!rp || typeof rp.confidence !== 'number' || !Number.isFinite(rp.confidence)) return null;
+  return {
+    confidence: Math.min(0.999, Math.max(0.9, rp.confidence)),
+    simulations: typeof rp.simulations === 'number' && rp.simulations > 0 ? rp.simulations : DEFAULT_RISK_PARAMS.simulations,
+    horizon: typeof rp.horizon === 'number' && rp.horizon > 0 ? rp.horizon : DEFAULT_RISK_PARAMS.horizon,
+    auto: Boolean(rp.auto),
+    dependence: rp.dependence === 'gaussian_copula' || rp.dependence === 't_copula' ? rp.dependence : 'aggregate',
+  };
+}
+
+const bookValue = (positions: Position[], source: Source): PortfolioValue => ({ csv: toCsv(positions), source });
+
+interface Savers {
+  portfolio: StateSaver<PortfolioValue>;
+  paper: StateSaver<PaperSettings>;
+  risk: StateSaver<RiskLabParams>;
+}
 
 export function PortfolioProvider({ children }: { children: ReactNode }) {
   const engine = useEngineHealth();
   const { user } = useAuth();
   const email = user?.email;
+  /** Browser-cache key owner. Guests keep a local-only copy and never reach the server. */
+  const who = email || 'guest';
   const { success, info } = useToast();
   const [positions, setPos] = useState<Position[]>(() => parseCsv(SAMPLE_CSV).positions);
   const [source, setSource] = useState<Source>('bundled sample');
@@ -98,90 +142,140 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const [stress, setStressState] = useState<StressCache>(EMPTY_STRESS);
 
   /**
-   * Which account's draft is loaded. It is state (not a ref) on purpose: it updates in the same
-   * render as the restored positions, so the save effect can never pair one account's key with
-   * another account's (or the default sample's) positions.
+   * Which account's cache is on screen. State (not a ref) so it updates in the same render as the
+   * restored values: a save can never pair one account's key with another account's data.
    */
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  /** Which account's server copy has been applied. Nothing is written to the server before this. */
+  const [syncedFor, setSyncedFor] = useState<string | null>(null);
+  const savers = useRef<Savers | null>(null);
 
-  // Load this account's saved book, risk parameters, and paper settings. Runs again when the account changes
-  // (sign-out, or another user signing in), and always starts from a clean in-memory state
-  // so nothing from the previous account survives.
+  // Paint from the browser cache at once, then replace it with the server copy. Runs again when the
+  // account changes, so nothing from the previous account survives.
   useEffect(() => {
-    let next = parseCsv(SAMPLE_CSV).positions;
-    let nextSource: Source = 'bundled sample';
-    let nextPaper: PaperSettings = DEFAULT_PAPER;
-    let nextRiskParams: RiskLabParams = DEFAULT_RISK_PARAMS;
-    try {
-      const raw = localStorage.getItem(portfolioKey(email));
-      if (raw) {
-        const d = JSON.parse(raw) as { csv?: unknown; source?: unknown };
-        const parsed = typeof d.csv === 'string' ? parseCsv(d.csv) : null;
-        if (parsed && parsed.positions.length && !parsed.errors.length) {
-          next = parsed.positions;
-          nextSource = SOURCES.includes(d.source as Source) ? (d.source as Source) : 'edited';
-        }
-      }
-    } catch {
-      /* corrupted draft: start from the sample */
-    }
-    try {
-      const raw = localStorage.getItem(paperKey(email));
-      if (raw) {
-        const p = JSON.parse(raw) as Partial<PaperSettings>;
-        if (Number.isFinite(p.startingCapital) && Number.isFinite(p.leverageLimit)) nextPaper = { startingCapital: p.startingCapital!, leverageLimit: p.leverageLimit! };
-      }
-    } catch {
-      /* defaults */
-    }
-    try {
-      const raw = localStorage.getItem(riskParamsKey(email));
-      if (raw) {
-        const rp = JSON.parse(raw) as Partial<RiskLabParams>;
-        if (typeof rp.confidence === 'number' && Number.isFinite(rp.confidence)) {
-          nextRiskParams = {
-            confidence: Math.min(0.999, Math.max(0.9, rp.confidence)),
-            simulations: typeof rp.simulations === 'number' && rp.simulations > 0 ? rp.simulations : DEFAULT_RISK_PARAMS.simulations,
-            horizon: typeof rp.horizon === 'number' && rp.horizon > 0 ? rp.horizon : DEFAULT_RISK_PARAMS.horizon,
-            auto: Boolean(rp.auto),
-            dependence: rp.dependence === 'gaussian_copula' || rp.dependence === 't_copula' ? rp.dependence : 'aggregate',
-          };
-        }
-      }
-    } catch {
-      /* defaults */
-    }
-    setPos(next);
-    setSource(nextSource);
-    setPaperState(nextPaper);
-    setRiskParamsState(nextRiskParams);
+    let alive = true;
+    const id = who;
+
+    const cachedBook = bookFrom(readCache<PortfolioValue>(id, 'portfolio'));
+    const cachedPaper = paperFrom(readCache(id, 'paper-account'));
+    const cachedRisk = riskFrom(readCache(id, 'risk-params'));
+    const paintedPositions = cachedBook?.positions ?? parseCsv(SAMPLE_CSV).positions;
+    const paintedSource: Source = cachedBook?.source ?? 'bundled sample';
+    setPos(paintedPositions);
+    setSource(paintedSource);
+    setPaperState(cachedPaper ?? DEFAULT_PAPER);
+    setRiskParamsState(cachedRisk ?? DEFAULT_RISK_PARAMS);
     setRiskRun(null);
     setStressState(EMPTY_STRESS);
     setRevision((r) => r + 1);
-    setLoadedFor(portfolioKey(email));
-  }, [email]);
+    setLoadedFor(id);
+    setSyncedFor(null);
 
-  // Save the draft under the current account only (never during the account switch itself).
-  useEffect(() => {
-    const key = portfolioKey(email);
-    if (loadedFor !== key) return;
-    try {
-      localStorage.setItem(key, JSON.stringify({ csv: toCsv(positions), source }));
-    } catch {
-      /* not persisted */
+    const s: Savers = {
+      portfolio: new StateSaver<PortfolioValue>('portfolio', (cur) => {
+        const b = bookFrom(cur.value);
+        if (b) {
+          setPos(b.positions);
+          setSource(b.source);
+          setRevision((r) => r + 1);
+        }
+        info('Portfolio updated', 'Changed on another device; loaded the latest copy.');
+      }),
+      paper: new StateSaver<PaperSettings>('paper-account', (cur) => {
+        setPaperState(paperFrom(cur.value) ?? DEFAULT_PAPER);
+      }),
+      risk: new StateSaver<RiskLabParams>('risk-params', (cur) => {
+        setRiskParamsState(riskFrom(cur.value) ?? DEFAULT_RISK_PARAMS);
+      }),
+    };
+    savers.current = s;
+
+    if (!email) {
+      return () => {
+        alive = false;
+        s.portfolio.dispose();
+        s.paper.dispose();
+        s.risk.dispose();
+      };
     }
-  }, [positions, source, email, loadedFor]);
+
+    (async () => {
+      try {
+        await ensureImported(id);
+        const st = await getUserState();
+        if (!alive) return;
+
+        const p = st.state.portfolio as StateEntry<PortfolioValue>;
+        if (p.version > 0) {
+          const b = bookFrom(p.value);
+          if (b) {
+            setPos(b.positions);
+            setSource(b.source);
+            setRevision((r) => r + 1);
+            s.portfolio.baseline(p.version, bookValue(b.positions, b.source));
+          } else {
+            s.portfolio.baseline(p.version, p.value);
+          }
+        } else {
+          // Nothing saved for this account yet: push what is on screen so every device starts from it.
+          s.portfolio.baseline(0, null);
+          s.portfolio.schedule(bookValue(paintedPositions, paintedSource), 0);
+        }
+
+        const pa = st.state['paper-account'] as StateEntry<unknown>;
+        if (pa.version > 0) {
+          const settings = paperFrom(pa.value);
+          if (settings) setPaperState(settings);
+          s.paper.baseline(pa.version, settings ?? DEFAULT_PAPER);
+        } else {
+          s.paper.baseline(0, null);
+          s.paper.schedule(cachedPaper ?? DEFAULT_PAPER, 0);
+        }
+
+        const rk = st.state['risk-params'] as StateEntry<unknown>;
+        if (rk.version > 0) {
+          const risk = riskFrom(rk.value);
+          if (risk) setRiskParamsState(risk);
+          s.risk.baseline(rk.version, risk ?? DEFAULT_RISK_PARAMS);
+        } else {
+          s.risk.baseline(0, null);
+          s.risk.schedule(cachedRisk ?? DEFAULT_RISK_PARAMS, 0);
+        }
+
+        setSyncedFor(id);
+      } catch {
+        // Could not reach the server: keep the browser copy on screen. Nothing is written to the server
+        // until a load succeeds, so an old copy cannot overwrite newer data.
+        if (alive) info('Saved data unavailable', 'Showing the copy on this browser. Changes will sync when you reconnect.');
+      }
+    })();
+
+    return () => {
+      alive = false;
+      s.portfolio.dispose();
+      s.paper.dispose();
+      s.risk.dispose();
+    };
+    // `info` is a stable toast callback; only the account matters here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [who, email]);
+
+  // Keep the cache current, and save to the server once this account is synced. The cache is gated on
+  // `loadedFor` so the default sample can never overwrite an account's cached book on mount.
+  useEffect(() => {
+    if (loadedFor !== who) return;
+    const book = bookValue(positions, source);
+    writeCache(who, 'portfolio', book);
+    if (syncedFor === who) savers.current?.portfolio.schedule(book);
+  }, [positions, source, who, loadedFor, syncedFor]);
 
   const setPaper = useCallback(
     (p: PaperSettings) => {
       setPaperState(p);
-      try {
-        localStorage.setItem(paperKey(email), JSON.stringify(p));
-      } catch {
-        /* not persisted */
-      }
+      writeCache(who, 'paper-account', p);
+      if (syncedFor === who) savers.current?.paper.schedule(p);
     },
-    [email],
+    [who, syncedFor],
   );
 
   const setPositions = useCallback((p: Position[], s: Source) => {
@@ -236,15 +330,12 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     (update: Partial<RiskLabParams> | ((p: RiskLabParams) => Partial<RiskLabParams>)) => {
       setRiskParamsState((prev) => {
         const next = { ...prev, ...(typeof update === 'function' ? update(prev) : update) };
-        try {
-          localStorage.setItem(riskParamsKey(email), JSON.stringify(next));
-        } catch {
-          /* not persisted */
-        }
+        writeCache(who, 'risk-params', next);
+        if (syncedFor === who) savers.current?.risk.schedule(next);
         return next;
       });
     },
-    [email],
+    [who, syncedFor],
   );
   const setStress = useCallback((update: (s: StressCache) => StressCache) => setStressState(update), []);
 

@@ -795,7 +795,10 @@ pub(crate) async fn save_strategy_draft(
     };
 
     let params = req.parameters.unwrap_or_else(|| serde_json::json!({}));
-    match strategies::save_draft(&pool, ws, strategy_id, &req.code, &params, user_of(&id)).await {
+    let saved = strategies::save_draft(&pool, ws, strategy_id, &req.code, &params, user_of(&id)).await;
+    match saved {
+        // The query only updates a draft that belongs to this workspace; otherwise no row comes back.
+        Err(sqlx::Error::RowNotFound) => error_response(404, NOT_FOUND),
         Ok(d) => to_json(
             200,
             &serde_json::json!({

@@ -163,6 +163,8 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/me/sandbox/orders': { method: ['GET', 'POST', 'DELETE'], minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/me/sandbox/orders/{id}': { method: 'PATCH', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/me/sandbox/transact': { method: 'POST', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/me/runs': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/me/runs/{id}/hide': { method: 'POST', minRole: 'viewer', timeoutMs: 15_000 },
 };
 
 export const ENGINE_UPLOAD_ROUTE = { path: 'api/v1/uploads', minRole: 'editor' as WorkspaceRole, timeoutMs: 300_000 };
@@ -202,6 +204,8 @@ export function routePolicyKey(path: string): string {
   if (/^api\/v1\/me\/state\/import$/i.test(path)) return 'api/v1/me/state/import';
   if (/^api\/v1\/me\/state\/[^/]+$/i.test(path)) return 'api/v1/me/state/{key}';
   if (/^api\/v1\/me\/sandbox\/orders\/[^/]+$/i.test(path)) return 'api/v1/me/sandbox/orders/{id}';
+  if (/^api\/v1\/me\/runs\/[^/]+\/hide$/i.test(path)) return 'api/v1/me/runs/{id}/hide';
+  if (/^api\/v1\/me\/runs$/i.test(path)) return 'api/v1/me/runs';
   for (const [pattern, key] of REGISTRY_PATTERNS) if (pattern.test(path)) return key;
   // Only the stored files the API serves; any other name stays unlisted (a 404 here).
   if (/^api\/v1\/backtests\/[0-9a-f-]{36}\/artifacts\/(summary|request|equity_csv|orders_csv|fills_csv|returns_csv|strategies_csv)$/i.test(path)) {

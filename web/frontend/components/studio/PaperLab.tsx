@@ -80,12 +80,14 @@ import { useAuth } from '@/lib/auth';
 import {
   appendSandboxOrder,
   clearSandboxOrders,
+  conflictCurrent,
   ensureImported,
   getUserState,
   listSandboxOrders,
   putUserState,
   readCache,
   StateSaver,
+  transactSandbox,
   updateSandboxOrder,
   writeCache,
   type SandboxValue,
@@ -239,15 +241,61 @@ export function PaperLab() {
   const email = user?.email;
   const who = email || 'guest';
   const syncedRef = useRef(false);
-  const sandboxSaver = useRef<StateSaver<SandboxValue> | null>(null);
+  /** Sandbox version the server last confirmed. Every trade is checked against it. */
+  const sandboxVersionRef = useRef(0);
   const watchlistSaver = useRef<StateSaver<string[]> | null>(null);
   /** Client order id to server row id, so an update can find the row. */
   const serverOrderIds = useRef<Record<string, string>>({});
 
-  const persistSandbox = (cash: number, positions: AlpacaPosition[]) => {
-    const value: SandboxValue = { cash, positions };
-    writeCache(who, 'sandbox', value);
-    if (syncedRef.current) sandboxSaver.current?.schedule(value, 0);
+  /**
+   * Record a sandbox trade on the server, then show it. A trade the server refuses is not shown.
+   * Guests (no account) keep trades in this browser only. A signed-in user whose account has not
+   * loaded cannot trade until it does, so nothing is written from a stale copy.
+   */
+  const commitSandboxTrade = async (
+    order: AlpacaOrder,
+    nextCash: number,
+    nextPositions: AlpacaPosition[],
+    nextOrders: AlpacaOrder[],
+  ): Promise<boolean> => {
+    const showTrade = () => {
+      setSandboxCash(nextCash);
+      setSandboxPositions(nextPositions);
+      setSandboxOrders(nextOrders);
+      writeCache(who, 'sandbox', { cash: nextCash, positions: nextPositions });
+    };
+    if (!email) {
+      showTrade();
+      return true;
+    }
+    if (!syncedRef.current) {
+      toastError('Trade not placed', 'Your account has not loaded yet. Try again in a moment.');
+      return false;
+    }
+    try {
+      const saved = await transactSandbox({
+        expected_version: sandboxVersionRef.current,
+        cash: nextCash,
+        positions: nextPositions,
+        order,
+      });
+      sandboxVersionRef.current = saved.version;
+      serverOrderIds.current[order.id] = saved.order.id;
+      showTrade();
+      return true;
+    } catch (e) {
+      const current = conflictCurrent<SandboxValue>(e);
+      if (current) {
+        sandboxVersionRef.current = current.version;
+        setSandboxCash(current.value.cash);
+        setSandboxPositions(current.value.positions as AlpacaPosition[]);
+        writeCache(who, 'sandbox', current.value);
+        toastError('Trade not placed', 'Your sandbox changed on another device and has been reloaded. Try the order again.');
+      } else {
+        toastError('Trade not placed', e instanceof Error ? e.message : 'The trade could not be saved. Try again.');
+      }
+      return false;
+    }
   };
 
   // Watchlist & Search state
@@ -302,23 +350,16 @@ export function PaperLab() {
     const cachedWatch = readCache<string[]>(who, 'watchlist');
     if (cachedWatch && cachedWatch.length > 0) setWatchlist(cachedWatch);
 
-    const box = new StateSaver<SandboxValue>('sandbox', (cur) => {
-      setSandboxCash(cur.value.cash);
-      setSandboxPositions(cur.value.positions as AlpacaPosition[]);
-      writeCache(who, 'sandbox', cur.value);
-    });
     const watch = new StateSaver<string[]>('watchlist', (cur) => {
       setWatchlist(cur.value);
       writeCache(who, 'watchlist', cur.value);
     });
-    sandboxSaver.current = box;
     watchlistSaver.current = watch;
     syncedRef.current = false;
 
     const stop = () => {
       alive = false;
       syncedRef.current = false;
-      box.dispose();
       watch.dispose();
     };
     if (!email) return stop;
@@ -335,14 +376,14 @@ export function PaperLab() {
           const seeded: SandboxValue = { cash: DEFAULT_SANDBOX.cash, positions: DEFAULT_SANDBOX.positions };
           const saved = await putUserState('sandbox', 0, seeded);
           if (!alive) return;
-          box.baseline(saved.version, seeded);
+          sandboxVersionRef.current = saved.version;
           setSandboxCash(seeded.cash);
           setSandboxPositions(DEFAULT_SANDBOX.positions);
           setSandboxOrders(DEFAULT_SANDBOX.orders);
           serverOrderIds.current = {};
           for (const o of DEFAULT_SANDBOX.orders) await recordOrder(o, serverOrderIds.current);
         } else {
-          box.baseline(sb.version, sb.value);
+          sandboxVersionRef.current = sb.version;
           setSandboxCash(sb.value.cash);
           setSandboxPositions(sb.value.positions as AlpacaPosition[]);
           const rows = await listSandboxOrders();
@@ -722,15 +763,20 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     setSandboxCash(DEFAULT_SANDBOX.cash);
     setSandboxPositions(DEFAULT_SANDBOX.positions);
     setSandboxOrders(DEFAULT_SANDBOX.orders);
-    persistSandbox(DEFAULT_SANDBOX.cash, DEFAULT_SANDBOX.positions);
-    if (syncedRef.current) {
+    writeCache(who, 'sandbox', { cash: DEFAULT_SANDBOX.cash, positions: DEFAULT_SANDBOX.positions });
+    if (email && syncedRef.current) {
       serverOrderIds.current = {};
       void (async () => {
         try {
+          const saved = await putUserState('sandbox', sandboxVersionRef.current, {
+            cash: DEFAULT_SANDBOX.cash,
+            positions: DEFAULT_SANDBOX.positions,
+          });
+          sandboxVersionRef.current = saved.version;
           await clearSandboxOrders();
           for (const o of DEFAULT_SANDBOX.orders) await recordOrder(o, serverOrderIds.current);
-        } catch {
-          // If this fails, the server copy can differ from the screen until the next reset.
+        } catch (e) {
+          toastError('Reset not saved', e instanceof Error ? e.message : 'The sandbox reset could not be saved. Reload and try again.');
         }
       })();
     }
@@ -956,11 +1002,8 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
           }
         }
 
-        setSandboxCash(nextCash);
-        setSandboxPositions(nextPositions);
-        setSandboxOrders([newOrder, ...sandboxOrders]);
-        persistSandbox(nextCash, nextPositions);
-        if (syncedRef.current) void recordOrder(newOrder, serverOrderIds.current);
+        const committed = await commitSandboxTrade(newOrder, nextCash, nextPositions, [newOrder, ...sandboxOrders]);
+        if (!committed) return;
 
         success(
           `Order Filled · ${orderSide.toUpperCase()} ${qtyNum} ${selectedSymbol}`,
@@ -1051,12 +1094,8 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
         time_in_force: 'day',
         status: 'filled',
       };
-      const nextOrders = [newOrder, ...sandboxOrders];
-      setSandboxCash(nextCash);
-      setSandboxPositions(nextPositions);
-      setSandboxOrders(nextOrders);
-      persistSandbox(nextCash, nextPositions);
-      if (syncedRef.current) void recordOrder(newOrder, serverOrderIds.current);
+      const committed = await commitSandboxTrade(newOrder, nextCash, nextPositions, [newOrder, ...sandboxOrders]);
+      if (!committed) return;
       success('Position Closed', `Liquidated ${closeQty} ${pos.symbol} at ${formatCurrency(fillPrice)}`);
       return;
     }

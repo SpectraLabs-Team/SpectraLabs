@@ -221,6 +221,81 @@ pub(crate) async fn clear_sandbox_orders(
     }
 }
 
+/// `POST /api/v1/me/sandbox/transact` body: one trade, applied atomically.
+#[derive(Deserialize)]
+pub(crate) struct TransactRequest {
+    expected_version: i32,
+    cash: f64,
+    positions: JsonValue,
+    order: JsonValue,
+}
+
+/// Record a sandbox trade (order, cash and positions) in one transaction. A stale version returns 409
+/// and writes nothing.
+pub(crate) async fn transact_sandbox(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let (pool, user, ws) = match scope(&st, &id, true).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let Ok(bytes) = body else { return error_response(400, "Could not read the request body.") };
+    let req: TransactRequest = match serde_json::from_slice(&bytes) {
+        Ok(r) => r,
+        Err(e) => return error_response(422, format!("Invalid trade: {e}")),
+    };
+    if req.expected_version < 0 {
+        return error_response(422, "expected_version must be 0 or more.");
+    }
+    if !req.cash.is_finite() {
+        return error_response(422, "cash must be a finite number.");
+    }
+    if !req.positions.is_array() {
+        return error_response(422, "positions must be a JSON array.");
+    }
+    if !req.order.is_object() {
+        return error_response(422, "An order must be a JSON object.");
+    }
+
+    match user_state::transact_sandbox(
+        &pool,
+        user,
+        ws,
+        req.expected_version,
+        req.cash,
+        &req.positions,
+        &req.order,
+    )
+    .await
+    {
+        Ok(user_state::TransactOutcome::Saved { state, order }) => to_json(
+            200,
+            &json!({
+                "saved": true,
+                "version": state.version,
+                "updated_at": state.updated_at,
+                "value": state.payload,
+                "order": {"id": order.id, "payload": order.payload, "created_at": order.created_at},
+            }),
+        ),
+        Ok(user_state::TransactOutcome::Conflict(current)) => {
+            let view = state_view(StateKey::Sandbox, current);
+            to_json(
+                409,
+                &json!({
+                    "message": "The sandbox changed on another device. Reload and try again.",
+                    "code": "version_conflict",
+                    "current": view.clone(),
+                    "details": { "current": view },
+                }),
+            )
+        }
+        Err(e) => db_error(&e),
+    }
+}
+
 /// `POST /api/v1/me/state/import` body: `{"import_key": "...", "data": {"portfolio": ..., ...}}`.
 #[derive(Deserialize)]
 pub(crate) struct ImportRequest {

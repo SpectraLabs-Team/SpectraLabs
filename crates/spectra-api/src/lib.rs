@@ -978,6 +978,7 @@ fn user_state_routes() -> Router<AppState> {
             ),
         )
         .route("/api/v1/me/sandbox/orders/{id}", only(patch(user_state_api::update_sandbox_order)))
+        .route("/api/v1/me/sandbox/transact", only(post(user_state_api::transact_sandbox)))
 }
 
 fn paper_routes() -> Router<AppState> {

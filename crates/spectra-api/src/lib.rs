@@ -41,6 +41,7 @@
 
 pub mod auth;
 pub mod backtests_api;
+pub mod broker_adapters;
 pub mod broker_api;
 pub mod config;
 pub mod corporate_actions_api;
@@ -742,6 +743,24 @@ fn engine_routes(prefix: &str) -> Router<AppState> {
         .route(&format!("{prefix}/telemetry/gpu"), only(get(telemetry_gpu)))
         .route(&format!("{prefix}/alpaca"), any(broker_api::alpaca_proxy))
         .route(&format!("{prefix}/alpaca/{{*rest}}"), any(broker_api::alpaca_proxy))
+        .route(&format!("{prefix}/broker/venues/order"), only(post(broker_api::handle_venue_order)))
+        .route(
+            &format!("{prefix}/broker/venues/specs/{{venue}}/{{symbol}}"),
+            only(get(broker_api::handle_venue_specs)),
+        )
+        .route(
+            &format!("{prefix}/broker/venues/options-support/{{venue}}"),
+            only(get(broker_api::handle_venue_options_support)),
+        )
+        .route(&format!("{prefix}/broker/venues/reconcile"), only(post(broker_api::handle_venue_reconcile)))
+        .route(
+            &format!("{prefix}/broker/venues/funding-payment"),
+            only(post(broker_api::handle_venue_funding_payment)),
+        )
+        .route(
+            &format!("{prefix}/broker/venues/options-greeks"),
+            only(post(broker_api::handle_venue_options_greeks)),
+        )
 }
 
 /// The queued-job routes (`/api/v1` only; there was never an `/api` version).

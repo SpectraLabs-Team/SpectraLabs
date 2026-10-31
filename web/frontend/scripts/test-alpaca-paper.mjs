@@ -21,9 +21,12 @@ function transpileAndLoad(relPath) {
   });
   const tempDir = path.join(root, 'node_modules', '.cache', 'alpaca-test');
   fs.mkdirSync(tempDir, { recursive: true });
-  const tempFile = path.join(tempDir, path.basename(relPath).replace(/\.tsx?$/, '.cjs'));
-  fs.writeFileSync(tempFile, outputText);
-  return require(tempFile);
+  const baseName = path.basename(relPath).replace(/\.tsx?$/, '');
+  const tempFileCjs = path.join(tempDir, `${baseName}.cjs`);
+  const tempFileJs = path.join(tempDir, `${baseName}.js`);
+  fs.writeFileSync(tempFileCjs, outputText);
+  fs.writeFileSync(tempFileJs, outputText);
+  return require(tempFileCjs);
 }
 
 const site = transpileAndLoad('lib/site.ts');
@@ -778,6 +781,7 @@ describe('7. Alpaca Secret Never Leaves the Browser (Decision 6)', () => {
       clear: () => mockStorage.clear(),
     };
 
+    transpileAndLoad('lib/api.ts');
     const tempDir = path.join(root, 'node_modules', '.cache', 'alpaca-test');
     const tsSource = fs.readFileSync(path.join(root, 'lib/userState.ts'), 'utf8');
     const { outputText } = ts.transpileModule(tsSource, {

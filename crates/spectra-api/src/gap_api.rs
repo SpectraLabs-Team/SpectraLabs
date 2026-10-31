@@ -200,7 +200,7 @@ pub(crate) async fn handle_analyze_gap(
             (SELECT id FROM runs WHERE id = $1 AND workspace_id = $2),
             (SELECT id FROM runs WHERE job_id = $1 AND workspace_id = $2),
             (SELECT r.id FROM runs r WHERE r.workspace_id = $2 ORDER BY r.created_at DESC LIMIT 1)
-        )"
+        )",
     )
     .bind(candidate_run_id)
     .bind(ws)
@@ -224,13 +224,13 @@ pub(crate) async fn handle_analyze_gap(
             })
             .collect::<Vec<_>>()
     } else {
-        let mut orders = spectra_db::paper::list_paper_orders(&pool, ws, Some(resolved_strategy_id), None, 500)
-            .await
-            .unwrap_or_default();
-        if orders.is_empty() {
-            orders = spectra_db::paper::list_paper_orders(&pool, ws, None, None, 500)
+        let mut orders =
+            spectra_db::paper::list_paper_orders(&pool, ws, Some(resolved_strategy_id), None, 500)
                 .await
                 .unwrap_or_default();
+        if orders.is_empty() {
+            orders =
+                spectra_db::paper::list_paper_orders(&pool, ws, None, None, 500).await.unwrap_or_default();
         }
         orders
             .into_iter()

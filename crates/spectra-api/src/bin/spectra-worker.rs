@@ -1016,20 +1016,14 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         }
     }
     let backtest_config = {
-        let exact_json = raw_stored
-            .get("config_exact")
-            .or_else(|| original_payload.get("config_exact"));
+        let exact_json = raw_stored.get("config_exact").or_else(|| original_payload.get("config_exact"));
         if let Some(cfg) = exact_json.and_then(|v| Json::parse(&v.to_string()).ok()) {
             config_from_json(&cfg).ok()
         } else {
             None
         }
     }
-    .or_else(|| {
-        Json::parse(&config_value_run.to_string())
-            .ok()
-            .and_then(|j| config_from_json(&j).ok())
-    })
+    .or_else(|| Json::parse(&config_value_run.to_string()).ok().and_then(|j| config_from_json(&j).ok()))
     .unwrap_or_default();
 
     let bars = if let Some(csv) = original_payload.get("csv").and_then(serde_json::Value::as_str) {
@@ -1128,7 +1122,18 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
                         }
                         Ok(Box::new(spectra_engine::dsl::DslStrategy::new(program.clone(), &overrides)))
                     };
-                    (Some(Arc::new(f) as Arc<dyn Fn(&spectra_research::ParamSet) -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error> + Send + Sync>), true)
+                    (
+                        Some(Arc::new(f)
+                            as Arc<
+                                dyn Fn(
+                                        &spectra_research::ParamSet,
+                                    )
+                                        -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error>
+                                    + Send
+                                    + Sync,
+                            >),
+                        true,
+                    )
                 }
                 Err(error) => {
                     let message = format!("DSL validation failed: {error}");
@@ -1148,9 +1153,25 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
 
     let builtin_factory = if !is_dsl {
         match spectra_backtest::builtin_factory(&strategy) {
-            Ok(f) => Some(Arc::new(f) as Arc<dyn Fn(&spectra_research::ParamSet) -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error> + Send + Sync>),
+            Ok(f) => Some(Arc::new(f)
+                as Arc<
+                    dyn Fn(
+                            &spectra_research::ParamSet,
+                        )
+                            -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error>
+                        + Send
+                        + Sync,
+                >),
             Err(_) => match spectra_backtest::builtin_factory("sma_cross") {
-                Ok(f) => Some(Arc::new(f) as Arc<dyn Fn(&spectra_research::ParamSet) -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error> + Send + Sync>),
+                Ok(f) => Some(Arc::new(f)
+                    as Arc<
+                        dyn Fn(
+                                &spectra_research::ParamSet,
+                            )
+                                -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error>
+                            + Send
+                            + Sync,
+                    >),
                 Err(error) => {
                     let message = format!("Unsupported source strategy: {error}");
                     let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")

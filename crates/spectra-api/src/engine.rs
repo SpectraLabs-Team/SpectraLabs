@@ -826,8 +826,7 @@ pub fn run_params(payload: &Json) -> Json {
             if key == "portfolio_csv" || key == "csv" {
                 if let Json::String(csv) = value {
                     let digest_key = if key == "csv" { "dataset_sha256" } else { "portfolio_sha256" };
-                    let _ = params
-                        .set(digest_key, Json::string(spectra_core::sha256_hex(csv.as_bytes())));
+                    let _ = params.set(digest_key, Json::string(spectra_core::sha256_hex(csv.as_bytes())));
                 }
             } else {
                 let _ = params.set(key.clone(), value.clone());

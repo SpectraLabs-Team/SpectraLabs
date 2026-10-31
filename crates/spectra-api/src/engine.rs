@@ -683,6 +683,10 @@ fn backtest_artifacts(result: &spectra_engine::BacktestResult, returns: &[f64]) 
         .with("returns", Json::string(series))
 }
 
+/// Runs a backtest job configured from a CSV dataset and SMA cross strategy.
+///
+/// # Errors
+/// Returns an HTTP error status code and message if payload validation or execution fails.
 pub fn run_registry_backtest(payload: &Json) -> Reply {
     let (csv, fast, slow, experiment_id) = backtest_inputs(payload)?;
     let note = str_field(payload, "note", "")?;

@@ -1151,7 +1151,9 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         (None, false)
     };
 
-    let builtin_factory = if !is_dsl {
+    let builtin_factory = if is_dsl {
+        None
+    } else {
         match spectra_backtest::builtin_factory(&strategy) {
             Ok(f) => Some(Arc::new(f)
                 as Arc<
@@ -1182,8 +1184,6 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
                 }
             },
         }
-    } else {
-        None
     };
 
     let active_factory = dsl_factory.or(builtin_factory).expect("factory must be available");

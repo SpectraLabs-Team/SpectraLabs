@@ -195,6 +195,48 @@ async fn viewer_reads_but_cannot_write() {
 }
 
 #[tokio::test]
+async fn viewer_is_refused_on_import_sandbox_orders_and_trades() {
+    let Some(f) = Fixture::new().await else { return };
+    let (owner, viewer) = (spectra_db::new_id(), spectra_db::new_id());
+    f.join(owner, "owner").await;
+    f.join(viewer, "viewer").await;
+
+    let (s, created) = f
+        .call(owner, f.ws, "POST", "/api/v1/me/sandbox/orders", &json!({"id": "o-1", "status": "filled"}))
+        .await;
+    assert_eq!(s, 201);
+    let row_id = created["id"].as_str().unwrap().to_string();
+
+    let refused: [(&str, String, Value); 4] = [
+        (
+            "POST",
+            format!("{STATE}/import"),
+            json!({"import_key": "viewer-import", "data": {"watchlist": ["IWM"]}}),
+        ),
+        ("PATCH", format!("/api/v1/me/sandbox/orders/{row_id}"), json!({"id": "o-1", "status": "canceled"})),
+        ("DELETE", "/api/v1/me/sandbox/orders".to_string(), Value::Null),
+        (
+            "POST",
+            "/api/v1/me/sandbox/transact".to_string(),
+            json!({"expected_version": 0, "cash": 0, "positions": [], "order": {"id": "t-1"}}),
+        ),
+    ];
+
+    for (method, path, body) in refused {
+        let (s, err) = f.call(viewer, f.ws, method, &path, &body).await;
+        assert_eq!(s, 403, "{method} {path}");
+        assert_eq!(err["code"], "viewer_read_only", "{method} {path}");
+    }
+
+    // Nothing changed: the viewer's watchlist is still empty and the owner keeps their one order.
+    let (_, view) = f.call(viewer, f.ws, "GET", STATE, &Value::Null).await;
+    assert_eq!(view["state"]["watchlist"]["value"], json!([]));
+    let (_, list) = f.call(owner, f.ws, "GET", "/api/v1/me/sandbox/orders", &Value::Null).await;
+    assert_eq!(list["orders"].as_array().unwrap().len(), 1);
+    assert_eq!(list["orders"][0]["payload"]["status"], "filled");
+}
+
+#[tokio::test]
 async fn import_keeps_server_data_and_is_idempotent() {
     let Some(f) = Fixture::new().await else { return };
     let a = spectra_db::new_id();

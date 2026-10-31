@@ -532,3 +532,68 @@ async fn sandbox_trade_is_atomic_and_rejects_stale_writes() {
     let (_, list) = f.call(a, f.ws, "GET", orders, &Value::Null).await;
     assert_eq!(list["orders"].as_array().unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn second_device_resume_sandbox_and_portfolio_state() {
+    let Some(f) = Fixture::new().await else { return };
+    let user = spectra_db::new_id();
+    f.join(user, "owner").await;
+
+    // Device A writes portfolio state and a sandbox order.
+    let portfolio_val = json!({
+        "csv": "symbol,quantity,price\nAAPL,100,150.0\n",
+        "source": "upload"
+    });
+    let (s, saved_portfolio) = f
+        .call(
+            user,
+            f.ws,
+            "PUT",
+            &format!("{STATE}/portfolio"),
+            &json!({"expected_version": 0, "value": portfolio_val}),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(saved_portfolio["version"], 1);
+    assert_eq!(saved_portfolio["value"], portfolio_val);
+
+    let order_payload = json!({"id": "order-dev-a", "symbol": "AAPL", "qty": 100, "side": "buy"});
+    let (s, created_order) = f.call(user, f.ws, "POST", "/api/v1/me/sandbox/orders", &order_payload).await;
+    assert_eq!(s, 201);
+    let order_id = created_order["id"].as_str().unwrap().to_string();
+
+    // Device B (a new client with no local state) reads GET /api/v1/me/state and GET /api/v1/me/sandbox/orders.
+    let (s, state_b) = f.call(user, f.ws, "GET", STATE, &Value::Null).await;
+    assert_eq!(s, 200);
+    assert_eq!(state_b["workspace_id"], f.ws.to_string());
+    assert_eq!(state_b["state"]["portfolio"]["version"], 1);
+    assert_eq!(state_b["state"]["portfolio"]["value"], portfolio_val);
+
+    let (s, orders_b) = f.call(user, f.ws, "GET", "/api/v1/me/sandbox/orders", &Value::Null).await;
+    assert_eq!(s, 200);
+    let orders_list = orders_b["orders"].as_array().unwrap();
+    assert_eq!(orders_list.len(), 1);
+    assert_eq!(orders_list[0]["id"], order_id);
+    assert_eq!(orders_list[0]["payload"]["symbol"], "AAPL");
+    assert_eq!(orders_list[0]["payload"]["id"], "order-dev-a");
+
+    // Device A writes again with the old expected_version (0).
+    // Assert 409 version_conflict with the current value in details.current.
+    let stale_portfolio_val = json!({
+        "csv": "symbol,quantity,price\nAAPL,200,155.0\n",
+        "source": "manual"
+    });
+    let (s, conflict) = f
+        .call(
+            user,
+            f.ws,
+            "PUT",
+            &format!("{STATE}/portfolio"),
+            &json!({"expected_version": 0, "value": stale_portfolio_val}),
+        )
+        .await;
+    assert_eq!(s, 409);
+    assert_eq!(conflict["code"], "version_conflict");
+    assert_eq!(conflict["details"]["current"]["version"], 1);
+    assert_eq!(conflict["details"]["current"]["value"], portfolio_val);
+}

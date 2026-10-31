@@ -32,12 +32,12 @@ use spectra_db::datasets::{self, Access, Resolved};
 use spectra_db::jobs::{self, Beat, Job, NewRun, WorkerInfo};
 use spectra_db::optimization;
 use spectra_db::{PgPool, PoolConfig};
-use spectra_engine::RunRecord;
+use spectra_engine::{RunRecord, Strategy};
 use spectra_registry::{
     registry::{config_from_json, metrics_from_json, params_from_json, RunInput},
     PgRegistry, StoredArtifact,
 };
-use spectra_research::{run_survival_lab_controlled, SurvivalProgress, Verdict};
+use spectra_research::{run_survival_lab_controlled, ParamSet, SurvivalProgress, Verdict};
 use sqlx::Row;
 use std::time::Instant;
 use tokio::sync::{watch, Semaphore};
@@ -396,9 +396,18 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut work = tokio::task::spawn_blocking(move || {
         let payload = Json::parse(&payload_text).map_err(|e| (422, format!("Invalid payload: {e}")))?;
-        engine::run_job_with_progress(&kind, &payload, |progress| {
-            let _ = progress_tx.send(progress);
-        })
+        if kind == "backtest" {
+            let _ = progress_tx.send(0.0);
+            let res = execute_registry_backtest(&payload);
+            if res.is_ok() {
+                let _ = progress_tx.send(1.0);
+            }
+            res
+        } else {
+            engine::run_job_with_progress(&kind, &payload, |progress| {
+                let _ = progress_tx.send(progress);
+            })
+        }
     });
 
     let timeout = engine::job_timeout(&job.kind);
@@ -602,6 +611,157 @@ async fn finish(ctx: &Ctx, job: &Job, report: &Json) -> Result<(), spectra_db::E
         warn!(job_id = %job.id, "job finished, but another worker had taken it over");
     }
     Ok(())
+}
+
+#[derive(Debug)]
+struct SmaCross(usize, usize);
+
+impl Strategy for SmaCross {
+    fn on_bar(&mut self, ctx: &mut spectra_engine::Context<'_>, bars: &[spectra_core::Bar]) {
+        for bar in bars {
+            let id = bar.instrument;
+            let history = ctx.history(id);
+            if history.len() < self.1 {
+                continue;
+            }
+            let sma = |period: usize| -> i128 {
+                history[history.len() - period..]
+                    .iter()
+                    .map(|item| i128::from(item.close.raw()))
+                    .sum::<i128>()
+                    / i128::try_from(period).unwrap_or(1)
+            };
+            let position = ctx.position(id);
+            if sma(self.0) > sma(self.1) && position.is_zero() {
+                if let Ok(quantity) = spectra_core::Qty::from_f64(1.0) {
+                    ctx.market(id, spectra_core::Side::Buy, quantity);
+                }
+            } else if sma(self.0) <= sma(self.1) && position.raw() > 0 {
+                ctx.market(id, spectra_core::Side::Sell, position);
+            }
+        }
+    }
+}
+
+/// The run's series as CSV files: `equity_curve`, `trades` and `returns`.
+fn backtest_artifacts(result: &spectra_engine::BacktestResult, returns: &[f64]) -> Json {
+    use std::fmt::Write as _;
+    let mut equity = String::from("ts_ns,equity,cash\n");
+    for point in &result.equity_curve {
+        let _ = writeln!(equity, "{},{},{}", point.ts_ns, point.equity, point.cash);
+    }
+    let mut trades = String::from("seq,ts_ns,instrument,side,qty,price,fee,realized,cash_after\n");
+    for entry in result.ledger.journal().iter().filter(|e| e.kind == spectra_core::EntryType::Fill) {
+        let fill = &entry.fill;
+        let side = match fill.side {
+            spectra_core::Side::Buy => "buy",
+            spectra_core::Side::Sell => "sell",
+        };
+        let _ = writeln!(
+            trades,
+            "{},{},{},{side},{},{},{},{},{}",
+            entry.seq,
+            fill.ts_ns,
+            fill.instrument,
+            fill.qty,
+            fill.price,
+            fill.fee,
+            entry.realized,
+            entry.cash_after
+        );
+    }
+    // Returns start at the second equity point (one per period).
+    let mut series = String::from("ts_ns,return\n");
+    for (point, value) in result.equity_curve.iter().skip(1).zip(returns) {
+        let _ = writeln!(series, "{},{value:?}", point.ts_ns);
+    }
+    Json::object()
+        .with("equity_curve", Json::string(equity))
+        .with("trades", Json::string(trades))
+        .with("returns", Json::string(series))
+}
+
+fn registry_str_field(j: &Json, key: &str, default: &str) -> Result<String, (u16, String)> {
+    match j.find(key) {
+        None | Some(Json::Null) => Ok(default.to_string()),
+        Some(Json::String(s)) => Ok(s.clone()),
+        _ => Err((422, format!("{key} must be a string."))),
+    }
+}
+
+fn registry_int_field(j: &Json, key: &str, default: i64, msg: &str) -> Result<i64, (u16, String)> {
+    match j.find(key) {
+        None | Some(Json::Null) => Ok(default),
+        Some(Json::Int(v)) => Ok(*v),
+        Some(Json::Double(d)) if d.fract() == 0.0 && d.abs() < 9e15 => Ok(*d as i64),
+        Some(Json::String(s)) => s.trim().parse().map_err(|_| (422, msg.to_string())),
+        _ => Err((422, msg.to_string())),
+    }
+}
+
+/// Executes an SMA cross backtest from an Experiment Registry payload with CSV data.
+fn execute_registry_backtest(payload: &Json) -> Result<Json, (u16, String)> {
+    let csv = registry_str_field(payload, "csv", "")?;
+    if csv.trim().is_empty() {
+        return Err((422, "csv must not be empty.".into()));
+    }
+    if csv.len() > 10_000_000 {
+        return Err((413, "Dataset CSV exceeds the 10 MB limit.".into()));
+    }
+    let fast = registry_int_field(payload, "fast", 5, "fast must be a positive integer.")?;
+    let slow = registry_int_field(payload, "slow", 20, "slow must be a positive integer.")?;
+    if !(1..1000).contains(&fast) || !(2..=1000).contains(&slow) || fast >= slow {
+        return Err((422, "SMA periods must satisfy 1 <= fast < slow <= 1000.".into()));
+    }
+    let experiment_id = registry_str_field(payload, "experiment_id", "")?;
+    if experiment_id.trim().is_empty() || experiment_id.len() > 128 {
+        return Err((422, "experiment_id is required and must be at most 128 characters.".into()));
+    }
+    let note = registry_str_field(payload, "note", "")?;
+    if note.len() > 2_000 {
+        return Err((422, "note must be at most 2,000 characters.".into()));
+    }
+    let dataset = spectra_data::load_csv(csv.as_bytes(), &spectra_data::CsvOptions::default())
+        .map_err(|error| (422, format!("Dataset CSV is invalid: {error}")))?;
+    let config = spectra_engine::BacktestConfig::default();
+    let mut strategy = SmaCross(usize::try_from(fast).unwrap_or(5), usize::try_from(slow).unwrap_or(20));
+    let result = spectra_engine::run_backtest(&dataset.bars, &mut strategy, &config)
+        .map_err(|error| (422, error.to_string()))?;
+    let returns = spectra_engine::returns_from_curve(&result.equity_curve);
+    let artifacts = backtest_artifacts(&result, &returns);
+    let params = ParamSet::from_pairs([("fast", fast as f64), ("slow", slow as f64)]);
+    let metrics = spectra_registry::registry::metrics_to_json(&result.metrics)
+        .map_err(|error| (422, error.to_string()))?;
+    let config_json =
+        spectra_registry::registry::config_to_json(&config).map_err(|error| (422, error.to_string()))?;
+    let params_json =
+        spectra_registry::registry::params_to_json(&params).map_err(|error| (422, error.to_string()))?;
+    let returns_json = returns
+        .into_iter()
+        .map(|value| Json::number(value).map_err(|error| (422, error.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+    let strategy_sha256 = spectra_core::sha256_hex(b"spectra:builtin:sma-cross:v1");
+    Ok(Json::object()
+        .with("experiment_id", Json::string(experiment_id))
+        .with("dataset_id", Json::string(dataset.info.id))
+        .with("strategy", Json::string("sma_cross"))
+        .with("strategy_sha256", Json::string(strategy_sha256))
+        .with("params", params_json)
+        .with("config", config_json)
+        .with("metrics", metrics)
+        .with("returns", Json::Array(returns_json))
+        .with("note", Json::string(note))
+        .with(engine::BACKTEST_ARTIFACTS_KEY, artifacts)
+        .with(
+            "run",
+            Json::object()
+                .with("engine_version", Json::string(result.run.engine_version))
+                .with("dataset_sha256", Json::string(result.run.dataset_sha256))
+                .with("config_sha256", Json::string(result.run.config_sha256))
+                .with("result_sha256", Json::string(result.run.result_sha256))
+                .with("seed", Json::string(result.run.seed.to_string()))
+                .with("bar_count", Json::integer(i64::try_from(result.run.bar_count).unwrap_or(i64::MAX))),
+        ))
 }
 
 async fn finish_registry_backtest(
@@ -1892,5 +2052,88 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
                 .await;
             fail_job(&ctx, &job, started, &msg, false).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod registry_backtest_tests {
+    use super::*;
+
+    fn sample_csv() -> String {
+        let mut csv = String::from("timestamp,symbol,open,high,low,close,volume\n");
+        let start = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid date");
+        for day in 0_u32..32 {
+            let date = start + chrono::Duration::days(i64::from(day));
+            let close = 100.0 + f64::from(day);
+            csv.push_str(&format!("{},TEST,{close},{},{},{close},100000\n", date, close + 1.0, close - 1.0));
+        }
+        csv
+    }
+
+    #[test]
+    fn execute_registry_backtest_succeeds_and_produces_artifacts_and_metrics() {
+        let payload = Json::object()
+            .with("experiment_id", Json::string("019a0000-0000-7000-8000-000000000001"))
+            .with("csv", Json::string(sample_csv()))
+            .with("fast", Json::integer(2))
+            .with("slow", Json::integer(5));
+        let output = execute_registry_backtest(&payload).expect("backtest completes");
+        assert_eq!(output.at("strategy").and_then(Json::as_str).unwrap(), "sma_cross");
+        for key in ["dataset_id", "strategy_sha256"] {
+            assert_eq!(output.at(key).and_then(Json::as_str).unwrap().len(), 64);
+        }
+        for key in ["dataset_sha256", "config_sha256", "result_sha256"] {
+            assert_eq!(
+                output.at("run").and_then(|run| run.at(key)).and_then(Json::as_str).unwrap().len(),
+                64
+            );
+        }
+        let metrics = output.at("metrics").expect("metrics object");
+        assert!(metrics.at("valid").and_then(Json::as_bool).unwrap());
+        assert!(!output.at("returns").and_then(Json::items).unwrap().is_empty());
+        let files = output.at(engine::BACKTEST_ARTIFACTS_KEY).unwrap();
+        let equity = files.at("equity_curve").and_then(Json::as_str).unwrap();
+        assert!(equity.starts_with("ts_ns,equity,cash\n"));
+        assert_eq!(equity.lines().count(), 33);
+        let trades = files.at("trades").and_then(Json::as_str).unwrap();
+        assert!(trades.starts_with("seq,ts_ns,instrument,side,qty,price,fee,realized,cash_after\n"));
+    }
+
+    #[test]
+    fn execute_registry_backtest_with_25_row_aapl_csv() {
+        let mut csv = String::from("timestamp,symbol,open,high,low,close,volume\n");
+        let start = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid date");
+        for day in 0_u32..25 {
+            let date = start + chrono::Duration::days(i64::from(day));
+            let close = 101.0 + f64::from(day) * 0.5;
+            csv.push_str(&format!(
+                "{},AAPL,{},{},{},{close},100000\n",
+                date,
+                close - 1.0,
+                close + 1.0,
+                close - 2.0
+            ));
+        }
+        let payload = Json::object()
+            .with("experiment_id", Json::string("019a0000-0000-7000-8000-000000000001"))
+            .with("csv", Json::string(csv))
+            .with("fast", Json::integer(5))
+            .with("slow", Json::integer(20));
+        let output = execute_registry_backtest(&payload).expect("25-row AAPL backtest completes");
+        assert_eq!(output.at("strategy").and_then(Json::as_str).unwrap(), "sma_cross");
+        let metrics = output.at("metrics").expect("metrics object");
+        assert!(metrics.at("valid").and_then(Json::as_bool).unwrap());
+        let run = output.at("run").expect("run record");
+        assert_eq!(run.at("bar_count").and_then(Json::as_int).unwrap(), 25);
+    }
+
+    #[test]
+    fn execute_registry_backtest_rejects_invalid_params() {
+        let payload = Json::object()
+            .with("experiment_id", Json::string("019a0000-0000-7000-8000-000000000001"))
+            .with("csv", Json::string(sample_csv()))
+            .with("fast", Json::integer(20))
+            .with("slow", Json::integer(5));
+        assert!(execute_registry_backtest(&payload).is_err());
     }
 }

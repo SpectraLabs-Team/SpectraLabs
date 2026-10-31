@@ -368,6 +368,37 @@ async fn curves_swaps_and_z_spreads() {
     assert!((payer["pv"].as_f64().unwrap() + receiver["pv"].as_f64().unwrap()).abs() < 1e-6);
     assert!(payer["dv01"].as_f64().unwrap() > 0.0, "a payer gains when rates rise");
 
+    // A swap record stores its terms; one without a fixed-leg frequency, or with a day count, is refused.
+    let (status, body) = f
+        .call(
+            "POST",
+            "/api/v1/instruments",
+            &json!({"symbol": "USD5Y", "type": "swap", "tick_size": "0.0001", "maturity": "2031-11-02",
+                    "coupon_rate": "-0.0025", "coupon_frequency": 2}),
+        )
+        .await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!((body["type"].as_str(), body["coupon_frequency"].as_u64()), (Some("swap"), Some(2)), "{body}");
+    assert_eq!(body["coupon_rate"], "-0.00250000");
+    let (status, body) = f
+        .call(
+            "POST",
+            "/api/v1/instruments",
+            &json!({"symbol": "USD7Y", "type": "swap", "tick_size": "0.0001", "maturity": "2033-11-02",
+                    "coupon_rate": "0.04"}),
+        )
+        .await;
+    assert_eq!(status, 422, "{body}");
+    let (status, body) = f
+        .call(
+            "POST",
+            "/api/v1/instruments",
+            &json!({"symbol": "USD7Y", "type": "swap", "tick_size": "0.0001", "maturity": "2033-11-02",
+                    "coupon_rate": "0.04", "coupon_frequency": 2, "day_count": "act_360"}),
+        )
+        .await;
+    assert_eq!(status, 422, "{body}");
+
     // A bond's z-spread over a flat curve: priced off curve + 100bp, it reads back 100bp.
     let flat = json!({"flat_rate": 0.03});
     let (status, zero) = f

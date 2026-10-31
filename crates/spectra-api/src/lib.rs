@@ -68,6 +68,7 @@ pub mod strategies_api;
 pub mod survival_api;
 pub mod telemetry;
 pub mod uploads_api;
+pub mod user_state_api;
 pub mod worker;
 
 use std::collections::HashSet;
@@ -963,6 +964,22 @@ fn risk_center_routes() -> Router<AppState> {
 }
 
 /// Module 9: Paper Trading.
+fn user_state_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/me/state", only(get(user_state_api::get_all)))
+        .route("/api/v1/me/state/import", only(post(user_state_api::import)))
+        .route("/api/v1/me/state/{key}", only(put(user_state_api::put_state)))
+        .route(
+            "/api/v1/me/sandbox/orders",
+            only(
+                get(user_state_api::list_sandbox_orders)
+                    .post(user_state_api::append_sandbox_order)
+                    .delete(user_state_api::clear_sandbox_orders),
+            ),
+        )
+        .route("/api/v1/me/sandbox/orders/{id}", only(patch(user_state_api::update_sandbox_order)))
+}
+
 fn paper_routes() -> Router<AppState> {
     Router::new()
         .route("/api/v1/paper/account", only(get(paper_api::get_account)))
@@ -1007,6 +1024,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(risk_center_routes())
         .merge(paper_routes())
         .merge(report_routes())
+        .merge(user_state_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .merge(upload_routes())

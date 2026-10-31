@@ -35,6 +35,7 @@ pub mod risk_center;
 pub mod roles;
 pub mod strategies;
 pub mod uploads;
+pub mod user_state;
 pub mod vault;
 pub mod web_migrations;
 

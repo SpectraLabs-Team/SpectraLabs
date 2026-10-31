@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlertCircle,
@@ -76,6 +76,31 @@ import {
   isCryptoSymbol,
   type CuratedAsset,
 } from '@/lib/marketStatus';
+import { useAuth } from '@/lib/auth';
+import {
+  appendSandboxOrder,
+  clearSandboxOrders,
+  ensureImported,
+  getUserState,
+  listSandboxOrders,
+  putUserState,
+  readCache,
+  StateSaver,
+  updateSandboxOrder,
+  writeCache,
+  type SandboxValue,
+  type StateEntry,
+} from '@/lib/userState';
+
+/** Save one sandbox order on the server. The order still shows on screen if this fails. */
+async function recordOrder(order: AlpacaOrder, ids: Record<string, string>) {
+  try {
+    const saved = await appendSandboxOrder(order);
+    ids[order.id] = saved.id;
+  } catch {
+    // The order stays on screen; the server copy is missing it until the next reset.
+  }
+}
 
 // Default initial watchlist symbols
 const INITIAL_WATCHLIST = ['SOL/USD', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'AMZN', 'GOOGL', 'META'];
@@ -209,6 +234,22 @@ export function PaperLab() {
   const [sandboxPositions, setSandboxPositions] = useState<AlpacaPosition[]>(DEFAULT_SANDBOX.positions);
   const [sandboxOrders, setSandboxOrders] = useState<AlpacaOrder[]>(DEFAULT_SANDBOX.orders);
 
+  // Server-backed sandbox, orders and watchlist (M25.1). The browser copy is a cache only.
+  const { user } = useAuth();
+  const email = user?.email;
+  const who = email || 'guest';
+  const syncedRef = useRef(false);
+  const sandboxSaver = useRef<StateSaver<SandboxValue> | null>(null);
+  const watchlistSaver = useRef<StateSaver<string[]> | null>(null);
+  /** Client order id to server row id, so an update can find the row. */
+  const serverOrderIds = useRef<Record<string, string>>({});
+
+  const persistSandbox = (cash: number, positions: AlpacaPosition[]) => {
+    const value: SandboxValue = { cash, positions };
+    writeCache(who, 'sandbox', value);
+    if (syncedRef.current) sandboxSaver.current?.schedule(value, 0);
+  };
+
   // Watchlist & Search state
   const [watchlist, setWatchlist] = useState<string[]>(INITIAL_WATCHLIST);
   const [watchlistCategory, setWatchlistCategory] = useState<'my' | 'crypto' | 'tech' | 'etfs' | 'volatility'>('my');
@@ -250,56 +291,96 @@ export function PaperLab() {
     return () => clearInterval(timer);
   }, [selectedSymbol]);
 
-  // Load Sandbox state from LocalStorage
+  // Load sandbox, orders and watchlist from the server. The browser copy paints first and is never the record.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('spectra-paper-sandbox-v1');
-      if (raw) {
-        const d = JSON.parse(raw);
-        if (typeof d.cash === 'number') setSandboxCash(d.cash);
-        if (Array.isArray(d.positions)) setSandboxPositions(d.positions);
-        if (Array.isArray(d.orders)) setSandboxOrders(d.orders);
-      }
-    } catch {
-      // ignore
+    let alive = true;
+    const cachedBox = readCache<SandboxValue>(who, 'sandbox');
+    if (cachedBox) {
+      setSandboxCash(cachedBox.cash);
+      setSandboxPositions(cachedBox.positions as AlpacaPosition[]);
     }
-  }, []);
+    const cachedWatch = readCache<string[]>(who, 'watchlist');
+    if (cachedWatch && cachedWatch.length > 0) setWatchlist(cachedWatch);
 
-  // Load Cached Alpaca Account from LocalStorage
-  useEffect(() => {
-    try {
-      const cached = localStorage.getItem('spectra-alpaca-account-cache');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && (parsed.equity || parsed.cash)) {
-          setAccount(parsed);
+    const box = new StateSaver<SandboxValue>('sandbox', (cur) => {
+      setSandboxCash(cur.value.cash);
+      setSandboxPositions(cur.value.positions as AlpacaPosition[]);
+      writeCache(who, 'sandbox', cur.value);
+    });
+    const watch = new StateSaver<string[]>('watchlist', (cur) => {
+      setWatchlist(cur.value);
+      writeCache(who, 'watchlist', cur.value);
+    });
+    sandboxSaver.current = box;
+    watchlistSaver.current = watch;
+    syncedRef.current = false;
+
+    const stop = () => {
+      alive = false;
+      syncedRef.current = false;
+      box.dispose();
+      watch.dispose();
+    };
+    if (!email) return stop;
+
+    (async () => {
+      try {
+        await ensureImported(who);
+        const st = await getUserState();
+        if (!alive) return;
+
+        const sb = st.state.sandbox as StateEntry<SandboxValue>;
+        if (sb.version === 0) {
+          // First sync for this account: seed the demo book so every device starts from it.
+          const seeded: SandboxValue = { cash: DEFAULT_SANDBOX.cash, positions: DEFAULT_SANDBOX.positions };
+          const saved = await putUserState('sandbox', 0, seeded);
+          if (!alive) return;
+          box.baseline(saved.version, seeded);
+          setSandboxCash(seeded.cash);
+          setSandboxPositions(DEFAULT_SANDBOX.positions);
+          setSandboxOrders(DEFAULT_SANDBOX.orders);
+          serverOrderIds.current = {};
+          for (const o of DEFAULT_SANDBOX.orders) await recordOrder(o, serverOrderIds.current);
+        } else {
+          box.baseline(sb.version, sb.value);
+          setSandboxCash(sb.value.cash);
+          setSandboxPositions(sb.value.positions as AlpacaPosition[]);
+          const rows = await listSandboxOrders();
+          if (!alive) return;
+          const ids: Record<string, string> = {};
+          const orders = rows.map((r) => {
+            ids[String(r.payload.id)] = r.id;
+            return r.payload as unknown as AlpacaOrder;
+          });
+          serverOrderIds.current = ids;
+          setSandboxOrders(orders.reverse());
         }
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
 
-  // Load Watchlist from LocalStorage
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('spectra-paper-watchlist');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) setWatchlist(parsed);
+        const wl = st.state.watchlist as StateEntry<unknown>;
+        if (wl.version === 0) {
+          const list = cachedWatch && cachedWatch.length > 0 ? cachedWatch : INITIAL_WATCHLIST;
+          setWatchlist(list);
+          watch.baseline(0, null);
+          watch.schedule(list, 0);
+        } else if (Array.isArray(wl.value)) {
+          watch.baseline(wl.version, wl.value as string[]);
+          setWatchlist(wl.value as string[]);
+        }
+
+        syncedRef.current = true;
+      } catch {
+        // Could not reach the server: keep the browser copy. Nothing is written until a load succeeds.
       }
-    } catch {
-      // ignore
-    }
-  }, []);
+    })();
+
+    return stop;
+    // `who` and `email` identify the account; the state setters are stable.
+  }, [who, email]);
 
   const saveWatchlist = (newList: string[]) => {
     setWatchlist(newList);
-    try {
-      localStorage.setItem('spectra-paper-watchlist', JSON.stringify(newList));
-    } catch {
-      // ignore
-    }
+    writeCache(who, 'watchlist', newList);
+    if (syncedRef.current) watchlistSaver.current?.schedule(newList);
   };
 
   const addToWatchlist = (sym: string) => {
@@ -343,11 +424,6 @@ export function PaperLab() {
         const acc = accResult.value;
         if (acc) {
           setAccount(acc);
-          try {
-            localStorage.setItem('spectra-alpaca-account-cache', JSON.stringify(acc));
-          } catch {
-            // ignore
-          }
         }
       } else {
         const err = accResult.reason;
@@ -613,11 +689,6 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
       setInputSecretKey('');
       if (res.account) {
         setAccount(res.account);
-        try {
-          localStorage.setItem('spectra-alpaca-account-cache', JSON.stringify(res.account));
-        } catch {
-          // ignore
-        }
       }
       success('Connected to Alpaca Paper Trading', `Authenticated broker session · Key: ••••${hint}`);
       await loadAlpacaData();
@@ -639,11 +710,6 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
       setPositions([]);
       setOrders([]);
       setKeyHint('');
-      try {
-        localStorage.removeItem('spectra-alpaca-account-cache');
-      } catch {
-        // ignore
-      }
       info('Alpaca Disconnected', 'Switched to Spectra Simulated Paper Sandbox');
     } catch (err) {
       toastError('Disconnect Failed', err instanceof Error ? err.message : 'Failed to disconnect account.');
@@ -656,10 +722,17 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     setSandboxCash(DEFAULT_SANDBOX.cash);
     setSandboxPositions(DEFAULT_SANDBOX.positions);
     setSandboxOrders(DEFAULT_SANDBOX.orders);
-    try {
-      localStorage.removeItem('spectra-paper-sandbox-v1');
-    } catch {
-      // ignore
+    persistSandbox(DEFAULT_SANDBOX.cash, DEFAULT_SANDBOX.positions);
+    if (syncedRef.current) {
+      serverOrderIds.current = {};
+      void (async () => {
+        try {
+          await clearSandboxOrders();
+          for (const o of DEFAULT_SANDBOX.orders) await recordOrder(o, serverOrderIds.current);
+        } catch {
+          // If this fails, the server copy can differ from the screen until the next reset.
+        }
+      })();
     }
     info('Sandbox Reset', 'Restored initial $100,000 cash balance and demo book.');
   };
@@ -885,14 +958,9 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
 
         setSandboxCash(nextCash);
         setSandboxPositions(nextPositions);
-        const nextOrders = [newOrder, ...sandboxOrders];
-        setSandboxOrders(nextOrders);
-
-        try {
-          localStorage.setItem('spectra-paper-sandbox-v1', JSON.stringify({ cash: nextCash, positions: nextPositions, orders: nextOrders }));
-        } catch {
-          // ignore
-        }
+        setSandboxOrders([newOrder, ...sandboxOrders]);
+        persistSandbox(nextCash, nextPositions);
+        if (syncedRef.current) void recordOrder(newOrder, serverOrderIds.current);
 
         success(
           `Order Filled · ${orderSide.toUpperCase()} ${qtyNum} ${selectedSymbol}`,
@@ -933,12 +1001,16 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
   // 8. Handle Order Cancellation
   const handleCancelOrder = async (orderId: string) => {
     if (tradingMode === 'sandbox') {
-      const nextOrders = sandboxOrders.map((o) => (o.id === orderId ? { ...o, status: 'canceled' as const } : o));
-      setSandboxOrders(nextOrders);
-      try {
-        localStorage.setItem('spectra-paper-sandbox-v1', JSON.stringify({ cash: sandboxCash, positions: sandboxPositions, orders: nextOrders }));
-      } catch {
-        // ignore
+      const target = sandboxOrders.find((o) => o.id === orderId);
+      if (target) {
+        const canceled: AlpacaOrder = { ...target, status: 'canceled' };
+        setSandboxOrders(sandboxOrders.map((o) => (o.id === orderId ? canceled : o)));
+        const serverId = serverOrderIds.current[orderId];
+        if (serverId && syncedRef.current) {
+          void updateSandboxOrder(serverId, canceled).catch(() => {
+            // The screen shows the order canceled; the server copy stays stale until the next change.
+          });
+        }
       }
       info('Order Canceled', `Sandbox order ${orderId.slice(0, 8)} marked canceled.`);
       return;
@@ -983,11 +1055,8 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
       setSandboxCash(nextCash);
       setSandboxPositions(nextPositions);
       setSandboxOrders(nextOrders);
-      try {
-        localStorage.setItem('spectra-paper-sandbox-v1', JSON.stringify({ cash: nextCash, positions: nextPositions, orders: nextOrders }));
-      } catch {
-        // ignore
-      }
+      persistSandbox(nextCash, nextPositions);
+      if (syncedRef.current) void recordOrder(newOrder, serverOrderIds.current);
       success('Position Closed', `Liquidated ${closeQty} ${pos.symbol} at ${formatCurrency(fillPrice)}`);
       return;
     }

@@ -52,7 +52,11 @@ check() {
     return
   fi
   iso="${stamp:0:4}-${stamp:4:2}-${stamp:6:2} ${stamp:9:2}:${stamp:11:2}:${stamp:13:2}"
-  taken="$(date -u -d "$iso" +%s)"
+  if date -u -d "$iso" +%s >/dev/null 2>&1; then
+    taken="$(date -u -d "$iso" +%s)"
+  else
+    taken="$(date -u -j -f "%Y-%m-%d %H:%M:%S" "$iso" +%s)"
+  fi
   age_secs=$(( now - taken ))
   if [ $(( age_secs / 3600 )) -gt "$max_hours" ]; then
     echo "freshness: STALE $label: newest backup is $(( age_secs / 3600 ))h old (limit ${max_hours}h)" >&2

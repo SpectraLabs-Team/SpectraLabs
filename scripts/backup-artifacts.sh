@@ -56,9 +56,15 @@ for dir in "$snap_root"/spectra-artifacts-*/; do
   base="${base##*/}"
   t="${base#spectra-artifacts-}"
   iso="${t:0:4}-${t:4:2}-${t:6:2} ${t:9:2}:${t:11:2}:${t:13:2}"
-  taken="$(date -u -d "$iso" +%s)"
+  if date -u -d "$iso" +%s >/dev/null 2>&1; then
+    taken="$(date -u -d "$iso" +%s)"
+    dow="$(date -u -d "$iso" +%u)"
+  else
+    taken="$(date -u -j -f "%Y-%m-%d %H:%M:%S" "$iso" +%s)"
+    dow="$(date -u -j -f "%Y-%m-%d %H:%M:%S" "$iso" +%u)"
+  fi
   age_days=$(( (now - taken) / 86400 ))
-  if [ "$(date -u -d "$iso" +%u)" = 7 ]; then limit="$keep_weekly_days"; else limit="$keep_days"; fi
+  if [ "$dow" = 7 ]; then limit="$keep_weekly_days"; else limit="$keep_days"; fi
   if [ "$limit" -gt 0 ] && [ "$age_days" -gt "$limit" ]; then
     rm -rf "$dir"
     echo "backup: removed old snapshot $base"

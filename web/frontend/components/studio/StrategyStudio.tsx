@@ -28,6 +28,7 @@ import {
   createParameterSet,
   createStrategy,
   diffVersions,
+  draftConflictCurrent,
   getDraft,
   listParameterSets,
   listStrategies,
@@ -114,6 +115,8 @@ export function StrategyStudio() {
 
   // Debounce ref for auto-saving drafts and validating
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const draftVersionRef = useRef<number>(0);
+  const [draftConflictNotice, setDraftConflictNotice] = useState<string | null>(null);
 
   // Load strategies list
   const loadStrategies = useCallback(async () => {
@@ -160,6 +163,8 @@ export function StrategyStudio() {
     // Load draft
     getDraft(stratId)
       .then((draft) => {
+        draftVersionRef.current = draft?.version ?? 0;
+        setDraftConflictNotice(null);
         if (draft && draft.code) {
           setCode(draft.code);
           setParameters(draft.parameters || {});
@@ -169,6 +174,7 @@ export function StrategyStudio() {
         }
       })
       .catch(() => {
+        draftVersionRef.current = 0;
         setCode(DEFAULT_DSL_TEMPLATE);
         setParameters({ fast: 10, slow: 30 });
       });
@@ -243,9 +249,20 @@ export function StrategyStudio() {
       if (selectedStrategy) {
         setDraftStatus('saving');
         try {
-          await saveDraft(selectedStrategy.id, code, parameters);
+          const res = await saveDraft(selectedStrategy.id, code, parameters, draftVersionRef.current);
+          draftVersionRef.current = res.version;
           setDraftStatus('saved');
+          setDraftConflictNotice(null);
         } catch (err: unknown) {
+          const conflict = draftConflictCurrent(err);
+          if (conflict) {
+            draftVersionRef.current = conflict.version;
+            setCode(conflict.code);
+            setParameters(conflict.parameters || {});
+            setDraftConflictNotice('Draft changed on another device and has been reloaded.');
+            setDraftStatus('saved');
+            return;
+          }
           const msg = err instanceof Error ? err.message : String(err);
           if (msg.includes('viewer_read_only') || msg.includes('403')) {
             setIsReadOnly(true);
@@ -344,7 +361,8 @@ export function StrategyStudio() {
           name: template.name,
           description: template.description,
         });
-        await saveDraft(strat.id, template.code, template.defaultParams).catch(() => {});
+        const saved = await saveDraft(strat.id, template.code, template.defaultParams, 0).catch(() => null);
+        draftVersionRef.current = saved?.version ?? 1;
         setStrategies((prev) => [strat, ...prev]);
         setSelectedStrategy(strat);
         setCode(template.code);
@@ -364,9 +382,12 @@ export function StrategyStudio() {
         description: newStrategyDesc.trim(),
       });
       if (selectedTemplateForNew) {
-        await saveDraft(strat.id, selectedTemplateForNew.code, selectedTemplateForNew.defaultParams).catch(() => {});
+        const saved = await saveDraft(strat.id, selectedTemplateForNew.code, selectedTemplateForNew.defaultParams, 0).catch(() => null);
+        draftVersionRef.current = saved?.version ?? 1;
         setCode(selectedTemplateForNew.code);
         setParameters(selectedTemplateForNew.defaultParams);
+      } else {
+        draftVersionRef.current = 0;
       }
       setStrategies((prev) => [strat, ...prev]);
       setSelectedStrategy(strat);
@@ -525,6 +546,19 @@ export function StrategyStudio() {
               type="button"
               onClick={() => setVersionSavedNotice(null)}
               className="text-emerald-700 hover:underline dark:text-emerald-300"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {draftConflictNotice && (
+          <div className="mt-4 flex items-center justify-between rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+            <span>{draftConflictNotice}</span>
+            <button
+              type="button"
+              onClick={() => setDraftConflictNotice(null)}
+              className="text-amber-700 hover:underline dark:text-amber-300"
             >
               Dismiss
             </button>

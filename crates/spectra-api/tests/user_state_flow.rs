@@ -341,7 +341,7 @@ async fn draft_save_cannot_touch_another_workspaces_strategy() {
             f.ws,
             "PUT",
             &format!("/api/v1/strategies/{with_draft}/draft"),
-            &json!({"code": "ORIGINAL", "parameters": {}}),
+            &json!({"code": "ORIGINAL", "parameters": {}, "expected_version": 0}),
         )
         .await;
     assert_eq!(s, 200);
@@ -356,7 +356,7 @@ async fn draft_save_cannot_touch_another_workspaces_strategy() {
                 ws2,
                 "PUT",
                 &format!("/api/v1/strategies/{id}/draft"),
-                &json!({"code": "HIJACK", "parameters": {}}),
+                &json!({"code": "HIJACK", "parameters": {}, "expected_version": 0}),
             )
             .await;
         assert_eq!(s, 404, "a save from another workspace must not succeed");
@@ -372,7 +372,7 @@ async fn draft_save_cannot_touch_another_workspaces_strategy() {
             f.ws,
             "PUT",
             &format!("/api/v1/strategies/{no_draft}/draft"),
-            &json!({"code": "FIRST", "parameters": {}}),
+            &json!({"code": "FIRST", "parameters": {}, "expected_version": 0}),
         )
         .await;
     assert_eq!(s, 200);

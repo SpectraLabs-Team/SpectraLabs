@@ -664,6 +664,21 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
     let strat_id = Uuid::parse_str(strat_resp["strategy"]["id"].as_str().unwrap()).unwrap();
 
     // 3. Draft Flow (PUT / GET /api/v1/strategies/{id}/draft)
+    // 3a. Negative expected_version returns 422
+    let (status, _) = f
+        .call(
+            "PUT",
+            &format!("/api/v1/strategies/{strat_id}/draft"),
+            &json!({
+                "code": valid_code,
+                "parameters": { "fast": 12, "slow": 24 },
+                "expected_version": -1,
+            }),
+        )
+        .await;
+    assert_eq!(status, 422);
+
+    // 3b. First save with expected_version 0 inserts version 1
     let (status, draft_save) = f
         .call(
             "PUT",
@@ -671,18 +686,53 @@ async fn m2b_strategy_studio_lifecycle_drafts_versions_diff_and_param_sets() {
             &json!({
                 "code": valid_code,
                 "parameters": { "fast": 12, "slow": 24 },
+                "expected_version": 0,
             }),
         )
         .await;
     assert_eq!(status, 200);
     assert_eq!(draft_save["saved"], true);
+    assert_eq!(draft_save["version"], 1);
+
+    // 3c. Stale save (expected_version 0 when row is at version 1) returns 409
+    let (status, conflict) = f
+        .call(
+            "PUT",
+            &format!("/api/v1/strategies/{strat_id}/draft"),
+            &json!({
+                "code": valid_code,
+                "parameters": { "fast": 15, "slow": 30 },
+                "expected_version": 0,
+            }),
+        )
+        .await;
+    assert_eq!(status, 409);
+    assert_eq!(conflict["code"], "version_conflict");
+    assert_eq!(conflict["details"]["current"]["version"], 1);
+
+    // 3d. Next valid save with expected_version 1 updates to version 2
+    let (status, draft_save2) = f
+        .call(
+            "PUT",
+            &format!("/api/v1/strategies/{strat_id}/draft"),
+            &json!({
+                "code": valid_code,
+                "parameters": { "fast": 15, "slow": 30 },
+                "expected_version": 1,
+            }),
+        )
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(draft_save2["saved"], true);
+    assert_eq!(draft_save2["version"], 2);
 
     let (status, draft_get) =
         f.call("GET", &format!("/api/v1/strategies/{strat_id}/draft"), &Value::Null).await;
     assert_eq!(status, 200);
     assert_eq!(draft_get["strategy_id"], strat_id.to_string());
     assert_eq!(draft_get["code"], valid_code);
-    assert_eq!(draft_get["parameters"]["fast"], 12);
+    assert_eq!(draft_get["parameters"]["fast"], 15);
+    assert_eq!(draft_get["version"], 2);
 
     // 4. Save Version & Deduplication
     let (status, v1_resp) = f
@@ -899,7 +949,7 @@ async fn strategy_sharing_viewer_can_run_and_cannot_edit() {
             f.ws,
             "PUT",
             &format!("/api/v1/strategies/{strat_id}/draft"),
-            &json!({ "code": "param fast = 12;", "parameters": {} }),
+            &json!({ "code": "param fast = 12;", "parameters": {}, "expected_version": 0 }),
         )
         .await;
     assert_eq!(status, 403);

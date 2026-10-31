@@ -7,9 +7,15 @@
 //!     { "symbol": "ESZ6", "type": "future", "multiplier": 50, "tick_size": 0.25, "expiry": "2026-12-18" },
 //!     { "symbol": "SAP", "currency": "EUR", "tick_size": 0.01 }
 //!   ],
-//!   "fx_rates": { "EUR": [ { "as_of": "2026-01-02", "rate": "1.0845" } ] }
+//!   "fx_rates": { "EUR": [ { "as_of": "2026-01-02", "rate": "1.0845" } ] },
+//!   "curves": { "USD-SOFR": [ { "as_of": "2026-01-02", "quotes": [
+//!     { "type": "deposit", "years": 0.25, "rate": "0.043" },
+//!     { "type": "swap", "years": 5, "rate": "0.039", "frequency": 2 } ] } ] }
 //! }
 //! ```
+//!
+//! A swap is not in the dataset: it names its curve (`underlying`), and the
+//! run marks it from that curve's dated quotes (see `spectra_engine::swaps`).
 //!
 //! Every field is optional. An instrument names its dataset instrument by
 //! `symbol` (or by `instrument` id when the dataset has no symbols). Missing
@@ -27,7 +33,10 @@ use spectra_core::{
     is_currency_code, Fixed, Instrument, InstrumentId, InstrumentType, Json, Price, Qty, Ratio, Result,
     DEFAULT_BASE_CURRENCY,
 };
-use spectra_engine::{BondQuote, FxRate, InstrumentSetup, RollAdjust, RollRule, MAX_ROLL_BUSINESS_DAYS};
+use spectra_engine::{
+    BondQuote, CurvePoint, CurveSnapshot, FxRate, InstrumentSetup, QuoteKind, RollAdjust, RollRule,
+    MAX_ROLL_BUSINESS_DAYS,
+};
 
 use crate::config::FieldError;
 
@@ -55,10 +64,15 @@ pub struct RequestInstruments {
     pub roll: Option<RollRule>,
     /// Whether bond bars are clean or dirty, when the request says (else clean).
     pub bond_quote: Option<BondQuote>,
+    /// Dated curve quotes by curve name, for swaps.
+    pub curves: BTreeMap<String, Vec<CurveSnapshot>>,
+    /// The curve snapshot timestamps as given, for the stored form.
+    curves_text: BTreeMap<String, Vec<String>>,
 }
 
 /// Request fields this module reads.
-pub const FIELDS: [&str; 5] = ["base_currency", "instruments", "fx_rates", "futures_roll", "bond_quote"];
+pub const FIELDS: [&str; 6] =
+    ["base_currency", "instruments", "fx_rates", "futures_roll", "bond_quote", "curves"];
 
 const INSTRUMENT_FIELDS: [&str; 15] = [
     "symbol",
@@ -132,6 +146,134 @@ fn parse_roll(v: &Json, errors: &mut Vec<FieldError>) -> Option<RollRule> {
         }
     }
     (errors.len() == before).then_some(rule)
+}
+
+/// Reads one curve quote: `{"type": "deposit"|"swap", "years", "rate", "frequency"}`
+/// (`frequency` for swaps only: 1, 2, 4 or 12).
+fn parse_quote(q: &Json, f: &str, errors: &mut Vec<FieldError>) -> Option<CurvePoint> {
+    let before = errors.len();
+    if let Ok(es) = q.entries() {
+        for (key, _) in es {
+            if !["type", "years", "rate", "frequency"].contains(&key.as_str()) {
+                err(errors, format!("{f}.{key}"), "unknown field");
+            }
+        }
+    } else {
+        err(errors, f, "must be a JSON object");
+        return None;
+    }
+    let years = match q.find("years").and_then(fixed::<spectra_core::fixed::RatioUnit>) {
+        Some(y) if y.raw() > 0 => Some(y),
+        _ => {
+            err(errors, format!("{f}.years"), "must be a positive number of years");
+            None
+        }
+    };
+    let rate = match q.find("rate").and_then(fixed::<spectra_core::fixed::RatioUnit>) {
+        Some(r) if r.raw().abs() < spectra_core::SCALE => Some(r),
+        _ => {
+            err(errors, format!("{f}.rate"), "must be a fraction between -1 and 1 (0.04 for 4%)");
+            None
+        }
+    };
+    let frequency = match q.find("frequency") {
+        None | Some(Json::Null) => None,
+        Some(Json::Int(n)) if spectra_core::COUPON_FREQUENCIES.iter().any(|&c| i64::from(c) == *n) => {
+            Some(*n as u32)
+        }
+        Some(_) => {
+            err(errors, format!("{f}.frequency"), "must be 1, 2, 4 or 12");
+            None
+        }
+    };
+    let kind = match (q.find("type"), frequency) {
+        (Some(Json::String(t)), None) if t.trim() == "deposit" => Some(QuoteKind::Deposit),
+        (Some(Json::String(t)), Some(frequency)) if t.trim() == "swap" => Some(QuoteKind::Swap { frequency }),
+        (Some(Json::String(t)), _) if t.trim() == "swap" => {
+            err(errors, format!("{f}.frequency"), "a swap quote needs a frequency: 1, 2, 4 or 12");
+            None
+        }
+        (Some(Json::String(t)), Some(_)) if t.trim() == "deposit" => {
+            err(errors, format!("{f}.frequency"), "a deposit has no frequency");
+            None
+        }
+        _ => {
+            err(errors, format!("{f}.type"), "must be \"deposit\" or \"swap\"");
+            None
+        }
+    };
+    if errors.len() != before {
+        return None;
+    }
+    Some(CurvePoint { kind: kind?, years: years?, rate: rate? })
+}
+
+/// Reads one curve's history: a list of `{as_of, quotes}` (see the module
+/// documentation), with errors under `field`. Returns the snapshots, sorted
+/// by time, with their `as_of` as given. Used by backtest requests and by the
+/// curves API, so both apply the same rules.
+pub fn parse_curve_history(
+    name: &str,
+    list: &Json,
+    field: &str,
+    errors: &mut Vec<FieldError>,
+) -> Option<(Vec<String>, Vec<CurveSnapshot>)> {
+    if name.trim().is_empty() || name.trim() != name {
+        err(errors, field, "a curve name must be non-empty with no surrounding spaces");
+        return None;
+    }
+    let Ok(items) = list.items() else {
+        err(errors, field, "must be a list of {as_of, quotes}");
+        return None;
+    };
+    let before = errors.len();
+    let mut snaps: Vec<(String, CurveSnapshot)> = Vec::with_capacity(items.len());
+    for (k, it) in items.iter().enumerate() {
+        let f = format!("{field}[{k}]");
+        if let Ok(es) = it.entries() {
+            for (key, _) in es {
+                if key != "as_of" && key != "quotes" {
+                    err(errors, format!("{f}.{key}"), "unknown field");
+                }
+            }
+        }
+        let as_of = it.find("as_of").and_then(timestamp);
+        if as_of.is_none() {
+            err(errors, format!("{f}.as_of"), "must be an ISO 8601 date or time, or nanoseconds");
+        }
+        let quotes = match it.find("quotes").map(Json::items) {
+            Some(Ok(qs)) if !qs.is_empty() => qs
+                .iter()
+                .enumerate()
+                .filter_map(|(j, q)| parse_quote(q, &format!("{f}.quotes[{j}]"), errors))
+                .collect(),
+            _ => {
+                err(
+                    errors,
+                    format!("{f}.quotes"),
+                    "must be a non-empty list of {type, years, rate, frequency}",
+                );
+                Vec::new()
+            }
+        };
+        if let Some((ts, text)) = as_of {
+            snaps.push((text, CurveSnapshot { as_of_ns: ts, quotes }));
+        }
+    }
+    if errors.len() != before {
+        return None;
+    }
+    snaps.sort_by_key(|s| s.1.as_of_ns);
+    if snaps.windows(2).any(|w| w[0].1.as_of_ns == w[1].1.as_of_ns) {
+        err(errors, field, "has two snapshots for the same time");
+        return None;
+    }
+    let history: Vec<CurveSnapshot> = snaps.iter().map(|s| s.1.clone()).collect();
+    if let Err(e) = spectra_engine::swaps::validate_history(name, &history) {
+        err(errors, field, e.to_string());
+        return None;
+    }
+    Some((snaps.into_iter().map(|s| s.0).collect(), history))
 }
 
 /// Reads one instrument record (the shape of an `instruments` entry), with
@@ -223,7 +365,8 @@ fn parse_one(
     let coupon = match item.find("coupon_rate") {
         None | Some(Json::Null) => None,
         Some(v) => match fixed::<spectra_core::fixed::RatioUnit>(v) {
-            Some(x) if x.raw() >= 0 => Some(x),
+            // A swap's fixed rate may be negative; a bond's coupon may not.
+            Some(x) if x.raw() >= 0 || kind == InstrumentType::Swap => Some(x),
             _ => {
                 err(errors, format!("{p}coupon_rate"), "must be a non-negative fraction (0.05 for 5%)");
                 None
@@ -322,6 +465,7 @@ impl RequestInstruments {
             && self.fx.is_empty()
             && self.roll.is_none()
             && self.bond_quote.is_none()
+            && self.curves.is_empty()
     }
 
     /// The base currency the run books in.
@@ -357,6 +501,9 @@ impl RequestInstruments {
         if let Some(fx) = doc.find("fx_rates").filter(|v| !v.is_null()) {
             Self::parse_fx(fx, &mut out, errors);
         }
+        if let Some(c) = doc.find("curves").filter(|v| !v.is_null()) {
+            Self::parse_curves(c, &mut out, errors);
+        }
         if let Some(r) = doc.find("futures_roll").filter(|v| !v.is_null()) {
             out.roll = parse_roll(r, errors);
         }
@@ -374,6 +521,20 @@ impl RequestInstruments {
             }
         }
         (errors.len() == before).then_some(out)
+    }
+
+    fn parse_curves(curves: &Json, out: &mut Self, errors: &mut Vec<FieldError>) {
+        let Ok(entries) = curves.entries() else {
+            err(errors, "curves", "must be an object of curve name to a list of {as_of, quotes}");
+            return;
+        };
+        for (name, list) in entries {
+            if let Some((texts, history)) = parse_curve_history(name, list, &format!("curves.{name}"), errors)
+            {
+                out.curves_text.insert(name.clone(), texts);
+                out.curves.insert(name.clone(), history);
+            }
+        }
     }
 
     fn parse_fx(fx: &Json, out: &mut Self, errors: &mut Vec<FieldError>) {
@@ -422,6 +583,35 @@ impl RequestInstruments {
         }
     }
 
+    /// `symbols` with every swap the request names appended (a swap has no
+    /// bars in a dataset: the run generates them), in request order.
+    ///
+    /// # Errors
+    /// A message when a swap is named but the dataset has no symbol table.
+    pub fn symbols_with_swaps(&self, symbols: &[String]) -> std::result::Result<Vec<String>, String> {
+        let mut out = symbols.to_vec();
+        for (i, (r, inst)) in self.instruments.iter().enumerate() {
+            if inst.kind != InstrumentType::Swap {
+                continue;
+            }
+            match r {
+                InstrumentRef::Symbol(s) if !out.contains(s) => {
+                    if symbols.is_empty() {
+                        return Err(format!(
+                            "instruments[{i}]: a swap needs a dataset with symbols, to add {s} to"
+                        ));
+                    }
+                    out.push(s.clone());
+                }
+                InstrumentRef::Symbol(_) => {}
+                InstrumentRef::Id(_) => {
+                    return Err(format!("instruments[{i}]: name a swap by symbol, not by instrument id"));
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// The setup for a dataset whose instrument ids are positions in `symbols`.
     /// Records naming a symbol the dataset does not have are left out: a
     /// workspace's instrument list covers more symbols than any one dataset.
@@ -468,6 +658,21 @@ impl RequestInstruments {
                 }
                 None => {
                     return Err(format!("option {}: its underlying {u} is not in this dataset", inst.symbol))
+                }
+            }
+        }
+        // Only the curves the resolved swaps are marked on.
+        for inst in setup.instruments.values().filter(|i| i.kind == InstrumentType::Swap) {
+            let Some(name) = inst.underlying.as_deref() else { continue };
+            match self.curves.get(name) {
+                Some(h) => {
+                    setup.curves.insert(name.to_string(), h.clone());
+                }
+                None => {
+                    return Err(format!(
+                    "swap {}: the request has no quotes for its curve {name} (give them under \"curves\")",
+                    inst.symbol
+                ))
                 }
             }
         }
@@ -562,6 +767,33 @@ impl RequestInstruments {
                 fx.set(ccy.clone(), list)?;
             }
             doc = doc.with("fx_rates", fx);
+        }
+        if !self.curves.is_empty() {
+            let mut curves = Json::object();
+            for (name, history) in &self.curves {
+                let texts = self.curves_text.get(name);
+                let mut list = Json::array();
+                for (k, snap) in history.iter().enumerate() {
+                    let as_of = texts.and_then(|t| t.get(k)).map_or_else(
+                        || Json::integer(snap.as_of_ns),
+                        |s| s.parse::<i64>().map_or_else(|_| Json::string(s.clone()), Json::integer),
+                    );
+                    let mut quotes = Json::array();
+                    for q in &snap.quotes {
+                        let mut j = Json::object()
+                            .with("type", Json::string(q.kind.as_str()))
+                            .with("years", Json::string(q.years.to_string()))
+                            .with("rate", Json::string(q.rate.to_string()));
+                        if let Some(f) = q.kind.frequency() {
+                            j = j.with("frequency", Json::integer(i64::from(f)));
+                        }
+                        quotes.push(j)?;
+                    }
+                    list.push(Json::object().with("as_of", as_of).with("quotes", quotes))?;
+                }
+                curves.set(name.clone(), list)?;
+            }
+            doc = doc.with("curves", curves);
         }
         Ok(doc)
     }

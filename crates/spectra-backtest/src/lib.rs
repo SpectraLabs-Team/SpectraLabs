@@ -29,7 +29,7 @@ pub use config::{
     stored_config_json, ConfigError, FieldError, Preset,
 };
 pub use corporate::{ActionTarget, RequestAction};
-pub use instruments::{parse_instrument, InstrumentRef, RequestInstruments};
+pub use instruments::{parse_curve_history, parse_instrument, InstrumentRef, RequestInstruments};
 pub use job::{
     load_bars, load_dataset, run_job, run_job_from_store, BacktestJob, JobFailure, JobFile, JobProducts,
     JOB_KIND,

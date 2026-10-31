@@ -83,6 +83,11 @@ pub struct CreateBacktest {
     /// every fill and mark) or `dirty` prices.
     #[serde(default)]
     pub bond_quote: Option<String>,
+    /// Dated curve quotes for swaps: `{"USD-SOFR": [{"as_of", "quotes": [...]}]}`.
+    /// Default: the workspace's quotes for the curves its swaps name.
+    #[serde(default)]
+    #[schema(value_type = Option<Object>)]
+    pub curves: Option<serde_json::Value>,
     /// -10..10; higher runs first. Default 0.
     #[serde(default)]
     pub priority: i32,
@@ -334,6 +339,9 @@ pub(crate) async fn create_backtest(
     }
     if let Some(q) = req.bond_quote {
         payload["bond_quote"] = serde_json::Value::String(q);
+    }
+    if let Some(c) = req.curves {
+        payload["curves"] = c;
     }
     // Snapshot the workspace's instrument data into the run, so it reproduces.
     if let Ok((pool, ws)) = crate::jobs_api::context(&st, &id) {

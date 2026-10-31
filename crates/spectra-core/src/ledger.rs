@@ -343,7 +343,10 @@ impl Ledger {
     /// `InvalidFill` for an invalid record, or what [`Self::register_instrument`] returns.
     pub fn list(&mut self, id: InstrumentId, inst: &Instrument, ts_ns: i64) -> Result<()> {
         inst.validate().map_err(|_| LedgerError::Rejected(Reject::InvalidFill))?;
-        let mtm = inst.kind == crate::instrument::InstrumentType::Future;
+        let mtm = matches!(
+            inst.kind,
+            crate::instrument::InstrumentType::Future | crate::instrument::InstrumentType::Swap
+        );
         self.register_contract(id, inst.multiplier, mtm, ts_ns)
     }
 
@@ -539,19 +542,23 @@ impl Ledger {
         Ok(())
     }
 
-    /// Post a bond coupon on the position in `instrument`: `amount` > 0
-    /// credits a long, < 0 debits a short (a debt, so it posts even when it
-    /// takes cash below zero).
+    /// Post a coupon on the position in `instrument`. A bond's: `amount` > 0
+    /// credits a long, < 0 debits a short. A swap's net coupon (a
+    /// marked-to-market instrument) may have either sign for either side.
+    /// A debt posts even when it takes cash below zero.
     ///
     /// # Errors
     /// `InvalidAmount` if `amount` is zero; `InvalidFill` if there is no
-    /// position or the sign does not match it; overflow.
+    /// position, or for a bond the sign does not match it; overflow.
     pub fn apply_coupon(&mut self, instrument: InstrumentId, amount: Money, ts_ns: i64) -> Result<()> {
         if amount.is_zero() {
             return Err(Reject::InvalidAmount.into());
         }
         let qty = self.position(instrument).qty;
-        if qty.is_zero() || qty.signum() != amount.signum() {
+        // A bond's coupon goes with the position's sign; a swap's net coupon
+        // (marked to market) may go either way.
+        let any_sign = self.marked_to_market.contains(&instrument);
+        if qty.is_zero() || (!any_sign && qty.signum() != amount.signum()) {
             return Err(Reject::InvalidFill.into());
         }
         let new_cash = self.cash.checked_add(amount)?;

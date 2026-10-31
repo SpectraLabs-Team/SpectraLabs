@@ -24,7 +24,7 @@ pub enum InstrumentType {
     Bond,
     /// An option (needs an expiry and a strike). Deferred past stage 2.
     Option,
-    /// A swap. Deferred until a curve model exists.
+    /// A fixed-for-floating interest-rate swap, marked from a dated curve history.
     Swap,
 }
 
@@ -257,8 +257,10 @@ impl Instrument {
                 Ok(())
             }
         };
-        if self.kind != InstrumentType::Bond {
+        if !matches!(self.kind, InstrumentType::Bond | InstrumentType::Swap) {
             forbid(self.coupon_frequency.is_some(), "a coupon frequency")?;
+        }
+        if self.kind != InstrumentType::Bond {
             forbid(self.day_count.is_some(), "a day count")?;
         }
         if self.kind != InstrumentType::Option {
@@ -305,11 +307,20 @@ impl Instrument {
                 }
             }
             InstrumentType::Swap => {
-                return Err(
-                    "swap records are not stored: backtesting a swap needs a dated history of curves, \
-                     which datasets do not carry yet; price swaps with POST /api/v1/pricing/swap"
-                        .into(),
-                )
+                // A fixed-for-floating swap: maturity, fixed rate, payment
+                // frequency, and the discount curve it is marked on.
+                need(self.maturity_ns.is_some(), "a maturity")?;
+                need(self.coupon_rate.is_some(), "a fixed rate (coupon_rate)")?;
+                need(self.coupon_frequency.is_some(), "a fixed-leg frequency (coupon_frequency)")?;
+                forbid(self.expiry_ns.is_some(), "an expiry")?;
+                forbid(self.strike.is_some(), "a strike")?;
+                need(self.underlying.is_some(), "a discount curve (underlying)")?;
+                if self.coupon_frequency.is_some_and(|f| !COUPON_FREQUENCIES.contains(&f)) {
+                    return Err("a swap's fixed-leg frequency must be 1, 2, 4 or 12 a year".into());
+                }
+                if self.coupon_rate.is_some_and(|c| c.raw() < -Ratio::ONE.raw() || c > Ratio::ONE) {
+                    return Err("a swap's fixed rate must be between -1 and 1".into());
+                }
             }
         }
         Ok(())
@@ -398,5 +409,27 @@ mod tests {
         }
         assert_eq!(InstrumentType::Equity.broker_asset_class(), Some("us_equity"));
         assert_eq!(InstrumentType::Bond.broker_asset_class(), None);
+    }
+
+    #[test]
+    fn swaps_need_their_terms() {
+        let mut s = Instrument::equity("USD5Y", "USD", Price::from_raw(1), lot());
+        s.kind = InstrumentType::Swap;
+        assert!(s.validate().unwrap_err().contains("a maturity"));
+        s.maturity_ns = Some(1);
+        s.coupon_rate = Some(Ratio::from_f64(-0.002).unwrap()); // negative rates are allowed
+        assert!(s.validate().unwrap_err().contains("frequency"));
+        s.coupon_frequency = Some(2);
+        assert!(s.validate().unwrap_err().contains("curve"));
+        s.underlying = Some("USD-SOFR".into());
+        s.validate().unwrap();
+        s.coupon_frequency = Some(3);
+        assert!(s.validate().unwrap_err().contains("1, 2, 4 or 12"));
+        s.coupon_frequency = Some(2);
+        s.day_count = Some(DayCount::Act360);
+        assert!(s.validate().unwrap_err().contains("a day count"));
+        s.day_count = None;
+        s.strike = Some(Price::from_raw(1));
+        assert!(s.validate().unwrap_err().contains("a strike"));
     }
 }

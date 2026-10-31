@@ -48,6 +48,7 @@ use spectra_core::{
 
 use crate::futures::{Chains, Continuous};
 use crate::instruments::InstrumentSetup;
+use crate::swaps::CurveHistory;
 
 use crate::corporate::{
     apply_order, corporate_actions_sha256, split_price, split_qty, CorporateAction, CorporateActionKind,
@@ -916,10 +917,18 @@ fn stop_trigger(side: Side, stop: Price, bar: &Bar) -> Option<Price> {
     }
 }
 
-fn evaluate(o: &Order, bar: &Bar, history: &[Bar], cfg: &BacktestConfig) -> Result<Evaluation> {
+/// `model_priced`: the bar was generated from a model (a swap), so it has no
+/// traded volume to cap participation against.
+fn evaluate(
+    o: &Order,
+    bar: &Bar,
+    history: &[Bar],
+    cfg: &BacktestConfig,
+    model_priced: bool,
+) -> Result<Evaluation> {
     let none = |triggered| Evaluation { fill: None, triggered };
     let mut q = o.remaining;
-    if cfg.exec.max_participation.raw() > 0 {
+    if cfg.exec.max_participation.raw() > 0 && !model_priced {
         let cap =
             i128::from(bar.volume.raw()) * i128::from(cfg.exec.max_participation.raw()) / i128::from(SCALE);
         q = q.min(Qty::from_raw(spectra_core::fixed::narrow(cap)?));
@@ -2077,6 +2086,110 @@ fn redeem_bonds(
     Ok(out)
 }
 
+/// Pays each swap's net coupon on its payment dates (M24.4), on the
+/// positions held at the previous close. The receiver of fixed gets
+/// `(fixed - fixing) * tau` per 1 of notional, which may be negative.
+fn pay_swap_coupons(
+    setup: &InstrumentSetup,
+    curves: &CurveHistory,
+    prev_ts: Option<i64>,
+    ts: i64,
+    ledger: &mut Ledger,
+    sleeves: &mut [Ledger],
+) -> std::result::Result<(), RunError> {
+    let Some(prev) = prev_ts else { return Ok(()) };
+    for &id in setup.instruments.keys() {
+        let Some(terms) = setup.swap_terms(id) else { continue };
+        for day in terms.payment_days_between(prev, ts) {
+            let held = |book: &Ledger| !book.position(id).qty.is_zero();
+            if !held(ledger) && !sleeves.iter().any(held) {
+                continue;
+            }
+            let per_unit = setup.fx_convert(id, Price::from_f64(terms.net_coupon(curves, day)?)?, ts)?;
+            if per_unit.is_zero() {
+                continue;
+            }
+            let owed = |book: &Ledger| -> Result<Money> {
+                let q = book.position(id).qty;
+                if q.is_zero() {
+                    return Ok(Money::ZERO);
+                }
+                Ok(book.notional_of(id, per_unit, q)?)
+            };
+            if sleeves.is_empty() {
+                let amount = owed(ledger)?;
+                if !amount.is_zero() {
+                    ledger.apply_coupon(id, amount, ts).map_err(ledger_err)?;
+                }
+                continue;
+            }
+            let mut total = Money::ZERO;
+            for book in sleeves.iter_mut() {
+                let amount = owed(book)?;
+                if !amount.is_zero() {
+                    book.apply_coupon(id, amount, ts).map_err(ledger_err)?;
+                    total = total.checked_add(amount)?;
+                }
+            }
+            if !total.is_zero() {
+                ledger.apply_coupon(id, total, ts).map_err(ledger_err)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Closes every swap position at 100 once its maturity has come: every
+/// payment has been made, so nothing is left to value.
+fn mature_swaps(
+    setup: &InstrumentSetup,
+    ts: i64,
+    ledger: &mut Ledger,
+    sleeves: &mut [Ledger],
+    rolls: &mut Vec<RollEvent>,
+    fill_orders: &mut Vec<OrderId>,
+) -> std::result::Result<Vec<(usize, Fill)>, RunError> {
+    let mut out = Vec::new();
+    let owners = sleeves.len().max(1);
+    for (&id, inst) in &setup.instruments {
+        let Some(maturity) = inst.maturity_ns.filter(|_| inst.kind == InstrumentType::Swap) else { continue };
+        if ts < maturity {
+            continue;
+        }
+        let close = setup.fx_convert(id, Price::from_units(100)?, ts)?;
+        for owner in 0..owners {
+            let qty = sleeves.get(owner).unwrap_or(ledger).position(id).qty;
+            if qty.is_zero() {
+                continue;
+            }
+            let side = if qty.raw() > 0 { Side::Sell } else { Side::Buy };
+            let f = Fill {
+                instrument: id,
+                side,
+                qty: qty.checked_abs()?,
+                price: close,
+                fee: Money::ZERO,
+                ts_ns: ts,
+            };
+            apply_engine_fill(ledger, sleeves, owner, &f, false).map_err(ledger_err)?;
+            fill_orders.push(0);
+            out.push((owner, f));
+            rolls.push(RollEvent {
+                ts_ns: ts,
+                strategy: owner,
+                from: id,
+                to: None,
+                qty,
+                close_price: close,
+                open_price: None,
+                kind: RollKind::Redeemed,
+                note: Some("swap matured".into()),
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// Refuses a setup the engine cannot run: an invalid record or rate series,
 /// or an instrument type whose model is not in this engine yet.
 fn check_setup(setup: &InstrumentSetup, bars: &[Bar]) -> std::result::Result<(), RunError> {
@@ -2096,10 +2209,11 @@ fn check_setup(setup: &InstrumentSetup, bars: &[Bar]) -> std::result::Result<(),
 /// Why the engine cannot trade `inst` yet, if it cannot.
 fn unsupported(inst: &Instrument) -> Option<&'static str> {
     match inst.kind {
-        InstrumentType::Equity | InstrumentType::Future | InstrumentType::Bond | InstrumentType::Option => {
-            None
-        }
-        InstrumentType::Swap => Some("swap trading needs a curve model"),
+        InstrumentType::Equity
+        | InstrumentType::Future
+        | InstrumentType::Bond
+        | InstrumentType::Option
+        | InstrumentType::Swap => None,
     }
 }
 
@@ -2152,6 +2266,8 @@ fn run_inner<'s>(
     let chains = Chains::new(setup, &setup.roll, cfg.exchange);
     let has_bonds = setup.instruments.values().any(|i| i.kind == InstrumentType::Bond);
     let has_options = setup.instruments.values().any(|i| i.kind == InstrumentType::Option);
+    let has_swaps = setup.instruments.values().any(|i| i.kind == InstrumentType::Swap);
+    let swap_curves = if has_swaps { CurveHistory::build(&setup.curves)? } else { CurveHistory::default() };
     let mut prev_ts: Option<i64> = None;
     let mut continuous = Continuous::default();
     let mut rolls: Vec<RollEvent> = Vec::new();
@@ -2305,6 +2421,11 @@ fn run_inner<'s>(
             pay_coupons(setup, prev_ts, ts, &mut ledger, &mut sleeves)?;
             fills.extend(redeem_bonds(setup, ts, &mut ledger, &mut sleeves, &mut rolls, &mut fill_orders)?);
         }
+        // Swaps: net coupons, then closing at maturity (M24.4).
+        if has_swaps {
+            pay_swap_coupons(setup, &swap_curves, prev_ts, ts, &mut ledger, &mut sleeves)?;
+            fills.extend(mature_swaps(setup, ts, &mut ledger, &mut sleeves, &mut rolls, &mut fill_orders)?);
+        }
         if !chains.is_empty() {
             let mut ctx = RollCtx {
                 chains: &chains,
@@ -2325,7 +2446,8 @@ fn run_inner<'s>(
                 }
                 let Some(bar) = find_bar(group, orders[k].instrument) else { continue };
                 let past = history.get(&orders[k].instrument).map_or(&[][..], Vec::as_slice);
-                let ev = evaluate(&orders[k], bar, past, cfg)?;
+                let model_priced = setup.kind(orders[k].instrument) == InstrumentType::Swap;
+                let ev = evaluate(&orders[k], bar, past, cfg, model_priced)?;
                 if ev.triggered && !orders[k].triggered {
                     // The stop was reached: from now on a stop is a market order and a
                     // stop-limit a resting limit order.

@@ -248,3 +248,114 @@ pub async fn list_fx_rates(
         .map(|r| FxRow { currency: r.get("currency"), as_of_ns: r.get("as_of_ns"), rate: r.get("rate") })
         .collect())
 }
+
+/// One stored curve quote. `years` and `rate` are exact decimal text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurveQuoteRow {
+    /// Curve name.
+    pub curve: String,
+    /// When the snapshot became known, nanoseconds since the epoch (microsecond precision).
+    pub as_of_ns: i64,
+    /// `deposit` or `swap`.
+    pub quote_type: String,
+    /// Maturity in years.
+    pub years: String,
+    /// Rate as a fraction.
+    pub rate: String,
+    /// Fixed payments a year (swap quotes).
+    pub frequency: Option<i16>,
+}
+
+/// One snapshot to store: its time and its quotes `(type, years, rate, frequency)`.
+pub type CurveSnapshotRow = (i64, Vec<(String, String, String, Option<i16>)>);
+
+/// Stores snapshots of `curve`. A snapshot at a time already stored replaces
+/// every quote at that time. Values are validated by the caller. All or nothing.
+///
+/// # Errors
+/// A database error.
+pub async fn upsert_curve_snapshots(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    curve: &str,
+    snapshots: &[CurveSnapshotRow],
+) -> Result<u64, Error> {
+    let mut tx = pool.begin().await?;
+    let mut n = 0;
+    for (ts, quotes) in snapshots {
+        sqlx::query(
+            "DELETE FROM curve_quotes WHERE workspace_id = $1 AND curve = $2
+               AND as_of = to_timestamp(($3::bigint / 1000)::double precision / 1000000)",
+        )
+        .bind(workspace_id)
+        .bind(curve)
+        .bind(ts)
+        .execute(&mut *tx)
+        .await?;
+        for (kind, years, rate, frequency) in quotes {
+            n += sqlx::query(
+                "INSERT INTO curve_quotes (workspace_id, curve, as_of, quote_type, years, rate, frequency)
+                 VALUES ($1, $2, to_timestamp(($3::bigint / 1000)::double precision / 1000000),
+                         $4, $5::numeric, $6::numeric, $7)",
+            )
+            .bind(workspace_id)
+            .bind(curve)
+            .bind(ts)
+            .bind(kind)
+            .bind(years)
+            .bind(rate)
+            .bind(frequency)
+            .execute(&mut *tx)
+            .await?
+            .rows_affected();
+        }
+    }
+    tx.commit().await?;
+    Ok(n)
+}
+
+/// Stored quotes, oldest first and by maturity: of `curve` when given, else of every curve.
+///
+/// # Errors
+/// A database error.
+pub async fn list_curve_quotes(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    curve: Option<&str>,
+) -> Result<Vec<CurveQuoteRow>, Error> {
+    let rows = sqlx::query(
+        "SELECT curve, (extract(epoch from as_of) * 1000000000)::bigint AS as_of_ns, quote_type,
+                trim_scale(years)::text AS years, trim_scale(rate)::text AS rate, frequency
+         FROM curve_quotes
+         WHERE workspace_id = $1 AND ($2::text IS NULL OR curve = $2)
+         ORDER BY curve, as_of, years",
+    )
+    .bind(workspace_id)
+    .bind(curve)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| CurveQuoteRow {
+            curve: r.get("curve"),
+            as_of_ns: r.get("as_of_ns"),
+            quote_type: r.get("quote_type"),
+            years: r.get("years"),
+            rate: r.get("rate"),
+            frequency: r.get("frequency"),
+        })
+        .collect())
+}
+
+/// Deletes every quote of `curve`. Returns whether there were any.
+///
+/// # Errors
+/// A database error.
+pub async fn delete_curve(pool: &PgPool, workspace_id: Uuid, curve: &str) -> Result<bool, Error> {
+    let r = sqlx::query("DELETE FROM curve_quotes WHERE workspace_id = $1 AND curve = $2")
+        .bind(workspace_id)
+        .bind(curve)
+        .execute(pool)
+        .await?;
+    Ok(r.rows_affected() > 0)
+}

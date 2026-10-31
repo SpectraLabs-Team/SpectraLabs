@@ -696,6 +696,112 @@
         }
       }
     },
+    "/api/v1/curves": {
+      "get": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "List the workspace's curves and their dated quotes.",
+        "operationId": "list_curves",
+        "parameters": [
+          {
+            "name": "curve",
+            "in": "path",
+            "description": "Only this curve.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurveListView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Store snapshots of one curve:\n`{\"curve\": \"USD-SOFR\", \"snapshots\": [{\"as_of\": \"2026-01-02\", \"quotes\": [{\"type\": \"deposit\",\n\"years\": 0.25, \"rate\": \"0.043\"}, {\"type\": \"swap\", \"years\": 5, \"rate\": \"0.039\", \"frequency\": 2}]}]}`.\nEach snapshot must bootstrap; one at a time already stored replaces it. All or nothing.",
+        "operationId": "put_curves",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurveListView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/curves/{name}": {
+      "delete": {
+        "tags": [
+          "instruments"
+        ],
+        "summary": "Delete a curve's quotes. Runs that used them keep their stored copy.",
+        "operationId": "delete_curve",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Curve name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/datasets": {
       "get": {
         "tags": [
@@ -6882,6 +6988,13 @@
             },
             "description": "Splits and dividends to apply during the run, on unadjusted prices:\n`[{\"symbol\", \"ex_date\", \"type\": \"split\", \"from\", \"to\"}]` or\n`[{\"symbol\", \"ex_date\", \"type\": \"dividend\", \"amount\"}]`."
           },
+          "curves": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Dated curve quotes for swaps: `{\"USD-SOFR\": [{\"as_of\", \"quotes\": [...]}]}`.\nDefault: the workspace's quotes for the curves its swaps name."
+          },
           "dataset_version_id": {
             "type": "string",
             "format": "uuid",
@@ -7456,6 +7569,22 @@
         },
         "additionalProperties": false
       },
+      "CurveListView": {
+        "type": "object",
+        "description": "The workspace's curves.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurveView"
+            },
+            "description": "By name."
+          }
+        }
+      },
       "CurvePointView": {
         "type": "object",
         "description": "One point of a curve.",
@@ -7517,6 +7646,38 @@
         },
         "additionalProperties": false
       },
+      "CurveQuoteView": {
+        "type": "object",
+        "description": "One quote of a curve snapshot.",
+        "required": [
+          "type",
+          "years",
+          "rate"
+        ],
+        "properties": {
+          "frequency": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Fixed payments a year (swap quotes): 1, 2, 4 or 12.",
+            "minimum": 0
+          },
+          "rate": {
+            "type": "string",
+            "description": "Rate as a fraction, exact decimal text."
+          },
+          "type": {
+            "type": "string",
+            "description": "`deposit` or `swap`."
+          },
+          "years": {
+            "type": "string",
+            "description": "Maturity in years, exact decimal text."
+          }
+        }
+      },
       "CurveRequest": {
         "type": "object",
         "description": "`POST /api/v1/pricing/curve` body.",
@@ -7538,6 +7699,28 @@
           }
         },
         "additionalProperties": false
+      },
+      "CurveSnapshotView": {
+        "type": "object",
+        "description": "The quotes of a curve from one time on.",
+        "required": [
+          "as_of",
+          "quotes"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the quotes became known, nanoseconds since the epoch."
+          },
+          "quotes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CurveQuoteView"
+            },
+            "description": "By increasing maturity."
+          }
+        }
       },
       "CurveView": {
         "type": "object",
@@ -8552,7 +8735,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "Coupons a year (bonds).",
+            "description": "Coupons a year (bonds) or fixed payments a year (swaps): 1, 2, 4 or 12.",
             "minimum": 0
           },
           "coupon_rate": {
@@ -8560,7 +8743,7 @@
               "string",
               "null"
             ],
-            "description": "Annual coupon rate as a fraction (bonds), exact decimal text."
+            "description": "Annual coupon rate (bonds) or fixed rate (swaps) as a fraction, exact decimal text."
           },
           "currency": {
             "type": "string",
@@ -8591,7 +8774,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "Maturity (bonds), nanoseconds since the epoch."
+            "description": "Maturity (bonds, swaps), nanoseconds since the epoch."
           },
           "multiplier": {
             "type": "string",

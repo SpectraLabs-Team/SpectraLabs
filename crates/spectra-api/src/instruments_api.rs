@@ -406,6 +406,191 @@ pub(crate) async fn refuse_options(
     }
 }
 
+/// One quote of a curve snapshot.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CurveQuoteView {
+    /// `deposit` or `swap`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// Maturity in years, exact decimal text.
+    pub years: String,
+    /// Rate as a fraction, exact decimal text.
+    pub rate: String,
+    /// Fixed payments a year (swap quotes): 1, 2, 4 or 12.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frequency: Option<u32>,
+}
+
+/// The quotes of a curve from one time on.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CurveSnapshotView {
+    /// When the quotes became known, nanoseconds since the epoch.
+    pub as_of: i64,
+    /// By increasing maturity.
+    pub quotes: Vec<CurveQuoteView>,
+}
+
+/// One curve's dated history.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CurveView {
+    /// Curve name, as swap records name it (`underlying`).
+    pub name: String,
+    /// Oldest first.
+    pub snapshots: Vec<CurveSnapshotView>,
+}
+
+/// The workspace's curves.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CurveListView {
+    /// By name.
+    pub items: Vec<CurveView>,
+}
+
+/// `GET /api/v1/curves` query.
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct CurveQuery {
+    /// Only this curve.
+    pub curve: Option<String>,
+}
+
+fn curves_from_rows(rows: Vec<spectra_db::instruments::CurveQuoteRow>) -> Vec<CurveView> {
+    let mut out: Vec<CurveView> = Vec::new();
+    for r in rows {
+        if out.last().is_none_or(|c| c.name != r.curve) {
+            out.push(CurveView { name: r.curve.clone(), snapshots: Vec::new() });
+        }
+        let Some(curve) = out.last_mut() else { continue };
+        if curve.snapshots.last().is_none_or(|s| s.as_of != r.as_of_ns) {
+            curve.snapshots.push(CurveSnapshotView { as_of: r.as_of_ns, quotes: Vec::new() });
+        }
+        if let Some(snap) = curve.snapshots.last_mut() {
+            snap.quotes.push(CurveQuoteView {
+                kind: r.quote_type,
+                years: r.years,
+                rate: r.rate,
+                frequency: r.frequency.and_then(|f| u32::try_from(f).ok()),
+            });
+        }
+    }
+    out
+}
+
+/// List the workspace's curves and their dated quotes.
+#[utoipa::path(get, path = "/api/v1/curves", tag = "instruments", params(CurveQuery),
+    responses((status = 200, body = CurveListView)))]
+pub(crate) async fn list_curves(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    Query(q): Query<CurveQuery>,
+) -> Response {
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match spectra_db::instruments::list_curve_quotes(&pool, ws, q.curve.as_deref().map(str::trim)).await {
+        Ok(rows) => to_json(200, &CurveListView { items: curves_from_rows(rows) }),
+        Err(e) => db_error(&e),
+    }
+}
+
+/// Store snapshots of one curve:
+/// `{"curve": "USD-SOFR", "snapshots": [{"as_of": "2026-01-02", "quotes": [{"type": "deposit",
+/// "years": 0.25, "rate": "0.043"}, {"type": "swap", "years": 5, "rate": "0.039", "frequency": 2}]}]}`.
+/// Each snapshot must bootstrap; one at a time already stored replaces it. All or nothing.
+#[utoipa::path(post, path = "/api/v1/curves", tag = "instruments",
+    responses((status = 200, body = CurveListView), (status = 422, body = crate::openapi::ErrorDoc)))]
+pub(crate) async fn put_curves(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let doc = match read_json(body) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let mut errors: Vec<(String, String)> = Vec::new();
+    if let Ok(entries) = doc.entries() {
+        for (k, _) in entries {
+            if k != "curve" && k != "snapshots" {
+                errors.push((k.clone(), "unknown field".into()));
+            }
+        }
+    }
+    let name = match doc.find("curve").map(Json::as_str) {
+        Some(Ok(n)) if !n.trim().is_empty() => n.trim().to_string(),
+        _ => {
+            errors.push(("curve".into(), "must be a curve name".into()));
+            String::new()
+        }
+    };
+    let parsed = match doc.find("snapshots") {
+        Some(list) if !name.is_empty() => {
+            let mut fe = Vec::new();
+            let r = spectra_backtest::parse_curve_history(&name, list, "snapshots", &mut fe);
+            errors.extend(fe.into_iter().map(|e| (e.field, e.message)));
+            r
+        }
+        Some(_) => None,
+        None => {
+            errors.push(("snapshots".into(), "must be a list of {as_of, quotes}".into()));
+            None
+        }
+    };
+    let Some((_, history)) = parsed.filter(|_| errors.is_empty()) else {
+        return invalid_fields(&errors);
+    };
+    let rows: Vec<spectra_db::instruments::CurveSnapshotRow> = history
+        .iter()
+        .map(|s| {
+            (
+                s.as_of_ns,
+                s.quotes
+                    .iter()
+                    .map(|q| {
+                        (
+                            q.kind.as_str().to_string(),
+                            q.years.to_string(),
+                            q.rate.to_string(),
+                            q.kind.frequency().and_then(|f| i16::try_from(f).ok()),
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    if let Err(e) = spectra_db::instruments::upsert_curve_snapshots(&pool, ws, &name, &rows).await {
+        return db_error(&e);
+    }
+    match spectra_db::instruments::list_curve_quotes(&pool, ws, Some(&name)).await {
+        Ok(rows) => to_json(200, &CurveListView { items: curves_from_rows(rows) }),
+        Err(e) => db_error(&e),
+    }
+}
+
+/// Delete a curve's quotes. Runs that used them keep their stored copy.
+#[utoipa::path(delete, path = "/api/v1/curves/{name}", tag = "instruments",
+    params(("name" = String, Path, description = "Curve name")),
+    responses((status = 200, body = DeletedView), (status = 404, body = crate::openapi::ErrorDoc)))]
+pub(crate) async fn delete_curve(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    Path(name): Path<String>,
+) -> Response {
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    match spectra_db::instruments::delete_curve(&pool, ws, name.trim()).await {
+        Ok(true) => to_json(200, &DeletedView { deleted: true }),
+        Ok(false) => error_response(404, "No such curve."),
+        Err(e) => db_error(&e),
+    }
+}
+
 /// What a backtest submitted in this workspace needs from the instrument
 /// tables, added to its payload unless the caller gave it: the base currency,
 /// every record that changes a run, and the FX series those records need.
@@ -443,6 +628,35 @@ pub(crate) async fn embed_instruments(
                     })
                     .collect(),
             );
+        }
+    }
+    if payload.get("curves").is_none() {
+        // The curves the swaps are marked on, every snapshot.
+        let mut names: Vec<String> = payload
+            .get("instruments")
+            .and_then(serde_json::Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter(|i| i.get("type").and_then(serde_json::Value::as_str) == Some("swap"))
+                    .filter_map(|i| i.get("underlying").and_then(serde_json::Value::as_str))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names.dedup();
+        let mut curves = serde_json::Map::new();
+        for n in names {
+            let rows = spectra_db::instruments::list_curve_quotes(pool, ws, Some(&n)).await?;
+            if let Some(c) = curves_from_rows(rows).into_iter().next() {
+                if let Ok(v) = serde_json::to_value(&c.snapshots) {
+                    curves.insert(n, v);
+                }
+            }
+            // A swap whose curve has no quotes: the run refuses it and says why.
+        }
+        if !curves.is_empty() {
+            payload["curves"] = serde_json::Value::Object(curves);
         }
     }
     if payload.get("fx_rates").is_none() {

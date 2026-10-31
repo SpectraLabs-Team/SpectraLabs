@@ -21,6 +21,7 @@ import {
   type DatasetVersion,
   type DownloadKind,
   type BondsSummary,
+  type SwapsSummary,
   type OptionsSummary,
   type FuturesRoll,
   type FuturesSummary,
@@ -484,6 +485,7 @@ function Results({
       {summary.futures && <FuturesCard futures={summary.futures} />}
       {summary.bonds && <BondsCard bonds={summary.bonds} />}
       {summary.options && <OptionsCard options={summary.options} />}
+      {summary.swaps && <SwapsCard swaps={summary.swaps} />}
 
       {b.run_id && <ExperimentLineageCard runId={b.run_id} />}
 
@@ -677,6 +679,70 @@ function BondsCard({ bonds }: { bonds: BondsSummary }) {
       {bonds.gaps.length > 0 && (
         <div className="border-t border-ink/[0.06] px-5 py-3 text-xs text-ink/55">
           {bonds.gaps.map((g) => (
+            <p key={g}>{g}</p>
+          ))}
+        </div>
+      )}
+    </GlassCard>
+  );
+}
+
+/** M24.4: each swap's mark and rate risk at its last bar, net coupons and maturities. */
+function SwapsCard({ swaps }: { swaps: SwapsSummary }) {
+  const fmt = (v: number | undefined, digits: number) => (v === undefined ? '—' : v.toFixed(digits));
+  const pct = (v: number | undefined) => (v === undefined ? '—' : `${(v * 100).toFixed(3)}%`);
+  return (
+    <GlassCard as="section" className="overflow-hidden">
+      <div className="border-b border-ink/[0.06] px-5 py-4">
+        <h3 className="text-sm font-semibold text-ink">Swaps</h3>
+        <p className="mt-0.5 text-xs text-ink/50">
+          Marked every bar from the curve known then ({swaps.curves.map((c) => `${c.name}: ${c.snapshots} snapshot${c.snapshots === 1 ? '' : 's'}`).join(', ')}).
+          Prices are 100 + NPV per 100 notional to the receiver of fixed; net coupons settle on payment dates.
+        </p>
+      </div>
+      <div className="max-h-[320px] overflow-auto">
+        <table className="w-full min-w-[760px] text-[12.5px]">
+          <thead className="sticky top-0 bg-panel/95 backdrop-blur">
+            <tr className="text-left text-[10.5px] uppercase tracking-wider text-ink/45">
+              {['Swap', 'Fixed', 'Maturity', 'Price', 'Par rate', 'Fixing', 'DV01', 'Net coupons'].map((h, i) => (
+                <th key={h} scope="col" className={cn('px-3 py-2.5 font-medium', i === 0 && 'pl-5', i >= 3 && 'text-right', i === 7 && 'pr-5')}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="num">
+            {swaps.swaps.map((w) => (
+              <tr key={w.symbol} className="border-t border-ink/[0.04]">
+                <td className="py-2 pl-5 pr-3 font-sans text-ink/90">
+                  {w.symbol} <span className="text-ink/45">{w.curve}</span>
+                </td>
+                <td className="px-3 py-2 font-sans text-ink/70">
+                  {(w.fixed_rate * 100).toFixed(3)}% × {w.frequency}/yr
+                </td>
+                <td className="px-3 py-2 font-sans text-ink/70">{expiryDate(w.maturity)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{fmt(w.price, 4)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{pct(w.par_rate)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{pct(w.fixing)}</td>
+                <td className="px-3 py-2 text-right text-ink/70">{fmt(w.dv01_per_100, 4)}</td>
+                <td className="py-2 pl-3 pr-5 text-right text-ink/70">{cash(w.net_coupons)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {swaps.maturities.length > 0 && (
+        <div className="border-t border-ink/[0.06] px-5 py-3 text-xs text-ink/60">
+          {swaps.maturities.map((m, i) => (
+            <p key={`${m.ts_ns}-${m.strategy}-${i}`}>
+              {m.symbol}: {Number(m.qty).toLocaleString('en-US', { maximumFractionDigits: 4 })} matured on {expiryDate(m.ts_ns)}
+            </p>
+          ))}
+        </div>
+      )}
+      {swaps.gaps.length > 0 && (
+        <div className="border-t border-ink/[0.06] px-5 py-3 text-xs text-ink/55">
+          {swaps.gaps.map((g) => (
             <p key={g}>{g}</p>
           ))}
         </div>

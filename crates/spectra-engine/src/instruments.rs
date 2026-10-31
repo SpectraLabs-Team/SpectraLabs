@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 
 use crate::bonds::BondTerms;
 use crate::futures::RollRule;
+use crate::swaps::{validate_history, CurveSnapshot, SwapTerms};
 use spectra_core::fixed::{div_round_half_away, narrow};
 use spectra_core::{
     is_currency_code, sha256_hex, Error, Instrument, InstrumentId, InstrumentType, Price, Result,
@@ -101,6 +102,8 @@ pub struct InstrumentSetup {
     pub bond_quote: BondQuote,
     /// Each option's underlying instrument in the dataset (M24.4).
     pub underlying_ids: BTreeMap<InstrumentId, InstrumentId>,
+    /// Dated curve quotes by curve name, for the swaps in the run (M24.4).
+    pub curves: BTreeMap<String, Vec<CurveSnapshot>>,
 }
 
 /// How bond prices in the bars are quoted.
@@ -142,6 +145,7 @@ impl Default for InstrumentSetup {
             underlying_ids: BTreeMap::new(),
             instruments: BTreeMap::new(),
             fx: BTreeMap::new(),
+            curves: BTreeMap::new(),
         }
     }
 }
@@ -165,6 +169,11 @@ impl InstrumentSetup {
     /// The coupon terms of `id`, when it is a bond.
     pub fn bond_terms(&self, id: InstrumentId) -> Option<BondTerms> {
         self.instrument(id).and_then(BondTerms::from_instrument)
+    }
+
+    /// The terms of `id`, when it is a swap.
+    pub fn swap_terms(&self, id: InstrumentId) -> Option<SwapTerms> {
+        self.instrument(id).and_then(SwapTerms::from_instrument)
     }
 
     /// The type of `id` (equity when it has no record).
@@ -244,6 +253,18 @@ impl InstrumentSetup {
                     inst.symbol,
                     inst.currency,
                     self.currency_of(u)
+                )));
+            }
+        }
+        for (name, history) in &self.curves {
+            validate_history(name, history)?;
+        }
+        for inst in self.instruments.values().filter(|i| i.kind == InstrumentType::Swap) {
+            let curve = inst.underlying.as_deref().unwrap_or_default();
+            if !self.curves.contains_key(curve) {
+                return Err(bad(format!(
+                    "swap {}: no quotes for its curve {curve}; a swap is marked from a dated curve history",
+                    inst.symbol
                 )));
             }
         }
@@ -347,6 +368,31 @@ impl InstrumentSetup {
         }
         if self.effective().any(|(_, i)| i.kind == InstrumentType::Bond) {
             s.push_str(&format!("bond_quote={};", self.bond_quote.as_str()));
+        }
+        // The curves the swaps are marked on, every quote exactly.
+        let mut used: Vec<&str> = self
+            .effective()
+            .filter(|(_, i)| i.kind == InstrumentType::Swap)
+            .filter_map(|(_, i)| i.underlying.as_deref())
+            .collect();
+        used.sort_unstable();
+        used.dedup();
+        for name in used {
+            let Some(history) = self.curves.get(name) else { continue };
+            s.push_str(&format!("curve={name},{};", history.len()));
+            for snap in history {
+                s.push_str(&format!("{}:", snap.as_of_ns));
+                for q in &snap.quotes {
+                    s.push_str(&format!(
+                        "{}/{}/{}/{},",
+                        q.kind.as_str(),
+                        q.kind.frequency().unwrap_or(0),
+                        q.years.raw(),
+                        q.rate.raw()
+                    ));
+                }
+                s.push(';');
+            }
         }
         for ccy in self.foreign_currencies() {
             if let Some(series) = self.fx.get(ccy) {

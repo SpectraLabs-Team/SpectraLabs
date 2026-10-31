@@ -95,6 +95,17 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   // Symbol changes, delistings & survivorship-free universes (M1b task 12)
   'api/v1/symbol-changes': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/symbol-changes/{id}': { method: 'DELETE', minRole: 'editor', timeoutMs: 20_000 },
+  // Multi-asset instruments, base currency, FX rates, curves and pricing (M24)
+  'api/v1/instruments': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
+  'api/v1/instruments/{symbol}': { method: 'DELETE', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/base-currency': { method: ['GET', 'PUT'], minRole: 'viewer', methodRoles: { PUT: 'owner' }, timeoutMs: 10_000 },
+  'api/v1/fx-rates': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000, maxBodyBytes: 5 * MB },
+  'api/v1/curves': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000, maxBodyBytes: 5 * MB },
+  'api/v1/curves/{name}': { method: 'DELETE', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/pricing/bond': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/pricing/option': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/pricing/curve': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/pricing/swap': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/delistings': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/delistings/{id}': { method: 'DELETE', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/universes': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },

@@ -38,13 +38,13 @@ pub struct InstrumentView {
     pub expiry: Option<i64>,
     /// Strike (options), exact decimal text.
     pub strike: Option<String>,
-    /// Maturity (bonds), nanoseconds since the epoch.
+    /// Maturity (bonds, swaps), nanoseconds since the epoch.
     pub maturity: Option<i64>,
-    /// Annual coupon rate as a fraction (bonds), exact decimal text.
+    /// Annual coupon rate (bonds) or fixed rate (swaps) as a fraction, exact decimal text.
     pub coupon_rate: Option<String>,
     /// A future's chain or an option's underlying symbol.
     pub underlying: Option<String>,
-    /// Coupons a year (bonds).
+    /// Coupons a year (bonds) or fixed payments a year (swaps): 1, 2, 4 or 12.
     pub coupon_frequency: Option<u32>,
     /// Day count for accrued interest (bonds): act_act_icma, 30_360, act_360 or act_365f.
     pub day_count: Option<String>,

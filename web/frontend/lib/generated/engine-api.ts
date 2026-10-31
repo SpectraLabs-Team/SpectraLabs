@@ -3144,10 +3144,10 @@ export interface components {
         InstrumentView: {
             /**
              * Format: int32
-             * @description Coupons a year (bonds).
+             * @description Coupons a year (bonds) or fixed payments a year (swaps): 1, 2, 4 or 12.
              */
             coupon_frequency?: number | null;
-            /** @description Annual coupon rate as a fraction (bonds), exact decimal text. */
+            /** @description Annual coupon rate (bonds) or fixed rate (swaps) as a fraction, exact decimal text. */
             coupon_rate?: string | null;
             /** @description ISO currency the price is quoted in. */
             currency: string;
@@ -3162,7 +3162,7 @@ export interface components {
             lot_size: string;
             /**
              * Format: int64
-             * @description Maturity (bonds), nanoseconds since the epoch.
+             * @description Maturity (bonds, swaps), nanoseconds since the epoch.
              */
             maturity?: number | null;
             /** @description Contract multiplier, exact decimal text. */

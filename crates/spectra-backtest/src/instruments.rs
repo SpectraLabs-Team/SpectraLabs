@@ -223,7 +223,8 @@ fn parse_one(
     let coupon = match item.find("coupon_rate") {
         None | Some(Json::Null) => None,
         Some(v) => match fixed::<spectra_core::fixed::RatioUnit>(v) {
-            Some(x) if x.raw() >= 0 => Some(x),
+            // A swap's fixed rate may be negative; a bond's coupon may not.
+            Some(x) if x.raw() >= 0 || kind == InstrumentType::Swap => Some(x),
             _ => {
                 err(errors, format!("{p}coupon_rate"), "must be a non-negative fraction (0.05 for 5%)");
                 None

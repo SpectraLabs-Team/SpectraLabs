@@ -8552,7 +8552,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "Coupons a year (bonds).",
+            "description": "Coupons a year (bonds) or fixed payments a year (swaps): 1, 2, 4 or 12.",
             "minimum": 0
           },
           "coupon_rate": {
@@ -8560,7 +8560,7 @@
               "string",
               "null"
             ],
-            "description": "Annual coupon rate as a fraction (bonds), exact decimal text."
+            "description": "Annual coupon rate (bonds) or fixed rate (swaps) as a fraction, exact decimal text."
           },
           "currency": {
             "type": "string",
@@ -8591,7 +8591,7 @@
               "null"
             ],
             "format": "int64",
-            "description": "Maturity (bonds), nanoseconds since the epoch."
+            "description": "Maturity (bonds, swaps), nanoseconds since the epoch."
           },
           "multiplier": {
             "type": "string",

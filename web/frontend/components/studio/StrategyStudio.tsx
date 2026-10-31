@@ -61,6 +61,14 @@ on_bar {
 }
 `;
 
+function draftKey(code: string, parameters: Record<string, unknown> = {}): string {
+  const sorted: Record<string, unknown> = {};
+  for (const k of Object.keys(parameters).sort()) {
+    sorted[k] = parameters[k];
+  }
+  return `${code}:::${JSON.stringify(sorted)}`;
+}
+
 export function StrategyStudio() {
   const [strategies, setStrategies] = useState<StrategySummary[]>([]);
   const [selectedStrategy, setSelectedStrategy] = useState<StrategySummary | null>(null);
@@ -116,6 +124,8 @@ export function StrategyStudio() {
   // Debounce ref for auto-saving drafts and validating
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const draftVersionRef = useRef<number>(0);
+  const loadedStrategyRef = useRef<string | null>(null);
+  const savedKeyRef = useRef<string | null>(null);
   const [draftConflictNotice, setDraftConflictNotice] = useState<string | null>(null);
 
   // Load strategies list
@@ -165,18 +175,28 @@ export function StrategyStudio() {
       .then((draft) => {
         draftVersionRef.current = draft?.version ?? 0;
         setDraftConflictNotice(null);
+        loadedStrategyRef.current = stratId;
         if (draft && draft.code) {
           setCode(draft.code);
-          setParameters(draft.parameters || {});
+          const p = draft.parameters || {};
+          setParameters(p);
+          savedKeyRef.current = draftKey(draft.code, p);
         } else {
           setCode(DEFAULT_DSL_TEMPLATE);
-          setParameters({ fast: 10, slow: 30 });
+          const p = { fast: 10, slow: 30 };
+          setParameters(p);
+          savedKeyRef.current = draftKey(DEFAULT_DSL_TEMPLATE, p);
         }
+        setDraftStatus('saved');
       })
       .catch(() => {
         draftVersionRef.current = 0;
+        loadedStrategyRef.current = stratId;
         setCode(DEFAULT_DSL_TEMPLATE);
-        setParameters({ fast: 10, slow: 30 });
+        const p = { fast: 10, slow: 30 };
+        setParameters(p);
+        savedKeyRef.current = draftKey(DEFAULT_DSL_TEMPLATE, p);
+        setDraftStatus('idle');
       });
 
     // Load versions
@@ -216,7 +236,16 @@ export function StrategyStudio() {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
-    setDraftStatus('dirty');
+
+    if (!selectedStrategy || loadedStrategyRef.current !== selectedStrategy.id) {
+      return;
+    }
+
+    const currentKey = draftKey(code, parameters);
+    const isUnchanged = savedKeyRef.current === currentKey;
+    if (!isUnchanged) {
+      setDraftStatus('dirty');
+    }
 
     debounceTimerRef.current = setTimeout(async () => {
       // 1. Validate code
@@ -229,13 +258,15 @@ export function StrategyStudio() {
         // Sync parameters default if not set
         if (valRes.parameters) {
           setParameters((prev) => {
+            let changed = false;
             const next = { ...prev };
             for (const p of valRes.parameters) {
               if (next[p.name] === undefined) {
                 next[p.name] = p.default;
+                changed = true;
               }
             }
-            return next;
+            return changed ? next : prev;
           });
         }
       } catch (err) {
@@ -245,12 +276,18 @@ export function StrategyStudio() {
         ]);
       }
 
-      // 2. Autosave draft if a strategy is selected
-      if (selectedStrategy) {
+      // 2. Autosave draft if a strategy is selected and draft changed
+      if (selectedStrategy && loadedStrategyRef.current === selectedStrategy.id) {
+        const keyToSave = draftKey(code, parameters);
+        if (savedKeyRef.current === keyToSave) {
+          setDraftStatus('saved');
+          return;
+        }
         setDraftStatus('saving');
         try {
           const res = await saveDraft(selectedStrategy.id, code, parameters, draftVersionRef.current);
           draftVersionRef.current = res.version;
+          savedKeyRef.current = keyToSave;
           setDraftStatus('saved');
           setDraftConflictNotice(null);
         } catch (err: unknown) {
@@ -258,7 +295,9 @@ export function StrategyStudio() {
           if (conflict) {
             draftVersionRef.current = conflict.version;
             setCode(conflict.code);
-            setParameters(conflict.parameters || {});
+            const confParams = conflict.parameters || {};
+            setParameters(confParams);
+            savedKeyRef.current = draftKey(conflict.code, confParams);
             setDraftConflictNotice('Draft changed on another device and has been reloaded.');
             setDraftStatus('saved');
             return;
@@ -280,7 +319,7 @@ export function StrategyStudio() {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, selectedStrategy]);
+  }, [code, parameters, selectedStrategy]);
 
   // Handle Save Version
   const handleSaveVersion = async () => {
@@ -363,6 +402,8 @@ export function StrategyStudio() {
         });
         const saved = await saveDraft(strat.id, template.code, template.defaultParams, 0).catch(() => null);
         draftVersionRef.current = saved?.version ?? 1;
+        loadedStrategyRef.current = strat.id;
+        savedKeyRef.current = draftKey(template.code, template.defaultParams);
         setStrategies((prev) => [strat, ...prev]);
         setSelectedStrategy(strat);
         setCode(template.code);
@@ -384,10 +425,14 @@ export function StrategyStudio() {
       if (selectedTemplateForNew) {
         const saved = await saveDraft(strat.id, selectedTemplateForNew.code, selectedTemplateForNew.defaultParams, 0).catch(() => null);
         draftVersionRef.current = saved?.version ?? 1;
+        loadedStrategyRef.current = strat.id;
+        savedKeyRef.current = draftKey(selectedTemplateForNew.code, selectedTemplateForNew.defaultParams);
         setCode(selectedTemplateForNew.code);
         setParameters(selectedTemplateForNew.defaultParams);
       } else {
         draftVersionRef.current = 0;
+        loadedStrategyRef.current = strat.id;
+        savedKeyRef.current = draftKey(DEFAULT_DSL_TEMPLATE, { fast: 10, slow: 30 });
       }
       setStrategies((prev) => [strat, ...prev]);
       setSelectedStrategy(strat);

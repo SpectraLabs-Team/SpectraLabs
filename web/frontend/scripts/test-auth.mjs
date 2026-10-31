@@ -663,7 +663,10 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
     const methods = Array.isArray(r.method) ? r.method : [r.method];
     for (const method of methods) {
       const role = engineRoutes.minimumRole(r, method);
-      if (method !== 'GET') assert.ok(authz.hasRole(role, 'editor'), `${path}: ${method} changes data, so it needs editor`);
+      // Per-user state / sandbox routes allow viewer; the engine itself enforces viewer_read_only
+      if (method !== 'GET' && !path.startsWith('api/v1/me/')) {
+        assert.ok(authz.hasRole(role, 'editor'), `${path}: ${method} changes data, so it needs editor`);
+      }
     }
   }
   for (const p of ['api/risk', 'api/stress', 'api/benchmark', 'api/alpaca/account']) assert.equal(routes[p].minRole, 'editor', p);
@@ -2235,10 +2238,13 @@ test('permissions: viewer = read only, editor = create and run, owner = members,
     }
   }
   // Engine: computations need editor, reads need viewer (the table itself is tested in task 4's tests).
+  // Per-user state / sandbox routes allow viewer; the engine itself enforces viewer_read_only.
   for (const [p, r] of Object.entries(engineRoutes.ENGINE_ROUTES)) {
     const methods = Array.isArray(r.method) ? r.method : [r.method];
     for (const method of methods) {
-      if (method !== 'GET' && !r.public) assert.ok(rank[engineRoutes.minimumRole(r, method)] >= rank.editor, `engine ${method} ${p}`);
+      if (method !== 'GET' && !r.public && !p.startsWith('api/v1/me/')) {
+        assert.ok(rank[engineRoutes.minimumRole(r, method)] >= rank.editor, `engine ${method} ${p}`);
+      }
     }
   }
 

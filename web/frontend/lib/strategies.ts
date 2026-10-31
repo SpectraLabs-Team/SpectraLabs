@@ -96,14 +96,14 @@ export const listStrategies = () =>
   request<{ items: EngineStrategy[] }>('/api/v1/strategies').then((r) => r.items.map((s) => toStrategySummary(s)));
 
 export const createStrategy = (data: { name: string; kind?: string; description?: string }) =>
-  request<StrategySummary>('/api/v1/strategies', {
+  request<{ strategy: EngineStrategy; versions: EngineVersion[] }>('/api/v1/strategies', {
     method: 'POST',
     body: JSON.stringify({
       name: data.name,
       kind: data.kind ?? 'custom',
       description: data.description ?? '',
     }),
-  });
+  }).then((r) => toStrategySummary(r.strategy));
 
 export const getStrategy = (id: string) =>
   request<StrategySummary>(`/api/v1/strategies/${id}`);

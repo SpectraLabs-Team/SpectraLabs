@@ -976,16 +976,23 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         }
     };
     let strategy_from_run: String = row.try_get("strategy").unwrap_or_default();
-    let strategy = if strategy_from_run.is_empty() {
+    let mut strategy = if strategy_from_run.is_empty() {
         original_payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("").to_owned()
     } else {
         strategy_from_run
     };
-    let params_value = if row
-        .try_get::<serde_json::Value, _>("params")
-        .is_ok_and(|v| v != serde_json::json!({}))
-    {
-        row.try_get::<serde_json::Value, _>("params").unwrap_or_default()
+    if strategy.contains('+') {
+        if let Some(first) = strategy.split('+').next() {
+            strategy = first.to_string();
+        }
+    }
+    let raw_stored = row.try_get::<serde_json::Value, _>("params").unwrap_or_default();
+    let params_value = if let Some(p) = raw_stored.get("params") {
+        p.clone()
+    } else if let Some(strategies) = raw_stored.get("strategies").and_then(|s| s.as_array()) {
+        strategies.first().and_then(|s| s.get("params")).cloned().unwrap_or_else(|| serde_json::json!({}))
+    } else if raw_stored != serde_json::json!({}) && raw_stored.get("config").is_none() {
+        raw_stored.clone()
     } else {
         original_payload.get("params").cloned().unwrap_or_else(|| {
             serde_json::json!({ "fast": original_payload.get("fast").and_then(serde_json::Value::as_f64).unwrap_or(5.0),
@@ -996,18 +1003,18 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         .try_get::<serde_json::Value, _>("config")
         .ok()
         .filter(|v| *v != serde_json::json!({}))
+        .or_else(|| raw_stored.get("config").cloned())
         .or_else(|| original_payload.get("config").cloned())
         .unwrap_or_else(|| serde_json::json!({}));
     let raw_params = Json::parse(&params_value.to_string()).unwrap_or(Json::Null);
-    let params = match params_from_json(&raw_params) {
-        Ok(v) => v,
-        Err(error) => {
-            let message = format!("Source run parameters are invalid: {error}");
-            fail_job(&ctx, &job, started, &message, false).await;
-            drop(permit);
-            return;
+    let mut params = spectra_research::ParamSet::default();
+    if let Ok(entries) = raw_params.entries() {
+        for (k, v) in entries {
+            if let Ok(num) = v.as_double() {
+                params.values.push((k.clone(), num));
+            }
         }
-    };
+    }
     let backtest_config =
         match config_from_json(&Json::parse(&config_value_run.to_string()).unwrap_or(Json::Null)) {
             Ok(v) => v,

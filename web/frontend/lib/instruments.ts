@@ -120,15 +120,4 @@ export const SAMPLE_CONTRACTS: CreateInstrumentPayload[] = [
     day_count: 'act_act_icma',
     maturity: '2034-11-15',
   },
-  {
-    symbol: 'USD-IRS-5Y',
-    type: 'swap',
-    currency: 'USD',
-    multiplier: 1,
-    tick_size: '0.01',
-    coupon_rate: '0.0385',
-    coupon_frequency: 2,
-    underlying: 'USD-SOFR',
-    maturity: '2029-11-01',
-  },
 ];

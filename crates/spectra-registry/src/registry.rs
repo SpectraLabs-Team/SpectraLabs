@@ -252,15 +252,25 @@ pub fn metrics_to_json(m: &Metrics) -> Result<Json> {
         .with("max_drawdown", finite_metric(m.max_drawdown, "max_drawdown")?))
 }
 
-/// Parses [`metrics_to_json`] output.
+/// Parses [`metrics_to_json`] output. Also accepts metrics nested under a `"metrics"` key
+/// (such as full backtest summaries).
 ///
 /// # Errors
 /// For missing or malformed fields.
 pub fn metrics_from_json(j: &Json) -> Result<Metrics> {
-    let d = |k: &str| j.at(k).and_then(Json::as_double);
+    let root = if let Ok(nested) = j.at("metrics") {
+        if nested.at("valid").is_ok() {
+            nested
+        } else {
+            j
+        }
+    } else {
+        j
+    };
+    let d = |k: &str| root.at(k).and_then(Json::as_double);
     Ok(Metrics {
-        valid: j.at("valid")?.as_bool()?,
-        periods: i32::try_from(j.at("periods")?.as_int()?).map_err(|_| reg_err("periods out of range"))?,
+        valid: root.at("valid")?.as_bool()?,
+        periods: i32::try_from(root.at("periods")?.as_int()?).map_err(|_| reg_err("periods out of range"))?,
         total_return: d("total_return")?,
         annualized_return: d("annualized_return")?,
         annualized_volatility: d("annualized_volatility")?,
@@ -1443,4 +1453,33 @@ pub fn reproduce_run(
         rep.notes.push("The re-run's result fingerprint differs from the recorded one.".into());
     }
     Ok(rep)
+}
+
+#[cfg(test)]
+mod metrics_shape_tests {
+    use super::*;
+
+    #[test]
+    fn metrics_parse_flat_and_nested_shapes() {
+        let flat = Json::object()
+            .with("valid", Json::boolean(true))
+            .with("periods", Json::integer(10))
+            .with("total_return", Json::number(0.12).unwrap())
+            .with("annualized_return", Json::number(0.15).unwrap())
+            .with("annualized_volatility", Json::number(0.20).unwrap())
+            .with("sharpe", Json::number(1.5).unwrap())
+            .with("max_drawdown", Json::number(0.05).unwrap());
+
+        let m_flat = metrics_from_json(&flat).expect("flat metrics should parse");
+        assert!(m_flat.valid);
+        assert_eq!(m_flat.periods, 10);
+        assert!((m_flat.sharpe - 1.5).abs() < f64::EPSILON);
+
+        let nested = Json::object().with("metrics", flat).with("activity", Json::object());
+
+        let m_nested = metrics_from_json(&nested).expect("nested metrics should parse");
+        assert!(m_nested.valid);
+        assert_eq!(m_nested.periods, 10);
+        assert!((m_nested.sharpe - 1.5).abs() < f64::EPSILON);
+    }
 }

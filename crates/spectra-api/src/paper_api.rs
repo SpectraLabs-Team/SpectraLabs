@@ -85,11 +85,14 @@ pub(crate) struct PaperAccountView {
     pub cvar_dollar: f64,
 }
 
-impl From<PaperAccount> for PaperAccountView {
-    fn from(acc: PaperAccount) -> Self {
+impl PaperAccountView {
+    /// The view, with each position valued at its price times its contract
+    /// multiplier (`records`: the workspace's instrument records).
+    fn new(acc: PaperAccount, records: &HashMap<String, spectra_core::Instrument>) -> Self {
         let mut positions_map = HashMap::new();
         for pos in &acc.positions {
-            positions_map.insert(pos.symbol.clone(), PositionSnapshot { qty: pos.qty, price: pos.price });
+            let price = pos.price * crate::instruments_api::multiplier_of(records, &pos.symbol);
+            positions_map.insert(pos.symbol.clone(), PositionSnapshot { qty: pos.qty, price });
         }
         let snap = PortfolioSnapshot {
             cash: acc.balance.cash,
@@ -292,8 +295,12 @@ pub(crate) async fn get_account(
 
     ensure_paper_strategy(&pool, ws, q.strategy_id, user_of(&identity)).await;
 
+    let records = match crate::instruments_api::order_instruments(&pool, ws).await {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
     match spectra_db::paper::get_or_init_paper_account(&pool, ws, q.strategy_id, q.initial_cash).await {
-        Ok(acc) => json_response(200, json!(PaperAccountView::from(acc)).to_string()),
+        Ok(acc) => json_response(200, json!(PaperAccountView::new(acc, &records)).to_string()),
         Err(e) => db_error(&e),
     }
 }
@@ -321,9 +328,15 @@ pub(crate) async fn get_paper_attribution(
 
     ensure_paper_strategy(&pool, ws, q.strategy_id, user_of(&identity)).await;
 
+    let records = match crate::instruments_api::order_instruments(&pool, ws).await {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let mult = |sym: &str| crate::instruments_api::multiplier_of(&records, sym);
     match spectra_db::paper::get_or_init_paper_account(&pool, ws, q.strategy_id, q.initial_cash).await {
         Ok(acc) => {
-            let total_positions_val: f64 = acc.positions.iter().map(|p| p.qty * p.price).sum();
+            let total_positions_val: f64 =
+                acc.positions.iter().map(|p| p.qty * p.price * mult(&p.symbol)).sum();
             let total_gross: f64 = acc.balance.equity - acc.balance.daily_start_equity;
             let total_fees: f64 = 0.0;
             let net: f64 = total_gross - total_fees;
@@ -333,7 +346,7 @@ pub(crate) async fn get_paper_attribution(
                 .into_iter()
                 .enumerate()
                 .map(|(i, p)| {
-                    let mkt_val = p.qty * p.price;
+                    let mkt_val = p.qty * p.price * mult(&p.symbol);
                     let pos_pnl = if total_positions_val.abs() > 0.0 {
                         total_gross * (mkt_val.abs() / total_positions_val.abs())
                     } else {
@@ -415,8 +428,12 @@ pub(crate) async fn reset_account(
 
     ensure_paper_strategy(&pool, ws, req.strategy_id, user_of(&identity)).await;
 
+    let records = match crate::instruments_api::order_instruments(&pool, ws).await {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
     match spectra_db::paper::reset_paper_account(&pool, ws, req.strategy_id, req.initial_cash).await {
-        Ok(acc) => json_response(200, json!(PaperAccountView::from(acc)).to_string()),
+        Ok(acc) => json_response(200, json!(PaperAccountView::new(acc, &records)).to_string()),
         Err(e) => db_error(&e),
     }
 }
@@ -501,10 +518,19 @@ pub(crate) async fn create_order(
     if symbol.is_empty() {
         return error_response(422, "Symbol is required.");
     }
-    // M24.4: options are backtest-only until the M26 review signs off (fails closed).
-    if let Some(refusal) = crate::instruments_api::refuse_options(&pool, ws, req.symbol.trim()).await {
+    // M24: every type trades on paper with its contract multiplier; a contract past
+    // its expiry or maturity does not trade. Fails closed when records cannot be read.
+    let records = match crate::instruments_api::order_instruments(&pool, ws).await {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let now_ns = Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
+    if let Some(refusal) =
+        crate::instruments_api::refuse_expired(crate::instruments_api::record_of(&records, &symbol), now_ns)
+    {
         return refusal;
     }
+    let mult = |sym: &str| crate::instruments_api::multiplier_of(&records, sym);
     if req.qty <= 0.0 {
         return error_response(422, "Quantity must be positive.");
     }
@@ -539,12 +565,15 @@ pub(crate) async fn create_order(
         if p.symbol == symbol {
             current_sym_price = Some(p.price);
         }
-        positions_map.insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price });
+        // Risk sees value per unit: price times the contract multiplier.
+        positions_map
+            .insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol) });
     }
 
     let eval_price = req.fill_price.or(req.limit_price).or(current_sym_price).unwrap_or(100.0);
 
-    let candidate = OrderCandidate { symbol: symbol.clone(), side, qty: req.qty, price: eval_price };
+    let candidate =
+        OrderCandidate { symbol: symbol.clone(), side, qty: req.qty, price: eval_price * mult(&symbol) };
 
     let snapshot = PortfolioSnapshot {
         cash: account.balance.cash,
@@ -724,16 +753,17 @@ pub(crate) async fn create_order(
     }
 
     // Update balances in portfolio_balances
+    let notional = fill_qty * fill_price * mult(&symbol);
     let cash_delta = match side {
-        OrderSide::Buy => -(fill_qty * fill_price) - fee,
-        OrderSide::Sell => (fill_qty * fill_price) - fee,
+        OrderSide::Buy => -notional - fee,
+        OrderSide::Sell => notional - fee,
     };
     let new_cash = account.balance.cash + cash_delta;
 
     // Calculate new total equity = cash + sum(pos.qty * pos.price)
     let updated_positions =
         spectra_db::risk_center::get_positions(&pool, ws, Some(strat_id)).await.unwrap_or_default();
-    let pos_value: f64 = updated_positions.iter().map(|p| p.qty * p.price).sum();
+    let pos_value: f64 = updated_positions.iter().map(|p| p.qty * p.price * mult(&p.symbol)).sum();
     let new_equity = new_cash + pos_value;
     let new_peak = account.balance.peak_equity.max(new_equity);
 
@@ -906,6 +936,16 @@ pub(crate) async fn step_strategy(
     cfg.kill_switch = kill_switch_active;
     cfg.risk_limits = Some(limits);
 
+    // M24: the workspace's instrument records (multipliers, expiries, currencies), as backtests use them.
+    let setup = match crate::instruments_api::setup_for(&pool, ws, &symbols).await {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
+    let step_records = match crate::instruments_api::order_instruments(&pool, ws).await {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+
     // 6. Instantiate strategy and execute synchronously (kept in isolated scope to preserve Send)
     let backtest_res = {
         let mut strategy: Box<dyn Strategy> = if version.builtin == "dsl" {
@@ -945,7 +985,15 @@ pub(crate) async fn step_strategy(
             }
         };
 
-        match spectra_engine::run_backtest(&engine_bars, strategy.as_mut(), &cfg) {
+        let mut ctl = spectra_engine::RunControl::default();
+        match spectra_engine::run_backtest_with_setup(
+            &engine_bars,
+            &[],
+            &setup,
+            strategy.as_mut(),
+            &cfg,
+            &mut ctl,
+        ) {
             Ok(res) => res,
             Err(e) => return error_response(422, format!("Strategy execution failed: {e}")),
         }
@@ -1169,7 +1217,7 @@ pub(crate) async fn step_strategy(
         strategy_version_id: Some(version.id),
         orders: order_views,
         fills: fill_views,
-        account: PaperAccountView::from(updated_account),
+        account: PaperAccountView::new(updated_account, &step_records),
     };
 
     json_response(200, json!(resp).to_string())

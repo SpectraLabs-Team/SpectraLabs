@@ -385,6 +385,7 @@ pub(crate) async fn put_fx_rates(
 
 /// The workspace's instrument records by symbol, for paper and broker
 /// orders. Fails closed: on a database error the order is not sent.
+#[allow(clippy::result_large_err)] // the error is the finished response
 pub(crate) async fn order_instruments(
     pool: &spectra_db::PgPool,
     ws: uuid::Uuid,
@@ -452,6 +453,7 @@ pub(crate) fn occ_symbol(inst: &Instrument) -> Option<String> {
 /// The instrument setup for an engine run over `symbols` (a paper strategy
 /// step): the workspace's base currency, records, FX rates and curves, read
 /// the same way a backtest request reads them. Fails closed.
+#[allow(clippy::result_large_err)] // the error is the finished response
 pub(crate) async fn setup_for(
     pool: &spectra_db::PgPool,
     ws: uuid::Uuid,

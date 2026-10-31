@@ -71,6 +71,18 @@ export const updateSandboxOrder = (serverId: string, order: object) =>
 export const clearSandboxOrders = () =>
   request<{ cleared: number }>(`${ME}/sandbox/orders`, { method: 'DELETE' });
 
+export interface TransactResponse {
+  saved: boolean;
+  version: number;
+  updated_at: string;
+  value: SandboxValue;
+  order: ServerOrder;
+}
+
+/** One sandbox trade: the order, new cash and positions, applied atomically. Refused with 409 if stale. */
+export const transactSandbox = (body: { expected_version: number; cash: number; positions: unknown[]; order: object }) =>
+  request<TransactResponse>(`${ME}/sandbox/transact`, { method: 'POST', body: JSON.stringify(body) });
+
 export interface ImportReport {
   noop: boolean;
   imported: string[];

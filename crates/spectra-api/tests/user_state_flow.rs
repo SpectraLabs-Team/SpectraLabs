@@ -418,3 +418,75 @@ async fn sandbox_order_can_be_cancelled_and_reset() {
     let (_, list) = f.call(a, f.ws, "GET", path, &Value::Null).await;
     assert_eq!(list["orders"], json!([]));
 }
+
+#[tokio::test]
+async fn sandbox_trade_is_atomic_and_rejects_stale_writes() {
+    let Some(f) = Fixture::new().await else { return };
+    let a = spectra_db::new_id();
+    f.join(a, "owner").await;
+    let trade = "/api/v1/me/sandbox/transact";
+    let orders = "/api/v1/me/sandbox/orders";
+
+    // First trade from an empty sandbox (version 0).
+    let (s, body) = f
+        .call(
+            a,
+            f.ws,
+            "POST",
+            trade,
+            &json!({
+                "expected_version": 0,
+                "cash": 900.0,
+                "positions": [{"symbol": "SPY", "qty": "1"}],
+                "order": {"id": "t-1", "symbol": "SPY", "side": "buy"}
+            }),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(body["version"], 1);
+    assert_eq!(body["value"]["cash"], 900.0);
+    assert_eq!(body["order"]["payload"]["id"], "t-1");
+
+    // A second device still holds version 0: refused, and nothing is written.
+    let (s, body) = f
+        .call(
+            a,
+            f.ws,
+            "POST",
+            trade,
+            &json!({
+                "expected_version": 0,
+                "cash": 500.0,
+                "positions": [],
+                "order": {"id": "t-2", "symbol": "QQQ", "side": "buy"}
+            }),
+        )
+        .await;
+    assert_eq!(s, 409);
+    assert_eq!(body["code"], "version_conflict");
+    assert_eq!(body["details"]["current"]["version"], 1);
+    assert_eq!(body["details"]["current"]["value"]["cash"], 900.0);
+
+    let (_, list) = f.call(a, f.ws, "GET", orders, &Value::Null).await;
+    assert_eq!(list["orders"].as_array().unwrap().len(), 1, "a refused trade must not add an order");
+
+    // Trade again on the current version.
+    let (s, body) = f
+        .call(
+            a,
+            f.ws,
+            "POST",
+            trade,
+            &json!({
+                "expected_version": 1,
+                "cash": 400.0,
+                "positions": [],
+                "order": {"id": "t-3", "symbol": "SPY", "side": "sell"}
+            }),
+        )
+        .await;
+    assert_eq!(s, 200);
+    assert_eq!(body["version"], 2);
+    let (_, list) = f.call(a, f.ws, "GET", orders, &Value::Null).await;
+    assert_eq!(list["orders"].as_array().unwrap().len(), 2);
+}

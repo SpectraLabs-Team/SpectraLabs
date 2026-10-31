@@ -275,6 +275,82 @@ pub async fn clear_sandbox_orders(pool: &PgPool, user: Uuid, ws: Uuid) -> Result
     Ok(res.rows_affected())
 }
 
+/// Result of an atomic sandbox trade.
+#[derive(Debug)]
+pub enum TransactOutcome {
+    Saved {
+        state: StateValue,
+        order: SandboxOrder,
+    },
+    /// The expected version did not match. Nothing was written. Carries the current row, if any.
+    Conflict(Option<StateValue>),
+}
+
+/// Record one sandbox trade: the order, the new cash and positions, and the version bump.
+///
+/// All three writes happen in one transaction, after the sandbox row is locked. A stale
+/// `expected_version` writes nothing.
+///
+/// # Errors
+/// Any database error.
+pub async fn transact_sandbox(
+    pool: &PgPool,
+    user: Uuid,
+    ws: Uuid,
+    expected_version: i32,
+    cash: f64,
+    positions: &JsonValue,
+    order: &JsonValue,
+) -> Result<TransactOutcome, Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO user_paper_sandbox (user_id, workspace_id, version) VALUES ($1, $2, 0) ON CONFLICT DO NOTHING",
+    )
+    .bind(user)
+    .bind(ws)
+    .execute(&mut *tx)
+    .await?;
+
+    let (current,): (i32,) = sqlx::query_as(
+        "SELECT version FROM user_paper_sandbox WHERE user_id = $1 AND workspace_id = $2 FOR UPDATE",
+    )
+    .bind(user)
+    .bind(ws)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    if current != expected_version {
+        tx.rollback().await?;
+        return Ok(TransactOutcome::Conflict(get(pool, user, ws, StateKey::Sandbox).await?));
+    }
+
+    let state: StateValue = sqlx::query_as(
+        "UPDATE user_paper_sandbox SET cash = $3, positions = $4::jsonb, version = version + 1, updated_at = now() \
+         WHERE user_id = $1 AND workspace_id = $2 \
+         RETURNING jsonb_build_object('cash', cash, 'positions', positions) AS payload, version, updated_at",
+    )
+    .bind(user)
+    .bind(ws)
+    .bind(cash)
+    .bind(positions)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    let saved_order: SandboxOrder = sqlx::query_as(
+        "INSERT INTO user_sandbox_orders (id, user_id, workspace_id, payload) \
+         VALUES ($1, $2, $3, $4) RETURNING id, payload, created_at",
+    )
+    .bind(crate::new_id())
+    .bind(user)
+    .bind(ws)
+    .bind(order)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+    Ok(TransactOutcome::Saved { state, order: saved_order })
+}
+
 /// One-time import from browser storage (Decision 3).
 ///
 /// Server data wins: a key whose row already has a version above 0 is skipped.

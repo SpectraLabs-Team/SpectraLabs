@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Database } from 'lucide-react';
+import { Database, Layers } from 'lucide-react';
 import { listDatasetSummaries, type DatasetSummary, type IngestResult } from '@/lib/datasets';
 import { loadAllSampleDatasets, SAMPLE_DATASETS } from '@/lib/sampleData';
 import { useToast } from '@/components/ui/StudioToast';
@@ -10,6 +10,7 @@ import { GlassCard } from '@/components/ui/primitives';
 import { DatasetDetail } from './data/DatasetDetail';
 import { DatasetList } from './data/DatasetList';
 import { UploadWizard } from './data/UploadWizard';
+import { InstrumentsManager } from './instruments/InstrumentsManager';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -31,6 +32,9 @@ export function DataLab() {
   const [selected, setSelected] = useState<string | null>(() => {
     const d = params.get('dataset');
     return d && UUID.test(d) ? d : null;
+  });
+  const [subTab, setSubTab] = useState<'datasets' | 'instruments'>(() => {
+    return params.get('view') === 'instruments' ? 'instruments' : 'datasets';
   });
   const detailRef = useRef<HTMLDivElement>(null);
 
@@ -106,50 +110,84 @@ export function DataLab() {
 
   return (
     <div className="space-y-5">
-      {uploading && (
-        <UploadWizard
-          datasetNames={(items ?? []).map((d) => d.name)}
-          onClose={() => setUploading(false)}
-          onDone={ingested}
-          onBacktest={backtest}
-        />
-      )}
-      <DatasetList
-        items={items}
-        error={error}
-        loading={loading}
-        selectedId={selected}
-        canEdit={canEdit}
-        onSelect={select}
-        onRefresh={load}
-        onUpload={() => setUploading(true)}
-        onLoadSamples={handleLoadSamples}
-        loadingSamples={loadingSamples}
-        missingSamplesCount={missingSamples.length}
-      />
-      <div ref={detailRef} className="scroll-mt-20">
-        {selected ? (
-          <DatasetDetail
-            key={selected}
-            datasetId={selected}
-            canEdit={canEdit}
-            onBacktest={backtest}
-            onChanged={load}
-            onDeleted={() => {
-              select(null);
-              load();
-            }}
-          />
-        ) : (
-          items &&
-          items.length > 0 && (
-            <GlassCard className="flex min-h-[120px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-ink/50">
-              <Database className="h-5 w-5 text-ink/30" />
-              Pick a dataset to see its quality report, charts and versions.
-            </GlassCard>
-          )
-        )}
+      {/* Subtab toggle: Datasets vs Multi-Asset Instruments */}
+      <div className="flex items-center gap-2 border-b border-ink/10 pb-3">
+        <button
+          type="button"
+          onClick={() => setSubTab('datasets')}
+          className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-medium transition ${
+            subTab === 'datasets'
+              ? 'bg-accent text-white shadow-sm'
+              : 'bg-panel/40 text-ink/70 hover:bg-panel hover:text-ink'
+          }`}
+        >
+          <Database className="h-4 w-4" />
+          Datasets & Market Files
+        </button>
+        <button
+          type="button"
+          onClick={() => setSubTab('instruments')}
+          className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs font-medium transition ${
+            subTab === 'instruments'
+              ? 'bg-accent text-white shadow-sm'
+              : 'bg-panel/40 text-ink/70 hover:bg-panel hover:text-ink'
+          }`}
+        >
+          <Layers className="h-4 w-4 text-emerald-400" />
+          Multi-Asset Instruments & Contracts
+        </button>
       </div>
+
+      {subTab === 'instruments' ? (
+        <InstrumentsManager />
+      ) : (
+        <>
+          {uploading && (
+            <UploadWizard
+              datasetNames={(items ?? []).map((d) => d.name)}
+              onClose={() => setUploading(false)}
+              onDone={ingested}
+              onBacktest={backtest}
+            />
+          )}
+          <DatasetList
+            items={items}
+            error={error}
+            loading={loading}
+            selectedId={selected}
+            canEdit={canEdit}
+            onSelect={select}
+            onRefresh={load}
+            onUpload={() => setUploading(true)}
+            onLoadSamples={handleLoadSamples}
+            loadingSamples={loadingSamples}
+            missingSamplesCount={missingSamples.length}
+          />
+          <div ref={detailRef} className="scroll-mt-20">
+            {selected ? (
+              <DatasetDetail
+                key={selected}
+                datasetId={selected}
+                canEdit={canEdit}
+                onBacktest={backtest}
+                onChanged={load}
+                onDeleted={() => {
+                  select(null);
+                  load();
+                }}
+              />
+            ) : (
+              items &&
+              items.length > 0 && (
+                <GlassCard className="flex min-h-[120px] flex-col items-center justify-center gap-2 p-6 text-center text-sm text-ink/50">
+                  <Database className="h-5 w-5 text-ink/30" />
+                  Pick a dataset to see its quality report, charts and versions.
+                </GlassCard>
+              )
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -213,6 +213,8 @@ export function routePolicyKey(path: string): string {
   if (/^api\/v1\/me\/state\/import$/i.test(path)) return 'api/v1/me/state/import';
   if (/^api\/v1\/me\/state\/[^/]+$/i.test(path)) return 'api/v1/me/state/{key}';
   if (/^api\/v1\/me\/sandbox\/orders\/[^/]+$/i.test(path)) return 'api/v1/me/sandbox/orders/{id}';
+  if (/^api\/v1\/instruments\/[^/]+$/i.test(path)) return 'api/v1/instruments/{symbol}';
+  if (/^api\/v1\/curves\/[^/]+$/i.test(path)) return 'api/v1/curves/{name}';
   for (const [pattern, key] of REGISTRY_PATTERNS) if (pattern.test(path)) return key;
   // Only the stored files the API serves; any other name stays unlisted (a 404 here).
   if (/^api\/v1\/backtests\/[0-9a-f-]{36}\/artifacts\/(summary|request|equity_csv|orders_csv|fills_csv|returns_csv|strategies_csv)$/i.test(path)) {

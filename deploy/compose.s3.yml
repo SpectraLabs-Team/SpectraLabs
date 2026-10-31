@@ -58,6 +58,7 @@ services:
     volumes:
       - s3-data:/data
     ports:
+      - "127.0.0.1:9000:9000" # s3 api
       - "127.0.0.1:9001:9001" # web console
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health/ready"]

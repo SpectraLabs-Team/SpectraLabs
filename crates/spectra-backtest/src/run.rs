@@ -77,7 +77,7 @@ pub struct StrategyAllocation {
 /// Most strategies in one request.
 pub const MAX_REQUEST_STRATEGIES: usize = 10;
 
-const REQUEST_FIELDS: [&str; 12] = [
+const REQUEST_FIELDS: [&str; 13] = [
     "strategy",
     "params",
     "strategies",
@@ -90,6 +90,7 @@ const REQUEST_FIELDS: [&str; 12] = [
     "fx_rates",
     "futures_roll",
     "bond_quote",
+    "curves",
 ];
 const ENTRY_FIELDS: [&str; 3] = ["strategy", "params", "weight"];
 
@@ -586,10 +587,26 @@ pub fn run_request_on(
 ) -> std::result::Result<BacktestOutput, RunError> {
     let actions = resolve(&request.corporate_actions, symbols)
         .map_err(|m| RunError::Engine(spectra_core::Error::InvalidArgument(m)))?;
-    let setup: InstrumentSetup = request
-        .instruments
-        .resolve(symbols)
-        .map_err(|m| RunError::Engine(spectra_core::Error::InvalidArgument(m)))?;
+    let invalid = |m: String| RunError::Engine(spectra_core::Error::InvalidArgument(m));
+    // Swaps are not in the dataset: they get ids after its symbols and bars
+    // generated from their curves (M24.4).
+    let symbols_with_swaps = request.instruments.symbols_with_swaps(symbols).map_err(invalid)?;
+    let symbols = symbols_with_swaps.as_slice();
+    let setup: InstrumentSetup = request.instruments.resolve(symbols).map_err(invalid)?;
+    let dataset_bars = bars;
+    let generated = spectra_engine::swap_bars(&setup, bars)?;
+    let merged: Vec<Bar>;
+    let bars: &[Bar] = if generated.is_empty() {
+        bars
+    } else {
+        let mut all = Vec::with_capacity(bars.len() + generated.len());
+        all.extend_from_slice(bars);
+        all.extend(generated);
+        // Stable, so revisions of one bar keep their order.
+        all.sort_by_key(|b| (b.ts_ns, b.instrument));
+        merged = all;
+        &merged
+    };
     let setup_ref = &setup;
     let mut ctl = std::panic::AssertUnwindSafe(ctl);
     let run_res = std::panic::catch_unwind(move || {
@@ -634,7 +651,8 @@ pub fn run_request_on(
             ))));
         }
     };
-    let benchmark = spectra_research::benchmark_returns(bars);
+    // The benchmark is the dataset's own, without generated swap marks.
+    let benchmark = spectra_research::benchmark_returns(dataset_bars);
     let mut last_quotes = std::collections::BTreeMap::new();
     for b in bars {
         last_quotes.insert(b.instrument, (b.ts_ns, b.close));

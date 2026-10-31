@@ -368,13 +368,42 @@ async fn curves_swaps_and_z_spreads() {
     assert!((payer["pv"].as_f64().unwrap() + receiver["pv"].as_f64().unwrap()).abs() < 1e-6);
     assert!(payer["dv01"].as_f64().unwrap() > 0.0, "a payer gains when rates rise");
 
-    // A swap record stores its terms; one without a fixed-leg frequency, or with a day count, is refused.
+    // Curves: dated quotes, every snapshot must bootstrap; a snapshot at a stored time replaces it.
+    let snapshots = json!([
+        {"as_of": "2026-01-02", "quotes": [{"type": "deposit", "years": "0.25", "rate": "0.04"},
+                                           {"type": "swap", "years": 5, "rate": "0.045", "frequency": 2}]},
+        {"as_of": "2026-01-05", "quotes": [{"type": "deposit", "years": "0.25", "rate": "0.041"},
+                                           {"type": "swap", "years": 5, "rate": "0.046", "frequency": 2}]}
+    ]);
+    let (status, body) =
+        f.call("POST", "/api/v1/curves", &json!({"curve": "USD-SOFR", "snapshots": snapshots})).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["items"][0]["snapshots"].as_array().unwrap().len(), 2, "{body}");
+    assert_eq!(body["items"][0]["snapshots"][0]["quotes"][0]["years"], "0.25", "{body}");
+    assert_eq!(body["items"][0]["snapshots"][0]["quotes"][1]["frequency"], 2, "{body}");
+    let (status, body) = f
+        .call(
+            "POST",
+            "/api/v1/curves",
+            &json!({"curve": "USD-SOFR", "snapshots": [{"as_of": "2026-01-05", "quotes": [
+                {"type": "swap", "years": 5, "rate": "0.047"}]}]}),
+        )
+        .await;
+    assert_eq!(status, 422, "{body}");
+    assert!(fields(&body).contains(&"snapshots[0].quotes[0].frequency".to_string()), "{body}");
+    let (_, list) = f.call("GET", "/api/v1/curves?curve=USD-SOFR", &Value::Null).await;
+    assert_eq!(
+        list["items"][0]["snapshots"][1]["quotes"][1]["rate"], "0.046",
+        "a refused write changes nothing"
+    );
+
+    // A swap record stores its terms and its curve; one without a fixed-leg frequency, or with a day count, is refused.
     let (status, body) = f
         .call(
             "POST",
             "/api/v1/instruments",
             &json!({"symbol": "USD5Y", "type": "swap", "tick_size": "0.0001", "maturity": "2031-11-02",
-                    "coupon_rate": "-0.0025", "coupon_frequency": 2}),
+                    "coupon_rate": "-0.0025", "coupon_frequency": 2, "underlying": "USD-SOFR"}),
         )
         .await;
     assert_eq!(status, 201, "{body}");
@@ -394,10 +423,31 @@ async fn curves_swaps_and_z_spreads() {
             "POST",
             "/api/v1/instruments",
             &json!({"symbol": "USD7Y", "type": "swap", "tick_size": "0.0001", "maturity": "2033-11-02",
-                    "coupon_rate": "0.04", "coupon_frequency": 2, "day_count": "act_360"}),
+                    "coupon_rate": "0.04", "coupon_frequency": 2, "day_count": "act_360", "underlying": "USD-SOFR"}),
         )
         .await;
     assert_eq!(status, 422, "{body}");
+
+    // A queued backtest carries the swap and its curve's history, and the worker accepts it as stored.
+    let version = f.dataset_version().await;
+    let (status, job) = f
+        .call(
+            "POST",
+            "/api/v1/backtests",
+            &json!({"dataset_version_id": version, "strategy": "buy_and_hold"}),
+        )
+        .await;
+    assert_eq!(status, 202, "{job}");
+    let req = &job["request"];
+    assert_eq!(req["curves"]["USD-SOFR"].as_array().unwrap().len(), 2, "{job}");
+    let payload = spectra_core::Json::parse(&req.to_string()).unwrap();
+    let parsed = spectra_backtest::BacktestJob::from_payload(&payload).expect("stored payload parses");
+    assert_eq!(parsed.request.instruments.curves.get("USD-SOFR").unwrap().len(), 2);
+
+    let (status, _) = f.call("DELETE", "/api/v1/curves/USD-SOFR", &Value::Null).await;
+    assert_eq!(status, 200);
+    let (status, _) = f.call("DELETE", "/api/v1/curves/USD-SOFR", &Value::Null).await;
+    assert_eq!(status, 404);
 
     // A bond's z-spread over a flat curve: priced off curve + 100bp, it reads back 100bp.
     let flat = json!({"flat_rate": 0.03});

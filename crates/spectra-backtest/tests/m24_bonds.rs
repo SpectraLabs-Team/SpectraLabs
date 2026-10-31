@@ -169,13 +169,3 @@ fn requests_need_the_coupon_terms() {
     assert!(fields.contains(&"bond_quote"), "{fields:?}");
     assert!(fields.contains(&"instruments[0]"), "{fields:?}"); // no coupon frequency
 }
-
-#[test]
-fn a_swap_record_is_accepted_but_not_backtested() {
-    // Swap terms parse and validate; the run is refused because datasets carry no curve history.
-    let doc = r#"{"strategy":"buy_and_hold","instruments":[{"symbol":"UST","type":"swap","tick_size":"0.0001",
-        "maturity":31536000000000000,"coupon_rate":"-0.001","coupon_frequency":2}]}"#;
-    let e = run_request_on(&bars(10, 100.0), &["UST".into()], &request(doc), &mut RunControl::default())
-        .unwrap_err();
-    assert!(e.to_string().contains("curve"), "{e}");
-}

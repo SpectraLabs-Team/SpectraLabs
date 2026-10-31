@@ -381,6 +381,10 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         Some(o) => summary.with("options", o),
         None => summary,
     };
+    let summary = match swaps_json(out)? {
+        Some(w) => summary.with("swaps", w),
+        None => summary,
+    };
     if req.is_multi() {
         return Ok(summary.with("strategies", strategies_json(out)?));
     }
@@ -632,7 +636,10 @@ fn bonds_json(out: &BacktestOutput) -> Result<Option<Json>> {
         list.push(j)?;
     }
     let mut redemptions = Json::array();
-    for e in out.result.rolls.iter().filter(|e| e.kind == spectra_engine::RollKind::Redeemed) {
+    for e in out.result.rolls.iter().filter(|e| {
+        e.kind == spectra_engine::RollKind::Redeemed
+            && out.setup.kind(e.from) == spectra_core::InstrumentType::Bond
+    }) {
         redemptions.push(
             Json::object()
                 .with("ts_ns", Json::integer(e.ts_ns))
@@ -752,6 +759,92 @@ fn options_json(out: &BacktestOutput) -> Result<Option<Json>> {
             .with("gaps", {
                 let mut g = Json::array();
                 g.push(Json::string(OPTION_GATE))?;
+                g
+            }),
+    ))
+}
+
+/// What a swap run does not model, stated in its summary.
+pub const SWAP_GAP: &str = "Swaps are single-curve (one curve discounts and projects), with both legs on one \
+    regular schedule backward from maturity and each floating rate fixed at its period's start from the curve \
+    known then. Collateral (CSA) discounting, separate OIS and projection curves, day-count and business-day \
+    adjustments, payment lags and counterparty risk are not modelled. Marks carry no traded volume, so \
+    volume-based slippage, impact and the participation cap do not apply.";
+
+/// What the run says about swaps, when it has any: each swap's terms, its
+/// mark and risk at the last bar, the net coupons paid, and every maturity.
+fn swaps_json(out: &BacktestOutput) -> Result<Option<Json>> {
+    let swaps: Vec<(spectra_core::InstrumentId, spectra_engine::SwapTerms)> =
+        out.setup.instruments.keys().filter_map(|&id| out.setup.swap_terms(id).map(|t| (id, t))).collect();
+    if swaps.is_empty() {
+        return Ok(None);
+    }
+    let curves = spectra_engine::CurveHistory::build(&out.setup.curves)?;
+    let name = |id: spectra_core::InstrumentId| {
+        out.symbols
+            .get(id as usize)
+            .cloned()
+            .or_else(|| out.setup.instrument(id).map(|i| i.symbol.clone()))
+            .unwrap_or_else(|| format!("#{id}"))
+    };
+    let mut list = Json::array();
+    for (id, terms) in &swaps {
+        let coupons = out
+            .result
+            .ledger
+            .journal()
+            .iter()
+            .filter(|e| e.kind == spectra_core::EntryType::Coupon && e.fill.instrument == *id)
+            .try_fold(spectra_core::Money::ZERO, |acc, e| acc.checked_add(e.amount))?;
+        let mut j = Json::object()
+            .with("symbol", Json::string(name(*id)))
+            .with("curve", Json::string(terms.curve.clone()))
+            .with("fixed_rate", num(terms.fixed_rate))
+            .with("frequency", Json::integer(i64::from(terms.frequency)))
+            .with("maturity", Json::integer(terms.maturity_ns))
+            .with("net_coupons", money(coupons));
+        if let Some(&(ts, close)) = out.last_quotes.get(id) {
+            j = j.with("as_of", Json::integer(ts)).with("price", num(close.to_f64()));
+            if let Some(m) = terms.mark(&curves, ts) {
+                j = j
+                    .with("npv_per_100", num(100.0 * m.npv))
+                    .with("par_rate", num(m.par_rate))
+                    .with("fixing", num(m.fixing))
+                    .with("dv01_per_100", num(m.dv01));
+            }
+        }
+        list.push(j)?;
+    }
+    let mut maturities = Json::array();
+    for e in out.result.rolls.iter().filter(|e| {
+        e.kind == spectra_engine::RollKind::Redeemed
+            && out.setup.kind(e.from) == spectra_core::InstrumentType::Swap
+    }) {
+        maturities.push(
+            Json::object()
+                .with("ts_ns", Json::integer(e.ts_ns))
+                .with("strategy", Json::integer(e.strategy as i64))
+                .with("symbol", Json::string(name(e.from)))
+                .with("qty", Json::string(e.qty.to_string())),
+        )?;
+    }
+    let mut curve_names = Json::array();
+    for (name, history) in &out.setup.curves {
+        curve_names.push(
+            Json::object()
+                .with("name", Json::string(name.clone()))
+                .with("snapshots", Json::integer(history.len() as i64)),
+        )?;
+    }
+    Ok(Some(
+        Json::object()
+            .with("model", Json::string("single_curve"))
+            .with("curves", curve_names)
+            .with("swaps", list)
+            .with("maturities", maturities)
+            .with("gaps", {
+                let mut g = Json::array();
+                g.push(Json::string(SWAP_GAP))?;
                 g
             }),
     ))

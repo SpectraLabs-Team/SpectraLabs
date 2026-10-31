@@ -842,6 +842,8 @@ fn backtest_routes() -> Router<AppState> {
             "/api/v1/fx-rates",
             only(get(instruments_api::list_fx_rates).post(instruments_api::put_fx_rates)),
         )
+        .route("/api/v1/curves", only(get(instruments_api::list_curves).post(instruments_api::put_curves)))
+        .route("/api/v1/curves/{name}", only(delete(instruments_api::delete_curve)))
         .route("/api/v1/pricing/bond", only(post(pricing_api::price_bond)))
         .route("/api/v1/pricing/option", only(post(pricing_api::price_option)))
         .route("/api/v1/pricing/curve", only(post(pricing_api::build_curve)))

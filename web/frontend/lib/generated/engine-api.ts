@@ -218,6 +218,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/curves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the workspace's curves and their dated quotes. */
+        get: operations["list_curves"];
+        put?: never;
+        /** Store snapshots of one curve:
+         *     `{"curve": "USD-SOFR", "snapshots": [{"as_of": "2026-01-02", "quotes": [{"type": "deposit",
+         *     "years": 0.25, "rate": "0.043"}, {"type": "swap", "years": 5, "rate": "0.039", "frequency": 2}]}]}`.
+         *     Each snapshot must bootstrap; one at a time already stored replaces it. All or nothing. */
+        post: operations["put_curves"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/curves/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a curve's quotes. Runs that used them keep their stored copy. */
+        delete: operations["delete_curve"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/datasets": {
         parameters: {
             query?: never;
@@ -2480,6 +2518,9 @@ export interface components {
              *     `[{"symbol", "ex_date", "type": "split", "from", "to"}]` or
              *     `[{"symbol", "ex_date", "type": "dividend", "amount"}]`. */
             corporate_actions?: Record<string, never>[] | null;
+            /** @description Dated curve quotes for swaps: `{"USD-SOFR": [{"as_of", "quotes": [...]}]}`.
+             *     Default: the workspace's quotes for the curves its swaps name. */
+            curves?: Record<string, never> | null;
             /**
              * Format: uuid
              * @description A dataset version of the caller's workspace.
@@ -2685,6 +2726,11 @@ export interface components {
             /** @description Deposits and par swaps, by increasing maturity. */
             quotes?: components["schemas"]["CurveQuoteInput"][] | null;
         };
+        /** @description The workspace's curves. */
+        CurveListView: {
+            /** @description By name. */
+            items: components["schemas"]["CurveView"][];
+        };
         /** @description One point of a curve. */
         CurvePointView: {
             /**
@@ -2723,12 +2769,36 @@ export interface components {
              */
             years: number;
         };
+        /** @description One quote of a curve snapshot. */
+        CurveQuoteView: {
+            /**
+             * Format: int32
+             * @description Fixed payments a year (swap quotes): 1, 2, 4 or 12.
+             */
+            frequency?: number | null;
+            /** @description Rate as a fraction, exact decimal text. */
+            rate: string;
+            /** @description `deposit` or `swap`. */
+            type: string;
+            /** @description Maturity in years, exact decimal text. */
+            years: string;
+        };
         /** @description `POST /api/v1/pricing/curve` body. */
         CurveRequest: {
             /** @description Extra maturities (years) to report besides the nodes. */
             at?: number[];
             /** @description The curve. */
             curve: components["schemas"]["CurveInput"];
+        };
+        /** @description The quotes of a curve from one time on. */
+        CurveSnapshotView: {
+            /**
+             * Format: int64
+             * @description When the quotes became known, nanoseconds since the epoch.
+             */
+            as_of: number;
+            /** @description By increasing maturity. */
+            quotes: components["schemas"]["CurveQuoteView"][];
         };
         /** @description A bootstrapped curve. */
         CurveView: {
@@ -5481,6 +5551,85 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeletedActionSetView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_curves: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Only this curve. */
+                curve: string | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurveListView"];
+                };
+            };
+        };
+    };
+    put_curves: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurveListView"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_curve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Curve name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedView"];
                 };
             };
             404: {

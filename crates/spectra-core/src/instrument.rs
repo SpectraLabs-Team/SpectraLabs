@@ -24,7 +24,7 @@ pub enum InstrumentType {
     Bond,
     /// An option (needs an expiry and a strike). Deferred past stage 2.
     Option,
-    /// A fixed-for-floating interest-rate swap: stored and priced, not backtested.
+    /// A fixed-for-floating interest-rate swap, marked from a dated curve history.
     Swap,
 }
 
@@ -307,15 +307,14 @@ impl Instrument {
                 }
             }
             InstrumentType::Swap => {
-                // A fixed-for-floating swap: maturity, fixed rate and fixed-leg
-                // frequency. Swaps are stored and priced; backtests refuse them
-                // until datasets carry a dated history of curves.
+                // A fixed-for-floating swap: maturity, fixed rate, payment
+                // frequency, and the discount curve it is marked on.
                 need(self.maturity_ns.is_some(), "a maturity")?;
                 need(self.coupon_rate.is_some(), "a fixed rate (coupon_rate)")?;
                 need(self.coupon_frequency.is_some(), "a fixed-leg frequency (coupon_frequency)")?;
                 forbid(self.expiry_ns.is_some(), "an expiry")?;
                 forbid(self.strike.is_some(), "a strike")?;
-                forbid(self.underlying.is_some(), "an underlying")?;
+                need(self.underlying.is_some(), "a discount curve (underlying)")?;
                 if self.coupon_frequency.is_some_and(|f| !COUPON_FREQUENCIES.contains(&f)) {
                     return Err("a swap's fixed-leg frequency must be 1, 2, 4 or 12 a year".into());
                 }
@@ -420,10 +419,13 @@ mod tests {
         s.maturity_ns = Some(1);
         s.coupon_rate = Some(Ratio::from_f64(-0.002).unwrap()); // negative rates are allowed
         assert!(s.validate().unwrap_err().contains("frequency"));
+        s.coupon_frequency = Some(2);
+        assert!(s.validate().unwrap_err().contains("curve"));
+        s.underlying = Some("USD-SOFR".into());
+        s.validate().unwrap();
         s.coupon_frequency = Some(3);
         assert!(s.validate().unwrap_err().contains("1, 2, 4 or 12"));
         s.coupon_frequency = Some(2);
-        s.validate().unwrap();
         s.day_count = Some(DayCount::Act360);
         assert!(s.validate().unwrap_err().contains("a day count"));
         s.day_count = None;

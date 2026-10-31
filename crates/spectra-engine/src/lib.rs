@@ -15,6 +15,7 @@ pub mod metrics;
 pub mod options;
 pub mod performance;
 pub mod rebalance;
+pub mod swaps;
 
 pub use backtest::{
     canonical_config, canonical_multi_config, config_fingerprint, run_backtest, run_backtest_controlled,
@@ -39,3 +40,6 @@ pub use metrics::{
 };
 pub use options::{norm_cdf, norm_pdf, OptionInputs, OptionValue};
 pub use rebalance::{RebalanceConfig, RebalanceRule, Rebalancer, WeightStrategy};
+pub use swaps::{
+    swap_bars, CurveHistory, CurvePoint, CurveSnapshot, QuoteKind, SwapMark, SwapTerms, YEAR_NS,
+};

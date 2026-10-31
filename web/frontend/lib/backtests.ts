@@ -215,6 +215,33 @@ export interface BondsSummary {
   gaps: string[];
 }
 
+export interface SwapSummary {
+  symbol: string;
+  /** The curve it is marked on. */
+  curve: string;
+  fixed_rate: number;
+  frequency: number;
+  maturity: number;
+  /** Net coupons received (negative: paid), base currency. */
+  net_coupons: string;
+  as_of?: number;
+  /** 100 + 100 × NPV per 1 of notional, to the receiver of fixed. */
+  price?: number;
+  npv_per_100?: number;
+  par_rate?: number;
+  fixing?: number;
+  dv01_per_100?: number;
+}
+
+export interface SwapsSummary {
+  model: string;
+  curves: { name: string; snapshots: number }[];
+  swaps: SwapSummary[];
+  maturities: { ts_ns: number; strategy: number; symbol: string; qty: string }[];
+  /** What the model leaves out, in words. */
+  gaps: string[];
+}
+
 export interface FuturesSummary {
   roll_rule: { business_days_before_expiry: number; adjust: 'ratio' | 'difference' };
   chains: string[];
@@ -302,6 +329,8 @@ export interface Summary {
   bonds?: BondsSummary;
   /** M24.4: present only for runs with options. */
   options?: OptionsSummary;
+  /** M24.4: present only for runs with swaps. */
+  swaps?: SwapsSummary;
   benchmark: {
     valid: boolean;
     name?: string;

@@ -66,6 +66,7 @@ export function ExperimentRegistry() {
   const [runId, setRunId] = useState('');
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [openRun, setOpenRun] = useState(runParam ?? '');
+  const [myRunsOnly, setMyRunsOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -136,27 +137,39 @@ export function ExperimentRegistry() {
     });
   }, [expParam]);
 
-  const loadRuns = useCallback(async (experimentId: string, cursor?: string) => {
-    if (!experimentId) { setRuns([]); setNextCursor(null); return; }
-    const query = new URLSearchParams({ experiment_id: experimentId, limit: '25' });
+  const loadRuns = useCallback(async (experimentId: string, cursor?: string, forMyRuns = myRunsOnly) => {
+    if (!forMyRuns && !experimentId) { setRuns([]); setNextCursor(null); return; }
+    const query = new URLSearchParams({ limit: '25' });
+    if (!forMyRuns && experimentId) query.set('experiment_id', experimentId);
     if (cursor) query.set('cursor', cursor);
-    const result = await request<RunPage>(`/api/v1/runs?${query}`);
+    const endpoint = forMyRuns ? `/api/v1/me/runs?${query}` : `/api/v1/runs?${query}`;
+    const result = await request<RunPage>(endpoint);
     setRuns((current) => (cursor ? [...current, ...result.items] : result.items));
     setNextCursor(result.next_cursor);
-  }, []);
+  }, [myRunsOnly]);
+
+  const hideRun = useCallback(async (rId: string) => {
+    try {
+      await request(`/api/v1/me/runs/${encodeURIComponent(rId)}/hide`, { method: 'POST' });
+      setRuns((current) => current.filter((r) => r.id !== rId));
+      if (openRun === rId) setOpenRun('');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not hide run.');
+    }
+  }, [openRun]);
 
   const refresh = useCallback(async () => {
     setError('');
     try {
       await loadExperiments();
-      if (selected) {
-        await loadRuns(selected);
-        await loadLineage(selected);
+      if (myRunsOnly || selected) {
+        await loadRuns(selected, undefined, myRunsOnly);
+        if (selected) await loadLineage(selected);
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not load the research registry.');
     }
-  }, [loadExperiments, loadRuns, loadLineage, selected]);
+  }, [loadExperiments, loadRuns, loadLineage, selected, myRunsOnly]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -177,13 +190,17 @@ export function ExperimentRegistry() {
   }, [runParam]);
 
   useEffect(() => {
-    if (selected) {
-      void loadRuns(selected).catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load runs.'));
-      void loadLineage(selected);
+    if (myRunsOnly || selected) {
+      void loadRuns(selected, undefined, myRunsOnly).catch((cause) =>
+        setError(cause instanceof Error ? cause.message : 'Could not load runs.')
+      );
+      if (selected) void loadLineage(selected);
     } else {
+      setRuns([]);
+      setNextCursor(null);
       setLineage([]);
     }
-  }, [selected, loadRuns, loadLineage]);
+  }, [selected, myRunsOnly, loadRuns, loadLineage]);
 
   const createExperiment = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -222,11 +239,11 @@ export function ExperimentRegistry() {
       setActiveJob(finished);
       setMessage(finished.status === 'succeeded' ? `Backtest finished · run ${queued.run_id}` : finished.error ?? `Backtest ${finished.status}.`);
       await loadExperiments();
-      if (selected) await loadRuns(selected);
+      if (selected || myRunsOnly) await loadRuns(selected, undefined, myRunsOnly);
       if (finished.status === 'succeeded') setOpenRun(queued.run_id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The backtest could not be completed.');
-      if (selected) await loadRuns(selected).catch(() => undefined);
+      if (selected || myRunsOnly) await loadRuns(selected, undefined, myRunsOnly).catch(() => undefined);
     } finally { setBusy(false); }
   };
 
@@ -441,14 +458,32 @@ export function ExperimentRegistry() {
           </div>
 
           <div className="rounded-2xl border border-ink/10 bg-ink/[0.025] p-5">
-            <h2 className="text-base font-semibold text-ink">Runs {selectedExperiment && <span className="font-mono text-xs text-ink/40">· {runs.length}</span>}</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-semibold text-ink">
+                {myRunsOnly ? 'My runs' : 'Runs'}{' '}
+                {(myRunsOnly || selectedExperiment) && <span className="font-mono text-xs text-ink/40">· {runs.length}</span>}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setMyRunsOnly((prev) => !prev)}
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+                  myRunsOnly
+                    ? 'border-accent bg-accent/10 text-accent'
+                    : 'border-ink/10 bg-ink/[0.03] text-ink/70 hover:bg-ink/[0.06]'
+                }`}
+                aria-pressed={myRunsOnly}
+              >
+                {myRunsOnly ? 'Show all runs' : 'My runs'}
+              </button>
+            </div>
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[720px] text-left text-xs">
                 <thead className="border-b border-ink/10 text-ink/45"><tr>
                   <th className="py-2 pr-3 font-medium">Status / ID</th><th className="py-2 pr-3 font-medium">Strategy</th>
                   <th className="py-2 pr-3 font-medium">Parameters</th><th className="py-2 pr-3 font-medium">Dataset</th>
                   <th className="py-2 pr-3 font-medium"><MetricLabel metric="sharpe_ratio">Sharpe</MetricLabel></th><th className="py-2 pr-3 font-medium"><MetricLabel metric="total_return">Return</MetricLabel></th>
-                  <th className="py-2 pr-3 font-medium"><MetricLabel metric="max_drawdown">Drawdown</MetricLabel></th><th className="py-2 font-medium">Date</th>
+                  <th className="py-2 pr-3 font-medium"><MetricLabel metric="max_drawdown">Drawdown</MetricLabel></th><th className="py-2 pr-3 font-medium">Date</th>
+                  <th className="py-2 text-right font-medium">Action</th>
                 </tr></thead>
                 <tbody className="divide-y divide-ink/[0.06]">
                   {runs.map((run) => {
@@ -468,15 +503,32 @@ export function ExperimentRegistry() {
                         <td className="py-3 pr-3 font-mono text-ink">{done && Number.isFinite(run.metrics?.sharpe) ? run.metrics.sharpe.toFixed(3) : '—'}</td>
                         <td className="py-3 pr-3 font-mono text-ink">{done && Number.isFinite(run.metrics?.total_return) ? pct(run.metrics.total_return) : '—'}</td>
                         <td className="py-3 pr-3 font-mono text-ink">{done && Number.isFinite(run.metrics?.max_drawdown) ? pct(run.metrics.max_drawdown) : '—'}</td>
-                        <td className="py-3 text-ink/50">{new Date(run.recorded_ts / 1e6).toLocaleDateString()}</td>
+                        <td className="py-3 pr-3 text-ink/50">{new Date(run.recorded_ts / 1e6).toLocaleDateString()}</td>
+                        <td className="py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void hideRun(run.id);
+                            }}
+                            className="rounded border border-ink/10 px-2 py-0.5 text-[11px] text-ink/60 hover:bg-ink/[0.05] hover:text-ink"
+                            title="Hide run"
+                          >
+                            Hide
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-              {!runs.length && <p className="py-6 text-center text-sm text-ink/45">No backtest runs recorded for this experiment yet.</p>}
+              {!runs.length && (
+                <p className="py-6 text-center text-sm text-ink/45">
+                  {myRunsOnly ? 'No runs recorded by you yet.' : 'No backtest runs recorded for this experiment yet.'}
+                </p>
+              )}
               {nextCursor && (
-                <button type="button" onClick={() => void loadRuns(selected, nextCursor).catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load more runs.'))}
+                <button type="button" onClick={() => void loadRuns(selected, nextCursor, myRunsOnly).catch((cause) => setError(cause instanceof Error ? cause.message : 'Could not load more runs.'))}
                   className="btn-secondary mt-3 w-full text-xs">Load more runs</button>
               )}
             </div>
@@ -487,7 +539,7 @@ export function ExperimentRegistry() {
               runId={openRun}
               experimentName={selectedExperiment?.name ?? 'Unsorted'}
               onClose={() => selectRun('')}
-              onChanged={() => { if (selected) void loadRuns(selected).catch(() => undefined); }}
+              onChanged={() => { if (selected || myRunsOnly) void loadRuns(selected, undefined, myRunsOnly).catch(() => undefined); }}
             />
           )}
         </section>

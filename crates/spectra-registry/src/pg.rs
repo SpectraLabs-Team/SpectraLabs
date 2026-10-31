@@ -665,6 +665,22 @@ impl PgRegistry {
         if filter.experiment_id.is_some() && experiment_id.is_none() {
             return Ok((Vec::new(), None));
         }
+        let created_by = filter
+            .created_by
+            .as_deref()
+            .map(|s| {
+                Uuid::parse_str(s)
+                    .map_err(|_| PgRegistryError::Invalid(format!("invalid created_by UUID: {s}")))
+            })
+            .transpose()?;
+        let hidden_for = filter
+            .hidden_for
+            .as_deref()
+            .map(|s| {
+                Uuid::parse_str(s)
+                    .map_err(|_| PgRegistryError::Invalid(format!("invalid hidden_for UUID: {s}")))
+            })
+            .transpose()?;
         let rows = sqlx::query(&format!(
             "SELECT {RUN_COLUMNS}, (extract(epoch FROM r.created_at) * 1000000)::bigint, r.id \
              FROM runs r LEFT JOIN experiments e ON e.workspace_id = r.workspace_id AND e.id = r.experiment_id \
@@ -675,9 +691,14 @@ impl PgRegistry {
                AND (NOT $6 OR r.counts_as_trial) \
                AND ($7::float8 IS NULL OR COALESCE((r.metrics->>'sharpe')::float8, -1.0e300) >= $7) \
                AND ($8::text IS NULL OR r.status = $8) \
-               AND ($9::bigint IS NULL OR (r.created_at, r.id) < \
-                    (timestamptz 'epoch' + $9 * interval '1 microsecond', $10)) \
-             ORDER BY r.created_at DESC, r.id DESC LIMIT $11"
+               AND ($9::uuid IS NULL OR r.created_by = $9) \
+               AND ($10::uuid IS NULL OR NOT EXISTS ( \
+                    SELECT 1 FROM user_run_hidden h \
+                    WHERE h.workspace_id = r.workspace_id AND h.user_id = $10 AND h.run_id = r.id \
+               )) \
+               AND ($11::bigint IS NULL OR (r.created_at, r.id) < \
+                    (timestamptz 'epoch' + $11 * interval '1 microsecond', $12)) \
+             ORDER BY r.created_at DESC, r.id DESC LIMIT $13"
         ))
         .bind(self.workspace_id)
         .bind(experiment_id)
@@ -687,6 +708,8 @@ impl PgRegistry {
         .bind(filter.only_trials)
         .bind(filter.min_sharpe)
         .bind(page.status.as_deref())
+        .bind(created_by)
+        .bind(hidden_for)
         .bind(cursor.map(|(micros, _)| micros))
         .bind(cursor.map(|(_, id)| id))
         .bind(i64::from(page.limit) + 1)
@@ -764,6 +787,33 @@ impl PgRegistry {
         .fetch_optional(&self.pool)
         .await?;
         row.map(|row| row_to_run(&row)).transpose()
+    }
+
+    /// Hide a run from a specific user's personal run list.
+    ///
+    /// The run record remains untouched in the registry. Hiding is idempotent.
+    pub async fn hide_run_for_user(&self, run_id: &str, user_id: Uuid) -> Result<(), PgRegistryError> {
+        let run_uuid = sqlx::query_scalar::<_, Uuid>(
+            "SELECT id FROM runs WHERE workspace_id = $1 AND (registry_id = $2 OR id::text = $2)",
+        )
+        .bind(self.workspace_id)
+        .bind(run_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(run_uuid) = run_uuid else {
+            return Err(PgRegistryError::Invalid(format!("run {run_id} not found")));
+        };
+        sqlx::query(
+            "INSERT INTO user_run_hidden (workspace_id, user_id, run_id) \
+             VALUES ($1, $2, $3) \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(self.workspace_id)
+        .bind(user_id)
+        .bind(run_uuid)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     /// List artifacts attached to an experiment.

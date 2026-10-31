@@ -502,6 +502,10 @@ pub struct RunFilter {
     pub min_sharpe: Option<f64>,
     /// Only runs that count as trials.
     pub only_trials: bool,
+    /// Filter by user who created the run.
+    pub created_by: Option<String>,
+    /// Filter out runs hidden for this user.
+    pub hidden_for: Option<String>,
 }
 
 /// Differences between two runs.
@@ -839,7 +843,9 @@ impl Registry {
                         };
                         let where_ = format!(" at sequence {n}");
                         let problem = if e.seq != n as u64 {
-                            Some(format!("unexpected sequence number{where_} (an event was removed, reordered or inserted)"))
+                            Some(format!(
+                                "unexpected sequence number{where_} (an event was removed, reordered or inserted)"
+                            ))
                         } else if e.prev != prev {
                             Some(format!("previous-hash mismatch{where_}"))
                         } else if e.hash != event_hash(&e.prev, e.seq, &e.kind, e.ts_ns, &e.payload) {

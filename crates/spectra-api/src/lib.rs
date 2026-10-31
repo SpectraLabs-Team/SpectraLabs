@@ -768,6 +768,8 @@ fn registry_routes() -> Router<AppState> {
         .route("/api/v1/registry/verify", only(get(registry_api::verify)))
         .route("/api/v1/registry/export", only(get(registry_api::export_jsonl)))
         .route("/api/v1/registry/import", only(post(registry_api::import_jsonl)))
+        .route("/api/v1/me/runs", only(get(registry_api::list_my_runs)))
+        .route("/api/v1/me/runs/{id}/hide", only(post(registry_api::hide_my_run)))
 }
 
 /// Strategy Survival Lab reports and saved workspace presets.

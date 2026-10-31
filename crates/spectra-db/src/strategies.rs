@@ -95,6 +95,7 @@ pub struct StrategyDraft {
     pub parameters: JsonValue,
     pub updated_at: DateTime<Utc>,
     pub updated_by: Option<Uuid>,
+    pub version: i32,
 }
 
 /// A named parameter set belonging to a strategy version.
@@ -257,6 +258,11 @@ pub async fn get_draft(
 /// Autosave or update a mutable draft for a strategy.
 ///
 /// # Errors
+/// Save a mutable strategy draft with optimistic concurrency control.
+///
+/// Returns `None` if the expected version did not match or the strategy is not in the workspace.
+///
+/// # Errors
 /// Any database error.
 pub async fn save_draft(
     pool: &PgPool,
@@ -265,14 +271,16 @@ pub async fn save_draft(
     code: &str,
     parameters: &JsonValue,
     updated_by: Option<Uuid>,
-) -> Result<StrategyDraft, Error> {
+    expected_version: i32,
+) -> Result<Option<StrategyDraft>, Error> {
     sqlx::query_as(include_str!("../queries/strategy_draft_save.sql"))
         .bind(workspace_id)
         .bind(strategy_id)
         .bind(code)
         .bind(parameters)
         .bind(updated_by)
-        .fetch_one(pool)
+        .bind(expected_version)
+        .fetch_optional(pool)
         .await
 }
 

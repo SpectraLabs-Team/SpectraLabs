@@ -50,7 +50,9 @@ export interface StrategyDraft {
   strategy_id: string;
   code: string;
   parameters: Record<string, unknown>;
-  updated_at: string;
+  version: number;
+  updated_at: string | null;
+  updated_by?: string | null;
 }
 
 export interface DiffLine {
@@ -109,11 +111,25 @@ export const getStrategy = (id: string) =>
 export const getDraft = (strategyId: string) =>
   request<StrategyDraft>(`/api/v1/strategies/${strategyId}/draft`);
 
-export const saveDraft = (strategyId: string, code: string, parameters: Record<string, unknown> = {}) =>
-  request<{ saved: boolean }>(`/api/v1/strategies/${strategyId}/draft`, {
+export const saveDraft = (
+  strategyId: string,
+  code: string,
+  parameters: Record<string, unknown> = {},
+  expectedVersion: number = 0,
+) =>
+  request<{ saved: boolean; version: number }>(`/api/v1/strategies/${strategyId}/draft`, {
     method: 'PUT',
-    body: JSON.stringify({ code, parameters }),
+    body: JSON.stringify({ code, parameters, expected_version: expectedVersion }),
   });
+
+export function draftConflictCurrent(error: unknown): StrategyDraft | null {
+  if (!error || typeof error !== 'object') return null;
+  const e = error as { code?: string; details?: { current?: StrategyDraft }; current?: StrategyDraft };
+  if (e.code === 'version_conflict') {
+    return e.details?.current ?? e.current ?? null;
+  }
+  return null;
+}
 
 /** Versions come from the strategy detail endpoint (`GET /api/v1/strategies/{id}` returns `versions`, newest first). */
 export const listVersions = (strategyId: string) =>

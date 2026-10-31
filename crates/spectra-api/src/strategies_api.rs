@@ -110,6 +110,8 @@ pub struct SaveDraftRequest {
     #[serde(default)]
     #[schema(value_type = Option<Object>)]
     pub parameters: Option<serde_json::Value>,
+    /// Expected version for optimistic concurrency control.
+    pub expected_version: Option<i32>,
 }
 
 /// `POST /api/v1/strategies/{id}/validate` body.
@@ -735,6 +737,30 @@ pub(crate) async fn validate_strategy_code(body: Result<Bytes, BytesRejection>) 
     }
 }
 
+fn draft_view(d: &spectra_db::strategies::StrategyDraft) -> serde_json::Value {
+    serde_json::json!({
+        "strategy_id": d.strategy_id,
+        "workspace_id": d.workspace_id,
+        "code": d.code,
+        "parameters": d.parameters,
+        "version": d.version,
+        "updated_at": d.updated_at,
+        "updated_by": d.updated_by,
+    })
+}
+
+fn empty_draft_view(strategy_id: Uuid, ws: Uuid) -> serde_json::Value {
+    serde_json::json!({
+        "strategy_id": strategy_id,
+        "workspace_id": ws,
+        "code": "",
+        "parameters": {},
+        "version": 0,
+        "updated_at": null,
+        "updated_by": null,
+    })
+}
+
 /// Fetch active draft for strategy.
 pub(crate) async fn get_strategy_draft(
     State(st): State<AppState>,
@@ -747,28 +773,8 @@ pub(crate) async fn get_strategy_draft(
         Err(r) => return r,
     };
     match strategies::get_draft(&pool, ws, strategy_id).await {
-        Ok(Some(d)) => to_json(
-            200,
-            &serde_json::json!({
-                "strategy_id": d.strategy_id,
-                "workspace_id": d.workspace_id,
-                "code": d.code,
-                "parameters": d.parameters,
-                "updated_at": d.updated_at,
-                "updated_by": d.updated_by,
-            }),
-        ),
-        Ok(None) => to_json(
-            200,
-            &serde_json::json!({
-                "strategy_id": strategy_id,
-                "workspace_id": ws,
-                "code": "",
-                "parameters": {},
-                "updated_at": null,
-                "updated_by": null,
-            }),
-        ),
+        Ok(Some(d)) => to_json(200, &draft_view(&d)),
+        Ok(None) => to_json(200, &empty_draft_view(strategy_id, ws)),
         Err(e) => db_error(&e),
     }
 }
@@ -793,24 +799,44 @@ pub(crate) async fn save_strategy_draft(
         Ok(r) => r,
         Err(e) => return error_response(422, format!("Invalid draft request: {e}")),
     };
+    let Some(expected_version) = req.expected_version else {
+        return error_response(422, "expected_version is required.");
+    };
+    if expected_version < 0 {
+        return error_response(422, "expected_version must be 0 or more.");
+    }
 
     let params = req.parameters.unwrap_or_else(|| serde_json::json!({}));
-    let saved = strategies::save_draft(&pool, ws, strategy_id, &req.code, &params, user_of(&id)).await;
+    let saved =
+        strategies::save_draft(&pool, ws, strategy_id, &req.code, &params, user_of(&id), expected_version)
+            .await;
     match saved {
-        // The query only updates a draft that belongs to this workspace; otherwise no row comes back.
-        Err(sqlx::Error::RowNotFound) => error_response(404, NOT_FOUND),
-        Ok(d) => to_json(
-            200,
-            &serde_json::json!({
-                "saved": true,
-                "strategy_id": d.strategy_id,
-                "workspace_id": d.workspace_id,
-                "code": d.code,
-                "parameters": d.parameters,
-                "updated_at": d.updated_at,
-                "updated_by": d.updated_by,
-            }),
-        ),
+        Ok(Some(d)) => {
+            let mut v = draft_view(&d);
+            v["saved"] = serde_json::json!(true);
+            to_json(200, &v)
+        }
+        Ok(None) => {
+            // Check if strategy exists in caller's workspace
+            match strategies::get(&pool, ws, strategy_id).await {
+                Ok(Some(_)) => {
+                    let current = match strategies::get_draft(&pool, ws, strategy_id).await {
+                        Ok(Some(cur)) => draft_view(&cur),
+                        _ => empty_draft_view(strategy_id, ws),
+                    };
+                    to_json(
+                        409,
+                        &serde_json::json!({
+                            "message": "The draft changed on another device. Reload and try again.",
+                            "code": "version_conflict",
+                            "current": current.clone(),
+                            "details": { "current": current },
+                        }),
+                    )
+                }
+                _ => error_response(404, NOT_FOUND),
+            }
+        }
         Err(e) => db_error(&e),
     }
 }

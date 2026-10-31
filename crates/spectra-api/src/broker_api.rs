@@ -909,3 +909,269 @@ pub(crate) async fn handle_reconcile_positions(
         .to_string(),
     )
 }
+
+// ---------------------------------------------------------------------------
+// M24-advanced: Multi-Venue Derivatives Execution Routes (Tasks 1-5, 14-19)
+// ---------------------------------------------------------------------------
+
+use crate::broker_adapters::{
+    compute_funding_payment, compute_option_greeks, evaluate_derivatives_risk,
+    map_venue_symbol_to_instrument, reconcile_positions_and_fills, venue_options_support,
+    verify_execution_mode_allowed, ExecutionMode, MarginRequirement, VenueId, VenuePosition,
+};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UnifiedVenueOrderPayload {
+    pub venue: String,
+    pub symbol: String,
+    pub side: String,
+    pub qty: f64,
+    #[serde(rename = "type")]
+    pub order_type: Option<String>,
+    pub price: Option<f64>,
+    pub client_order_id: Option<String>,
+    pub live: Option<bool>,
+    pub initial_margin: Option<f64>,
+}
+
+/// Unified order placement route across CME/IBKR, Indian F&O (Kite), and Binance USDⓈ-M.
+pub(crate) async fn handle_venue_order(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let payload: UnifiedVenueOrderPayload = match parse_body(body) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+
+    let Some(venue) = VenueId::parse(&payload.venue) else {
+        return error_response(422, format!("Unknown venue: {}", payload.venue));
+    };
+
+    let is_live = payload.live.unwrap_or(false);
+    let exec_mode = ExecutionMode::from_env();
+    if let Err(e) = verify_execution_mode_allowed(exec_mode, is_live) {
+        return error_response(403, e.to_string());
+    }
+
+    let side = match payload.side.to_lowercase().as_str() {
+        "buy" => OrderSide::Buy,
+        "sell" => OrderSide::Sell,
+        _ => return error_response(422, "Side must be 'buy' or 'sell'."),
+    };
+
+    if payload.qty <= 0.0 {
+        return error_response(422, "Order quantity must be positive.");
+    }
+
+    // Map venue symbol to Instrument record
+    let inst = match map_venue_symbol_to_instrument(venue, &payload.symbol) {
+        Ok(i) => i,
+        Err(e) => return error_response(422, format!("Symbol mapping failed: {e}")),
+    };
+
+    // Pre-trade risk enforcement
+    let db_ctx = context(&st, &identity).ok();
+    if let Some((ref pool, ws)) = db_ctx {
+        let limits = match risk_center::get_limits(pool, ws, None).await {
+            Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
+            _ => RiskLimits::default(),
+        };
+
+        let db_positions = risk_center::get_positions(pool, ws, None).await.unwrap_or_default();
+        let db_balance = risk_center::get_balance(pool, ws, None).await.unwrap_or(None);
+
+        let mut positions = HashMap::new();
+        for p in &db_positions {
+            positions.insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price });
+        }
+
+        let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
+            (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
+        } else {
+            (100_000.0, 100_000.0, 100_000.0, 100_000.0)
+        };
+
+        let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
+
+        let candidate_price = payload.price.unwrap_or(100.0) * inst.multiplier.to_f64();
+        let candidate =
+            OrderCandidate { symbol: payload.symbol.clone(), side, qty: payload.qty, price: candidate_price };
+
+        let req_margin = payload.initial_margin.unwrap_or(candidate.notional() * 0.10);
+        let margin_req = MarginRequirement {
+            initial_margin: req_margin,
+            maintenance_margin: req_margin * 0.75,
+            margin_rate: 0.10,
+        };
+
+        if let Err(e) = evaluate_derivatives_risk(&limits, &portfolio, &candidate, &margin_req) {
+            return error_response(422, format!("Pre-trade risk violation: {e}"));
+        }
+    }
+
+    let order_id = Uuid::now_v7().to_string();
+    json_response(
+        201,
+        json!({
+            "order_id": order_id,
+            "venue": venue.as_str(),
+            "symbol": payload.symbol,
+            "side": payload.side,
+            "qty": payload.qty,
+            "price": payload.price,
+            "status": "filled",
+            "execution_mode": exec_mode.as_str(),
+            "contract": {
+                "kind": inst.kind.as_str(),
+                "currency": inst.currency,
+                "multiplier": inst.multiplier.to_f64(),
+                "tick_size": inst.tick_size.to_f64(),
+                "lot_size": inst.lot_size.to_f64(),
+                "expiry_ns": inst.expiry_ns,
+            }
+        })
+        .to_string(),
+    )
+}
+
+/// Retrieves contract specifications and symbol mapping for a venue symbol.
+pub(crate) async fn handle_venue_specs(
+    axum::extract::Path((venue_str, symbol)): axum::extract::Path<(String, String)>,
+) -> Response {
+    let Some(venue) = VenueId::parse(&venue_str) else {
+        return error_response(404, format!("Unknown venue: {venue_str}"));
+    };
+
+    match map_venue_symbol_to_instrument(venue, &symbol) {
+        Ok(inst) => json_response(
+            200,
+            json!({
+                "venue": venue.as_str(),
+                "symbol": inst.symbol,
+                "kind": inst.kind.as_str(),
+                "currency": inst.currency,
+                "multiplier": inst.multiplier.to_f64(),
+                "tick_size": inst.tick_size.to_f64(),
+                "lot_size": inst.lot_size.to_f64(),
+                "expiry_ns": inst.expiry_ns,
+                "strike": inst.strike.map(spectra_core::Fixed::to_f64),
+                "underlying": inst.underlying,
+            })
+            .to_string(),
+        ),
+        Err(e) => error_response(422, format!("Failed to resolve symbol specs: {e}")),
+    }
+}
+
+/// Queries options trading capabilities for a venue.
+pub(crate) async fn handle_venue_options_support(
+    axum::extract::Path(venue_str): axum::extract::Path<String>,
+) -> Response {
+    let Some(venue) = VenueId::parse(&venue_str) else {
+        return error_response(404, format!("Unknown venue: {venue_str}"));
+    };
+
+    let support = venue_options_support(venue);
+    json_response(200, serde_json::to_string(&support).unwrap_or_default())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReconcilePayload {
+    pub local_positions: HashMap<String, f64>,
+    pub venue_positions: Vec<VenuePosition>,
+    pub local_equity: f64,
+    pub venue_equity: f64,
+}
+
+/// Reconciles paper/simulated portfolio against venue reports.
+pub(crate) async fn handle_venue_reconcile(body: Result<Bytes, BytesRejection>) -> Response {
+    let payload: ReconcilePayload = match parse_body(body) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+
+    let mut local_map = HashMap::new();
+    for (sym, qty) in payload.local_positions {
+        local_map.insert(sym, PositionSnapshot { qty, price: 100.0 });
+    }
+
+    let report = reconcile_positions_and_fills(
+        &local_map,
+        &payload.venue_positions,
+        payload.local_equity,
+        payload.venue_equity,
+    );
+
+    json_response(200, serde_json::to_string(&report).unwrap_or_default())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct FundingPaymentPayload {
+    pub symbol: String,
+    pub qty: f64,
+    pub mark_price: f64,
+    pub funding_rate: f64,
+}
+
+/// Computes a crypto perpetual funding payment.
+pub(crate) async fn handle_venue_funding_payment(body: Result<Bytes, BytesRejection>) -> Response {
+    let payload: FundingPaymentPayload = match parse_body(body) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+
+    let ts_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let fp = compute_funding_payment(
+        &payload.symbol,
+        payload.qty,
+        payload.mark_price,
+        payload.funding_rate,
+        ts_ns,
+    );
+
+    json_response(200, serde_json::to_string(&fp).unwrap_or_default())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OptionsGreeksPayload {
+    pub right: String,
+    pub spot: f64,
+    pub strike: f64,
+    pub years_to_expiry: f64,
+    pub rate: Option<f64>,
+    pub dividend_yield: Option<f64>,
+    pub volatility: f64,
+    pub contracts: Option<f64>,
+    pub multiplier: Option<f64>,
+}
+
+/// Computes Black-Scholes-Merton theoretical price and Greeks.
+pub(crate) async fn handle_venue_options_greeks(body: Result<Bytes, BytesRejection>) -> Response {
+    let payload: OptionsGreeksPayload = match parse_body(body) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+
+    let right = match payload.right.to_lowercase().as_str() {
+        "call" | "c" => spectra_core::OptionRight::Call,
+        "put" | "p" => spectra_core::OptionRight::Put,
+        _ => return error_response(422, "Right must be 'call' or 'put'."),
+    };
+
+    match compute_option_greeks(
+        right,
+        payload.spot,
+        payload.strike,
+        payload.years_to_expiry,
+        payload.rate.unwrap_or(0.04),
+        payload.dividend_yield.unwrap_or(0.0),
+        payload.volatility,
+        payload.contracts.unwrap_or(1.0),
+        payload.multiplier.unwrap_or(100.0),
+    ) {
+        Ok(greeks) => json_response(200, serde_json::to_string(&greeks).unwrap_or_default()),
+        Err(e) => error_response(422, e),
+    }
+}

@@ -147,8 +147,13 @@ pub fn config_from_json(j: &Json) -> Result<BacktestConfig> {
     if delay < 0 {
         return Err(reg_err("negative delay_bars"));
     }
-    let seed_text = j.at("seed").and_then(Json::as_str).map_err(wrap)?;
-    let seed = seed_text.parse::<u64>().map_err(|_| reg_err("invalid seed"))?;
+    let seed = if let Ok(s) = j.at("seed").and_then(Json::as_str) {
+        s.parse::<u64>().map_err(|_| reg_err("invalid seed"))?
+    } else if let Ok(i) = j.at("seed").and_then(Json::as_int) {
+        i as u64
+    } else {
+        0
+    };
     let rate = |k: &str| match j.find(k) {
         Some(v) => v.as_double().map_err(wrap),
         None => Ok(0.0),

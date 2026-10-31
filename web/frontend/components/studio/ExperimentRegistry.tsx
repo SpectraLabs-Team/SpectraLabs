@@ -46,6 +46,35 @@ type BacktestReport = {
 
 const pct = (value: number) => `${(value * 100).toFixed(2)}%`;
 
+const SAMPLE_CSV = `timestamp,symbol,open,high,low,close,volume
+2026-01-02,SPY,500.0,505.0,499.0,504.0,1000000
+2026-01-05,SPY,504.0,508.0,503.0,507.5,1200000
+2026-01-06,SPY,507.0,510.0,506.0,509.0,1100000
+2026-01-07,SPY,509.0,511.0,507.0,508.0,950000
+2026-01-08,SPY,508.5,512.0,508.0,511.5,1050000
+2026-01-09,SPY,511.0,515.0,510.5,514.0,1300000
+2026-01-12,SPY,514.5,518.0,513.0,517.0,1250000
+2026-01-13,SPY,516.0,517.5,512.0,513.0,1150000
+2026-01-14,SPY,513.5,516.0,511.0,515.0,1000000
+2026-01-15,SPY,515.0,520.0,514.0,519.5,1400000
+2026-01-16,SPY,519.0,522.0,518.0,521.0,1350000
+2026-01-20,SPY,521.0,524.0,520.0,523.5,1100000
+2026-01-21,SPY,523.0,525.0,521.5,522.0,1050000
+2026-01-22,SPY,522.0,526.0,521.0,525.0,1200000
+2026-01-23,SPY,525.5,528.0,524.0,527.0,1250000
+2026-01-26,SPY,527.0,530.0,526.0,529.5,1300000
+2026-01-27,SPY,529.0,531.0,527.5,528.0,1150000
+2026-01-28,SPY,528.5,532.0,528.0,531.0,1200000
+2026-01-29,SPY,531.0,534.0,530.0,533.5,1400000
+2026-01-30,SPY,533.0,535.0,531.0,532.0,1250000
+2026-02-02,SPY,532.5,536.0,532.0,535.0,1300000
+2026-02-03,SPY,535.0,538.0,534.5,537.5,1350000
+2026-02-04,SPY,537.0,540.0,536.0,539.0,1400000
+2026-02-05,SPY,539.0,542.0,538.0,541.5,1450000
+2026-02-06,SPY,541.0,543.0,539.5,540.0,1300000
+2026-02-09,SPY,540.5,544.0,540.0,543.0,1350000
+2026-02-10,SPY,543.0,546.0,542.0,545.5,1400000`;
+
 export function ExperimentRegistry() {
   const searchParams = useSearchParams();
   const expParam = searchParams.get('experiment');
@@ -136,14 +165,18 @@ export function ExperimentRegistry() {
     });
   }, [expParam]);
 
-  const loadRuns = useCallback(async (experimentId: string, cursor?: string) => {
-    if (!experimentId) { setRuns([]); setNextCursor(null); return; }
-    const query = new URLSearchParams({ experiment_id: experimentId, limit: '25' });
+  const [filterAllRuns, setFilterAllRuns] = useState(false);
+
+  const loadRuns = useCallback(async (experimentId: string, cursor?: string, all?: boolean) => {
+    const isAll = all ?? filterAllRuns;
+    if (!experimentId && !isAll) { setRuns([]); setNextCursor(null); return; }
+    const query = new URLSearchParams({ limit: '25' });
+    if (!isAll && experimentId) query.set('experiment_id', experimentId);
     if (cursor) query.set('cursor', cursor);
     const result = await request<RunPage>(`/api/v1/runs?${query}`);
     setRuns((current) => (cursor ? [...current, ...result.items] : result.items));
     setNextCursor(result.next_cursor);
-  }, []);
+  }, [filterAllRuns]);
 
   const refresh = useCallback(async () => {
     setError('');
@@ -418,9 +451,19 @@ export function ExperimentRegistry() {
             <h2 className="flex items-center gap-2 text-base font-semibold text-ink"><Beaker className="h-4 w-4 text-accent" />Run SMA crossover backtest</h2>
             <p className="mt-1 text-xs text-ink/50">{selectedExperiment ? `Recorded under ${selectedExperiment.name}.` : 'No experiment selected: the run goes to Unsorted.'} Paste OHLCV CSV, up to 10 MB.</p>
             <form onSubmit={startBacktest} className="mt-4 space-y-3">
-              <label className="block text-xs font-medium text-ink/65">Dataset CSV
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-medium text-ink/65">Dataset CSV</label>
+                  <button
+                    type="button"
+                    onClick={() => setCsv(SAMPLE_CSV)}
+                    className="font-mono text-[11px] font-medium text-accent hover:underline"
+                  >
+                    + Load sample CSV (SPY daily)
+                  </button>
+                </div>
                 <textarea required value={csv} onChange={(event) => setCsv(event.target.value)} className="input mt-1 min-h-44 w-full resize-y font-mono text-xs" placeholder={'timestamp,symbol,open,high,low,close,volume\n2026-01-01,AAPL,100,102,99,101,100000'} />
-              </label>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <label className="text-xs font-medium text-ink/65">Fast SMA
                   <input type="number" min={1} max={999} value={fast} onChange={(event) => setFast(Number(event.target.value))} className="input mt-1 w-full" />
@@ -441,7 +484,25 @@ export function ExperimentRegistry() {
           </div>
 
           <div className="rounded-2xl border border-ink/10 bg-ink/[0.025] p-5">
-            <h2 className="text-base font-semibold text-ink">Runs {selectedExperiment && <span className="font-mono text-xs text-ink/40">· {runs.length}</span>}</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-base font-semibold text-ink">
+                Runs {selectedExperiment && !filterAllRuns && <span className="font-mono text-xs text-ink/40">· {runs.length}</span>}
+                {filterAllRuns && <span className="font-mono text-xs text-ink/40">· All ({runs.length})</span>}
+              </h2>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !filterAllRuns;
+                  setFilterAllRuns(next);
+                  void loadRuns(selected, undefined, next);
+                }}
+                className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+                  filterAllRuns ? 'border-accent/40 bg-accent/10 text-accent font-semibold' : 'border-ink/10 text-ink/60 hover:border-ink/20'
+                }`}
+              >
+                {filterAllRuns ? '✓ Showing all runs' : 'Show all workspace runs'}
+              </button>
+            </div>
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[720px] text-left text-xs">
                 <thead className="border-b border-ink/10 text-ink/45"><tr>

@@ -524,7 +524,11 @@ export function ExperimentRegistry() {
               </table>
               {!runs.length && (
                 <p className="py-6 text-center text-sm text-ink/45">
-                  {myRunsOnly ? 'No runs recorded by you yet.' : 'No backtest runs recorded for this experiment yet.'}
+                  {myRunsOnly
+                    ? 'No runs recorded by you yet.'
+                    : selected
+                    ? 'No backtest runs recorded for this experiment yet.'
+                    : 'No runs recorded in this workspace yet. Select an experiment to view its runs.'}
                 </p>
               )}
               {nextCursor && (

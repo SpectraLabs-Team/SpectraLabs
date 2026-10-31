@@ -400,7 +400,7 @@ function UsageData() {
           sends a signal about once a minute. Time with the tab hidden or idle is not counted, so the figure is an estimate.
         </li>
         <li>Counts of what you run, such as simulations, backtests and paper orders, taken from your workspace history.</li>
-        <li>Your personal run history lists the runs you started. You can remove individual runs from your own view at any time without deleting them from the workspace.</li>
+        <li>Your run history lists the backtests you started in each workspace. Hiding a run removes it from your list only; the run itself is kept until it or your account is deleted.</li>
         <li>We do not record the pages you view, your clicks or what you type.</li>
         <li>Daily activity totals are deleted after {ACTIVITY_RETENTION_DAYS_CLIENT} days. Deleting your account removes them immediately.</li>
         <li>

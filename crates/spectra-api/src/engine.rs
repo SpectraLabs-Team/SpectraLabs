@@ -536,7 +536,13 @@ pub fn validate_job(kind: &str, payload: &Json) -> Result<(), (u16, String)> {
         return Err(unprocessable("payload must be a JSON object."));
     }
     match kind {
-        "backtest" => backtest_job(payload).map(|_| ()),
+        "backtest" => {
+            if payload.find("csv").is_some() {
+                backtest_inputs(payload).map(|_| ())
+            } else {
+                backtest_job(payload).map(|_| ())
+            }
+        }
         "benchmark" => benchmark_args(payload).map(|_| ()),
         "risk" => risk_args(payload).map(|_| ()),
         "stress" => stress_args(payload).map(|_| ()),
@@ -590,6 +596,142 @@ pub fn backtest_job(payload: &Json) -> Result<spectra_backtest::BacktestJob, (u1
     spectra_backtest::BacktestJob::from_payload(payload).map_err(|e| unprocessable(e.to_string()))
 }
 
+fn backtest_inputs(payload: &Json) -> Result<(String, usize, usize, String), (u16, String)> {
+    let csv = str_field(payload, "csv", "")?;
+    if csv.trim().is_empty() {
+        return Err(unprocessable("csv must not be empty."));
+    }
+    if csv.len() > 10_000_000 {
+        return Err((413, "Dataset CSV exceeds the 10 MB limit.".into()));
+    }
+    let fast = int_field(payload, "fast", 5, "fast must be a positive integer.")?;
+    let slow = int_field(payload, "slow", 20, "slow must be a positive integer.")?;
+    if !(1..1000).contains(&fast) || !(2..=1000).contains(&slow) || fast >= slow {
+        return Err(unprocessable("SMA periods must satisfy 1 <= fast < slow <= 1000."));
+    }
+    let experiment_id = str_field(payload, "experiment_id", "")?;
+    if experiment_id.trim().is_empty() || experiment_id.len() > 128 {
+        return Err(unprocessable("experiment_id is required and must be at most 128 characters."));
+    }
+    Ok((csv, usize::try_from(fast).unwrap_or(5), usize::try_from(slow).unwrap_or(20), experiment_id))
+}
+
+struct SmaCross(usize, usize);
+
+impl spectra_engine::Strategy for SmaCross {
+    fn on_bar(&mut self, ctx: &mut spectra_engine::Context<'_>, bars: &[spectra_core::Bar]) {
+        for bar in bars {
+            let id = bar.instrument;
+            let history = ctx.history(id);
+            if history.len() < self.1 {
+                continue;
+            }
+            let sma = |period: usize| -> i128 {
+                history[history.len() - period..]
+                    .iter()
+                    .map(|item| i128::from(item.close.raw()))
+                    .sum::<i128>()
+                    / i128::try_from(period).unwrap_or(1)
+            };
+            let position = ctx.position(id);
+            if sma(self.0) > sma(self.1) && position.is_zero() {
+                if let Ok(quantity) = spectra_core::Qty::from_f64(1.0) {
+                    ctx.market(id, spectra_core::Side::Buy, quantity);
+                }
+            } else if sma(self.0) <= sma(self.1) && position.raw() > 0 {
+                ctx.market(id, spectra_core::Side::Sell, position);
+            }
+        }
+    }
+}
+
+/// The run's series as CSV files: `equity_curve`, `trades` and `returns`.
+fn backtest_artifacts(result: &spectra_engine::BacktestResult, returns: &[f64]) -> Json {
+    use std::fmt::Write as _;
+    let mut equity = String::from("ts_ns,equity,cash\n");
+    for point in &result.equity_curve {
+        let _ = writeln!(equity, "{},{},{}", point.ts_ns, point.equity, point.cash);
+    }
+    let mut trades = String::from("seq,ts_ns,instrument,side,qty,price,fee,realized,cash_after\n");
+    for entry in result.ledger.journal().iter().filter(|e| e.kind == spectra_core::EntryType::Fill) {
+        let fill = &entry.fill;
+        let side = match fill.side {
+            spectra_core::Side::Buy => "buy",
+            spectra_core::Side::Sell => "sell",
+        };
+        let _ = writeln!(
+            trades,
+            "{},{},{},{side},{},{},{},{},{}",
+            entry.seq,
+            fill.ts_ns,
+            fill.instrument,
+            fill.qty,
+            fill.price,
+            fill.fee,
+            entry.realized,
+            entry.cash_after
+        );
+    }
+    // Returns start at the second equity point (one per period).
+    let mut series = String::from("ts_ns,return\n");
+    for (point, value) in result.equity_curve.iter().skip(1).zip(returns) {
+        let _ = writeln!(series, "{},{value:?}", point.ts_ns);
+    }
+    Json::object()
+        .with("equity_curve", Json::string(equity))
+        .with("trades", Json::string(trades))
+        .with("returns", Json::string(series))
+}
+
+pub fn run_registry_backtest(payload: &Json) -> Reply {
+    let (csv, fast, slow, experiment_id) = backtest_inputs(payload)?;
+    let note = str_field(payload, "note", "")?;
+    if note.len() > 2_000 {
+        return Err(unprocessable("note must be at most 2,000 characters."));
+    }
+    let dataset = spectra_data::load_csv(csv.as_bytes(), &spectra_data::CsvOptions::default())
+        .map_err(|error| unprocessable(format!("Dataset CSV is invalid: {error}")))?;
+    let config = spectra_engine::BacktestConfig::default();
+    let mut strategy = SmaCross(fast, slow);
+    let result = spectra_engine::run_backtest(&dataset.bars, &mut strategy, &config)
+        .map_err(|error| engine_error(&error))?;
+    let returns = spectra_engine::returns_from_curve(&result.equity_curve);
+    let artifacts = backtest_artifacts(&result, &returns);
+    let params = spectra_research::ParamSet::from_pairs([("fast", fast as f64), ("slow", slow as f64)]);
+    let metrics = spectra_registry::registry::metrics_to_json(&result.metrics)
+        .map_err(|error| unprocessable(error.to_string()))?;
+    let config_json = spectra_registry::registry::config_to_json(&config)
+        .map_err(|error| unprocessable(error.to_string()))?;
+    let params_json = spectra_registry::registry::params_to_json(&params)
+        .map_err(|error| unprocessable(error.to_string()))?;
+    let returns = returns
+        .into_iter()
+        .map(|value| Json::number(value).map_err(|error| unprocessable(error.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+    let strategy_sha256 = spectra_core::sha256_hex(b"spectra:builtin:sma-cross:v1");
+    Ok(Json::object()
+        .with("experiment_id", Json::string(experiment_id))
+        .with("dataset_id", Json::string(dataset.info.id))
+        .with("strategy", Json::string("sma_cross"))
+        .with("strategy_sha256", Json::string(strategy_sha256))
+        .with("params", params_json)
+        .with("config", config_json)
+        .with("metrics", metrics)
+        .with("returns", Json::Array(returns))
+        .with("note", Json::string(note))
+        .with(BACKTEST_ARTIFACTS_KEY, artifacts)
+        .with(
+            "run",
+            Json::object()
+                .with("engine_version", Json::string(result.run.engine_version))
+                .with("dataset_sha256", Json::string(result.run.dataset_sha256))
+                .with("config_sha256", Json::string(result.run.config_sha256))
+                .with("result_sha256", Json::string(result.run.result_sha256))
+                .with("seed", Json::string(result.run.seed.to_string()))
+                .with("bar_count", Json::integer(i64::try_from(result.run.bar_count).unwrap_or(i64::MAX))),
+        ))
+}
+
 /// Execute the computation associated with a queued job.
 ///
 /// # Errors
@@ -599,9 +741,14 @@ pub fn run_job(kind: &str, payload: &Json) -> Reply {
         "benchmark" => benchmark_route(payload),
         "risk" => risk(payload),
         "stress" => stress(payload),
-        // Backtests need the database (dataset version) and report progress; the worker runs
-        // them on its own path and never calls this for them.
-        "backtest" => Err((409, "backtest jobs run on the worker's backtest path".into())),
+        // Registry backtests run with inline CSV and SmaCross; dataset version backtests run on the worker's dedicated path.
+        "backtest" => {
+            if payload.find("csv").is_some() {
+                run_registry_backtest(payload)
+            } else {
+                Err((409, "backtest jobs run on the worker's backtest path".into()))
+            }
+        }
         PROVIDER_REFRESH_JOB_KIND => {
             Err((409, "provider refresh jobs run on the worker's refresh path".into()))
         }
@@ -626,6 +773,14 @@ pub fn run_job_with_progress(kind: &str, payload: &Json, mut on_progress: impl F
         .map_err(|e| engine_error(&e));
     }
     if kind == "backtest" {
+        if payload.find("csv").is_some() {
+            on_progress(0.0);
+            let res = run_registry_backtest(payload);
+            if res.is_ok() {
+                on_progress(1.0);
+            }
+            return res;
+        }
         return Err((409, "backtest jobs run on the worker's backtest path".into()));
     }
     let result = run_job(kind, payload);
@@ -652,6 +807,9 @@ pub fn job_timeout(kind: &str) -> std::time::Duration {
 /// Seed recorded for a job run, when the payload explicitly provides one.
 pub fn job_seed(kind: &str, payload: &Json) -> Option<i64> {
     if kind == "backtest" {
+        if payload.find("csv").is_some() {
+            return Some(0);
+        }
         return backtest_job(payload).ok().and_then(|j| i64::try_from(j.request.config.seed).ok());
     }
     if !matches!(kind, "risk" | "stress") {
@@ -665,10 +823,11 @@ pub fn run_params(payload: &Json) -> Json {
     let mut params = Json::object();
     if let Ok(entries) = payload.entries() {
         for (key, value) in entries {
-            if key == "portfolio_csv" {
+            if key == "portfolio_csv" || key == "csv" {
                 if let Json::String(csv) = value {
+                    let digest_key = if key == "csv" { "dataset_sha256" } else { "portfolio_sha256" };
                     let _ = params
-                        .set("portfolio_sha256", Json::string(spectra_core::sha256_hex(csv.as_bytes())));
+                        .set(digest_key, Json::string(spectra_core::sha256_hex(csv.as_bytes())));
                 }
             } else {
                 let _ = params.set(key.clone(), value.clone());

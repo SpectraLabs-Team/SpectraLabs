@@ -358,6 +358,12 @@ pub struct OverfittingResponse {
     pub dsr: f64,
     pub min_trl: f64,
     pub pbo: f64,
+    /// False when the value is not defined for this input (the number above is then 0 and
+    /// means nothing). M26 task 5: previously an undefined value was reported as 0.
+    pub psr_defined: bool,
+    pub dsr_defined: bool,
+    pub min_trl_defined: bool,
+    pub pbo_defined: bool,
     pub expected_max_sharpe: f64,
     pub sharpe_variance: f64,
     pub best_sharpe: f64,
@@ -1148,10 +1154,12 @@ pub(crate) async fn compute_overfitting(body: Result<Bytes, BytesRejection>) -> 
     let min_trl = min_track_record_length(best_sr, benchmark, m.skew, m.kurt, req.confidence);
     let exp_max_sr = expected_max_sharpe(sr_var, n_trials);
 
-    let pbo_val = if n_trials >= 2 && n_obs >= 8 {
-        cscv_pbo(&req.returns_matrix, 16).map_or(0.0, |p| p.pbo)
+    // PBO is undefined with fewer than two trials or too few observations, and when CSCV fails.
+    // It used to be reported as 0.0, which reads as "no overfitting" (M26 task 5).
+    let pbo_opt = if n_trials >= 2 && n_obs >= 8 {
+        cscv_pbo(&req.returns_matrix, 16).ok().map(|p| p.pbo)
     } else {
-        0.0
+        None
     };
 
     to_json(
@@ -1160,7 +1168,11 @@ pub(crate) async fn compute_overfitting(body: Result<Bytes, BytesRejection>) -> 
             psr: if psr.is_nan() { 0.0 } else { psr },
             dsr: if dsr.is_nan() { 0.0 } else { dsr },
             min_trl: if min_trl.is_infinite() || min_trl.is_nan() { 0.0 } else { min_trl },
-            pbo: pbo_val,
+            pbo: pbo_opt.unwrap_or(0.0),
+            psr_defined: psr.is_finite(),
+            dsr_defined: dsr.is_finite(),
+            min_trl_defined: min_trl.is_finite(),
+            pbo_defined: pbo_opt.is_some(),
             expected_max_sharpe: exp_max_sr,
             sharpe_variance: sr_var,
             best_sharpe: best_sr,
@@ -1345,49 +1357,30 @@ pub(crate) async fn evaluate_holdout(
 
     let default_dir = std::path::PathBuf::from("data");
     let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
-    let bars = match spectra_backtest::load_bars(data_dir, &version.checksum) {
-        Ok(b) => b,
-        Err(_) => {
-            // Synthetic / fallback test bars
-            vec![
-                spectra_core::Bar {
-                    ts_ns: 1_700_000_000_000_000_000,
-                    instrument: 0,
-                    open: spectra_core::fixed::Price::from_f64(100.0).unwrap(),
-                    high: spectra_core::fixed::Price::from_f64(105.0).unwrap(),
-                    low: spectra_core::fixed::Price::from_f64(99.0).unwrap(),
-                    close: spectra_core::fixed::Price::from_f64(102.0).unwrap(),
-                    volume: spectra_core::Qty::from_f64(1000.0).unwrap(),
-                    known_at_ns: 1_700_000_000_000_000_000,
-                },
-                spectra_core::Bar {
-                    ts_ns: 1_700_000_086_400_000_000,
-                    instrument: 0,
-                    open: spectra_core::fixed::Price::from_f64(102.0).unwrap(),
-                    high: spectra_core::fixed::Price::from_f64(108.0).unwrap(),
-                    low: spectra_core::fixed::Price::from_f64(101.0).unwrap(),
-                    close: spectra_core::fixed::Price::from_f64(107.0).unwrap(),
-                    volume: spectra_core::Qty::from_f64(1200.0).unwrap(),
-                    known_at_ns: 1_700_000_086_400_000_000,
-                },
-            ]
-        }
+    // The grant above already spent one evaluation. If the dataset cannot be loaded, say so: never
+    // evaluate on invented bars (M26 task 5: the old code ran on synthetic bars silently).
+    let Ok(bars) = spectra_backtest::load_bars(data_dir, &version.checksum) else {
+        return error_response(
+            500,
+            "The holdout dataset could not be loaded, so no result was produced. This evaluation was logged and its budget is spent.",
+        );
     };
-
     let cfg = spectra_engine::BacktestConfig::default();
-    let (metrics_json, dsr_val) = {
+    // The DSR needs the variance of the trials in the experiment, which is not wired into holdout
+    // evaluation yet, so it is reported as not defined (None), not as a fixed 0.05 (M26 task 5).
+    let (metrics_json, dsr_val): (serde_json::Value, Option<f64>) = {
         let mut strat = spectra_backtest::builtin("buy_and_hold")
             .unwrap()
             .build(&spectra_research::ParamSet::default())
             .unwrap();
-        let res = spectra_engine::run_backtest(&bars, strat.as_mut(), &cfg);
-        match res {
-            Ok(r) => {
-                let returns = spectra_engine::returns_from_curve(&r.equity_curve);
-                let dsr = deflated_sharpe(&returns, eval_num as usize, 0.05);
-                (metrics_to_json(&r.metrics), if dsr.is_nan() { 0.0 } else { dsr })
+        match spectra_engine::run_backtest(&bars, strat.as_mut(), &cfg) {
+            Ok(r) => (metrics_to_json(&r.metrics), None),
+            Err(_) => {
+                return error_response(
+                    500,
+                    "The holdout backtest failed, so no result was produced. This evaluation was logged and its budget is spent.",
+                )
             }
-            Err(_) => (json!({}), 0.0),
         }
     };
 
@@ -1404,7 +1397,7 @@ pub(crate) async fn evaluate_holdout(
         req.strategy_version_id,
         eval_num,
         &metrics_json,
-        Some(dsr_val),
+        dsr_val,
         &json!(warnings),
         user_of(&id),
     )

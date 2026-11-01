@@ -1674,11 +1674,12 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                 let dsr = spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var);
                 let min_trl =
                     spectra_research::min_track_record_length(best.metrics.sharpe, 0.0, m.skew, m.kurt, 0.95);
+                // PBO is undefined (None, stored as NULL) when CSCV cannot run or fails, not 0.0 (M26 task 5).
                 let pbo = if returns_matrix.len() >= 2 && returns_matrix.first().is_some_and(|r| r.len() >= 8)
                 {
-                    spectra_research::cscv_pbo(&returns_matrix, 16).map_or(0.0, |p| p.pbo)
+                    spectra_research::cscv_pbo(&returns_matrix, 16).ok().map(|p| p.pbo)
                 } else {
-                    0.0
+                    None
                 };
                 let mut b_params = serde_json::Map::new();
                 for (k, v) in &best.params.values {
@@ -1692,10 +1693,10 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     "max_drawdown": best.metrics.max_drawdown,
                 });
                 (
-                    Some(if dsr.is_nan() { 0.0 } else { dsr }),
-                    Some(if psr.is_nan() { 0.0 } else { psr }),
-                    Some(if min_trl.is_infinite() || min_trl.is_nan() { 0.0 } else { min_trl }),
-                    Some(pbo),
+                    dsr.is_finite().then_some(dsr),
+                    psr.is_finite().then_some(psr),
+                    min_trl.is_finite().then_some(min_trl),
+                    pbo,
                     Some(serde_json::Value::Object(b_params)),
                     Some(b_metrics),
                 )

@@ -283,8 +283,9 @@ async fn holdout_vault_budget_lockout_flow() {
             &json!({ "strategy": "buy_and_hold" }),
         )
         .await;
-    assert_eq!(status, 200, "status: {status}, body: {eval1}");
-    assert_eq!(eval1["evaluation_num"], 1);
+    // The fixture has no dataset bars on disk, so the evaluation fails after the budget is spent
+    // (M26 task 5: no synthetic bars). The lockout checks below still hold.
+    assert_eq!(status, 500, "status: {status}, body: {eval1}");
 
     // Check status
     let (status, detail) =
@@ -300,8 +301,7 @@ async fn holdout_vault_budget_lockout_flow() {
             &json!({ "strategy": "buy_and_hold" }),
         )
         .await;
-    assert_eq!(status, 200);
-    assert_eq!(eval2["evaluation_num"], 2);
+    assert_eq!(status, 500, "budget is spent on the grant even when loading fails: {eval2}");
 
     // Check status
     let (_, detail) =
@@ -652,8 +652,8 @@ async fn holdout_guard_covers_every_route_and_logs_access() {
             &json!({ "strategy": "buy_and_hold" }),
         )
         .await;
-    assert_eq!(status, 200, "status: {status}, body: {eval}");
-    assert_eq!(eval["evaluation_num"], 1);
+    // No bars on disk in this fixture: the grant is logged, then the load fails (M26 task 5).
+    assert_eq!(status, 500, "status: {status}, body: {eval}");
 
     let log = access_log(&f, &holdout_id).await;
     // Sealing checks the version before the seal exists, so it logs nothing.
@@ -691,10 +691,12 @@ async fn concurrent_holdout_evaluations_never_overspend() {
         f.call("POST", &path, &body),
     );
     let results = [a, b, c, d, e, g];
-    let ok = results.iter().filter(|(s, _)| *s == 200).count();
+    // The fixture has no dataset bars on disk, so granted evaluations fail with 500 after the
+    // budget is spent (M26 task 5: no synthetic bars). The lockout ensures only 2 are granted.
+    let granted = results.iter().filter(|(s, _)| *s == 500).count();
     let refused =
         results.iter().filter(|(s, b)| *s == 403 && b["code"] == "holdout_budget_exhausted").count();
-    assert_eq!((ok, refused), (2, 4), "{results:?}");
+    assert_eq!((granted, refused), (2, 4), "{results:?}");
 
     let used: i32 = sqlx::query_scalar("SELECT evaluations_used FROM holdout_vault WHERE id = $1::uuid")
         .bind(&holdout_id)

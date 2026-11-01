@@ -7,8 +7,8 @@
 //! worked by hand. Money, price and quantity are fixed point, so the comparisons
 //! are exact.
 //!
-//! Not covered here: zero bar volume (the volume term is silently off, a
-//! documented defect, tasks 6-7). Futures roll and rebalance follow in part 3.
+//! Zero bar volume is an error when volume slippage is active (task 6). Futures
+//! roll and rebalance follow in part 3.
 
 use spectra_core::{Bps, Money, Price, Qty, Side};
 use spectra_engine::costs::{
@@ -85,4 +85,11 @@ fn extra_market_impact_is_added_on_top() {
     // 2 + 5 + 5 (volume at half participation) + 1.5 extra impact = 13.5 bps.
     let model = cost_model(2.0, 10.0, 10.0);
     assert_eq!(effective_slippage_bps(&model, q(50.0), q(100.0), 1.5).unwrap(), b(13.5));
+}
+
+#[test]
+fn zero_bar_volume_returns_error_when_volume_slippage_is_configured() {
+    let model = cost_model(2.0, 10.0, 10.0);
+    let res = effective_slippage_bps(&model, q(50.0), q(0.0), 0.0);
+    assert_eq!(res, Err(spectra_core::ArithmeticError::DivisionByZero));
 }

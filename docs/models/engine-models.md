@@ -98,11 +98,9 @@ raw unit (silent floor, `costs.rs`: `max(Price::from_raw(1))`).
 + extra impact. Volume term = volume_slippage × min(1, qty / bar volume), added only when bar
 volume > 0.
 
-**Known problems (task 6–7):**
-1. **Zero bar volume turns off the volume term** silently. Zero volume should be an error or an
-   explicit "unknown" result, not zero cost.
-2. **Flat slippage defaults** in the paper path are hardcoded (0.0005 and fee 1.0 in
-   `paper_api.rs`, see the M26 doc). The fix routes them through this model.
+**Resolved in task 6:**
+1. **Zero bar volume with active volume slippage** returns `ArithmeticError::DivisionByZero` instead of silently ignoring the volume term.
+2. **Paper order fills** in `paper_api.rs` are routed through `spectra_engine::costs` (`CostModel`, `slipped_price`, and `commission_fee`), aligning paper execution with engine costs.
 
 ## Rebalancing (`rebalance.rs`)
 

@@ -61,7 +61,7 @@ pub fn slipped_price(px: Price, side: Side, slippage: Bps) -> Result<Price, Arit
 /// (`volume_slippage * min(1.0, qty / bar_volume)`), and any additional market impact basis points.
 ///
 /// # Errors
-/// Arithmetic overflow.
+/// Arithmetic overflow or division by zero when volume slippage is active but bar volume is non-positive.
 pub fn effective_slippage_bps(
     model: &CostModel,
     qty: Qty,
@@ -73,7 +73,10 @@ pub fn effective_slippage_bps(
         let half = Bps::from_raw(model.spread.raw() / 2);
         bps = bps.checked_add(half)?;
     }
-    if model.volume_slippage.raw() > 0 && bar_volume.raw() > 0 {
+    if model.volume_slippage.raw() > 0 {
+        if bar_volume.raw() <= 0 {
+            return Err(ArithmeticError::DivisionByZero);
+        }
         let part = (qty.to_f64() / bar_volume.to_f64()).min(1.0);
         let vol_bps = model.volume_slippage.to_f64() * part;
         bps = bps.checked_add(Bps::from_f64(vol_bps)?)?;

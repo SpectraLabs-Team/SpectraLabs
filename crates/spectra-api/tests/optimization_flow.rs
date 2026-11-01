@@ -691,10 +691,12 @@ async fn concurrent_holdout_evaluations_never_overspend() {
         f.call("POST", &path, &body),
     );
     let results = [a, b, c, d, e, g];
-    let ok = results.iter().filter(|(s, _)| *s == 200).count();
+    // The fixture has no dataset bars on disk, so granted evaluations fail with 500 after the
+    // budget is spent (M26 task 5: no synthetic bars). The lockout ensures only 2 are granted.
+    let granted = results.iter().filter(|(s, _)| *s == 500).count();
     let refused =
         results.iter().filter(|(s, b)| *s == 403 && b["code"] == "holdout_budget_exhausted").count();
-    assert_eq!((ok, refused), (2, 4), "{results:?}");
+    assert_eq!((granted, refused), (2, 4), "{results:?}");
 
     let used: i32 = sqlx::query_scalar("SELECT evaluations_used FROM holdout_vault WHERE id = $1::uuid")
         .bind(&holdout_id)

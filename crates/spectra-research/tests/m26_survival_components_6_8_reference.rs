@@ -101,17 +101,15 @@ impl Strategy for DelayedBuyAndHold {
     }
 }
 
-/// Strategy that buys 100% of equity on bar 1, leaving 0 cash so equity return
-/// mirrors price return identically.
-struct FullBuyAndHold;
+/// Strategy that buys 1 unit at price 100.0 on bar 1, spending all 100.0 cash,
+/// leaving 0 cash so equity identically matches instrument price.
+struct UnitBuyAndHold;
 
-impl Strategy for FullBuyAndHold {
+impl Strategy for UnitBuyAndHold {
     fn on_bar(&mut self, ctx: &mut Context<'_>, bars: &[Bar]) {
         let n = ctx.history(bars[0].instrument).len();
         if n == 1 && ctx.position(1).is_zero() {
-            let price = bars[0].close.to_f64();
-            let qty = ctx.equity().to_f64() / price;
-            ctx.market(1, Side::Buy, Qty::from_f64(qty).unwrap());
+            ctx.market(1, Side::Buy, Qty::from_f64(1.0).unwrap());
         }
     }
 }
@@ -763,20 +761,31 @@ fn benchmark_relative_passes_when_alpha_and_information_ratio_positive() {
 }
 
 #[test]
-fn benchmark_relative_warn_boundary_at_alpha_and_information_ratio_exactly_zero() {
-    // When strategy buys 100% of equity (FullBuyAndHold), equity curve return is
-    // identically equal to benchmark return (s == b).
-    // As proven mathematically: beta == 1.0, alpha == 0.0, and tracking error == 0.0 <= 1e-15,
-    // so information_ratio == 0.0.
-    // The verdict rule: alpha <= 0.0 || IR <= 0.0 -> Warn.
-    // This tests the exact 0.0 boundary for both alpha and information ratio simultaneously.
+fn benchmark_relative_warns_when_information_ratio_at_zero_from_guard() {
+    // When a strategy tracks the benchmark with near-zero tracking error (at or below
+    // the 1e-15 per-period guard threshold), information ratio is guarded to 0.0.
+    // The fixture produces a slightly positive alpha (~5e-15 > 0.0), so the Warn verdict
+    // is triggered strictly by the information ratio condition (IR <= 0.0), not by alpha.
     let mut closes = vec![100.0, 100.0];
     for i in 1..79 {
         let t = f64::from(i as u32);
-        closes.push(100.0 + 0.1 * t + 2.0 * (t * 0.3).sin());
+        closes.push(100.0 + 0.05 * t + 2.0 * (t * 0.3).sin());
     }
     let bars = bars_from(&closes);
-    let factory = move |_: &ParamSet| -> Result<Box<dyn Strategy>> { Ok(Box::new(FullBuyAndHold)) };
+    let factory = move |_: &ParamSet| -> Result<Box<dyn Strategy>> {
+        struct FullTracker;
+        impl Strategy for FullTracker {
+            fn on_bar(&mut self, ctx: &mut Context<'_>, bars: &[Bar]) {
+                let n = ctx.history(bars[0].instrument).len();
+                if n == 1 && ctx.position(1).is_zero() {
+                    let price = bars[0].close.to_f64();
+                    let qty = ctx.equity().to_f64() / price;
+                    ctx.market(1, Side::Buy, Qty::from_f64(qty).unwrap());
+                }
+            }
+        }
+        Ok(Box::new(FullTracker))
+    };
 
     let rep = run_survival_lab(
         &bars,
@@ -789,14 +798,63 @@ fn benchmark_relative_warn_boundary_at_alpha_and_information_ratio_exactly_zero(
 
     let bm = &rep.benchmark;
     let m = &bm.metrics;
-    println!("Component 8 Boundary 0.0 Alpha & IR:");
+    println!("Component 8 Guarded IR == 0.0 (alpha > 0):");
     println!(
-        "  beta={:.4}, alpha={:.10}, IR={:.10}, sharpe={:.2}, verdict={:?}",
-        m.beta, m.alpha_annualized, m.information_ratio, rep.baseline.sharpe, bm.verdict
+        "  beta={:.4}, alpha={:e}, IR={:.10}, te={:e}, sharpe={:.2}, verdict={:?}",
+        m.beta, m.alpha_annualized, m.information_ratio, m.tracking_error, rep.baseline.sharpe, bm.verdict
     );
 
     assert!(m.valid);
-    assert!(m.alpha_annualized.abs() < 1e-9);
+    // Directly assert the guard path: per-period tracking error is <= 1e-15,
+    // so annualized tracking error is <= 1e-15 * sqrt(252) ≈ 1.587e-14:
+    assert!(
+        m.tracking_error <= 1e-14,
+        "tracking error {} must be at or below guard threshold",
+        m.tracking_error
+    );
+    assert_eq!(m.information_ratio, 0.0);
+    assert!(m.information_ratio <= 0.0);
+    assert!(m.alpha_annualized > 0.0);
+    assert!(rep.baseline.sharpe >= 0.5 && rep.baseline.sharpe <= 3.0);
+    assert_eq!(bm.verdict, Verdict::Warn);
+}
+
+#[test]
+fn benchmark_relative_warn_boundary_at_alpha_exactly_zero() {
+    // Exact zero boundary for alpha by construction:
+    // With initial cash 100.0 and buy of exactly 1.0 unit at 100.0 (UnitBuyAndHold),
+    // remaining cash is 0.0 and position is 1.0.
+    // Pos * price == price exactly with zero fixed-point truncation error,
+    // making equity returns identically match benchmark returns bit-for-bit.
+    // Thus beta == 1.0, tracking error == 0.0, information ratio == 0.0,
+    // and alpha == 0.0 exactly (no float noise).
+    // This case tests alpha <= 0.0 on its own and still gives Warn when the IR condition is removed.
+    let mut closes = vec![100.0, 100.0];
+    for i in 1..79 {
+        let t = f64::from(i as u32);
+        closes.push(100.0 + 0.1 * t + 2.0 * (t * 0.3).sin());
+    }
+    let bars = bars_from(&closes);
+    let factory = move |_: &ParamSet| -> Result<Box<dyn Strategy>> { Ok(Box::new(UnitBuyAndHold)) };
+
+    let backtest_cfg = BacktestConfig { initial_cash: Money::from_f64(100.0).unwrap(), ..Default::default() };
+
+    let rep =
+        run_survival_lab(&bars, &factory, &backtest_cfg, &ParamSet::default(), &SurvivalConfig::default())
+            .unwrap();
+
+    let bm = &rep.benchmark;
+    let m = &bm.metrics;
+    println!("Component 8 Exact Zero Alpha:");
+    println!(
+        "  beta={:.4}, alpha={:e}, IR={:.10}, te={:e}, sharpe={:.2}, verdict={:?}",
+        m.beta, m.alpha_annualized, m.information_ratio, m.tracking_error, rep.baseline.sharpe, bm.verdict
+    );
+
+    assert!(m.valid);
+    assert_eq!(m.beta, 1.0);
+    assert_eq!(m.alpha_annualized, 0.0);
+    assert_eq!(m.tracking_error, 0.0);
     assert_eq!(m.information_ratio, 0.0);
     assert!(m.alpha_annualized <= 0.0);
     assert!(m.information_ratio <= 0.0);

@@ -82,6 +82,16 @@ pub struct ListRuns {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct MyRuns {
+    /// `queued`, `running`, `succeeded`, `failed` or `cancelled`.
+    pub status: Option<String>,
+    /// `next_cursor` from the previous page.
+    pub cursor: Option<String>,
+    /// Page size, 1 through 200 (default 50).
+    pub limit: Option<u32>,
+}
+
 #[allow(clippy::result_large_err)] // route helpers return the response immediately
 fn registry(st: &AppState, identity: &Identity) -> Result<PgRegistry, Response> {
     let Some(pool) = st.db.clone() else {
@@ -418,6 +428,8 @@ pub(crate) async fn list_runs(
         kind: query.kind,
         min_sharpe: query.min_sharpe,
         only_trials: query.only_trials,
+        created_by: None,
+        hidden_for: None,
     };
     let limit = query.limit.unwrap_or(50);
     if !(1..=200).contains(&limit) {
@@ -431,6 +443,62 @@ pub(crate) async fn list_runs(
                 .to_string(),
         ),
         Err(spectra_registry::PgRegistryError::Invalid(message)) => error_response(422, message),
+        Err(error) => fail(&error),
+    }
+}
+
+#[utoipa::path(get, path = "/api/v1/me/runs", tag = "registry", params(MyRuns), responses((status = 200, description = "Current user's runs")))]
+pub(crate) async fn list_my_runs(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    Query(query): Query<MyRuns>,
+) -> Response {
+    let registry = match registry(&st, &identity) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let limit = query.limit.unwrap_or(50);
+    if !(1..=200).contains(&limit) {
+        return error_response(422, "limit must be between 1 and 200.");
+    }
+    let filter = RunFilter {
+        experiment_id: None,
+        dataset_id: None,
+        strategy: None,
+        kind: None,
+        min_sharpe: None,
+        only_trials: false,
+        created_by: Some(identity.user.clone()),
+        hidden_for: Some(identity.user),
+    };
+    let page = RunPage { status: query.status, cursor: query.cursor, limit };
+    match registry.runs_page(&filter, &page).await {
+        Ok((items, next)) => json_response(
+            200,
+            json!({ "items": items.into_iter().map(run_json).collect::<Vec<_>>(), "next_cursor": next })
+                .to_string(),
+        ),
+        Err(spectra_registry::PgRegistryError::Invalid(message)) => error_response(422, message),
+        Err(error) => fail(&error),
+    }
+}
+
+#[utoipa::path(post, path = "/api/v1/me/runs/{id}/hide", tag = "registry", params(("id" = String, Path)), responses((status = 200, description = "Run hidden from user's list"), (status = 404, description = "Run not found")))]
+pub(crate) async fn hide_my_run(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    Path(id): Path<String>,
+) -> Response {
+    let registry = match registry(&st, &identity) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let Ok(user_id) = Uuid::parse_str(&identity.user) else {
+        return error_response(401, "Invalid user identity.");
+    };
+    match registry.hide_run_for_user(&id, user_id).await {
+        Ok(()) => json_response(200, json!({ "ok": true }).to_string()),
+        Err(spectra_registry::PgRegistryError::Invalid(_)) => error_response(404, "Run not found."),
         Err(error) => fail(&error),
     }
 }
@@ -564,7 +632,7 @@ pub(crate) async fn get_run_artifact(
     let bytes = match store.get(&artifact.sha256).await {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return error_response(404, "The artifact's bytes are no longer stored.")
+            return error_response(404, "The artifact's bytes are no longer stored.");
         }
         Err(error) => {
             tracing::error!(error = %error, sha256 = %artifact.sha256, "could not read artifact");

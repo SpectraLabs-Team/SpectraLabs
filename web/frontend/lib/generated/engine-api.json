@@ -9327,6 +9327,10 @@
           "dsr",
           "min_trl",
           "pbo",
+          "psr_defined",
+          "dsr_defined",
+          "min_trl_defined",
+          "pbo_defined",
           "expected_max_sharpe",
           "sharpe_variance",
           "best_sharpe",
@@ -9342,6 +9346,9 @@
             "type": "number",
             "format": "double"
           },
+          "dsr_defined": {
+            "type": "boolean"
+          },
           "expected_max_sharpe": {
             "type": "number",
             "format": "double"
@@ -9349,6 +9356,9 @@
           "min_trl": {
             "type": "number",
             "format": "double"
+          },
+          "min_trl_defined": {
+            "type": "boolean"
           },
           "num_observations": {
             "type": "integer",
@@ -9362,9 +9372,16 @@
             "type": "number",
             "format": "double"
           },
+          "pbo_defined": {
+            "type": "boolean"
+          },
           "psr": {
             "type": "number",
             "format": "double"
+          },
+          "psr_defined": {
+            "type": "boolean",
+            "description": "False when the value is not defined for this input (the number above is then 0 and\nmeans nothing). M26 task 5: previously an undefined value was reported as 0."
           },
           "sharpe_variance": {
             "type": "number",

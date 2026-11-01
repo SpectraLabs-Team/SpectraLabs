@@ -16,6 +16,7 @@ use serde_json::json;
 use spectra_backtest::config::Preset;
 use spectra_core::{Bar, Money, Price, Qty, Side};
 use spectra_db::paper::{PaperAccount, PaperFillRow, PaperOrderRow};
+use spectra_engine::costs::{commission_fee, slipped_price, CommissionModel, CostModel};
 use spectra_engine::{OrderState, Strategy};
 use spectra_risk::enforcement::{
     OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeVerdict,
@@ -713,16 +714,34 @@ pub(crate) async fn create_order(
     }
 
     // Tasks 4 & 5: Fills and Positions/Equity update
-    // Cost model: small spread / slippage simulation matching backtest (0.05% slippage + $1.00 fee)
-    let slippage = 0.0005;
-    let base_price = req.fill_price.or(req.limit_price).or(current_sym_price).unwrap_or(100.0);
-    let fill_price = match side {
-        OrderSide::Buy => base_price * (1.0 + slippage),
-        OrderSide::Sell => base_price * (1.0 - slippage),
+    // Cost model: routed through spectra_engine::costs (CostModel, slipped_price, commission_fee)
+    let cost_model = CostModel {
+        slippage: spectra_core::Bps::from_f64(5.0).unwrap_or_default(),
+        commission: CommissionModel {
+            min_fee: Money::from_f64(1.0).unwrap_or_default(),
+            ..Default::default()
+        },
+        ..Default::default()
     };
+    let base_price_f64 = req.fill_price.or(req.limit_price).or(current_sym_price).unwrap_or(100.0);
+    let Ok(base_price_val) = Price::from_f64(base_price_f64) else {
+        return error_response(422, format!("Invalid base price: {base_price_f64}"));
+    };
+    let engine_side = match side {
+        OrderSide::Buy => Side::Buy,
+        OrderSide::Sell => Side::Sell,
+    };
+    let fill_price = slipped_price(base_price_val, engine_side, cost_model.slippage)
+        .map(|p| p.to_f64())
+        .unwrap_or(base_price_f64);
     let fill_qty =
         if pre_trade.verdict == PreTradeVerdict::Reduced { pre_trade.approved_qty } else { req.qty };
-    let fee = 1.0;
+    let mult_val = mult(&symbol);
+    let notional_val = Money::from_f64(fill_qty * fill_price * mult_val).unwrap_or_default();
+    let fee =
+        commission_fee(&cost_model.commission, Qty::from_f64(fill_qty).unwrap_or_default(), notional_val)
+            .map(|m| m.to_f64())
+            .unwrap_or(1.0);
 
     // Record fill
     let fill_row = match spectra_db::paper::insert_paper_fill(

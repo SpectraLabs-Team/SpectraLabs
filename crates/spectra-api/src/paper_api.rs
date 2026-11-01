@@ -732,16 +732,14 @@ pub(crate) async fn create_order(
         OrderSide::Sell => Side::Sell,
     };
     let fill_price = slipped_price(base_price_val, engine_side, cost_model.slippage)
-        .map(|p| p.to_f64())
-        .unwrap_or(base_price_f64);
+        .map_or(base_price_f64, spectra_core::Fixed::to_f64);
     let fill_qty =
         if pre_trade.verdict == PreTradeVerdict::Reduced { pre_trade.approved_qty } else { req.qty };
     let mult_val = mult(&symbol);
     let notional_val = Money::from_f64(fill_qty * fill_price * mult_val).unwrap_or_default();
     let fee =
         commission_fee(&cost_model.commission, Qty::from_f64(fill_qty).unwrap_or_default(), notional_val)
-            .map(|m| m.to_f64())
-            .unwrap_or(1.0);
+            .map_or(1.0, spectra_core::Fixed::to_f64);
 
     // Record fill
     let fill_row = match spectra_db::paper::insert_paper_fill(

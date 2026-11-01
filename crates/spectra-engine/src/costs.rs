@@ -143,8 +143,8 @@ mod tests {
         let with_impact = effective_slippage_bps(&model, q(50.0), q(100.0), 3.0).unwrap();
         assert_eq!(with_impact, bps(12.0));
 
-        // When volume is zero, volume slippage is skipped safely
-        let zero_vol = effective_slippage_bps(&model, q(50.0), q(0.0), 0.0).unwrap();
-        assert_eq!(zero_vol, bps(4.0));
+        // When volume is zero and volume slippage is active, DivisionByZero is returned
+        let zero_vol = effective_slippage_bps(&model, q(50.0), q(0.0), 0.0);
+        assert_eq!(zero_vol, Err(ArithmeticError::DivisionByZero));
     }
 }

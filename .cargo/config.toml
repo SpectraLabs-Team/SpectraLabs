@@ -1,6 +1,12 @@
 [target.aarch64-apple-darwin]
 linker = "clang"
 
-[target.'cfg(not(target_os = "windows"))'.env]
-CC = { value = "clang", force = true }
-CXX = { value = "clang++", force = true }
+# Build C dependencies (aws-lc-sys and others) with Apple clang on macOS, even when the shell
+# exports CC=gcc (Homebrew GCC cannot parse the macOS SDK headers). Cargo has no per-target
+# [env], so the target-specific names are used instead: cc-rs reads CC_<target> before CC, and
+# Linux, Docker and Windows builds never see them. `force` overrides the shell's value.
+[env]
+CC_aarch64_apple_darwin = { value = "clang", force = true }
+CXX_aarch64_apple_darwin = { value = "clang++", force = true }
+CC_x86_64_apple_darwin = { value = "clang", force = true }
+CXX_x86_64_apple_darwin = { value = "clang++", force = true }

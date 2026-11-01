@@ -6,9 +6,10 @@
 //! functions", 2005): accurate to about 1e-14 and computed the same way on
 //! every platform, so prices reproduce exactly.
 //!
-//! Model review: the formulas here are listed for the M26 correctness audit
-//! (task 5a). Options trade in backtests and on paper; the audit checks this
-//! model against reference values.
+//! Model review: audited in M26 task 5a against independent reference values
+//! (Hull, Haug); the reference document is `docs/models/options.md` and the
+//! reference tests are `tests/m26_options_reference.rs`. A change to a formula
+//! here needs both updated (M26 decision 3).
 
 use spectra_core::{Error, OptionRight, Result};
 
@@ -138,12 +139,14 @@ impl OptionInputs {
                 OptionRight::Call => (fwd - pv_k).max(0.0),
                 OptionRight::Put => (pv_k - fwd).max(0.0),
             };
-            let delta = match (self.right, itm) {
-                (OptionRight::Call, true) => dq,
-                (OptionRight::Put, true) => -dq,
-                _ => 0.0,
+            // In the money, the option is worth a forward: S e^{-qT} - K e^{-rT} for a call, its
+            // negative for a put. Its theta and rho are the forward's, not zero (M26 task 5a).
+            let (delta, theta, rho) = match (self.right, itm) {
+                (OptionRight::Call, true) => (dq, q * fwd - r * pv_k, t * pv_k),
+                (OptionRight::Put, true) => (-dq, r * pv_k - q * fwd, -t * pv_k),
+                _ => (0.0, 0.0, 0.0),
             };
-            return Ok(OptionValue { price, delta, ..OptionValue::default() });
+            return Ok(OptionValue { price, delta, theta, rho, ..OptionValue::default() });
         }
         let sq = t.sqrt();
         let d1 = ((s / k).ln() + (r - q + 0.5 * v * v) * t) / (v * sq);
@@ -177,8 +180,8 @@ impl OptionInputs {
     ///
     /// # Errors
     /// [`Error::InvalidArgument`] when `price` is outside the no-arbitrage
-    /// bounds (below the discounted intrinsic value or above its maximum), or
-    /// at expiry.
+    /// bounds (below the discounted intrinsic value or above its maximum), at
+    /// expiry, or when the search does not converge in 200 iterations.
     pub fn implied_volatility(&self, price: f64) -> Result<f64> {
         let at = |v: f64| OptionInputs { volatility: v, ..*self }.value().map(|x| x.price);
         if self.years <= 0.0 {
@@ -206,7 +209,10 @@ impl OptionInputs {
             let next = v - diff / val.vega;
             v = if val.vega > 1e-12 && next > lo && next < hi { next } else { 0.5 * (lo + hi) };
         }
-        Ok(v)
+        // Not converged: an error, never the last guess (M26 decision 1).
+        Err(Error::InvalidArgument(format!(
+            "implied volatility did not converge in 200 iterations for price {price} (last {v})"
+        )))
     }
 }
 

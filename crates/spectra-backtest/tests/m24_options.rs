@@ -105,6 +105,31 @@ fn a_short_option_keeps_the_premium_when_it_expires() {
 }
 
 #[test]
+fn an_in_the_money_put_settles_at_intrinsic_value() {
+    // M26 task 5a. The underlying closes at day 15 at 100 - 19 * 14/19 = 86: intrinsic 14.
+    let r = run(&bars(81.0, 3.0), &setup(OptionRight::Put), 1.0);
+    r.ledger.check_invariants().unwrap();
+    let e = r.rolls.iter().find(|e| e.from == 1).unwrap();
+    assert_eq!((e.kind, e.ts_ns), (RollKind::Exercised, 15 * DAY));
+    assert_eq!(e.close_price, px(14.0));
+    assert_eq!(r.ledger.position(1).qty, Qty::ZERO);
+    // Paid 1 x 100 x 3 = 300; received 1 x 100 x 14 = 1,400.
+    assert_eq!(r.ledger.realized_pnl(), Money::from_units(1_100).unwrap());
+}
+
+#[test]
+fn a_short_in_the_money_call_pays_intrinsic_value() {
+    // M26 task 5a. Sold at 5, settled at 14 against the day-15 close of 114.
+    let r = run(&bars(119.0, 5.0), &setup(OptionRight::Call), -1.0);
+    r.ledger.check_invariants().unwrap();
+    let e = r.rolls.iter().find(|e| e.from == 1).unwrap();
+    assert_eq!((e.kind, e.close_price), (RollKind::Exercised, px(14.0)));
+    assert_eq!(r.ledger.position(1).qty, Qty::ZERO);
+    // Received 1 x 100 x 5 = 500; paid 1 x 100 x 14 = 1,400.
+    assert_eq!(r.ledger.realized_pnl(), Money::from_units(-900).unwrap());
+}
+
+#[test]
 fn the_underlying_must_be_in_the_run() {
     let mut s = setup(OptionRight::Call);
     s.underlying_ids.clear();

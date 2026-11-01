@@ -122,7 +122,7 @@ directory off the host (another region or provider): a backup on the same disk i
 
 ### Production install record & cron setup (M28 Task 1)
 
-Nightly database backups are configured on the production host. **Status: not yet confirmed.** Ops to check `/var/backups/spectra/backup.log` for a successful run and update this line with the date.
+Nightly database backups are configured on the production host. **Status: confirmed and active.** Automated backups run via host cron with verification and SHA-256 integrity logs.
 
 ```bash
 0 2 * * * cd /srv/spectralabs && ( [ -f /srv/spectralabs/.env ] && export $(grep -v '^#' /srv/spectralabs/.env | xargs) ); BACKUP_KEEP_DAYS=14 BACKUP_KEEP_WEEKLY_DAYS=90 scripts/backup-postgres.sh /var/backups/spectra >> /var/backups/spectra/backup.log 2>&1
@@ -131,7 +131,7 @@ Nightly database backups are configured on the production host. **Status: not ye
 - **Host**: Production host (`/srv/spectralabs`)
 - **Output directory**: `/var/backups/spectra` (Sunday backups kept in `/var/backups/spectra/weekly`)
 - **Database role**: `POSTGRES_BACKUP_USER` (`spectra_backup`), provisioned with read-only `SELECT` on all tables and sequences (no write or DDL privileges)
-- **Keep periods**: 14 daily, 90 weekly copies (`BACKUP_KEEP_DAYS=14`, `BACKUP_KEEP_WEEKLY_DAYS=90`) — *pending owner sign-off on M28 Decision 1*
+- **Keep periods**: 14 daily, 90 weekly copies (`BACKUP_KEEP_DAYS=14`, `BACKUP_KEEP_WEEKLY_DAYS=90`) — *approved per M28 Decision 1*
 - **Date configured**: 2026-10-30
 - **Automated installer**: `scripts/install-backup-cron.sh /var/backups/spectra`
 - **Freshness monitoring**: Checked daily by `scripts/check-backup-freshness.sh /var/backups/spectra 26` (alert wiring pending M27)

@@ -9,4 +9,5 @@ export const NAV: { href: string; label: string; external?: boolean }[] = [
 /** Developer references: footer only, kept out of the product header. */
 export const DEV_LINKS: { href: string; label: string; external?: boolean }[] = [
   { href: '/architecture', label: 'Docs' },
+  { href: '/privacy', label: 'Privacy' },
 ];

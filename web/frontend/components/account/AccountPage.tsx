@@ -409,6 +409,13 @@ function UsageData() {
         </li>
         <li>Admins can see these figures for your account, and every time they open them is recorded in the audit log.</li>
       </ul>
+      <p className="mt-4 text-[12px] text-ink/55">
+        For our full data lifecycle schedules and compliance disclosures, read the{' '}
+        <Link href="/privacy" className="font-semibold text-accent underline underline-offset-2 hover:brightness-110">
+          Privacy &amp; Data Retention Policy
+        </Link>
+        .
+      </p>
     </Section>
   );
 }

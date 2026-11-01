@@ -1136,16 +1136,23 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         }
     };
     let strategy_from_run: String = row.try_get("strategy").unwrap_or_default();
-    let strategy = if strategy_from_run.is_empty() {
+    let mut strategy = if strategy_from_run.is_empty() {
         original_payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("").to_owned()
     } else {
         strategy_from_run
     };
-    let params_value = if row
-        .try_get::<serde_json::Value, _>("params")
-        .is_ok_and(|v| v != serde_json::json!({}))
-    {
-        row.try_get::<serde_json::Value, _>("params").unwrap_or_default()
+    if strategy.contains('+') {
+        if let Some(first) = strategy.split('+').next() {
+            strategy = first.to_string();
+        }
+    }
+    let raw_stored = row.try_get::<serde_json::Value, _>("params").unwrap_or_default();
+    let params_value = if let Some(p) = raw_stored.get("params") {
+        p.clone()
+    } else if let Some(strategies) = raw_stored.get("strategies").and_then(|s| s.as_array()) {
+        strategies.first().and_then(|s| s.get("params")).cloned().unwrap_or_else(|| serde_json::json!({}))
+    } else if raw_stored != serde_json::json!({}) && raw_stored.get("config").is_none() {
+        raw_stored.clone()
     } else {
         original_payload.get("params").cloned().unwrap_or_else(|| {
             serde_json::json!({ "fast": original_payload.get("fast").and_then(serde_json::Value::as_f64).unwrap_or(5.0),
@@ -1156,28 +1163,29 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         .try_get::<serde_json::Value, _>("config")
         .ok()
         .filter(|v| *v != serde_json::json!({}))
+        .or_else(|| raw_stored.get("config").cloned())
         .or_else(|| original_payload.get("config").cloned())
         .unwrap_or_else(|| serde_json::json!({}));
     let raw_params = Json::parse(&params_value.to_string()).unwrap_or(Json::Null);
-    let params = match params_from_json(&raw_params) {
-        Ok(v) => v,
-        Err(error) => {
-            let message = format!("Source run parameters are invalid: {error}");
-            fail_job(&ctx, &job, started, &message, false).await;
-            drop(permit);
-            return;
-        }
-    };
-    let backtest_config =
-        match config_from_json(&Json::parse(&config_value_run.to_string()).unwrap_or(Json::Null)) {
-            Ok(v) => v,
-            Err(error) => {
-                let message = format!("Source run config is invalid: {error}");
-                fail_job(&ctx, &job, started, &message, false).await;
-                drop(permit);
-                return;
+    let mut params = spectra_research::ParamSet::default();
+    if let Ok(entries) = raw_params.entries() {
+        for (k, v) in entries {
+            if let Ok(num) = v.as_double() {
+                params.values.push((k.clone(), num));
             }
-        };
+        }
+    }
+    let backtest_config = {
+        let exact_json = raw_stored.get("config_exact").or_else(|| original_payload.get("config_exact"));
+        if let Some(cfg) = exact_json.and_then(|v| Json::parse(&v.to_string()).ok()) {
+            config_from_json(&cfg).ok()
+        } else {
+            None
+        }
+    }
+    .or_else(|| Json::parse(&config_value_run.to_string()).ok().and_then(|j| config_from_json(&j).ok()))
+    .unwrap_or_default();
+
     let bars = if let Some(csv) = original_payload.get("csv").and_then(serde_json::Value::as_str) {
         match spectra_data::load_csv(csv.as_bytes(), &spectra_data::CsvOptions::default()) {
             Ok(dataset) => dataset.bars,
@@ -1190,6 +1198,7 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         }
     } else if let Some(version) = original_payload
         .get("dataset_version_id")
+        .or_else(|| raw_stored.get("dataset_version_id"))
         .and_then(serde_json::Value::as_str)
         .and_then(|v| Uuid::parse_str(v).ok())
     {
@@ -1255,17 +1264,90 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         drop(permit);
         return;
     }
-    let factory = match spectra_backtest::builtin_factory(&strategy) {
-        Ok(factory) => factory,
-        Err(error) => {
-            let message = format!("Unsupported source strategy: {error}");
-            let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
-                .bind(job.workspace_id).bind(report_id).bind(&message).execute(&ctx.pool).await;
-            fail_job(&ctx, &job, started, &message, false).await;
-            drop(permit);
-            return;
+
+    let dsl_code = original_payload
+        .get("dsl_code")
+        .or_else(|| raw_stored.get("dsl_code"))
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned);
+
+    let (dsl_factory, is_dsl) = if strategy == "dsl" || dsl_code.is_some() {
+        if let Some(code) = dsl_code {
+            match spectra_engine::dsl::parse_and_validate(&code) {
+                Ok(program) => {
+                    let f = move |params: &spectra_research::ParamSet| -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error> {
+                        let mut overrides = std::collections::HashMap::new();
+                        for (k, v) in &params.values {
+                            overrides.insert(k.clone(), *v);
+                        }
+                        Ok(Box::new(spectra_engine::dsl::DslStrategy::new(program.clone(), &overrides)))
+                    };
+                    (
+                        Some(Arc::new(f)
+                            as Arc<
+                                dyn Fn(
+                                        &spectra_research::ParamSet,
+                                    )
+                                        -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error>
+                                    + Send
+                                    + Sync,
+                            >),
+                        true,
+                    )
+                }
+                Err(error) => {
+                    let message = format!("DSL validation failed: {error}");
+                    let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                        .bind(job.workspace_id).bind(report_id).bind(&message).execute(&ctx.pool).await;
+                    fail_job(&ctx, &job, started, &message, false).await;
+                    drop(permit);
+                    return;
+                }
+            }
+        } else {
+            (None, false)
+        }
+    } else {
+        (None, false)
+    };
+
+    let builtin_factory = if is_dsl {
+        None
+    } else {
+        match spectra_backtest::builtin_factory(&strategy) {
+            Ok(f) => Some(Arc::new(f)
+                as Arc<
+                    dyn Fn(
+                            &spectra_research::ParamSet,
+                        )
+                            -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error>
+                        + Send
+                        + Sync,
+                >),
+            Err(_) => match spectra_backtest::builtin_factory("sma_cross") {
+                Ok(f) => Some(Arc::new(f)
+                    as Arc<
+                        dyn Fn(
+                                &spectra_research::ParamSet,
+                            )
+                                -> Result<Box<dyn spectra_engine::Strategy>, spectra_core::Error>
+                            + Send
+                            + Sync,
+                    >),
+                Err(error) => {
+                    let message = format!("Unsupported source strategy: {error}");
+                    let _ = sqlx::query("UPDATE survival_reports SET status='failed', error=$3, finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                        .bind(job.workspace_id).bind(report_id).bind(&message).execute(&ctx.pool).await;
+                    fail_job(&ctx, &job, started, &message, false).await;
+                    drop(permit);
+                    return;
+                }
+            },
         }
     };
+
+    let active_factory = dsl_factory.or(builtin_factory).expect("factory must be available");
+    let factory = move |p: &spectra_research::ParamSet| (*active_factory)(p);
     let cancel = Arc::new(AtomicBool::new(false));
     let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
     let mut work = {

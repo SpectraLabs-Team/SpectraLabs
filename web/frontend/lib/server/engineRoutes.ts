@@ -215,6 +215,8 @@ export function routePolicyKey(path: string): string {
   if (/^api\/v1\/me\/state\/import$/i.test(path)) return 'api/v1/me/state/import';
   if (/^api\/v1\/me\/state\/[^/]+$/i.test(path)) return 'api/v1/me/state/{key}';
   if (/^api\/v1\/me\/sandbox\/orders\/[^/]+$/i.test(path)) return 'api/v1/me/sandbox/orders/{id}';
+  if (/^api\/v1\/instruments\/[^/]+$/i.test(path)) return 'api/v1/instruments/{symbol}';
+  if (/^api\/v1\/curves\/[^/]+$/i.test(path)) return 'api/v1/curves/{name}';
   if (/^api\/v1\/me\/runs\/[^/]+\/hide$/i.test(path)) return 'api/v1/me/runs/{id}/hide';
   if (/^api\/v1\/me\/runs$/i.test(path)) return 'api/v1/me/runs';
   for (const [pattern, key] of REGISTRY_PATTERNS) if (pattern.test(path)) return key;

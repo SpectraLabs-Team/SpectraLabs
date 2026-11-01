@@ -102,7 +102,7 @@ pub async fn list_gap_reports(
         sqlx::query_as::<_, GapReportRecord>(
             r"
             SELECT * FROM backtest_paper_gap_reports
-            WHERE workspace_id = $1 AND strategy_id = $2
+            WHERE workspace_id = $1 AND (strategy_id = $2 OR backtest_run_id = $2)
             ORDER BY created_at DESC
             LIMIT 50
             ",

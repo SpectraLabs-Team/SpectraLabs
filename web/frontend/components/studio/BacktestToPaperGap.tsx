@@ -24,14 +24,17 @@ type GapReportSummary = paths['/api/v1/paper/gap/reports']['get']['responses']['
 
 interface Props {
   strategyId?: string;
+  runId?: string;
 }
 
-export function BacktestToPaperGap({ strategyId }: Props) {
+export function BacktestToPaperGap({ strategyId, runId }: Props) {
   const [reports, setReports] = useState<GapReportSummary[]>([]);
   const [selectedReport, setSelectedReport] = useState<GapReportDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const effectiveStrategyId = strategyId || runId;
 
   const loadDetail = useCallback(async (id: string) => {
     try {
@@ -48,8 +51,8 @@ export function BacktestToPaperGap({ strategyId }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const url = strategyId
-        ? `/api/engine/api/v1/paper/gap/reports?strategy_id=${encodeURIComponent(strategyId)}`
+      const url = effectiveStrategyId
+        ? `/api/engine/api/v1/paper/gap/reports?strategy_id=${encodeURIComponent(effectiveStrategyId)}`
         : '/api/engine/api/v1/paper/gap/reports';
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -66,10 +69,13 @@ export function BacktestToPaperGap({ strategyId }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [strategyId, loadDetail]);
+  }, [effectiveStrategyId, loadDetail]);
 
   const runAnalysis = async () => {
-    if (!strategyId) return;
+    if (!effectiveStrategyId) {
+      setError('A strategy ID or run ID is required for gap comparison.');
+      return;
+    }
     setAnalyzing(true);
     setError(null);
     try {
@@ -77,7 +83,8 @@ export function BacktestToPaperGap({ strategyId }: Props) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          strategy_id: strategyId,
+          strategy_id: effectiveStrategyId,
+          backtest_run_id: runId || effectiveStrategyId,
           max_slippage_drift_bps: 10.0,
           max_timing_latency_ms: 1000.0,
           max_tracking_error_pct: 3.0,

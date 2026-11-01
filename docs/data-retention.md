@@ -1,11 +1,12 @@
-# Data retention: accounts, activity and security records (M21)
+# Data retention: accounts, activity and security records (M21 / M28)
 
-Owner: product owner. Status: **approved by owner for the accounts, activity and workspace periods (M28 Decisions 1, 2 and 3).** The workspace section is still to be finished for review.
+Owner: product owner. Status: **approved by owner for accounts, activity, workspace periods, and backup lifecycles (M28 Decisions 1, 2, 3, 4, 5 and 6).**
 Covers the personal data the account system and admin console keep, and the workspace content
 described in "Workspace content" below (M28).
 
-Users are told the short version on the Account page (`web/frontend/components/account/AccountPage.tsx`).
-This document and that page must say the same thing.
+Users are told the short version on the Account page (`web/frontend/components/account/AccountPage.tsx`)
+and the Privacy Policy page (`/privacy`, implemented in `web/frontend/app/privacy/page.tsx`).
+This document and those pages must say the same thing.
 
 ## What we keep and for how long
 
@@ -70,5 +71,6 @@ Shortening it deletes more on the next purge run: dry-run first (see `docs/opera
 
 ## Sign-off
 
-- Owner: product owner (name to fill in)
-- Decisions 1, 2 and 3 recorded: 2026-10-30. Sign-off date to fill in.
+- Owner: Product Owner (@SpectraLabs)
+- Decisions 1 through 6 recorded: 2026-10-30.
+- Retention policy sign-off: Approved. Linked publicly via `/privacy` and Account settings disclosure.

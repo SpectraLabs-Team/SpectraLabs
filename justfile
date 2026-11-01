@@ -84,6 +84,26 @@ backup dir="backups":
 restore-check file:
     scripts/restore-postgres.sh {{file}}
 
+# Back up artifact store (local or S3) to a snapshot directory.
+backup-artifacts dir="backups":
+    scripts/backup-artifacts.sh {{dir}}
+
+# Restore an artifact snapshot into a target directory and verify sample files.
+restore-artifacts snap target sample="20":
+    scripts/restore-artifacts.sh {{snap}} {{target}} {{sample}}
+
+# Check if any database or artifact backup is older than N hours (default 26).
+backup-freshness dir="backups" hours="26":
+    scripts/check-backup-freshness.sh {{dir}} {{hours}}
+
+# Monthly restore test of the latest database backup against a scratch database.
+monthly-restore-check dir="backups":
+    scripts/monthly-restore-check.sh {{dir}}
+
+# Run activity purge for daily active rows older than 400 days.
+activity-purge:
+    cd web/frontend && npm run activity:purge
+
 # Record every workspace's registry head hash in ./anchors.
 anchor dir="anchors":
     scripts/anchor-registry-hash.sh {{dir}}

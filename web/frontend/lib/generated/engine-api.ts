@@ -3511,16 +3511,22 @@ export interface components {
             best_sharpe: number;
             /** Format: double */
             dsr: number;
+            dsr_defined: boolean;
             /** Format: double */
             expected_max_sharpe: number;
             /** Format: double */
             min_trl: number;
+            min_trl_defined: boolean;
             num_observations: number;
             num_trials: number;
             /** Format: double */
             pbo: number;
+            pbo_defined: boolean;
             /** Format: double */
             psr: number;
+            /** @description False when the value is not defined for this input (the number above is then 0 and
+             *     means nothing). M26 task 5: previously an undefined value was reported as 0. */
+            psr_defined: boolean;
             /** Format: double */
             sharpe_variance: number;
         };

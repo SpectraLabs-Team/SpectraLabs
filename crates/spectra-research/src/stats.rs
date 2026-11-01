@@ -277,7 +277,14 @@ pub fn moments(x: &[f64]) -> Moments {
         m4 += dv * dv * dv * dv;
     }
     m.mean = mean;
-    m.stdev = (m2 / (n - 1.0)).sqrt();
+    // A series constant up to rounding has no spread. Without this test, sum-of-squares residue
+    // gives a stdev around 1e-18 and a Sharpe near 1e15 (M26 task 5).
+    let scale = x.iter().fold(0.0f64, |a, v| a.max(v.abs()));
+    let sample_sd = (m2 / (n - 1.0)).sqrt();
+    if sample_sd <= 1e-12 * scale {
+        return m;
+    }
+    m.stdev = sample_sd;
     m2 /= n;
     m3 /= n;
     m4 /= n;

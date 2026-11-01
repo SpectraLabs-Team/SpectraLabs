@@ -355,20 +355,34 @@ fn parameter_stability_warns_when_share_positive_between_fifty_and_eighty_percen
 
 #[test]
 fn parameter_stability_warns_when_median_sharpe_falls_below_half_baseline() {
-    let closes: Vec<f64> = (0..60).map(|i| 100.0 * 1.01f64.powi(i)).collect();
+    // Realistic price series: choppy start, surge into bar 20, pullback into bar 25, followed by chop.
+    #[rustfmt::skip]
+    let closes = vec![
+        100.0, 100.0, 103.27, 104.09, 104.27, 100.83, 100.33, 99.69, 99.54, 98.42,
+        98.34, 97.5, 95.22, 96.75, 98.3, 101.37, 102.95, 105.68, 107.84, 110.38,
+        112.69, 110.5, 107.94, 105.0, 102.73, 100.87, 100.36, 100.0, 100.31, 100.23,
+        99.85, 99.73, 100.1, 101.1, 100.47, 100.16, 99.76, 98.56, 98.1, 97.6,
+        98.15, 98.09, 97.29, 97.61, 97.43, 96.59, 96.3, 96.02, 95.6, 95.61,
+        94.55, 94.42, 94.9, 95.3, 95.83, 96.37, 97.09, 96.55, 96.96, 96.06,
+        95.77, 94.86, 95.36, 96.0, 95.9, 96.76, 96.43, 96.5, 96.58, 96.06,
+        96.27, 97.21, 96.72, 97.15, 97.08, 97.94, 98.18, 98.51, 98.83, 98.95, 98.26,
+    ];
     let bars = bars_from(&closes);
 
-    // Baseline (100.0) holds for all 60 bars (high Sharpe).
-    // All 4 neighbours (75, 90, 110, 125) exit very early at bar 3.
-    // Their return is positive (share_positive = 1.0 >= 0.80), but their Sharpe is much lower
-    // than 0.5 * baseline_sharpe because they only capture 2 bars of gains while sitting in cash for 57 bars.
+    // Strategy parameter directly controls the holding period (exit bar):
+    // Baseline (holding = 20) exits right at the peak on bar 20.
+    // Neighbours hold for 15, 18, 22, 25 bars:
+    // - 15 exits before the peak (misses top gains)
+    // - 18 exits near the peak
+    // - 22 holds 2 bars into the pullback
+    // - 25 holds 5 bars into the pullback
+    // Each parameter value produces a distinct exit trade, different fill price, and different Sharpe.
     let factory = move |params: &ParamSet| -> Result<Box<dyn Strategy>> {
-        let val = params.get("param")?;
-        let exit = if (val - 100.0).abs() < 1e-3 { 59 } else { 3 };
-        Ok(Box::new(ParameterControlledStrategy { gain_fraction: 0.95, exit_bar: exit }))
+        let holding_bars = params.get("holding_bars")? as usize;
+        Ok(Box::new(ParameterControlledStrategy { gain_fraction: 0.95, exit_bar: holding_bars }))
     };
 
-    let params = ParamSet::from_pairs([("param", 100.0)]);
+    let params = ParamSet::from_pairs([("holding_bars", 20.0)]);
     let rep =
         run_survival_lab(&bars, &factory, &BacktestConfig::default(), &params, &SurvivalConfig::default())
             .unwrap();

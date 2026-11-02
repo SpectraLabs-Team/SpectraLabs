@@ -30,7 +30,7 @@ should fail for a matrix that needs it.
 
 **Divergence (M26 task 4):**
 - **Herfindahl-Hirschman Index (HHI) concentration calculation:**
-  - **Old behaviour:** The legacy C++ engine returned a hard-coded `1.0` for HHI regardless of portfolio weights (the doc comment in `crates/spectra-risk/src/portfolio.rs:100-111` is the only source; no C++ engine source is in the repository).
+  - **Old behaviour:** The legacy C++ engine returned a hard-coded `1.0` for HHI regardless of portfolio weights (documented in `PORTING.md:85` and the doc comment in `crates/spectra-risk/src/portfolio.rs:100-111`; no C++ engine source is in the repository).
   - **New behaviour:** Rust computes the Herfindahl index from gross position weights: $\text{HHI} = \sum_i w_i^2$, in range $[1/n, 1]$ where $n$ is the number of active positions. Example: two equal positions give $0.5$, four equal positions give $0.25$, and a single position gives $1.0$.
   - **Reference test values:**
     - Concrete example in `crates/spectra-risk/tests/risk.rs:147` (`hhi_comes_from_the_weights`, two equal positions: 1.0 @ 50.0 and -1.0 @ 50.0, asserts 0.5):
@@ -54,7 +54,7 @@ should fail for a matrix that needs it.
         ```rust
         close(p.hhi().unwrap(), 1.0, TOL, "HHI of one position");
         ```
-  - **Parity golden status:** Grepping for `hhi` in `parity/` confirms that `parity/cpp/risk_golden.cpp` and `parity/golden/risk/risk.golden` do not currently exercise `Metric::Hhi`. No golden line changes in this PR. If a parity test is added or the golden still has 1.0, the parity test is expected to diverge from C++ by design, and the golden is updated in this PR only for the HHI line, per the parity rule in the plan.
+  - **Parity golden status:** The frozen golden has no HHI line (`git grep -n -i "hhi" parity/` returns nothing), so no golden line changes in this PR.
 
 ## Stress scenarios (`engine.rs`)
 

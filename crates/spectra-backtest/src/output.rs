@@ -807,7 +807,7 @@ fn swaps_json(out: &BacktestOutput) -> Result<Option<Json>> {
             .with("net_coupons", money(coupons));
         if let Some(&(ts, close)) = out.last_quotes.get(id) {
             j = j.with("as_of", Json::integer(ts)).with("price", num(close.to_f64()));
-            if let Some(m) = terms.mark(&curves, ts) {
+            if let Some(m) = terms.mark(&curves, ts)? {
                 j = j
                     .with("npv_per_100", num(100.0 * m.npv))
                     .with("par_rate", num(m.par_rate))

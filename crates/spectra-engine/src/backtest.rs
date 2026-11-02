@@ -2107,7 +2107,7 @@ fn pay_swap_coupons(
     let Some(prev) = prev_ts else { return Ok(()) };
     for &id in setup.instruments.keys() {
         let Some(terms) = setup.swap_terms(id) else { continue };
-        for day in terms.payment_days_between(prev, ts) {
+        for day in terms.payment_days_between(prev, ts)? {
             let held = |book: &Ledger| !book.position(id).qty.is_zero();
             if !held(ledger) && !sleeves.iter().any(held) {
                 continue;

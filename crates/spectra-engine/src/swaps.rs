@@ -237,8 +237,8 @@ impl SwapTerms {
     }
 
     /// The start day of the period ending on `end_day`.
-    fn start_of(&self, end_day: i64) -> Option<i64> {
-        self.schedule().period_around(end_day * DAY_NS).ok().flatten().map(|(s, _)| s)
+    fn start_of(&self, end_day: i64) -> Result<Option<i64>> {
+        Ok(self.schedule().period_around(end_day * DAY_NS)?.map(|(s, _)| s))
     }
 
     /// The floating rate of the period `(start_day, end_day)`, fixed at its
@@ -250,8 +250,11 @@ impl SwapTerms {
     }
 
     /// Payment days strictly after `from_ns` and on or before `to_ns`.
-    pub fn payment_days_between(&self, from_ns: i64, to_ns: i64) -> Vec<i64> {
-        self.schedule().coupon_days_between(from_ns, to_ns).unwrap_or_default()
+    ///
+    /// # Errors
+    /// [`Error::Data`] when the schedule exceeds 2,400 periods.
+    pub fn payment_days_between(&self, from_ns: i64, to_ns: i64) -> Result<Vec<i64>> {
+        self.schedule().coupon_days_between(from_ns, to_ns)
     }
 
     /// The receiver's net coupon per 100 of notional for the period ending
@@ -259,36 +262,43 @@ impl SwapTerms {
     ///
     /// # Errors
     /// [`Error::InvalidArgument`] when the period's fixing is not known.
+    /// [`Error::Data`] when the schedule exceeds 2,400 periods.
     pub fn net_coupon(&self, curves: &CurveHistory, end_day: i64) -> Result<f64> {
-        let fixing = self
-            .start_of(end_day)
-            .and_then(|start| self.fixing(curves, start, end_day))
-            .ok_or_else(|| {
-                Error::InvalidArgument(format!(
-                    "swap on curve {}: no curve known at the start of the period ending on day {end_day}",
-                    self.curve
-                ))
-            })?;
+        let Some(start) = self.start_of(end_day)? else {
+            return Err(Error::InvalidArgument(format!(
+                "swap on curve {}: no curve known at the start of the period ending on day {end_day}",
+                self.curve
+            )));
+        };
+        let Some(fixing) = self.fixing(curves, start, end_day) else {
+            return Err(Error::InvalidArgument(format!(
+                "swap on curve {}: no curve known at the start of the period ending on day {end_day}",
+                self.curve
+            )));
+        };
         Ok(100.0 * (self.fixed_rate - fixing) * self.tau())
     }
 
     /// The mark at `ts_ns`, or `None` before the current period's fixing or
     /// any curve is known, and after maturity. On the maturity date itself
     /// every payment has been made and the mark is 100.
-    pub fn mark(&self, curves: &CurveHistory, ts_ns: i64) -> Option<SwapMark> {
+    ///
+    /// # Errors
+    /// [`Error::Data`] when the schedule exceeds 2,400 periods.
+    pub fn mark(&self, curves: &CurveHistory, ts_ns: i64) -> Result<Option<SwapMark>> {
         let day = ts_ns.div_euclid(DAY_NS);
         let mat = self.maturity_day();
         if day > mat {
-            return None;
+            return Ok(None);
         }
         if day == mat {
-            return Some(SwapMark { price: 100.0, ..SwapMark::default() });
+            return Ok(Some(SwapMark { price: 100.0, ..SwapMark::default() }));
         }
-        let days = self.payment_days_between(ts_ns, self.maturity_ns);
-        let &next = days.first()?;
-        let start = self.start_of(next)?;
-        let fixing = self.fixing(curves, start, next)?;
-        let curve = curves.at(&self.curve, ts_ns)?;
+        let days = self.payment_days_between(ts_ns, self.maturity_ns)?;
+        let Some(&next) = days.first() else { return Ok(None) };
+        let Some(start) = self.start_of(next)? else { return Ok(None) };
+        let Some(fixing) = self.fixing(curves, start, next) else { return Ok(None) };
+        let Some(curve) = curves.at(&self.curve, ts_ns) else { return Ok(None) };
         let tau = self.tau();
         let years = |d: i64| (d * DAY_NS - ts_ns) as f64 / YEAR_NS;
         let value = |c: &Curve| {
@@ -299,13 +309,13 @@ impl SwapTerms {
         let (npv, annuity, float) = value(curve);
         let up = value(&curve.shifted(0.0001)).0;
         let down = value(&curve.shifted(-0.0001)).0;
-        Some(SwapMark {
+        Ok(Some(SwapMark {
             price: 100.0 + 100.0 * npv,
             npv,
             par_rate: if annuity > 0.0 { float / annuity } else { 0.0 },
             fixing,
             dv01: 100.0 * (up - down) / 2.0,
-        })
+        }))
     }
 }
 
@@ -329,7 +339,7 @@ pub fn swap_bars(setup: &InstrumentSetup, bars: &[Bar]) -> Result<Vec<Bar>> {
     let mut out = Vec::new();
     for &ts in &times {
         for (id, terms) in &swaps {
-            let Some(m) = terms.mark(&curves, ts) else { continue };
+            let Some(m) = terms.mark(&curves, ts)? else { continue };
             let px = Price::from_f64(m.price)?;
             if px.raw() <= 0 {
                 return Err(Error::InvalidArgument(format!(
@@ -392,12 +402,12 @@ mod tests {
     #[test]
     fn a_swap_at_inception_near_its_par_rate_is_near_100() {
         let h = history(vec![snap(0, 0.04)]);
-        let m = terms(0.04).mark(&h, 0).unwrap();
+        let m = terms(0.04).mark(&h, 0).unwrap().unwrap();
         // Calendar periods differ slightly from the curve's regular 0.5-year
         // grid, so par is close to, not exactly, the quoted rate.
         assert!((m.par_rate - 0.04).abs() < 2e-4, "{}", m.par_rate);
         assert!((m.price - 100.0).abs() < 0.05, "{}", m.price);
-        let at_par = terms(m.par_rate).mark(&h, 0).unwrap();
+        let at_par = terms(m.par_rate).mark(&h, 0).unwrap().unwrap();
         assert!((at_par.price - 100.0).abs() < 1e-9, "{}", at_par.price);
         // A receiver gains when rates fall: dv01 (per 100) is negative.
         assert!(m.dv01 < 0.0 && m.dv01 > -0.03, "{}", m.dv01);
@@ -407,28 +417,29 @@ mod tests {
     fn a_receiver_gains_when_rates_fall() {
         let h = history(vec![snap(0, 0.04), snap(30, 0.03)]);
         let s = terms(0.04);
-        let before = s.mark(&h, 29 * D).unwrap();
-        let after = s.mark(&h, 30 * D).unwrap();
+        let before = s.mark(&h, 29 * D).unwrap().unwrap();
+        let after = s.mark(&h, 30 * D).unwrap().unwrap();
         assert!(after.price > before.price + 1.0, "{} -> {}", before.price, after.price);
         // The first period's fixing stays what it was at its start.
         assert!((after.fixing - before.fixing).abs() < 1e-15);
     }
 
     #[test]
-    fn net_coupons_and_the_mark_drop_on_payment_dates() {
+    fn net_coupons_and_the_mark_drop_on_payment_dates() -> Result<()> {
         let h = history(vec![snap(0, 0.04)]);
         let s = terms(0.05);
-        let days = s.payment_days_between(0, s.maturity_ns);
+        let days = s.payment_days_between(0, s.maturity_ns)?;
         assert_eq!(days, vec![181, 365, 546, 730]); // Jul 1, Jan 1, Jul 1, Jan 1
         let c = s.net_coupon(&h, 181).unwrap();
         let fixing = s.fixing(&h, 0, 181).unwrap();
         assert!((c - 100.0 * (0.05 - fixing) * 0.5).abs() < 1e-12);
         // Across a payment the mark drops by about the coupon paid.
-        let before = s.mark(&h, 180 * D).unwrap().price;
-        let on = s.mark(&h, 181 * D).unwrap().price;
+        let before = s.mark(&h, 180 * D).unwrap().unwrap().price;
+        let on = s.mark(&h, 181 * D).unwrap().unwrap().price;
         assert!((before - on - c).abs() < 0.01, "{before} {on} {c}");
-        assert_eq!(s.mark(&h, 730 * D).unwrap().price, 100.0);
-        assert!(s.mark(&h, 731 * D).is_none());
+        assert_eq!(s.mark(&h, 730 * D).unwrap().unwrap().price, 100.0);
+        assert!(s.mark(&h, 731 * D).unwrap().is_none());
+        Ok(())
     }
 
     #[test]
@@ -436,7 +447,7 @@ mod tests {
         // The period running Jul 1 1969 - Jan 1 1970 fixed before the first curve.
         let s = SwapTerms { maturity_ns: 365 * D, fixed_rate: 0.04, frequency: 1, curve: "USD".into() };
         let h = history(vec![snap(10, 0.04)]);
-        assert!(s.mark(&h, 20 * D).is_none()); // its period started on day 0, before day 10
+        assert!(s.mark(&h, 20 * D).unwrap().is_none()); // its period started on day 0, before day 10
         assert!(s.net_coupon(&h, 365).is_err());
     }
 
@@ -446,5 +457,30 @@ mod tests {
         assert!(validate_history("USD", &[]).is_err());
         assert!(validate_history("USD", &[one.clone(), one.clone()]).is_err());
         assert!(validate_history(" ", &[one]).is_err());
+    }
+    #[test]
+    fn swap_schedule_exceeding_2400_periods_returns_error_through_payment_path() {
+        // Frequency = 12 (monthly, step = 30 days).
+        // 2,500 periods * 30 days = 75,000 days (~205.5 years).
+        // Walking back 2,400 periods covers only 72,000 days, leaving 3,000 days > issue_date (0).
+        // The guard k > 2,400 triggers Error::Data.
+        let s =
+            SwapTerms { curve: "USD-SOFR".into(), fixed_rate: 0.05, frequency: 12, maturity_ns: 75_000 * D };
+        let err = s.payment_days_between(0, s.maturity_ns).unwrap_err();
+        match err {
+            Error::Data(msg) => {
+                assert!(msg.contains("2400 periods"), "expected 2400 periods in message, got: {msg}");
+            }
+            other => panic!("expected Error::Data for payment_days_between, got: {other:?}"),
+        }
+
+        let h = history(vec![snap(0, 0.04)]);
+        let coupon_err = s.net_coupon(&h, 30).unwrap_err();
+        match coupon_err {
+            Error::Data(msg) => {
+                assert!(msg.contains("2400 periods"), "expected 2400 periods in message, got: {msg}");
+            }
+            other => panic!("expected Error::Data for net_coupon, got: {other:?}"),
+        }
     }
 }

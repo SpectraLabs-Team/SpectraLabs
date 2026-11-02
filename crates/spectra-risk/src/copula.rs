@@ -39,13 +39,47 @@ impl DependenceModel {
     }
 
     pub fn parse(s: &str) -> Result<Self> {
-        match s.to_ascii_lowercase().as_str() {
+        let (name, param) = match s.split_once(':') {
+            Some((m, p)) => (m.trim(), Some(p.trim())),
+            None => (s.trim(), None),
+        };
+        match name.to_ascii_lowercase().as_str() {
             "aggregate" | "single_factor" => Ok(Self::Aggregate),
             "gaussian" | "gaussian_copula" | "copula" => Ok(Self::GaussianCopula),
-            "t_copula" | "student_t" | "t" => Ok(Self::TCopula { degrees_of_freedom: 4 }),
-            "clayton" | "clayton_copula" => Ok(Self::ClaytonCopula { theta: 2.0 }),
+            "t_copula" | "student_t" | "t" => {
+                let Some(p) = param else {
+                    return Err(Error::InvalidArgument(
+                        "t_copula requires degrees_of_freedom parameter (e.g. t_copula:4)".into(),
+                    ));
+                };
+                let dof: u32 = p.parse().map_err(|_| {
+                    Error::InvalidArgument(format!("invalid degrees_of_freedom for t_copula: {p}"))
+                })?;
+                if dof < 1 {
+                    return Err(Error::InvalidArgument(
+                        "degrees_of_freedom must be at least 1".into(),
+                    ));
+                }
+                Ok(Self::TCopula { degrees_of_freedom: dof })
+            }
+            "clayton" | "clayton_copula" => {
+                let Some(p) = param else {
+                    return Err(Error::InvalidArgument(
+                        "clayton requires theta parameter (e.g. clayton:2.0)".into(),
+                    ));
+                };
+                let theta: f64 = p.parse().map_err(|_| {
+                    Error::InvalidArgument(format!("invalid theta for clayton: {p}"))
+                })?;
+                if !(theta >= 0.1 && theta.is_finite()) {
+                    return Err(Error::InvalidArgument(
+                        "theta must be at least 0.1".into(),
+                    ));
+                }
+                Ok(Self::ClaytonCopula { theta })
+            }
             _ => Err(Error::InvalidArgument(format!(
-                "Unknown dependence model: {s} (use aggregate, gaussian_copula, t_copula, or clayton_copula)"
+                "Unknown dependence model: {s} (use aggregate, gaussian_copula, t_copula:<dof>, or clayton_copula:<theta>)"
             ))),
         }
     }
@@ -121,12 +155,10 @@ pub fn simulate_correlated(
             )));
         }
         cholesky(corr)?
+    } else if n_assets > 1 {
+        return Err(Error::Data("missing correlation matrix for multi-asset copula simulation".into()));
     } else {
-        let mut id = vec![vec![0.0; n_assets]; n_assets];
-        for i in 0..n_assets {
-            id[i][i] = 1.0;
-        }
-        id
+        vec![vec![1.0]]
     };
 
     let mut rng = Mt19937_64::new(seed);
@@ -136,13 +168,18 @@ pub fn simulate_correlated(
     let mut portfolio_losses = vec![0.0; n_paths];
     let mut asset_losses = vec![vec![0.0; n_paths]; n_assets];
 
-    let default_vol = crate::engine::DEFAULT_VOLATILITY;
     let mut drift_terms = Vec::with_capacity(n_assets);
     let mut diffusions = Vec::with_capacity(n_assets);
     let mut initial_values = Vec::with_capacity(n_assets);
 
     for asset in assets {
-        let vol = if asset.volatility > 0.0 { asset.volatility } else { default_vol };
+        if asset.volatility <= 0.0 || !asset.volatility.is_finite() {
+            return Err(Error::Data(format!(
+                "asset {} has non-positive or non-finite volatility ({})",
+                asset.symbol, asset.volatility
+            )));
+        }
+        let vol = asset.volatility;
         let drift = 0.0;
         let drift_term = (drift - 0.5 * vol * vol) * horizon_years;
         let diffusion = vol * horizon_years.sqrt();

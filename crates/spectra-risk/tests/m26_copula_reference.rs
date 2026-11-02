@@ -259,10 +259,11 @@ fn test_dof_floor_silent_default() {
     let mut p = Portfolio::new();
     p.add_asset_with_volatility("ASSET_A", 10.0, 100.0, 0.20)
         .add_asset_with_volatility("ASSET_B", 10.0, 100.0, 0.20);
+    let identity = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
 
     let res_dof0 = simulate_correlated(
         &p,
-        None,
+        Some(&identity),
         DependenceModel::TCopula { degrees_of_freedom: 0 },
         1_000,
         42,
@@ -273,7 +274,7 @@ fn test_dof_floor_silent_default() {
 
     let res_dof1 = simulate_correlated(
         &p,
-        None,
+        Some(&identity),
         DependenceModel::TCopula { degrees_of_freedom: 1 },
         1_000,
         42,
@@ -284,7 +285,7 @@ fn test_dof_floor_silent_default() {
 
     let res_dof2 = simulate_correlated(
         &p,
-        None,
+        Some(&identity),
         DependenceModel::TCopula { degrees_of_freedom: 2 },
         1_000,
         42,
@@ -310,10 +311,11 @@ fn test_theta_floor_silent_default() {
     let mut p = Portfolio::new();
     p.add_asset_with_volatility("ASSET_A", 10.0, 100.0, 0.20)
         .add_asset_with_volatility("ASSET_B", 10.0, 100.0, 0.20);
+    let identity = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
 
     let res_th0 = simulate_correlated(
         &p,
-        None,
+        Some(&identity),
         DependenceModel::ClaytonCopula { theta: 0.0 },
         1_000,
         42,
@@ -324,7 +326,7 @@ fn test_theta_floor_silent_default() {
 
     let res_th0_1 = simulate_correlated(
         &p,
-        None,
+        Some(&identity),
         DependenceModel::ClaytonCopula { theta: 0.1 },
         1_000,
         42,
@@ -335,7 +337,7 @@ fn test_theta_floor_silent_default() {
 
     let res_th0_5 = simulate_correlated(
         &p,
-        None,
+        Some(&identity),
         DependenceModel::ClaytonCopula { theta: 0.5 },
         1_000,
         42,
@@ -357,19 +359,36 @@ fn test_theta_floor_silent_default() {
 
 #[test]
 fn test_identity_correlation_fallback_when_none() {
-    // finding for Task 7/8: None correlation silently falls back to identity matrix (uncorrelated assets).
-    // In copula.rs lines 124-130: when correlation is None, generates an n_assets x n_assets identity matrix.
+    // Task 7: Missing correlation matrix for multi-asset must return Error::Data,
+    // not silently fall back to identity matrix.
     let mut p = Portfolio::new();
     p.add_asset_with_volatility("ASSET_A", 10.0, 100.0, 0.20)
         .add_asset_with_volatility("ASSET_B", 10.0, 100.0, 0.30);
 
-    let identity = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
-    let correlated = vec![vec![1.0, 0.80], vec![0.80, 1.0]];
-
-    let res_none =
+    let err_multi =
         simulate_correlated(&p, None, DependenceModel::GaussianCopula, 1_000, 42, 1.0 / 252.0, 0.99)
-            .expect("Simulation with None correlation failed");
+            .unwrap_err();
+    match err_multi {
+        spectra_core::Error::Data(msg) => {
+            assert!(
+                msg.contains("missing correlation matrix for multi-asset copula simulation"),
+                "unexpected error message: {msg}"
+            );
+        }
+        other => panic!("expected Error::Data, got {other:?}"),
+    }
 
+    // Single-asset with no correlation is valid (dimension 1).
+    let mut p_single = Portfolio::new();
+    p_single.add_asset_with_volatility("ASSET_A", 10.0, 100.0, 0.20);
+    assert!(
+        simulate_correlated(&p_single, None, DependenceModel::GaussianCopula, 1_000, 42, 1.0 / 252.0, 0.99)
+            .is_ok(),
+        "Single asset simulation with None correlation should succeed"
+    );
+
+    // Multi-asset with explicit identity correlation matrix succeeds.
+    let identity = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
     let res_id = simulate_correlated(
         &p,
         Some(&identity),
@@ -379,86 +398,92 @@ fn test_identity_correlation_fallback_when_none() {
         1.0 / 252.0,
         0.99,
     )
-    .expect("Simulation with identity correlation failed");
+    .expect("Simulation with explicit identity correlation failed");
+    assert!(!res_id.portfolio_losses.is_empty());
+}
 
-    let res_corr = simulate_correlated(
-        &p,
-        Some(&correlated),
+#[test]
+fn test_default_volatility_fallback_when_nonpositive() {
+    // Task 7: Non-positive or non-finite asset volatility must return Error::Data,
+    // not silently fall back to DEFAULT_VOLATILITY (0.20).
+    let mut p_zero = Portfolio::new();
+    p_zero
+        .add_asset_with_volatility("ASSET_A", 10.0, 100.0, 0.20)
+        .add_asset_with_volatility("ASSET_B", 10.0, 100.0, 0.0);
+
+    let identity = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+    let err_zero = simulate_correlated(
+        &p_zero,
+        Some(&identity),
         DependenceModel::GaussianCopula,
         1_000,
         42,
         1.0 / 252.0,
         0.99,
     )
-    .expect("Simulation with correlated matrix failed");
+    .unwrap_err();
 
-    assert_eq!(
-        res_none.portfolio_losses, res_id.portfolio_losses,
-        "Passing correlation: None must produce identical losses to explicit identity matrix"
-    );
-    assert_ne!(
-        res_none.portfolio_losses, res_corr.portfolio_losses,
-        "Uncorrelated fallback must produce distinct losses from correlated simulation"
-    );
-}
+    match err_zero {
+        spectra_core::Error::Data(msg) => {
+            assert!(
+                msg.contains("has non-positive or non-finite volatility"),
+                "unexpected error message: {msg}"
+            );
+        }
+        other => panic!("expected Error::Data, got {other:?}"),
+    }
 
-#[test]
-fn test_default_volatility_fallback_when_nonpositive() {
-    // finding for Task 7/8: asset volatility <= 0.0 silently falls back to DEFAULT_VOLATILITY (0.20).
-    // In copula.rs line 145 and engine.rs line 158:
-    //   let vol = if asset.volatility > 0.0 { asset.volatility } else { default_vol };
-    // Portfolio::validate() requires volatility >= 0.0, so valid inputs with volatility 0.0
-    // (such as default unpopulated assets via Portfolio::add_asset) silently use 0.20 instead of erroring.
-    let mut p_zero = Portfolio::new();
-    p_zero.add_asset("ASSET_A", 10.0, 100.0).add_asset_with_volatility("ASSET_B", 10.0, 100.0, 0.0);
-
+    // Explicit valid volatility succeeds.
     let mut p_explicit = Portfolio::new();
     p_explicit
         .add_asset_with_volatility("ASSET_A", 10.0, 100.0, DEFAULT_VOLATILITY)
         .add_asset_with_volatility("ASSET_B", 10.0, 100.0, DEFAULT_VOLATILITY);
 
-    let res_zero =
-        simulate_correlated(&p_zero, None, DependenceModel::GaussianCopula, 1_000, 42, 1.0 / 252.0, 0.99)
-            .expect("Simulation with zero volatility failed");
-
-    let res_explicit =
-        simulate_correlated(&p_explicit, None, DependenceModel::GaussianCopula, 1_000, 42, 1.0 / 252.0, 0.99)
-            .expect("Simulation with explicit DEFAULT_VOLATILITY failed");
-
-    assert_eq!(
-        res_zero.portfolio_losses, res_explicit.portfolio_losses,
-        "Volatility 0.0 must silently fall back to DEFAULT_VOLATILITY (0.20)"
-    );
-    assert!(
-        res_zero.portfolio_losses.iter().any(|&l| l.abs() > 1e-4),
-        "Simulated losses with DEFAULT_VOLATILITY fallback must be non-zero"
-    );
+    let res_explicit = simulate_correlated(
+        &p_explicit,
+        Some(&identity),
+        DependenceModel::GaussianCopula,
+        1_000,
+        42,
+        1.0 / 252.0,
+        0.99,
+    )
+    .expect("Simulation with explicit DEFAULT_VOLATILITY failed");
+    assert!(!res_explicit.portfolio_losses.is_empty());
 }
 
 #[test]
 fn test_parser_defaults_in_dependence_model_parse() {
-    // finding for Task 7/8: DependenceModel::parse() hardcodes silent defaults:
-    // "t_copula" -> dof 4, "clayton" -> theta 2.0.
+    // Task 7: DependenceModel::parse() requires explicit parameters instead of hardcoded silent defaults:
+    // "t_copula" without parameter returns Error::InvalidArgument, "t_copula:4" returns dof 4.
+    // "clayton" without parameter returns Error::InvalidArgument, "clayton:2.0" returns theta 2.0.
+    assert!(DependenceModel::parse("t_copula").is_err());
+    assert!(DependenceModel::parse("student_t").is_err());
+    assert!(DependenceModel::parse("t").is_err());
+    assert!(DependenceModel::parse("t_copula:0").is_err());
+
     assert_eq!(
-        DependenceModel::parse("t_copula").expect("parse t_copula"),
+        DependenceModel::parse("t_copula:4").expect("parse t_copula:4"),
         DependenceModel::TCopula { degrees_of_freedom: 4 }
     );
     assert_eq!(
-        DependenceModel::parse("student_t").expect("parse student_t"),
-        DependenceModel::TCopula { degrees_of_freedom: 4 }
+        DependenceModel::parse("student_t:8").expect("parse student_t:8"),
+        DependenceModel::TCopula { degrees_of_freedom: 8 }
     );
+
+    assert!(DependenceModel::parse("clayton").is_err());
+    assert!(DependenceModel::parse("clayton_copula").is_err());
+    assert!(DependenceModel::parse("clayton:0.0").is_err());
+
     assert_eq!(
-        DependenceModel::parse("t").expect("parse t"),
-        DependenceModel::TCopula { degrees_of_freedom: 4 }
-    );
-    assert_eq!(
-        DependenceModel::parse("clayton").expect("parse clayton"),
+        DependenceModel::parse("clayton:2.0").expect("parse clayton:2.0"),
         DependenceModel::ClaytonCopula { theta: 2.0 }
     );
     assert_eq!(
-        DependenceModel::parse("clayton_copula").expect("parse clayton_copula"),
-        DependenceModel::ClaytonCopula { theta: 2.0 }
+        DependenceModel::parse("clayton_copula:1.5").expect("parse clayton_copula:1.5"),
+        DependenceModel::ClaytonCopula { theta: 1.5 }
     );
+
     assert_eq!(DependenceModel::parse("gaussian").expect("parse gaussian"), DependenceModel::GaussianCopula);
     assert_eq!(DependenceModel::parse("aggregate").expect("parse aggregate"), DependenceModel::Aggregate);
 }
@@ -480,8 +505,15 @@ fn test_enforcement_var_pct_hardcodes_t_copula_dof_4() {
     };
 
     let var_default = snap.var_pct();
-    let var_t4 = snap.var_pct_with_model(DependenceModel::TCopula { degrees_of_freedom: 4 });
-    let var_gauss = snap.var_pct_with_model(DependenceModel::GaussianCopula);
+    let var_t4 = snap.var_pct_with_model(DependenceModel::TCopula { degrees_of_freedom: 4 }).unwrap();
+    let var_gauss = snap.var_pct_with_model(DependenceModel::GaussianCopula).unwrap();
+
+    // Verify explicit-dof result matches pre-change baseline:
+    let expected_baseline = 0.009_010_267_051_396_0;
+    assert!(
+        (var_t4 - expected_baseline).abs() < 1e-10,
+        "explicit dof result {var_t4} must match pre-change baseline {expected_baseline}"
+    );
 
     assert!(
         (var_default - var_t4).abs() < 1e-12,
@@ -490,5 +522,11 @@ fn test_enforcement_var_pct_hardcodes_t_copula_dof_4() {
     assert_ne!(
         var_default, var_gauss,
         "var_pct under TCopula(4) must produce distinct VaR from Gaussian copula ({var_gauss})"
+    );
+
+    // TCopula with degrees_of_freedom == 0 returns Error::InvalidArgument
+    assert!(
+        snap.var_pct_with_model(DependenceModel::TCopula { degrees_of_freedom: 0 }).is_err(),
+        "TCopula with dof 0 must return an error"
     );
 }

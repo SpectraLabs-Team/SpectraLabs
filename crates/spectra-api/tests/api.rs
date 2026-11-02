@@ -747,8 +747,20 @@ async fn m7_backtest_endpoint() {
 
 #[tokio::test]
 async fn m7_correlated_copula_risk() {
-    let body = Json::object()
+    let multi_body = Json::object()
         .with("portfolio_csv", Json::string(SAMPLE_PORTFOLIO))
+        .with("metric", Json::string("var"))
+        .with("confidence", Json::number(0.99).unwrap())
+        .with("simulations", Json::integer(5_000))
+        .with("dependence", Json::string("gaussian_copula"));
+
+    let (status, j) = call(post("/api/v1/risk", &multi_body)).await;
+    assert_eq!(status, 422, "{}", j.dump());
+    assert!(j.dump().contains("missing correlation matrix for multi-asset copula simulation"));
+
+    let single_csv = "symbol,quantity,price,volatility\nAAPL,1000,190.00,0.20\n";
+    let body = Json::object()
+        .with("portfolio_csv", Json::string(single_csv))
         .with("metric", Json::string("var"))
         .with("confidence", Json::number(0.99).unwrap())
         .with("simulations", Json::integer(5_000))
@@ -861,8 +873,9 @@ async fn m7_advanced_backtest_with_fz_and_jb() {
 
 #[tokio::test]
 async fn m7_advanced_clayton_copula_risk() {
+    let single_csv = "symbol,quantity,price,volatility\nAAPL,1000,190.00,0.20\n";
     let body = Json::object()
-        .with("portfolio_csv", Json::string(SAMPLE_PORTFOLIO))
+        .with("portfolio_csv", Json::string(single_csv))
         .with("metric", Json::string("var"))
         .with("confidence", Json::number(0.99).unwrap())
         .with("simulations", Json::integer(5_000))

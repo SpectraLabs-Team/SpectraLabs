@@ -4,6 +4,8 @@
 
 use std::collections::HashMap;
 
+use spectra_core::{Error, Result};
+
 /// Configurable limits for risk enforcement.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RiskLimits {
@@ -139,34 +141,60 @@ impl PortfolioSnapshot {
     }
 
     /// Parametric or correlated copula 1-day 99% VaR approximation based on portfolio holdings.
+    /// Uses Student-t copula with 4 degrees of freedom.
     pub fn var_pct(&self) -> f64 {
         self.var_pct_with_model(crate::copula::DependenceModel::TCopula { degrees_of_freedom: 4 })
+            .unwrap_or(0.0)
     }
 
     /// Calculates 1-day 99% VaR as a fraction of equity under a specific dependence model.
-    pub fn var_pct_with_model(&self, model: crate::copula::DependenceModel) -> f64 {
+    pub fn var_pct_with_model(&self, model: crate::copula::DependenceModel) -> Result<f64> {
         if self.equity <= 0.0 || self.positions.is_empty() {
-            return 0.0;
+            return Ok(0.0);
+        }
+
+        if let crate::copula::DependenceModel::TCopula { degrees_of_freedom } = model {
+            if degrees_of_freedom == 0 {
+                return Err(Error::InvalidArgument(
+                    "t_copula requires degrees_of_freedom parameter (must be >= 1)".into(),
+                ));
+            }
         }
 
         let mut p = crate::portfolio::Portfolio::new();
         for (sym, pos) in &self.positions {
             if pos.qty.abs() > 1e-8 && pos.price > 0.0 {
-                p.add_asset(sym.as_str(), pos.qty, pos.price);
+                p.add_asset_with_volatility(
+                    sym.as_str(),
+                    pos.qty,
+                    pos.price,
+                    crate::engine::DEFAULT_VOLATILITY,
+                );
             }
         }
 
-        if p.assets().is_empty() {
-            return 0.0;
+        let n = p.assets().len();
+        if n == 0 {
+            return Ok(0.0);
         }
 
+        let id = if n > 1 {
+            let mut m = vec![vec![0.0; n]; n];
+            for i in 0..n {
+                m[i][i] = 1.0;
+            }
+            Some(m)
+        } else {
+            None
+        };
+
         // Run 2,000 simulations on 1-day horizon (1/252) at 99% confidence
-        match crate::copula::simulate_correlated(&p, None, model, 2_000, 42, 1.0 / 252.0, 0.99) {
+        match crate::copula::simulate_correlated(&p, id.as_deref(), model, 2_000, 42, 1.0 / 252.0, 0.99) {
             Ok(sim) => match crate::metrics::value_at_risk(&sim.portfolio_losses, 0.99) {
-                Ok(var_dollars) => var_dollars.max(0.0) / self.equity,
-                Err(_) => (self.leverage() * 0.0165 * 2.33).max(0.0),
+                Ok(var_dollars) => Ok(var_dollars.max(0.0) / self.equity),
+                Err(_) => Ok((self.leverage() * 0.0165 * 2.33).max(0.0)),
             },
-            Err(_) => (self.leverage() * 0.0165 * 2.33).max(0.0),
+            Err(_) => Ok((self.leverage() * 0.0165 * 2.33).max(0.0)),
         }
     }
 }

@@ -99,3 +99,17 @@ fn positive_interest_is_reported_as_interest_income() {
     close(with_interest.costs.financing_interest, 0.0, "financing interest");
     close(with_interest.total_net_pnl, baseline.total_net_pnl, "total net P&L unchanged");
 }
+
+#[test]
+fn attribution_requires_slippage_when_fills_present() {
+    let err = compute_pnl_attribution(&scenario(), None, None).unwrap_err();
+    match err {
+        spectra_core::Error::InvalidArgument(msg) => {
+            assert!(
+                msg.contains("attribution requires slippage for each fill"),
+                "unexpected error message: {msg}"
+            );
+        }
+        other => panic!("expected InvalidArgument, got {other:?}"),
+    }
+}

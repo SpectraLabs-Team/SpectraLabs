@@ -366,7 +366,15 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
         .with("exposure", exposure_json(r))
         .with("activity", activity)
         .with("trades", trades)
-        .with("attribution", compute_pnl_attribution(&r.ledger, Some(&out.symbols), None)?.to_json())
+        .with(
+            "attribution",
+            compute_pnl_attribution(
+                &r.ledger,
+                Some(&out.symbols),
+                Some(out.request.config.costs.slippage.to_f64()),
+            )?
+            .to_json(),
+        )
         .with("instruments", instruments_json(out)?)
         .with("benchmark", benchmark_json(out)?);
     let summary = match futures_json(out)? {

@@ -18,6 +18,56 @@ fn synthetic_returns() -> Vec<f64> {
         .collect()
 }
 
+fn synthetic_3state_returns() -> Vec<f64> {
+    let mut rng_state = 123_456_789_u64;
+    let mut next_u01 = || -> f64 {
+        rng_state = rng_state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        (rng_state >> 33) as f64 / 2_147_483_648.0
+    };
+    let mut transitions_series = Vec::with_capacity(300);
+    let mut cur_state = 0;
+    for _ in 0..300 {
+        let u = next_u01();
+        cur_state = match cur_state {
+            0 => {
+                if u < 0.7 {
+                    0
+                } else if u < 0.9 {
+                    1
+                } else {
+                    2
+                }
+            }
+            1 => {
+                if u < 0.15 {
+                    0
+                } else if u < 0.85 {
+                    1
+                } else {
+                    2
+                }
+            }
+            _ => {
+                if u < 0.1 {
+                    0
+                } else if u < 0.3 {
+                    1
+                } else {
+                    2
+                }
+            }
+        };
+        let noise = (next_u01() - 0.5) * 0.001;
+        let val = match cur_state {
+            0 => 0.001 + noise,
+            1 => -0.0005 + noise * 3.0,
+            _ => -0.005 + noise * 10.0,
+        };
+        transitions_series.push(val);
+    }
+    transitions_series
+}
+
 // Property-based test for the two-state model
 #[test]
 fn two_state_fit_properties() -> Result<(), Error> {
@@ -45,17 +95,14 @@ fn two_state_fit_properties() -> Result<(), Error> {
 // Property-based test for the three-state model
 #[test]
 fn three_state_fit_properties() -> Result<(), Error> {
-    let returns = synthetic_returns();
+    let returns = synthetic_3state_returns();
     let model = Regime3State::fit(&returns)?;
-    // transition rows sum to 1 within 1e-12.
-    // documents current behaviour: clamp is applied before row normalisation, so normalised entries can fall below 0.01; finding for Task 7/8 (separate PR).
-    let min_allowed = 0.01 / 1.97;
-    let max_allowed = 0.98 / 1.0;
+    // transition rows sum to 1 within 1e-12 and all normalised entries within [0.01, 0.98]
     for row in &model.transitions {
         let row_sum: f64 = row.iter().copied().sum();
         assert!((row_sum - 1.0).abs() < 1e-12);
         for &p in row {
-            assert!((min_allowed..=max_allowed).contains(&p), "transition entry out of bounds: {p}");
+            assert!((0.01..=0.98).contains(&p), "transition entry out of bounds: {p}");
         }
     }
     // sigmas positive for all three states
@@ -95,29 +142,29 @@ fn two_state_characterisation() -> Result<(), Error> {
 // characterisation of current Rust output, not an independent reference; the Python reference does not reproduce it.
 #[test]
 fn three_state_characterisation() -> Result<(), Error> {
-    let returns = synthetic_returns();
+    let returns = synthetic_3state_returns();
     let model = Regime3State::fit(&returns)?;
     // Values from a clean run (tolerance 1e-9)
-    assert!((model.state_0.mu_daily + 0.000_777_522_346_828_25).abs() < TOL);
-    assert!((model.state_0.sigma_daily - 0.000_152_860_640_867_193).abs() < TOL);
-    assert!((model.state_1.mu_daily - 0.000_849_660_292_936_041).abs() < TOL);
-    assert!((model.state_1.sigma_daily - 0.000_164_964_225_387_449).abs() < TOL);
-    assert!((model.state_2.mu_daily - 0.000_046_152_343_005_929_8).abs() < TOL);
-    assert!((model.state_2.sigma_daily - 0.000_304_293_110_511_612).abs() < TOL);
+    assert!((model.state_0.mu_daily - 0.000_445_552_853_191_599).abs() < TOL);
+    assert!((model.state_0.sigma_daily - 0.000_882_121_307_649_567).abs() < TOL);
+    assert!((model.state_1.mu_daily + 0.006_576_719_172_874_858).abs() < TOL);
+    assert!((model.state_1.sigma_daily - 0.002_181_632_255_174_091).abs() < TOL);
+    assert!((model.state_2.mu_daily + 0.003_399_730_772_805_249).abs() < TOL);
+    assert!((model.state_2.sigma_daily - 0.002_766_703_876_852_641).abs() < TOL);
     // transition matrix entries
-    assert!((model.transitions[0][0] - 0.901_998_930_975_35).abs() < TOL);
-    assert!((model.transitions[0][1] - 0.088_100_078_925_601_87).abs() < TOL);
-    assert!((model.transitions[0][2] - 0.009_900_990_099_048_11).abs() < TOL);
-    assert!((model.transitions[1][0] - 0.115_703_874_586_512_28).abs() < TOL);
-    assert!((model.transitions[1][1] - 0.797_547_653_883_178_5).abs() < TOL);
-    assert!((model.transitions[1][2] - 0.086_748_471_530_309_19).abs() < TOL);
-    assert!((model.transitions[2][0] - 0.009_900_990_099_041_51).abs() < TOL);
-    assert!((model.transitions[2][1] - 0.097_443_738_904_843_17).abs() < TOL);
-    assert!((model.transitions[2][2] - 0.892_655_270_996_115_3).abs() < TOL);
+    assert!((model.transitions[0][0] - 0.905_871_661_402_667_6).abs() < TOL);
+    assert!((model.transitions[0][1] - 0.018_372_360_743_176_74).abs() < TOL);
+    assert!((model.transitions[0][2] - 0.075_755_977_854_155_57).abs() < TOL);
+    assert!((model.transitions[1][0] - 0.238_035_193_023_473_04).abs() < TOL);
+    assert!((model.transitions[1][1] - 0.606_859_618_987_887).abs() < TOL);
+    assert!((model.transitions[1][2] - 0.155_105_187_988_639_92).abs() < TOL);
+    assert!((model.transitions[2][0] - 0.057_167_355_963_997_49).abs() < TOL);
+    assert!((model.transitions[2][1] - 0.452_618_945_405_069_75).abs() < TOL);
+    assert!((model.transitions[2][2] - 0.490_213_698_630_932_84).abs() < TOL);
     // initial probabilities
     assert!((model.initial_probs[0] - 0.0).abs() < TOL);
-    assert!((model.initial_probs[1] - 1.0).abs() < TOL);
-    assert!((model.initial_probs[2] - 0.0).abs() < TOL);
+    assert!((model.initial_probs[1] - 0.000_000_000_000_784_171).abs() < TOL);
+    assert!((model.initial_probs[2] - 0.999_999_999_999_215_8).abs() < TOL);
     Ok(())
 }
 
@@ -181,4 +228,30 @@ fn fit_observations_check() {
     let short = vec![0.0; 29];
     let err = RegimeModel::fit(&short).unwrap_err();
     assert!(matches!(err, Error::InvalidArgument(_)));
+}
+
+#[test]
+fn two_state_fit_drives_transition_to_clamp_returns_error() {
+    // Two blocks of 50 constant observations with large separation drive transition to 0.999 clamp
+    let mut series = vec![0.001; 50];
+    series.extend(vec![0.05; 50]);
+    let err = RegimeModel::fit(&series).unwrap_err();
+    assert_eq!(err, Error::Data("regime transition probability hit clamp 0.999; fit is degenerate".into()));
+
+    // 95 observations of 0.001 and 5 rare outliers drive transition to 0.001 clamp
+    let mut series_outlier = vec![0.001; 95];
+    series_outlier.extend(vec![0.1; 5]);
+    let err_outlier = RegimeModel::fit(&series_outlier).unwrap_err();
+    assert_eq!(
+        err_outlier,
+        Error::Data("regime transition probability hit clamp 0.001; fit is degenerate".into())
+    );
+}
+
+#[test]
+fn three_state_fit_synthetic_returns_hits_clamp() {
+    // synthetic_returns() has only 1 harmonic component, driving 3-state transition [0][2] to clamp 0.01
+    let returns = synthetic_returns();
+    let err = Regime3State::fit(&returns).unwrap_err();
+    assert_eq!(err, Error::Data("regime transition probability hit clamp 0.01; fit is degenerate".into()));
 }

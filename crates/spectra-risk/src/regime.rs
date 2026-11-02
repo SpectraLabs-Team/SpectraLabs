@@ -154,11 +154,23 @@ impl RegimeModel {
 
             for i in 0..2 {
                 let d = trans_den[i].max(1e-12);
-                trans[i][0] = (trans_num[i][0] / d).clamp(0.001, 0.999);
-                trans[i][1] = (trans_num[i][1] / d).clamp(0.001, 0.999);
-                let row_sum = trans[i][0] + trans[i][1];
-                trans[i][0] /= row_sum;
-                trans[i][1] /= row_sum;
+                let p0 = trans_num[i][0] / d;
+                let p1 = trans_num[i][1] / d;
+                for p in [p0, p1] {
+                    if p < 0.001 {
+                        return Err(Error::Data(
+                            "regime transition probability hit clamp 0.001; fit is degenerate".into(),
+                        ));
+                    }
+                    if p > 0.999 {
+                        return Err(Error::Data(
+                            "regime transition probability hit clamp 0.999; fit is degenerate".into(),
+                        ));
+                    }
+                }
+                let row_sum = p0 + p1;
+                trans[i][0] = p0 / row_sum;
+                trans[i][1] = p1 / row_sum;
             }
 
             for k in 0..2 {
@@ -445,11 +457,21 @@ impl Regime3State {
                 }
                 if denom > 1e-12 {
                     for j in 0..3 {
-                        a[i][j] = (num[j] / denom).clamp(0.01, 0.98);
+                        a[i][j] = num[j] / denom;
                     }
                     let row_sum: f64 = a[i].iter().sum();
                     for j in 0..3 {
                         a[i][j] /= row_sum;
+                        if a[i][j] < 0.01 {
+                            return Err(Error::Data(
+                                "regime transition probability hit clamp 0.01; fit is degenerate".into(),
+                            ));
+                        }
+                        if a[i][j] > 0.98 {
+                            return Err(Error::Data(
+                                "regime transition probability hit clamp 0.98; fit is degenerate".into(),
+                            ));
+                        }
                     }
                 }
             }
@@ -830,12 +852,22 @@ mod tests {
         let mut returns = Vec::with_capacity(50);
         let mut expected = Vec::with_capacity(50);
 
-        for i in 0..25 {
+        for i in 0..15 {
             let r = 0.0005 + 0.004 * ((i as f64 * 1.7).sin());
             returns.push(r);
             expected.push(MarketRegime::LowVolatility);
         }
-        for i in 25..50 {
+        for i in 15..30 {
+            let r = -0.002 + 0.035 * ((i as f64 * 1.9).sin());
+            returns.push(r);
+            expected.push(MarketRegime::HighVolatility);
+        }
+        for i in 30..40 {
+            let r = 0.0005 + 0.004 * ((i as f64 * 1.7).sin());
+            returns.push(r);
+            expected.push(MarketRegime::LowVolatility);
+        }
+        for i in 40..50 {
             let r = -0.002 + 0.035 * ((i as f64 * 1.9).sin());
             returns.push(r);
             expected.push(MarketRegime::HighVolatility);
@@ -859,10 +891,16 @@ mod tests {
     #[test]
     fn test_regime_conditional_var_higher_in_turbulent_state() {
         let mut returns = Vec::with_capacity(60);
-        for i in 0..30 {
+        for i in 0..15 {
             returns.push(0.0008 + 0.005 * ((i as f64 * 0.8).cos()));
         }
-        for i in 30..60 {
+        for i in 15..30 {
+            returns.push(-0.003 + 0.030 * ((i as f64 * 1.1).cos()));
+        }
+        for i in 30..45 {
+            returns.push(0.0008 + 0.005 * ((i as f64 * 0.8).cos()));
+        }
+        for i in 45..60 {
             returns.push(-0.003 + 0.030 * ((i as f64 * 1.1).cos()));
         }
 
@@ -883,19 +921,51 @@ mod tests {
 
     #[test]
     fn test_regime_3_state_monotonic_volatility_ordering() {
-        let mut returns = Vec::with_capacity(90);
-        let pi2 = 2.0 * std::f64::consts::PI;
-        // Bull: low vol
-        for i in 0..30 {
-            returns.push(0.0008 + 0.004 * ((i as f64 * pi2 / 10.0).sin()));
-        }
-        // Neutral: med vol
-        for i in 30..60 {
-            returns.push(0.0001 + 0.012 * ((i as f64 * pi2 / 10.0).sin()));
-        }
-        // Crisis: high vol
-        for i in 60..90 {
-            returns.push(-0.002 + 0.035 * ((i as f64 * pi2 / 10.0).sin()));
+        let mut rng_state = 123_456_789_u64;
+        let mut next_u01 = || -> f64 {
+            rng_state = rng_state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            (rng_state >> 33) as f64 / 2_147_483_648.0
+        };
+        let mut returns = Vec::with_capacity(300);
+        let mut cur_state = 0;
+        for _ in 0..300 {
+            let u = next_u01();
+            cur_state = match cur_state {
+                0 => {
+                    if u < 0.7 {
+                        0
+                    } else if u < 0.9 {
+                        1
+                    } else {
+                        2
+                    }
+                }
+                1 => {
+                    if u < 0.15 {
+                        0
+                    } else if u < 0.85 {
+                        1
+                    } else {
+                        2
+                    }
+                }
+                _ => {
+                    if u < 0.1 {
+                        0
+                    } else if u < 0.3 {
+                        1
+                    } else {
+                        2
+                    }
+                }
+            };
+            let noise = (next_u01() - 0.5) * 0.001;
+            let val = match cur_state {
+                0 => 0.001 + noise,
+                1 => -0.0005 + noise * 3.0,
+                _ => -0.005 + noise * 10.0,
+            };
+            returns.push(val);
         }
 
         let model = Regime3State::fit(&returns).unwrap();
@@ -907,7 +977,7 @@ mod tests {
         assert!(cur > 0.0);
 
         let decoded = model.decode_viterbi(&returns);
-        assert_eq!(decoded.len(), 90);
+        assert_eq!(decoded.len(), 300);
     }
 
     #[test]

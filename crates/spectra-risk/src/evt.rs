@@ -27,6 +27,8 @@ pub struct EvtTailModel {
 
 impl EvtTailModel {
     /// Fit a GPD to the upper tail of `losses` using Peaks-Over-Threshold (POT).
+    ///
+    /// Callers must check the GoF flag; not enforced here (see Task 8 findings).
     pub fn fit(losses: &[f64], threshold_quantile: f64) -> Result<Self> {
         let n = losses.len();
         if n < 50 {
@@ -62,7 +64,7 @@ impl EvtTailModel {
         let a_1 = a_1_sum / n_u as f64;
 
         let denom = a_0 - 2.0 * a_1;
-        let (mut xi, mut beta) = if denom.abs() > 1e-9 {
+        let (xi, beta) = if denom.abs() > 1e-9 {
             let xi_est = 2.0 - a_0 / denom;
             let beta_est = (2.0 * a_0 * a_1) / denom;
             (xi_est, beta_est)
@@ -71,10 +73,10 @@ impl EvtTailModel {
         };
 
         if beta <= 0.0 {
-            beta = a_0.max(1e-6);
-            xi = 0.0;
-        } else {
-            xi = xi.clamp(-0.5, 0.9);
+            return Err(Error::Data("EVT scale must be positive".into()));
+        }
+        if !(-0.5..=0.9).contains(&xi) {
+            return Err(Error::Data(format!("EVT shape {xi} outside the supported range [-0.5, 0.9]")));
         }
 
         let mut ks_stat = 0.0f64;
@@ -117,12 +119,17 @@ impl EvtTailModel {
     }
 
     /// Calculate EVT Expected Shortfall (CVaR) at confidence level `p`.
-    pub fn cvar(&self, p: f64) -> f64 {
-        let var_val = self.var(p);
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Data`] if the tail shape parameter $\xi \ge 1$, where the expected
+    /// shortfall is mathematically undefined (infinite mean).
+    pub fn cvar(&self, p: f64) -> Result<f64> {
         if self.xi >= 1.0 {
-            return var_val;
+            return Err(Error::Data("EVT CVaR undefined for shape >= 1".into()));
         }
-        (var_val + self.beta - self.xi * self.threshold) / (1.0 - self.xi)
+        let var_val = self.var(p);
+        Ok((var_val + self.beta - self.xi * self.threshold) / (1.0 - self.xi))
     }
 }
 
@@ -151,7 +158,7 @@ mod tests {
         );
 
         let var99 = model.var(0.99);
-        let cvar99 = model.cvar(0.99);
+        let cvar99 = model.cvar(0.99).unwrap();
 
         assert!(var99 > model.threshold);
         assert!(cvar99 >= var99, "CVaR ({cvar99}) must be >= VaR ({var99})");

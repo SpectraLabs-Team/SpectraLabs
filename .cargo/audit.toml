@@ -1,0 +1,14 @@
+[advisories]
+# RUSTSEC-2023-0071: rsa 0.9.10; existing ignore in .github/workflows/security.yml, included here for consistency with the workflow
+# RUSTSEC-2024-0436: paste 1.0.15; existing ignore in .github/workflows/security.yml (unmaintained dependency of parquet)
+# RUSTSEC-2026-0435: thrift 0.17.0
+# Pulled in transitively by parquet 54.3.1 (thrift = "^0.17").
+# Upstream patched version is >=0.23.0, which is a semver-breaking upgrade
+# not supported by parquet 54.3.1. Requires upgrading parquet across major versions.
+# Date: 2026-11-02
+# remove by 2026-12-02
+ignore = [
+    "RUSTSEC-2023-0071",
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0435",
+]

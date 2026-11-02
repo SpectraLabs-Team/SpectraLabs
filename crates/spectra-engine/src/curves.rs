@@ -53,10 +53,16 @@ fn bad<T>(m: impl Into<String>) -> Result<T> {
 }
 
 /// Payment times of a regular schedule to `years`, `frequency` a year (the last at `years`).
-fn schedule(years: f64, frequency: u32) -> Vec<f64> {
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if tenor `years` is shorter than one period (`years * frequency < 0.5`).
+pub fn schedule(years: f64, frequency: u32) -> Result<Vec<f64>> {
     let f = f64::from(frequency);
+    if years * f < 0.5 {
+        return bad(format!("tenor {years} years is shorter than one period at frequency {frequency}"));
+    }
     let n = (years * f).round().max(1.0) as usize;
-    (1..=n).map(|i| i as f64 / f).map(|t| if (t - years).abs() < 1e-9 { years } else { t }).collect()
+    Ok((1..=n).map(|i| i as f64 / f).map(|t| if (t - years).abs() < 1e-9 { years } else { t }).collect())
 }
 
 impl Curve {
@@ -175,7 +181,7 @@ impl Curve {
     /// with intermediate payments interpolated against the new node.
     fn solve_swap_node(&self, years: f64, rate: f64, frequency: u32) -> Result<f64> {
         let tau = 1.0 / f64::from(frequency);
-        let times = schedule(years, frequency);
+        let times = schedule(years, frequency)?;
         let err = |d: f64| {
             let mut trial = self.clone();
             trial.nodes.push((years, d));
@@ -246,9 +252,10 @@ impl Swap {
         {
             return bad("swap needs a positive maturity and finite notional and rate");
         }
+        let times = schedule(self.years, self.frequency)?;
         let pv_on = |c: &Curve| {
             let tau = 1.0 / f64::from(self.frequency);
-            let annuity: f64 = schedule(self.years, self.frequency).iter().map(|&t| tau * c.df(t)).sum();
+            let annuity: f64 = times.iter().map(|&t| tau * c.df(t)).sum();
             let float = 1.0 - c.df(self.years);
             let payer = self.notional * (float - self.fixed_rate * annuity);
             (if self.pay_fixed { payer } else { -payer }, annuity, float / annuity)
@@ -343,6 +350,15 @@ mod tests {
             (1..=5).map(|i| (f64::from(i), if i == 5 { 105.0 } else { 5.0 })).collect();
         let p = pv_flows(&flows, &c, 0.0125);
         assert!((z_spread(&flows, &c, p).unwrap() - 0.0125).abs() < 1e-10);
+    }
+
+    #[test]
+    fn schedule_tenor_guard() {
+        assert!(matches!(
+            schedule(0.1, 1),
+            Err(Error::InvalidArgument(msg)) if msg == "tenor 0.1 years is shorter than one period at frequency 1"
+        ));
+        assert_eq!(schedule(1.0, 1).unwrap(), vec![1.0]);
     }
 
     #[test]

@@ -17,7 +17,7 @@
 //!    If `qty * close < min_trade_notional`, returns None.
 //! 7. Side: Buy if `delta > 0`, else Sell.
 
-use spectra_core::{Bar, InstrumentId, LedgerConfig, Money, Price, Qty, Ratio, Side, SCALE};
+use spectra_core::{Bar, Error, InstrumentId, LedgerConfig, Money, Price, Qty, Ratio, Side, SCALE};
 use spectra_engine::{
     run_backtest, BacktestConfig, Context, OrderState, RebalanceConfig, Rebalancer, WeightStrategy,
 };
@@ -216,7 +216,7 @@ fn non_positive_price_is_rejected_before_trading() {
 }
 
 #[test]
-fn overflow_guard_on_nano_price_submits_no_trade_documenting_current_behavior() {
+fn overflow_guard_on_nano_price_returns_overflow_error() {
     // -------------------------------------------------------------------------
     // Case 4: Overflow guard (|want_raw| >= 9.0e18).
     //
@@ -227,10 +227,7 @@ fn overflow_guard_on_nano_price_submits_no_trade_documenting_current_behavior() 
     //   want = 0.50 * 100,000.0 / 1e-9 = 5.0e13
     //   want_raw = trunc(5.0e13 * 1e9) = 5.0e22
     //   |want_raw| = 5.0e22 >= 9.0e18 -> overflow guard in trade_for triggers!
-    //   trade_for returns None silently.
-    //
-    // Comment:
-    // documents current behaviour, Task 7 will change this (silent default to explicit error).
+    //   trade_for returns Error::Overflow.
     // -------------------------------------------------------------------------
     let nano_price = Price::from_raw(1);
     let bars = vec![
@@ -259,15 +256,20 @@ fn overflow_guard_on_nano_price_submits_no_trade_documenting_current_behavior() 
     let sched = vec![vec![(1, 0.50)], vec![(1, 0.50)]];
     let mut strat = Rebalancer::new(ScheduledWeights::new(sched), cfg_rebalance_cap1());
 
-    let r = run_backtest(&bars, &mut strat, &cfg_100k()).unwrap();
-    r.ledger.check_invariants().unwrap();
+    let err = run_backtest(&bars, &mut strat, &cfg_100k()).unwrap_err();
+    assert_eq!(err, Error::Overflow);
+}
 
-    // The overflow guard returned None, so no order was submitted:
+#[test]
+fn rebalance_with_zero_close_price_returns_invalid_argument() {
+    let mut bars = flat_bars(1, 100.0);
+    bars[0].close = Price::ZERO;
+    let mut strat = Rebalancer::new(ScheduledWeights::new(vec![vec![(1, 0.50)]]), cfg_rebalance_cap1());
+    let err = run_backtest(&bars, &mut strat, &cfg_100k()).unwrap_err();
     assert!(
-        r.orders.is_empty(),
-        "overflow guard (|want_raw| >= 9.0e18) silently produces no trade in current behaviour"
+        matches!(err, Error::InvalidArgument(ref msg) if msg.contains("non-positive price")),
+        "expected InvalidArgument with non-positive price, got: {err:?}"
     );
-    assert_eq!(r.ledger.position(1).qty, Qty::ZERO);
 }
 
 #[test]

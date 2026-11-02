@@ -658,9 +658,16 @@ pub struct Context<'a> {
     setup: &'a InstrumentSetup,
     chains: &'a Chains,
     continuous: &'a Continuous,
+    strategy_error: &'a mut Option<Error>,
 }
 
 impl Context<'_> {
+    /// Signal a fatal strategy error, halting the backtest.
+    pub fn fail(&mut self, err: Error) {
+        if self.strategy_error.is_none() {
+            *self.strategy_error = Some(err);
+        }
+    }
     /// False only for a future that is not its chain's front contract now
     /// (it has passed its roll date, or an earlier contract has not).
     /// Strategies enter positions in front contracts only.
@@ -1647,7 +1654,7 @@ fn apply_action(
             for book in sleeves.iter_mut() {
                 let q = book.position(id).qty;
                 if q.is_zero() {
-                    book.rescale_mark(id, from, to);
+                    book.rescale_mark(id, from, to).map_err(ledger_err)?;
                 } else {
                     let nq = split_qty(q, from, to);
                     book.apply_split(id, from, to, nq, ts).map_err(ledger_err)?;
@@ -1656,7 +1663,7 @@ fn apply_action(
             }
             let q = ledger.position(id).qty;
             if q.is_zero() {
-                ledger.rescale_mark(id, from, to);
+                ledger.rescale_mark(id, from, to).map_err(ledger_err)?;
             } else {
                 let nq = if sleeves.is_empty() { split_qty(q, from, to) } else { total };
                 ledger.apply_split(id, from, to, nq, ts).map_err(ledger_err)?;
@@ -1911,8 +1918,8 @@ fn pay_coupons(
     let Some(prev) = prev_ts else { return Ok(()) };
     for &id in setup.instruments.keys() {
         let Some(terms) = setup.bond_terms(id) else { continue };
-        for day in terms.coupon_days_between(prev, ts) {
-            let Some((start, end)) = terms.period_around(day * 86_400_000_000_000) else { continue };
+        for day in terms.coupon_days_between(prev, ts)? {
+            let Some((start, end)) = terms.period_around(day * 86_400_000_000_000)? else { continue };
             // Per 100 face, in the bond's currency, converted at the rate known now.
             let per_unit = setup.fx_convert(id, Price::from_f64(terms.coupon_amount(start, end))?, ts)?;
             if per_unit.is_zero() {
@@ -2103,7 +2110,7 @@ fn pay_swap_coupons(
     let Some(prev) = prev_ts else { return Ok(()) };
     for &id in setup.instruments.keys() {
         let Some(terms) = setup.swap_terms(id) else { continue };
-        for day in terms.payment_days_between(prev, ts) {
+        for day in terms.payment_days_between(prev, ts)? {
             let held = |book: &Ledger| !book.position(id).qty.is_zero();
             if !held(ledger) && !sleeves.iter().any(held) {
                 continue;
@@ -2266,7 +2273,7 @@ fn run_inner<'s>(
     let financed = !fin.is_zero();
     let interval = check_uniform_intervals(bars)?;
     let sessions = SessionRule::new(cfg.exchange, interval);
-    let chains = Chains::new(setup, &setup.roll, cfg.exchange);
+    let chains = Chains::new(setup, &setup.roll, cfg.exchange)?;
     let has_bonds = setup.instruments.values().any(|i| i.kind == InstrumentType::Bond);
     let has_options = setup.instruments.values().any(|i| i.kind == InstrumentType::Option);
     let has_swaps = setup.instruments.values().any(|i| i.kind == InstrumentType::Swap);
@@ -2305,6 +2312,7 @@ fn run_inner<'s>(
         }
     }
 
+    let mut strategy_error: Option<Error> = None;
     // Orders placed in on_start are stamped just before the first bar so they can fill on it.
     let start_ts = if first_ts > i64::MIN { first_ts - 1 } else { first_ts };
     for (s, strategy) in strategies.iter_mut().enumerate() {
@@ -2321,8 +2329,12 @@ fn run_inner<'s>(
             setup,
             chains: &chains,
             continuous: &continuous,
+            strategy_error: &mut strategy_error,
         };
         strategy.on_start(&mut ctx);
+        if let Some(err) = strategy_error {
+            return Err(err.into());
+        }
     }
 
     let min_wait = 1 + cfg.exec.delay_bars as i64;
@@ -2660,6 +2672,7 @@ fn run_inner<'s>(
                 setup,
                 chains: &chains,
                 continuous: &continuous,
+                strategy_error: &mut strategy_error,
             };
             for a in &applied {
                 strategy.on_corporate_action(&mut ctx, a);
@@ -2668,6 +2681,9 @@ fn run_inner<'s>(
                 strategy.on_fill(&mut ctx, f);
             }
             strategy.on_bar(&mut ctx, group);
+            if let Some(err) = strategy_error {
+                return Err(err.into());
+            }
         }
         open.market.retain(|&k| orders[k].state.is_open());
         i = j;

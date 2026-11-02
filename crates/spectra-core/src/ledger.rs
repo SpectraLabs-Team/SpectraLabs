@@ -332,6 +332,7 @@ impl Ledger {
 
     /// The contract multiplier of `instrument` (1 unless registered).
     pub fn multiplier(&self, instrument: InstrumentId) -> Ratio {
+        // Unregistered equities default to Ratio::ONE.
         self.multipliers.get(&instrument).copied().unwrap_or(Ratio::ONE)
     }
 
@@ -475,21 +476,27 @@ impl Ledger {
             return Err(Reject::InvalidFill.into());
         }
         self.split_quantity(instrument, new_qty, ts_ns)?;
-        self.rescale_mark(instrument, from, to);
+        self.rescale_mark(instrument, from, to)?;
         Ok(())
     }
 
     /// Scales the mark of `instrument` by `from / to` (a split); positions are
     /// untouched. Rounds half away from zero and never below one tick.
-    pub fn rescale_mark(&mut self, instrument: InstrumentId, from: u32, to: u32) {
+    ///
+    /// # Errors
+    /// Overflow when the rescaled mark price cannot fit in an `i64`.
+    pub fn rescale_mark(&mut self, instrument: InstrumentId, from: u32, to: u32) -> Result<()> {
         if from == 0 || to == 0 {
-            return;
+            return Ok(());
         }
         if let Some(px) = self.marks.get_mut(&instrument) {
             let raw =
                 crate::fixed::div_round_half_away(i128::from(px.raw()) * i128::from(from), i128::from(to));
-            *px = Price::from_raw(i64::try_from(raw).unwrap_or(i64::MAX).max(1));
+            let val = i64::try_from(raw)
+                .map_err(|_| LedgerError::Arithmetic(crate::fixed::ArithmeticError::Overflow))?;
+            *px = Price::from_raw(val.max(1));
         }
+        Ok(())
     }
 
     /// The journaled part of a split (what replay re-applies; marks are not journaled).
@@ -908,6 +915,7 @@ impl Ledger {
 
     /// The position, or a zero position if the instrument never traded.
     pub fn position(&self, instrument: InstrumentId) -> Position {
+        // Position is zero for never-traded instruments.
         self.positions.get(&instrument).copied().unwrap_or_default()
     }
 
@@ -1014,7 +1022,20 @@ impl Ledger {
                 }
                 EntryType::Fill => {
                     let f = &e.fill;
-                    let mult = t.mults.get(&f.instrument).copied().unwrap_or(Ratio::ONE);
+                    let mult = match t.mults.get(&f.instrument).copied() {
+                        Some(m) => m,
+                        None if self.multipliers.contains_key(&f.instrument)
+                            || self.marked_to_market.contains(&f.instrument)
+                            || t.mtm.contains(&f.instrument) =>
+                        {
+                            return Err(fail(format!(
+                                "fill for instrument {} has no multiplier registration",
+                                f.instrument
+                            )));
+                        }
+                        // Unregistered equities default to Ratio::ONE (see line 335).
+                        None => Ratio::ONE,
+                    };
                     let n = notional_with_multiplier(f.price, f.qty, mult)?;
                     let buy = f.side == Side::Buy;
                     t.cash = if t.mtm.contains(&f.instrument) {
@@ -1108,6 +1129,7 @@ impl Ledger {
 
         // 2. Quantities from the journal match the positions.
         for (&id, p) in &self.positions {
+            // Absent fills in journal imply zero quantity, ensuring mismatch is caught.
             if p.qty != qty.get(&id).copied().unwrap_or_default() {
                 return Err(fail(format!("quantity mismatch for instrument {id}")));
             }
@@ -1226,5 +1248,36 @@ enum InvariantFailure {
 impl From<ArithmeticError> for InvariantFailure {
     fn from(e: ArithmeticError) -> Self {
         Self::Arithmetic(e)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replay_of_fill_with_no_multiplier_registration_returns_error() {
+        let mut l = Ledger::new(LedgerConfig::default());
+        l.deposit(Money::from_raw(100_000 * crate::fixed::SCALE), 0).unwrap();
+        l.register_contract(2, Ratio::from_units(50).unwrap(), false, 0).unwrap();
+        l.apply_fill(&Fill {
+            instrument: 2,
+            side: crate::Side::Buy,
+            price: Price::from_raw(100 * crate::fixed::SCALE),
+            qty: Qty::from_raw(crate::fixed::SCALE),
+            fee: Money::ZERO,
+            ts_ns: 1,
+        })
+        .unwrap();
+        // Corrupt the journal by omitting the Listing entry:
+        l.journal.retain(|e| e.kind != EntryType::Listing);
+        for (i, e) in l.journal.iter_mut().enumerate() {
+            e.seq = i as u64;
+        }
+        let err = l.check_invariants().unwrap_err();
+        assert!(
+            err.contains("fill for instrument 2 has no multiplier registration"),
+            "expected missing multiplier registration error, got: {err}"
+        );
     }
 }

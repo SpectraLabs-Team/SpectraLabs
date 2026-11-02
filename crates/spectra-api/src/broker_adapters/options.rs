@@ -5,7 +5,7 @@
 //! and cash-settled vs physical delivery settlement at expiry.
 
 use serde::{Deserialize, Serialize};
-use spectra_core::OptionRight;
+use spectra_core::{Error, OptionRight};
 use spectra_engine::options::{OptionInputs, OptionValue};
 
 use super::symbols::VenueId;
@@ -91,18 +91,20 @@ pub fn compute_option_greeks(
     volatility: f64,
     contracts: f64,
     multiplier: f64,
-) -> Result<PositionGreeks, String> {
-    let inputs = OptionInputs {
-        right,
-        spot,
-        strike,
-        years: years_to_expiry.max(0.0),
-        rate,
-        dividend_yield,
-        volatility: volatility.max(0.0001),
-    };
+) -> Result<PositionGreeks, Error> {
+    if years_to_expiry < 0.0 || !years_to_expiry.is_finite() {
+        return Err(Error::InvalidArgument("time to expiry must not be negative".into()));
+    }
+    // Defined value: years == 0.0 represents an expired contract (intrinsic value only).
 
-    let value: OptionValue = inputs.value().map_err(|e| format!("Greeks calculation error: {e}"))?;
+    if !(volatility.is_finite() && volatility > 0.0) {
+        return Err(Error::InvalidArgument("volatility must be positive and finite".into()));
+    }
+
+    let inputs =
+        OptionInputs { right, spot, strike, years: years_to_expiry, rate, dividend_yield, volatility };
+
+    let value: OptionValue = inputs.value()?;
 
     // Position delta = delta * contracts * multiplier
     let position_delta = value.delta * contracts * multiplier;

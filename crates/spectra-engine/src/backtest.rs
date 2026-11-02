@@ -1957,7 +1957,7 @@ fn pay_coupons(
 
 /// Settles every option position once its expiry has come (M24.4): in the
 /// money, cash-settled at its intrinsic value against the underlying's last
-/// close at or before expiry; otherwise closed at zero. European, cash-settled.
+/// close at or before expiry; returns an error if no price is available at or before expiry. European, cash-settled.
 #[allow(clippy::too_many_arguments)]
 fn settle_options(
     setup: &InstrumentSetup,
@@ -1990,15 +1990,18 @@ fn settle_options(
             .underlying_of(id)
             .and_then(|u| history.get(&u))
             .and_then(|h| h.iter().rev().find(|b| b.ts_ns <= expiry))
-            .map(|b| b.close);
-        let intrinsic = spot.map_or(0.0, |s| right.intrinsic(s.to_f64(), strike.to_f64()));
+            .map(|b| b.close)
+            .ok_or_else(|| {
+                Error::Data(format!("no underlying price available at or before expiry for option {id}"))
+            })?;
+        // Defined zero: intrinsic is 0.0 when spot is known and the option is out of the money.
+        let intrinsic = right.intrinsic(spot.to_f64(), strike.to_f64());
         let settle_px = if intrinsic > 0.0 {
             Some(setup.fx_convert(id, Price::from_f64(intrinsic)?, ts)?).filter(|p| p.raw() > 0)
         } else {
             None
         };
-        let note =
-            spot.is_none().then(|| "no underlying price at or before expiry; closed at zero".to_string());
+        let note = None;
         for owner in 0..owners {
             let qty = sleeves.get(owner).unwrap_or(ledger).position(id).qty;
             if qty.is_zero() {

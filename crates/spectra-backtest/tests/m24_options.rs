@@ -145,6 +145,34 @@ fn the_underlying_must_be_in_the_run() {
     assert!(e.to_string().contains("underlying"), "{e}");
 }
 
+#[test]
+fn settle_options_with_no_underlying_history_at_expiry_returns_error() {
+    let s = setup(OptionRight::Call);
+    // Option expires at 15 * DAY. Provide underlying bars only on days 16..20 (none at or before expiry).
+    let mut b = Vec::new();
+    for d in 16..=20 {
+        b.push(bar(d, 0, 110.0));
+    }
+    for d in 1..=20 {
+        b.push(bar(d, 1, 5.0));
+    }
+    b.sort_by_key(|x| (x.ts_ns, x.instrument));
+
+    let err =
+        run_backtest_with_setup(&b, &[], &s, &mut Trade(1.0, false), &cfg(), &mut RunControl::default())
+            .unwrap_err();
+
+    match err {
+        spectra_engine::RunError::Engine(spectra_core::Error::Data(msg)) => {
+            assert!(
+                msg.contains("no underlying price available at or before expiry for option 1"),
+                "unexpected error message: {msg}"
+            );
+        }
+        other => panic!("expected RunError::Engine(Error::Data), got {other:?}"),
+    }
+}
+
 // ------------------------------------------------------------ request path
 
 fn request(doc: &str) -> BacktestRequest {

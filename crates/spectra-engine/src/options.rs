@@ -135,6 +135,7 @@ impl OptionInputs {
                 OptionRight::Call => fwd > pv_k,
                 OptionRight::Put => fwd < pv_k,
             };
+            // Defined zero: intrinsic is 0.0 for out-of-the-money options.
             let price = match self.right {
                 OptionRight::Call => (fwd - pv_k).max(0.0),
                 OptionRight::Put => (pv_k - fwd).max(0.0),

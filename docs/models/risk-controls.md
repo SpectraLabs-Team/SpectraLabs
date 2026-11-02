@@ -28,10 +28,33 @@ should fail for a matrix that needs it.
 - **HHI** = Σ w_i², in [1/n, 1]. 1 means all exposure in one position.
 - Errors when the portfolio has no exposure.
 
-**Divergence from the C++ engine (already in code):** the doc comment says the C++ engine returned
-a hard-coded 1.0. The Rust code computes the index. The golden files will show the C++ value for
-any portfolio with more than one position, so a parity test that covers HHI will differ by design.
-This is the first documented divergence under the parity rule in the M26 doc: record it there.
+**Divergence (M26 task 4):**
+- **Herfindahl-Hirschman Index (HHI) concentration calculation:**
+  - **Old behaviour:** The legacy C++ engine returned a hard-coded `1.0` for HHI regardless of portfolio weights (see `PORTING.md:85` and doc comment on `Portfolio::hhi` in `crates/spectra-risk/src/portfolio.rs`).
+  - **New behaviour:** Rust computes the Herfindahl index from gross position weights: $\text{HHI} = \sum_i w_i^2$, in range $[1/n, 1]$ where $n$ is the number of active positions. Example: two equal positions give $0.5$, four equal positions give $0.25$, and a single position gives $1.0$.
+  - **Reference test values (`crates/spectra-risk/tests/m26_risk_controls_reference.rs`):**
+    - Four equal positions (`hhi_of_equal_positions_is_one_over_n`, assets A, B, C, D each 1.0 @ 100.0):
+      - Old C++ value: `1.0` (hard-coded stub)
+      - New Rust value: `0.25` ($\sum_{i=1}^4 (0.25)^2 = 4 \times 0.0625 = 0.25$)
+      - Assertion line:
+        ```rust
+        close(p.hhi().unwrap(), 0.25, TOL, "HHI of four equal positions");
+        ```
+    - Single position (`hhi_of_one_position_is_one`, asset A 10.0 @ 50.0):
+      - Old C++ value: `1.0`
+      - New Rust value: `1.0`
+      - Assertion line:
+        ```rust
+        close(p.hhi().unwrap(), 1.0, TOL, "HHI of one position");
+        ```
+    - Two equal positions in `crates/spectra-risk/tests/risk.rs` (`hhi_comes_from_the_weights`, 1.0 @ 50.0 and -1.0 @ 50.0):
+      - Old C++ value: `1.0`
+      - New Rust value: `0.5`
+      - Assertion line:
+        ```rust
+        assert!((p.hhi().unwrap() - 0.5).abs() < 1e-15);
+        ```
+  - **Parity golden status:** Grepping for `hhi` in `parity/` confirms that `parity/cpp/risk_golden.cpp` and `parity/golden/risk/risk.golden` do not currently exercise `Metric::Hhi`. If a parity test is added or the golden still has 1.0, the parity test is expected to diverge from C++ by design, and the golden is updated in this PR only for the HHI line, per the parity rule in the plan.
 
 ## Stress scenarios (`engine.rs`)
 

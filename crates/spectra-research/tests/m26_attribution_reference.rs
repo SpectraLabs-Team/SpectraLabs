@@ -19,7 +19,7 @@ fn close(got: f64, want: f64, what: &str) {
     assert!((got - want).abs() <= TOL, "{what}: got {got}, want {want} (tol {TOL})");
 }
 
-fn scenario() -> Ledger {
+fn scenario_with_interest(interest: Option<f64>) -> Ledger {
     let mut l =
         Ledger::new(LedgerConfig { allow_short: true, allow_negative_cash: true, ..LedgerConfig::default() });
     l.deposit(Money::from_f64(100_000.0).unwrap(), 0).unwrap();
@@ -41,8 +41,14 @@ fn scenario() -> Ledger {
         ts_ns: 2_000,
     })
     .unwrap();
-    l.apply_interest(Money::from_f64(-20.0).unwrap(), 3_000).unwrap();
+    if let Some(amt) = interest {
+        l.apply_interest(Money::from_f64(amt).unwrap(), 3_000).unwrap();
+    }
     l
+}
+
+fn scenario() -> Ledger {
+    scenario_with_interest(Some(-20.0))
 }
 
 #[test]
@@ -81,4 +87,15 @@ fn a_single_instrument_carries_the_whole_result_and_direction() {
     close(a.direction.long_net_pnl, 990.0, "long net");
     assert_eq!(a.direction.long_trades, 1);
     assert_eq!(a.direction.short_trades, 0);
+}
+
+#[test]
+fn positive_interest_is_reported_as_interest_income() {
+    let baseline = compute_pnl_attribution(&scenario_with_interest(None), None, Some(10.0)).unwrap();
+    let with_interest =
+        compute_pnl_attribution(&scenario_with_interest(Some(45.0)), None, Some(10.0)).unwrap();
+
+    close(with_interest.costs.interest_income, 45.0, "interest income (absolute)");
+    close(with_interest.costs.financing_interest, 0.0, "financing interest");
+    close(with_interest.total_net_pnl, baseline.total_net_pnl, "total net P&L unchanged");
 }

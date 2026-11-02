@@ -54,9 +54,12 @@ Breaks P&L into components from the ledger journal:
 **Known problems (task 8, plus a check):**
 1. **Unknown slippage defaults to zero.** `slippage_bps.unwrap_or(0.0)` (`attribution.rs`): a
    report without a slippage figure says "no slippage cost", not "unknown".
-2. **Positive interest is dropped.** Only negative interest entries count as financing. Interest
-   income is not in the attribution at all. Check in task 3 that the components sum to the total
-   P&L; if they don't, this is the reason.
+2. **Positive interest was previously dropped (fixed in Task 4).** See divergence below.
+
+**Divergence (M26 task 4):**
+- **Positive interest reported as interest income:** Previously, positive `EntryType::Interest` entries were dropped completely, so a strategy earning cash deposit interest had that income omitted from the attribution breakdown. Now, positive interest entries are accumulated in `CostDecomposition::interest_income` (reported in the `costs` JSON object as `"interest_income"`), while `financing_interest` remains strictly negative financing charges. In the reference test scenario with 45.0 positive interest:
+  - Old behaviour: `interest_income` was omitted/0.0, and positive interest vanished from the report.
+  - New behaviour: `interest_income` is 45.0, `financing_interest` is 0.0, and `total_net_pnl` is unchanged (990.0).
 
 ## Execution gap (`gap.rs`)
 

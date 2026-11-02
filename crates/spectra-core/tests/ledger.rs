@@ -552,6 +552,17 @@ fn splits_and_dividends_are_journaled_and_replay() {
     expect_invariants(&l);
 }
 
+#[test]
+fn mark_price_split_overflow_returns_error() {
+    let mut l = reference(false, false);
+    l.mark(1, Price::from_raw(i64::MAX)).unwrap();
+    let err = l.rescale_mark(1, 2, 1).unwrap_err();
+    assert!(
+        matches!(err, LedgerError::Arithmetic(ArithmeticError::Overflow)),
+        "expected ArithmeticError::Overflow, got: {err:?}"
+    );
+}
+
 // ---------------------------------------------------------------- M24.1 multipliers
 
 fn r(v: i64) -> Ratio {

@@ -21,7 +21,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use spectra_core::{Bar, InstrumentId, Qty, Side};
+use spectra_core::{Bar, Error, InstrumentId, Qty, Result, Side};
 
 use crate::backtest::{Context, OrderId, Strategy};
 
@@ -144,6 +144,7 @@ impl<S: WeightStrategy> Rebalancer<S> {
                     || (equity > 0.0
                         && self.universe(ctx).into_iter().any(|id| {
                             let actual = ctx.position_exposure(id).to_f64() / equity;
+                            // Held and not in targets = target 0 (decided: liquidation is intended).
                             (actual - self.targets.get(&id).copied().unwrap_or(0.0)).abs() > th
                         }))
             }
@@ -151,32 +152,43 @@ impl<S: WeightStrategy> Rebalancer<S> {
     }
 
     /// The order (side, quantity) that moves `id` to its target, if any.
-    fn trade_for(&self, ctx: &Context<'_>, id: InstrumentId, equity: f64) -> Option<(Side, Qty)> {
+    fn trade_for(&self, ctx: &Context<'_>, id: InstrumentId, equity: f64) -> Result<Option<(Side, Qty)>> {
         // Base-currency value of one unit (price converted, times the multiplier);
         // exactly the close for a plain equity.
-        let close = ctx.unit_value(id, ctx.history(id).last()?.close)?;
+        let Some(bar) = ctx.history(id).last() else {
+            return Ok(None);
+        };
+        let Some(close) = ctx.unit_value(id, bar.close) else {
+            return Ok(None);
+        };
         if close <= 0.0 {
-            return None;
+            return Err(Error::InvalidArgument(format!("instrument {id}: non-positive price for rebalance")));
         }
+        // Held and not in targets = target 0 (decided: liquidation is intended).
         let want = self.targets.get(&id).copied().unwrap_or(0.0) * equity / close;
         let lot = effective_lot(self.cfg.lot_size.raw(), ctx.lot_size(id).map(spectra_core::Fixed::raw));
         let want_raw = (want * spectra_core::SCALE as f64).trunc();
         if !want_raw.is_finite() || want_raw.abs() >= 9.0e18 {
-            return None;
+            return Err(Error::Overflow);
         }
         let mut target = want_raw as i64;
         if lot > 0 {
             target = target / lot * lot; // towards zero
         }
-        let delta = target.checked_sub(ctx.position(id).raw())?;
+        let Some(delta) = target.checked_sub(ctx.position(id).raw()) else {
+            return Err(Error::Overflow);
+        };
         if delta == 0 {
-            return None;
+            return Ok(None);
         }
-        let qty = Qty::from_raw(delta.checked_abs()?);
+        let Some(abs_delta) = delta.checked_abs() else {
+            return Err(Error::Overflow);
+        };
+        let qty = Qty::from_raw(abs_delta);
         if qty.to_f64() * close < self.cfg.min_trade_notional {
-            return None;
+            return Ok(None);
         }
-        Some((if delta > 0 { Side::Buy } else { Side::Sell }, qty))
+        Ok(Some((if delta > 0 { Side::Buy } else { Side::Sell }, qty)))
     }
 }
 
@@ -199,9 +211,13 @@ impl<S: WeightStrategy> Strategy for Rebalancer<S> {
             let mut buys = Vec::new();
             for id in self.universe(ctx) {
                 match self.trade_for(ctx, id, equity) {
-                    Some((Side::Sell, q)) => sells.push((id, q)),
-                    Some((Side::Buy, q)) => buys.push((id, q)),
-                    None => {}
+                    Ok(Some((Side::Sell, q))) => sells.push((id, q)),
+                    Ok(Some((Side::Buy, q))) => buys.push((id, q)),
+                    Ok(None) => {}
+                    Err(e) => {
+                        ctx.fail(e);
+                        return;
+                    }
                 }
             }
             self.pending.clear();

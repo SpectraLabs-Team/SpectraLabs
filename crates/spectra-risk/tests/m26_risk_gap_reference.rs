@@ -165,7 +165,8 @@ fn test_pre_trade_enforcement_kill_switch_fixture() {
     // positions.insert("AAPL".to_string(), PositionSnapshot { qty: 50.0, price: 100.0 });
     // let portfolio = PortfolioSnapshot { positions, ..PortfolioSnapshot::default() };
     let mut positions = HashMap::new();
-    positions.insert("AAPL".to_string(), PositionSnapshot { qty: 50.0, price: 100.0 });
+    positions
+        .insert("AAPL".to_string(), PositionSnapshot { qty: 50.0, price: 100.0, volatility: Some(0.20) });
     let portfolio = PortfolioSnapshot { positions, ..PortfolioSnapshot::default() };
 
     let limits = RiskLimits::default();

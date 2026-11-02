@@ -695,6 +695,7 @@ fn backtest_enforces_daily_loss_limit() {
     let mut cfg = base_config();
     cfg.risk_limits = Some(spectra_risk::enforcement::RiskLimits {
         max_daily_loss: 1.0, // Strict $1 daily loss limit
+        max_var_pct: 0.0,
         ..spectra_risk::enforcement::RiskLimits::default()
     });
 

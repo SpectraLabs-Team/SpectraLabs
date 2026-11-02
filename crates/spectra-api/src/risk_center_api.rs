@@ -170,6 +170,8 @@ pub struct SetKillSwitchRequest {
 pub struct PositionSnapshotDto {
     pub qty: f64,
     pub price: f64,
+    #[serde(default)]
+    pub volatility: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -740,7 +742,7 @@ pub(crate) async fn pre_trade_check(
     let portfolio = {
         let mut positions = HashMap::new();
         for p in db_positions {
-            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price });
+            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: None });
         }
         let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
             (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
@@ -1132,7 +1134,7 @@ pub(crate) async fn get_alerts(
 
     let mut positions = HashMap::new();
     for p in db_positions {
-        positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price });
+        positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: None });
     }
     let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
         (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
@@ -1248,7 +1250,7 @@ pub(crate) async fn replay_decision(
 
     let mut positions = HashMap::new();
     if gross > 0.0 {
-        positions.insert("AAPL".into(), PositionSnapshot { qty: 10.0, price: 150.0 });
+        positions.insert("AAPL".into(), PositionSnapshot { qty: 10.0, price: 150.0, volatility: Some(0.20) });
     }
     let portfolio = PortfolioSnapshot {
         cash: 50_000.0,
@@ -1359,7 +1361,7 @@ pub(crate) async fn get_metrics(
     let (gross, net, lev, dd, loss, var_pct) = if !db_positions.is_empty() || db_balance.is_some() {
         let mut positions = HashMap::new();
         for p in db_positions {
-            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price });
+            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: None });
         }
         let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
             (b.cash, b.equity, b.peak_equity, b.daily_start_equity)

@@ -164,7 +164,7 @@ pub fn simulate_correlated(
     let mut rng = Mt19937_64::new(seed);
     let mut normal = PolarNormal::new();
 
-    let n_paths = usize::try_from(simulations).unwrap_or(usize::MAX);
+    let n_paths = usize::try_from(simulations).map_err(|_| Error::Overflow)?;
     let mut portfolio_losses = vec![0.0; n_paths];
     let mut asset_losses = vec![vec![0.0; n_paths]; n_assets];
 

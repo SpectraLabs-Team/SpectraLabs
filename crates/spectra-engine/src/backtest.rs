@@ -2491,6 +2491,7 @@ fn run_inner<'s>(
                                 spectra_risk::enforcement::PositionSnapshot {
                                     qty: pos.qty.to_f64(),
                                     price: unit(inst, mark_price),
+                                    volatility: None,
                                 },
                             );
                         }

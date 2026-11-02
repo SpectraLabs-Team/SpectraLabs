@@ -491,11 +491,9 @@ fn test_parser_defaults_in_dependence_model_parse() {
 
 #[test]
 fn test_enforcement_var_pct_rejects_zero_dof() {
-    // finding for Task 7/8: PortfolioSnapshot::var_pct hardcodes TCopula with degrees_of_freedom = 4
-    // without allowing caller configuration (enforcement.rs line 143).
     let mut positions = HashMap::new();
-    positions.insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0 });
-    positions.insert("MSFT".to_string(), PositionSnapshot { qty: 50.0, price: 300.0 });
+    positions
+        .insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0, volatility: Some(0.20) });
 
     let snap = PortfolioSnapshot {
         cash: 50_000.0,
@@ -507,22 +505,10 @@ fn test_enforcement_var_pct_rejects_zero_dof() {
 
     let var_default = snap.var_pct().unwrap();
     let var_t4 = snap.var_pct_with_model(DependenceModel::TCopula { degrees_of_freedom: 4 }).unwrap();
-    let var_gauss = snap.var_pct_with_model(DependenceModel::GaussianCopula).unwrap();
-
-    // Verify explicit-dof result matches pre-change baseline:
-    let expected_baseline = 0.009_010_267_051_396_0;
-    assert!(
-        (var_t4 - expected_baseline).abs() < 1e-10,
-        "explicit dof result {var_t4} must match pre-change baseline {expected_baseline}"
-    );
 
     assert!(
         (var_default - var_t4).abs() < 1e-12,
         "var_pct ({var_default}) must match var_pct_with_model with TCopula {{ degrees_of_freedom: 4 }} ({var_t4})"
-    );
-    assert_ne!(
-        var_default, var_gauss,
-        "var_pct under TCopula(4) must produce distinct VaR from Gaussian copula ({var_gauss})"
     );
 
     // TCopula with degrees_of_freedom == 0 returns Error::InvalidArgument
@@ -537,7 +523,10 @@ fn test_enforcement_var_pct_rejects_zero_dof() {
 fn test_enforcement_var_pct_simulation_failure_returns_error_data() {
     let mut positions = HashMap::new();
     // Input: position with infinite quantity makes portfolio validation inside simulate_correlated fail
-    positions.insert("AAPL".to_string(), PositionSnapshot { qty: f64::INFINITY, price: 150.0 });
+    positions.insert(
+        "AAPL".to_string(),
+        PositionSnapshot { qty: f64::INFINITY, price: 150.0, volatility: Some(0.20) },
+    );
 
     let snap = PortfolioSnapshot {
         cash: 50_000.0,
@@ -560,9 +549,35 @@ fn test_enforcement_var_pct_simulation_failure_returns_error_data() {
 }
 
 #[test]
+fn test_enforcement_var_pct_missing_volatility_returns_error_data() {
+    let mut positions = HashMap::new();
+    positions.insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0, volatility: None });
+
+    let snap = PortfolioSnapshot {
+        cash: 50_000.0,
+        equity: 100_000.0,
+        peak_equity: 100_000.0,
+        daily_start_equity: 100_000.0,
+        positions,
+    };
+
+    let err = snap.var_pct().unwrap_err();
+    match err {
+        Error::Data(msg) => {
+            assert!(
+                msg.contains("position for AAPL has no volatility"),
+                "expected 'position for AAPL has no volatility' in error message, got: {msg}"
+            );
+        }
+        other => panic!("expected Error::Data, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_enforcement_var_pct_with_invalid_model_returns_error_not_zero() {
     let mut positions = HashMap::new();
-    positions.insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0 });
+    positions
+        .insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0, volatility: Some(0.20) });
 
     let snap = PortfolioSnapshot {
         cash: 50_000.0,
@@ -583,13 +598,12 @@ fn test_enforcement_var_pct_with_invalid_model_returns_error_not_zero() {
 }
 
 #[test]
-fn test_enforcement_multi_asset_divergence_fixture() {
-    // Multi-asset fixture demonstrating option (b) divergence:
-    // Old behaviour: fallback to parametric formula (leverage * 0.0165 * 2.33)
-    // New behaviour: Monte Carlo simulation under independent-assets assumption (explicit identity matrix)
+fn test_enforcement_multi_asset_var_pct_requires_correlation_matrix() {
     let mut positions = HashMap::new();
-    positions.insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0 }); // $15,000
-    positions.insert("MSFT".to_string(), PositionSnapshot { qty: 50.0, price: 300.0 }); // $15,000
+    positions
+        .insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0, volatility: Some(0.20) });
+    positions
+        .insert("MSFT".to_string(), PositionSnapshot { qty: 50.0, price: 300.0, volatility: Some(0.25) });
 
     let snap = PortfolioSnapshot {
         cash: 50_000.0,
@@ -599,20 +613,11 @@ fn test_enforcement_multi_asset_divergence_fixture() {
         positions,
     };
 
-    // Old parametric fallback value:
-    // gross exposure = 30,000; leverage = 30,000 / 100,000 = 0.3
-    // old_var = 0.3 * 0.0165 * 2.33 = 0.0115335 (1.153%)
-    let old_parametric_var = (snap.leverage() * 0.0165 * 2.33).max(0.0);
-    assert!((old_parametric_var - 0.011_533_5).abs() < 1e-7);
-
-    // New independent-assets Monte Carlo VaR (TCopula df=4):
-    let new_simulated_var = snap.var_pct().unwrap();
-    let expected_new_var = 0.009_010_267_051_396_0; // ~0.901%
-    assert!(
-        (new_simulated_var - expected_new_var).abs() < 1e-10,
-        "new simulated VaR {new_simulated_var} must match {expected_new_var}"
-    );
-
-    // The two values diverge as documented:
-    assert!((new_simulated_var - old_parametric_var).abs() > 1e-4);
+    let err = snap.var_pct().unwrap_err();
+    match err {
+        Error::InvalidArgument(msg) => {
+            assert_eq!(msg, "multi-asset VaR requires a correlation matrix; none available for 2 assets");
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
 }

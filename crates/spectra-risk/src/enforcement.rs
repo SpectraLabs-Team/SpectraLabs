@@ -75,6 +75,8 @@ pub struct PositionSnapshot {
     pub qty: f64,
     /// Current marked price.
     pub price: f64,
+    /// Annualized volatility (if known).
+    pub volatility: Option<f64>,
 }
 
 impl PositionSnapshot {
@@ -166,12 +168,13 @@ impl PortfolioSnapshot {
         let mut p = crate::portfolio::Portfolio::new();
         for (sym, pos) in &self.positions {
             if pos.qty.abs() > 1e-8 && pos.price > 0.0 {
-                p.add_asset_with_volatility(
-                    sym.as_str(),
-                    pos.qty,
-                    pos.price,
-                    crate::engine::DEFAULT_VOLATILITY,
-                );
+                let vol = pos
+                    .volatility
+                    .ok_or_else(|| Error::Data(format!("position for {sym} has no volatility")))?;
+                if vol <= 0.0 || !vol.is_finite() {
+                    return Err(Error::Data(format!("position for {sym} has invalid volatility: {vol}")));
+                }
+                p.add_asset_with_volatility(sym.as_str(), pos.qty, pos.price, vol);
             }
         }
 
@@ -180,18 +183,14 @@ impl PortfolioSnapshot {
             return Ok(0.0);
         }
 
-        let id = if n > 1 {
-            let mut m = vec![vec![0.0; n]; n];
-            for i in 0..n {
-                m[i][i] = 1.0;
-            }
-            Some(m)
-        } else {
-            None
-        };
+        if n > 1 {
+            return Err(Error::InvalidArgument(format!(
+                "multi-asset VaR requires a correlation matrix; none available for {n} assets"
+            )));
+        }
 
         // Run 2,000 simulations on 1-day horizon (1/252) at 99% confidence
-        match crate::copula::simulate_correlated(&p, id.as_deref(), model, 2_000, 42, 1.0 / 252.0, 0.99) {
+        match crate::copula::simulate_correlated(&p, None, model, 2_000, 42, 1.0 / 252.0, 0.99) {
             Ok(sim) => match crate::metrics::value_at_risk(&sim.portfolio_losses, 0.99) {
                 Ok(var_dollars) => Ok(var_dollars.max(0.0) / self.equity),
                 Err(e) => Err(Error::Data(format!("var_pct quantile calculation failed: {e}"))),
@@ -354,7 +353,7 @@ impl PreTradeChecker {
                         concentration_pct: 0.0,
                         drawdown_pct: portfolio.drawdown_pct(),
                         daily_loss: portfolio.daily_loss(),
-                        var_pct: portfolio.var_pct()?,
+                        var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct()? } else { 0.0 },
                     },
                 });
             }
@@ -424,7 +423,7 @@ impl PreTradeChecker {
                         concentration_pct: 0.0,
                         drawdown_pct: portfolio.drawdown_pct(),
                         daily_loss: portfolio.daily_loss(),
-                        var_pct: portfolio.var_pct()?,
+                        var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct()? } else { 0.0 },
                     },
                 });
             }
@@ -464,7 +463,7 @@ impl PreTradeChecker {
                     },
                     drawdown_pct: portfolio.drawdown_pct(),
                     daily_loss: portfolio.daily_loss(),
-                    var_pct: portfolio.var_pct()?,
+                    var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct()? } else { 0.0 },
                 },
             });
         }
@@ -511,7 +510,7 @@ impl PreTradeChecker {
                     concentration_pct: 0.0,
                     drawdown_pct: current_dd,
                     daily_loss: current_loss,
-                    var_pct: portfolio.var_pct()?,
+                    var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct()? } else { 0.0 },
                 },
             });
         }
@@ -545,10 +544,11 @@ impl PreTradeChecker {
             projected_net += projected_pos_qty * order.price;
         }
 
+        let existing_vol = portfolio.positions.get(&order.symbol).and_then(|p| p.volatility);
         if projected_pos_qty.abs() > 1e-8 {
             projected_positions.insert(
                 order.symbol.clone(),
-                PositionSnapshot { qty: projected_pos_qty, price: order.price },
+                PositionSnapshot { qty: projected_pos_qty, price: order.price, volatility: existing_vol },
             );
         } else {
             projected_positions.remove(&order.symbol);
@@ -567,7 +567,7 @@ impl PreTradeChecker {
             daily_start_equity: portfolio.daily_start_equity,
             positions: projected_positions,
         };
-        let projected_var = projected_portfolio.var_pct()?;
+        let projected_var = if limits.max_var_pct > 0.0 { projected_portfolio.var_pct()? } else { 0.0 };
 
         let projected_metrics = ProjectedMetrics {
             gross_exposure: projected_gross,
@@ -714,7 +714,10 @@ mod tests {
     #[test]
     fn test_approved_when_within_limits() {
         let limits = RiskLimits::default();
-        let portfolio = PortfolioSnapshot::default();
+        let mut portfolio = PortfolioSnapshot::default();
+        portfolio
+            .positions
+            .insert("AAPL".into(), PositionSnapshot { qty: 0.0, price: 150.0, volatility: Some(0.20) });
         let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 100.0, price: 150.0 };
 
         let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap();
@@ -745,7 +748,9 @@ mod tests {
             daily_start_equity: 65_000.0,
             positions: HashMap::new(),
         };
-        portfolio.positions.insert("AAPL".into(), PositionSnapshot { qty: 100.0, price: 150.0 });
+        portfolio
+            .positions
+            .insert("AAPL".into(), PositionSnapshot { qty: 100.0, price: 150.0, volatility: Some(0.20) });
 
         // Sell 100 on existing long 100 is flattening -> Approved even under kill switch!
         let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Sell, qty: 100.0, price: 150.0 };
@@ -772,7 +777,9 @@ mod tests {
             daily_start_equity: 65_000.0,
             positions: HashMap::new(),
         };
-        portfolio.positions.insert("AAPL".into(), PositionSnapshot { qty: 50.0, price: 150.0 });
+        portfolio
+            .positions
+            .insert("AAPL".into(), PositionSnapshot { qty: 50.0, price: 150.0, volatility: Some(0.20) });
 
         // Sell 100 when holding 50 with size reduction -> Reduced to 50
         let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Sell, qty: 100.0, price: 150.0 };
@@ -786,7 +793,10 @@ mod tests {
     fn test_size_reduction_when_exceeding_position_limit() {
         let limits =
             RiskLimits { max_position_size: 15_000.0, size_reduction_enabled: true, ..RiskLimits::default() };
-        let portfolio = PortfolioSnapshot::default();
+        let mut portfolio = PortfolioSnapshot::default();
+        portfolio
+            .positions
+            .insert("TSLA".into(), PositionSnapshot { qty: 0.0, price: 200.0, volatility: Some(0.20) });
         let order = OrderCandidate {
             symbol: "TSLA".into(),
             side: OrderSide::Buy,
@@ -820,13 +830,16 @@ mod tests {
     #[test]
     fn test_property_limit_arithmetic_invariants() {
         let limits = RiskLimits::default();
-        let portfolio = PortfolioSnapshot {
+        let mut portfolio = PortfolioSnapshot {
             cash: 100_000.0,
             equity: 100_000.0,
             peak_equity: 100_000.0,
             daily_start_equity: 100_000.0,
             positions: HashMap::new(),
         };
+        portfolio
+            .positions
+            .insert("TEST".into(), PositionSnapshot { qty: 0.0, price: 100.0, volatility: Some(0.20) });
 
         // Property: any order that does not exceed position, concentration, gross, net, or leverage limits is Approved
         for price in [10.0, 50.0, 100.0, 250.0] {
@@ -857,13 +870,16 @@ mod tests {
             max_gross_exposure: 1_000_000.0,
             ..RiskLimits::default()
         };
-        let portfolio = PortfolioSnapshot {
+        let mut portfolio = PortfolioSnapshot {
             cash: 100_000.0,
             equity: 100_000.0,
             peak_equity: 100_000.0,
             daily_start_equity: 100_000.0,
             positions: HashMap::new(),
         };
+        portfolio
+            .positions
+            .insert("AAPL".into(), PositionSnapshot { qty: 0.0, price: 200.0, volatility: Some(0.20) });
 
         // Buying $50,000 of stock generates ~0.6% 1-day 99% VaR, which breaches the 0.1% limit
         let order = OrderCandidate {
@@ -893,14 +909,21 @@ mod tests {
             daily_start_equity: 100_000.0,
             positions: HashMap::new(),
         };
-        portfolio.positions.insert("AAPL".into(), PositionSnapshot { qty: 200.0, price: 150.0 });
+        portfolio
+            .positions
+            .insert("AAPL".into(), PositionSnapshot { qty: 200.0, price: 150.0, volatility: Some(0.20) });
+        portfolio
+            .positions
+            .insert("MSFT".into(), PositionSnapshot { qty: 0.0, price: 300.0, volatility: Some(0.25) });
 
-        // Buying another $60,000 of MSFT pushes gross to $90,000, 0.9x leverage
+        // Buying another $60,000 of MSFT pushes to 2 assets
         let order = OrderCandidate { symbol: "MSFT".into(), side: OrderSide::Buy, qty: 200.0, price: 300.0 };
 
-        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap();
-        assert_eq!(res.verdict, PreTradeVerdict::Rejected);
-        assert!(res.breaches.iter().any(|b| b.code == "var_limit_exceeded"));
-        assert!(res.projected_metrics.var_pct > 0.02);
+        let err = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap_err();
+        assert!(matches!(err, Error::InvalidArgument(_)));
+        assert_eq!(
+            err.to_string(),
+            "multi-asset VaR requires a correlation matrix; none available for 2 assets"
+        );
     }
 }

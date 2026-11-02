@@ -238,7 +238,7 @@ impl SwapTerms {
 
     /// The start day of the period ending on `end_day`.
     fn start_of(&self, end_day: i64) -> Option<i64> {
-        self.schedule().period_around(end_day * DAY_NS).map(|(s, _)| s)
+        self.schedule().period_around(end_day * DAY_NS).ok().flatten().map(|(s, _)| s)
     }
 
     /// The floating rate of the period `(start_day, end_day)`, fixed at its
@@ -251,7 +251,7 @@ impl SwapTerms {
 
     /// Payment days strictly after `from_ns` and on or before `to_ns`.
     pub fn payment_days_between(&self, from_ns: i64, to_ns: i64) -> Vec<i64> {
-        self.schedule().coupon_days_between(from_ns, to_ns)
+        self.schedule().coupon_days_between(from_ns, to_ns).unwrap_or_default()
     }
 
     /// The receiver's net coupon per 100 of notional for the period ending

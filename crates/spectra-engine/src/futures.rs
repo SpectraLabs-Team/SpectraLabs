@@ -125,7 +125,15 @@ fn is_business_day(day: i64, exchange: Option<Exchange>) -> bool {
 }
 
 /// Start (00:00 UTC) of the day `n` business days before the day of `expiry_ns`.
-pub fn roll_ts(expiry_ns: i64, n: u32, exchange: Option<Exchange>) -> i64 {
+///
+/// # Errors
+/// Returns [`Error::Data`] if `n` business days cannot be found within 400 calendar days.
+pub fn roll_ts(
+    expiry_ns: i64,
+    n: u32,
+    exchange: Option<Exchange>,
+    instrument: impl std::fmt::Display,
+) -> Result<i64> {
     let mut day = expiry_ns.div_euclid(DAY_NS);
     let mut left = n;
     // Bounded: at most a few weeks of holidays between business days.
@@ -137,7 +145,12 @@ pub fn roll_ts(expiry_ns: i64, n: u32, exchange: Option<Exchange>) -> i64 {
             left -= 1;
         }
     }
-    day * DAY_NS
+    if left > 0 {
+        return Err(Error::Data(format!(
+            "futures roll did not find {left} business days within 400 days for {instrument}"
+        )));
+    }
+    Ok(day * DAY_NS)
 }
 
 /// The futures chains of a run.
@@ -156,7 +169,10 @@ pub struct Chains {
 impl Chains {
     /// The chains of `setup`'s futures. A future without an underlying is a
     /// chain of its own (named by its symbol).
-    pub fn new(setup: &InstrumentSetup, rule: &RollRule, exchange: Option<Exchange>) -> Self {
+    ///
+    /// # Errors
+    /// Returns [`Error::Data`] if rolling any future contract hits the 400-day guard.
+    pub fn new(setup: &InstrumentSetup, rule: &RollRule, exchange: Option<Exchange>) -> Result<Self> {
         let mut c = Self::default();
         for (&id, inst) in &setup.instruments {
             if inst.kind != InstrumentType::Future {
@@ -166,13 +182,13 @@ impl Chains {
             let chain = inst.underlying.clone().unwrap_or_else(|| inst.symbol.clone());
             c.by_chain.entry(chain.clone()).or_default().push((expiry, id));
             c.chain_of.insert(id, chain);
-            c.roll_at.insert(id, roll_ts(expiry, rule.business_days_before_expiry, exchange));
+            c.roll_at.insert(id, roll_ts(expiry, rule.business_days_before_expiry, exchange, id)?);
             c.expiry.insert(id, expiry);
         }
         for list in c.by_chain.values_mut() {
             list.sort_unstable();
         }
-        c
+        Ok(c)
     }
 
     /// True when the run has no futures.
@@ -339,10 +355,10 @@ mod tests {
     #[test]
     fn rolls_five_weekdays_before_expiry() {
         // Friday 2026-12-18: five weekdays back is Friday 2026-12-11.
-        assert_eq!(roll_ts(ymd(2026, 12, 18) + 3_600_000_000_000, 5, None), ymd(2026, 12, 11));
+        assert_eq!(roll_ts(ymd(2026, 12, 18) + 3_600_000_000_000, 5, None, 1).unwrap(), ymd(2026, 12, 11));
         // Monday 2026-12-14: back over a weekend to Monday 2026-12-07.
-        assert_eq!(roll_ts(ymd(2026, 12, 14), 5, None), ymd(2026, 12, 7));
-        assert_eq!(roll_ts(ymd(2026, 12, 14), 0, None), ymd(2026, 12, 14));
+        assert_eq!(roll_ts(ymd(2026, 12, 14), 5, None, 1).unwrap(), ymd(2026, 12, 7));
+        assert_eq!(roll_ts(ymd(2026, 12, 14), 0, None, 1).unwrap(), ymd(2026, 12, 14));
     }
 
     #[test]
@@ -350,7 +366,20 @@ mod tests {
         // XNYS is closed on Thursday 2026-11-26 (Thanksgiving): two business days before
         // Friday 2026-11-27 is Tuesday 2026-11-24, not Wednesday.
         let ex = Exchange::parse("XNYS").expect("XNYS calendar");
-        assert_eq!(roll_ts(ymd(2026, 11, 27), 2, Some(ex)), ymd(2026, 11, 24));
+        assert_eq!(roll_ts(ymd(2026, 11, 27), 2, Some(ex), 1).unwrap(), ymd(2026, 11, 24));
+    }
+
+    #[test]
+    fn roll_guard_returns_error_when_left_unfound() {
+        // Requesting 401 business days on a weekday-only calendar (exchange: None):
+        // Walking back 400 calendar days spans 57 full weeks (399 days) + 1 day (Sunday 11-01).
+        // 57 * 5 = 285 business days found; left = 401 - 285 = 116 business days remain.
+        // Guard triggers after 400 days and returns Error::Data.
+        let expiry = ymd(2026, 11, 2);
+        assert!(matches!(
+            roll_ts(expiry, 401, None, "ESZ6"),
+            Err(Error::Data(msg)) if msg == "futures roll did not find 116 business days within 400 days for ESZ6"
+        ));
     }
 
     fn fut(sym: &str, under: &str, expiry: i64) -> Instrument {
@@ -367,7 +396,7 @@ mod tests {
         let mut s = InstrumentSetup::default();
         s.instruments.insert(1, fut("ESH7", "ES", ymd(2027, 3, 19)));
         s.instruments.insert(0, fut("ESZ6", "ES", ymd(2026, 12, 18)));
-        let c = Chains::new(&s, &RollRule::default(), None);
+        let c = Chains::new(&s, &RollRule::default(), None).unwrap();
         assert_eq!(c.front("ES", ymd(2026, 12, 10)), Some(0));
         assert_eq!(c.front("ES", ymd(2026, 12, 11)), Some(1)); // rolled on the 11th
         assert_eq!(c.next_after(0), Some(1));
@@ -382,7 +411,7 @@ mod tests {
         s.instruments.insert(0, fut("A", "X", 3 * DAY_NS + 1));
         s.instruments.insert(1, fut("B", "X", 100 * DAY_NS));
         let rule = RollRule { business_days_before_expiry: 0, adjust: RollAdjust::Ratio };
-        let c = Chains::new(&s, &rule, None);
+        let c = Chains::new(&s, &rule, None).unwrap();
         let px = |v: i64| Price::from_raw(v * SCALE);
         let bar =
             |ts: i64, id, close: i64| Bar::new(ts, id, px(close), px(close), px(close), px(close), Qty::ONE);

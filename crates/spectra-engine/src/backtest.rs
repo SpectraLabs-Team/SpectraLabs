@@ -1918,8 +1918,8 @@ fn pay_coupons(
     let Some(prev) = prev_ts else { return Ok(()) };
     for &id in setup.instruments.keys() {
         let Some(terms) = setup.bond_terms(id) else { continue };
-        for day in terms.coupon_days_between(prev, ts) {
-            let Some((start, end)) = terms.period_around(day * 86_400_000_000_000) else { continue };
+        for day in terms.coupon_days_between(prev, ts)? {
+            let Some((start, end)) = terms.period_around(day * 86_400_000_000_000)? else { continue };
             // Per 100 face, in the bond's currency, converted at the rate known now.
             let per_unit = setup.fx_convert(id, Price::from_f64(terms.coupon_amount(start, end))?, ts)?;
             if per_unit.is_zero() {
@@ -2270,7 +2270,7 @@ fn run_inner<'s>(
     let financed = !fin.is_zero();
     let interval = check_uniform_intervals(bars)?;
     let sessions = SessionRule::new(cfg.exchange, interval);
-    let chains = Chains::new(setup, &setup.roll, cfg.exchange);
+    let chains = Chains::new(setup, &setup.roll, cfg.exchange)?;
     let has_bonds = setup.instruments.values().any(|i| i.kind == InstrumentType::Bond);
     let has_options = setup.instruments.values().any(|i| i.kind == InstrumentType::Option);
     let has_swaps = setup.instruments.values().any(|i| i.kind == InstrumentType::Swap);

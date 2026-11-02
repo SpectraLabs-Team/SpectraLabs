@@ -304,16 +304,18 @@ impl RiskReport {
         dependence_model: DependenceModel,
         position_contributions: Vec<PositionRiskContribution>,
         config: &RiskConfig,
-    ) -> Self {
+    ) -> Result<Self> {
         let (evt_var, evt_cvar) = if losses.len() >= 50 {
-            EvtTailModel::fit(losses, 0.95)
-                .map(|e| (Some(e.var(config.confidence)), e.cvar(config.confidence).ok()))
-                .unwrap_or((None, None))
+            if let Ok(e) = EvtTailModel::fit(losses, 0.95) {
+                (Some(e.var(config.confidence)), Some(e.cvar(config.confidence)?))
+            } else {
+                (None, None)
+            }
         } else {
             (None, None)
         };
 
-        Self {
+        Ok(Self {
             metric_name: metric.into(),
             value,
             confidence: config.confidence,
@@ -333,7 +335,7 @@ impl RiskReport {
             position_contributions,
             evt_var,
             evt_cvar,
-        }
+        })
     }
 
     /// JSON with the C++ report's fields first (same names), then the
@@ -638,7 +640,7 @@ impl RiskEngine {
                     }
                     Which::Plugin(p) => (p.name().to_string(), p.compute(&losses, config.confidence)?),
                 };
-                Ok(RiskReport::new(
+                RiskReport::new(
                     &name,
                     value,
                     &losses,
@@ -653,7 +655,7 @@ impl RiskEngine {
                     config.dependence,
                     contributions.clone(),
                     config,
-                ))
+                )
             })
             .collect()
     }

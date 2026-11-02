@@ -676,7 +676,7 @@ async fn preview_checks_every_row_of_the_sample_not_just_the_rows_it_returns() {
 async fn m7_regimes_endpoint() {
     let mut returns = Vec::new();
     for i in 0..50 {
-        returns.push(if (i < 15) || (i >= 30 && i < 40) { 0.001 } else { -0.015 });
+        returns.push(if (i < 15) || (30..40).contains(&i) { 0.001 } else { -0.015 });
     }
     let body = Json::object()
         .with("returns", Json::Array(returns.into_iter().map(|v| Json::number(v).unwrap()).collect()))
@@ -710,8 +710,8 @@ async fn m7_garch_endpoint() {
 async fn m7_evt_endpoint() {
     let mut losses = Vec::new();
     for i in 0..100 {
-        let z = ((i as f64 * 0.17).sin() + (i as f64 * 0.53).cos()) * 0.7071;
-        let chi = (1.0 + (i as f64 * 0.31).sin().powi(2) + (i as f64 * 0.71).cos().powi(2)) / 3.0;
+        let z = ((f64::from(i) * 0.17).sin() + (f64::from(i) * 0.53).cos()) * std::f64::consts::FRAC_1_SQRT_2;
+        let chi = (1.0 + (f64::from(i) * 0.31).sin().powi(2) + (f64::from(i) * 0.71).cos().powi(2)) / 3.0;
         let t_val = z / chi.sqrt();
         losses.push((100.0 * t_val * 0.02).abs() + 1.0);
     }

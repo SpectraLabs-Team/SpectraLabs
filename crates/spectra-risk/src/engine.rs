@@ -306,11 +306,8 @@ impl RiskReport {
         config: &RiskConfig,
     ) -> Result<Self> {
         let (evt_var, evt_cvar) = if losses.len() >= 50 {
-            if let Ok(e) = EvtTailModel::fit(losses, 0.95) {
-                (Some(e.var(config.confidence)), Some(e.cvar(config.confidence)?))
-            } else {
-                (None, None)
-            }
+            let e = EvtTailModel::fit(losses, 0.95)?;
+            (Some(e.var(config.confidence)), Some(e.cvar(config.confidence)?))
         } else {
             (None, None)
         };
@@ -551,6 +548,14 @@ impl RiskEngine {
         config: &RiskConfig,
     ) -> Result<RiskReport> {
         self.calculate_named(metric.name(), portfolio, config)
+    }
+
+    /// Runs the engine to compute a metric (alias for [`calculate`](Self::calculate)).
+    ///
+    /// # Errors
+    /// Validation errors, simulation failure, or EVT fit failure when observations $\ge 50$.
+    pub fn run(&self, metric: Metric, portfolio: &Portfolio, config: &RiskConfig) -> Result<RiskReport> {
+        self.calculate(metric, portfolio, config)
     }
 
     /// Simulates once and computes several metrics from the same losses.

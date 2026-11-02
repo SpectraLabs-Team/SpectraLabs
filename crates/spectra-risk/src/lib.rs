@@ -54,8 +54,9 @@ pub use copula::{
     PositionRiskContribution,
 };
 pub use enforcement::{
-    utilization, LimitUtilization, OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot,
-    PreTradeChecker, PreTradeResult, PreTradeVerdict, ProjectedMetrics, RiskBreach, RiskLimits,
+    utilization, volatility_from_bars, volatility_from_prices, LimitUtilization, OrderCandidate, OrderSide,
+    PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeResult, PreTradeVerdict, ProjectedMetrics,
+    RiskBreach, RiskLimits, MIN_VOLATILITY_BARS,
 };
 pub use evt::EvtTailModel;
 pub use garch::{Egarch11, Garch11, GjrGarch11};

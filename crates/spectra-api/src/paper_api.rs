@@ -93,7 +93,8 @@ impl PaperAccountView {
         let mut positions_map = HashMap::new();
         for pos in &acc.positions {
             let price = pos.price * crate::instruments_api::multiplier_of(records, &pos.symbol);
-            positions_map.insert(pos.symbol.clone(), PositionSnapshot { qty: pos.qty, price });
+            positions_map
+                .insert(pos.symbol.clone(), PositionSnapshot { qty: pos.qty, price, volatility: 0.20 });
         }
         let snap = PortfolioSnapshot {
             cash: acc.balance.cash,
@@ -567,8 +568,10 @@ pub(crate) async fn create_order(
             current_sym_price = Some(p.price);
         }
         // Risk sees value per unit: price times the contract multiplier.
-        positions_map
-            .insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol) });
+        positions_map.insert(
+            p.symbol.clone(),
+            PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol), volatility: 0.20 },
+        );
     }
 
     let eval_price = req.fill_price.or(req.limit_price).or(current_sym_price).unwrap_or(100.0);

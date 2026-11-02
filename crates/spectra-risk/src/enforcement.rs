@@ -73,6 +73,8 @@ pub struct PositionSnapshot {
     pub qty: f64,
     /// Current marked price.
     pub price: f64,
+    /// Trailing annualized volatility.
+    pub volatility: f64,
 }
 
 impl PositionSnapshot {
@@ -152,7 +154,7 @@ impl PortfolioSnapshot {
         let mut p = crate::portfolio::Portfolio::new();
         for (sym, pos) in &self.positions {
             if pos.qty.abs() > 1e-8 && pos.price > 0.0 {
-                p.add_asset(sym.as_str(), pos.qty, pos.price);
+                p.add_asset_with_volatility(sym.as_str(), pos.qty, pos.price, pos.volatility);
             }
         }
 
@@ -512,10 +514,11 @@ impl PreTradeChecker {
             projected_net += projected_pos_qty * order.price;
         }
 
+        let existing_vol = portfolio.positions.get(&order.symbol).map(|p| p.volatility).unwrap_or(0.20);
         if projected_pos_qty.abs() > 1e-8 {
             projected_positions.insert(
                 order.symbol.clone(),
-                PositionSnapshot { qty: projected_pos_qty, price: order.price },
+                PositionSnapshot { qty: projected_pos_qty, price: order.price, volatility: existing_vol },
             );
         } else {
             projected_positions.remove(&order.symbol);
@@ -674,6 +677,50 @@ impl PreTradeChecker {
     }
 }
 
+/// Minimum number of bars of price history required to compute trailing volatility.
+pub const MIN_VOLATILITY_BARS: usize = 60;
+
+/// Annualized volatility computed from trailing bars of price history.
+///
+/// Uses the annualised standard deviation of log returns over the trailing 60 trading days,
+/// using the sample standard deviation (n-1), times sqrt(252).
+///
+/// # Errors
+/// Returns [`spectra_core::Error::Data`] if `bars` has fewer than 60 bars:
+/// `"insufficient price history for {symbol}: need 60 bars, have {n}"`
+pub fn volatility_from_bars(symbol: &str, bars: &[spectra_core::Bar]) -> spectra_core::Result<f64> {
+    let prices: Vec<f64> = bars.iter().map(|b| b.close.to_f64()).collect();
+    volatility_from_prices(symbol, &prices)
+}
+
+/// Annualized volatility computed from trailing prices.
+///
+/// # Errors
+/// Returns [`spectra_core::Error::Data`] if `prices` has fewer than 60 prices:
+/// `"insufficient price history for {symbol}: need 60 bars, have {n}"`
+pub fn volatility_from_prices(symbol: &str, prices: &[f64]) -> spectra_core::Result<f64> {
+    let n = prices.len();
+    if n < MIN_VOLATILITY_BARS {
+        return Err(spectra_core::Error::Data(format!(
+            "insufficient price history for {symbol}: need 60 bars, have {n}"
+        )));
+    }
+    let window = &prices[n - MIN_VOLATILITY_BARS..];
+    let mut log_returns = Vec::with_capacity(window.len() - 1);
+    for i in 1..window.len() {
+        let p_prev = window[i - 1];
+        let p_curr = window[i];
+        if p_prev <= 0.0 || p_curr <= 0.0 {
+            return Err(spectra_core::Error::Data(format!(
+                "non-positive price encountered for {symbol} when computing volatility"
+            )));
+        }
+        log_returns.push((p_curr / p_prev).ln());
+    }
+    let sample_std_dev = crate::metrics::volatility(&log_returns)?;
+    Ok(sample_std_dev * 252.0_f64.sqrt())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -712,7 +759,9 @@ mod tests {
             daily_start_equity: 65_000.0,
             positions: HashMap::new(),
         };
-        portfolio.positions.insert("AAPL".into(), PositionSnapshot { qty: 100.0, price: 150.0 });
+        portfolio
+            .positions
+            .insert("AAPL".into(), PositionSnapshot { qty: 100.0, price: 150.0, volatility: 0.20 });
 
         // Sell 100 on existing long 100 is flattening -> Approved even under kill switch!
         let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Sell, qty: 100.0, price: 150.0 };
@@ -739,7 +788,9 @@ mod tests {
             daily_start_equity: 65_000.0,
             positions: HashMap::new(),
         };
-        portfolio.positions.insert("AAPL".into(), PositionSnapshot { qty: 50.0, price: 150.0 });
+        portfolio
+            .positions
+            .insert("AAPL".into(), PositionSnapshot { qty: 50.0, price: 150.0, volatility: 0.20 });
 
         // Sell 100 when holding 50 with size reduction -> Reduced to 50
         let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Sell, qty: 100.0, price: 150.0 };
@@ -860,7 +911,9 @@ mod tests {
             daily_start_equity: 100_000.0,
             positions: HashMap::new(),
         };
-        portfolio.positions.insert("AAPL".into(), PositionSnapshot { qty: 200.0, price: 150.0 });
+        portfolio
+            .positions
+            .insert("AAPL".into(), PositionSnapshot { qty: 200.0, price: 150.0, volatility: 0.20 });
 
         // Buying another $60,000 of MSFT pushes gross to $90,000, 0.9x leverage
         let order = OrderCandidate { symbol: "MSFT".into(), side: OrderSide::Buy, qty: 200.0, price: 300.0 };
@@ -869,5 +922,62 @@ mod tests {
         assert_eq!(res.verdict, PreTradeVerdict::Rejected);
         assert!(res.breaches.iter().any(|b| b.code == "var_limit_exceeded"));
         assert!(res.projected_metrics.var_pct > 0.02);
+    }
+
+    #[test]
+    fn test_volatility_from_bars_60_bars_known_returns() {
+        // Hand calculation for 60 bars (59 log returns):
+        // 30 log returns of +0.01 and 29 log returns of -0.01.
+        // N = 59 returns.
+        // Sum of returns = 30 * 0.01 + 29 * (-0.01) = 0.01.
+        // Mean return r_bar = 0.01 / 59 ≈ 0.0001694915254237288.
+        // For +0.01: (r - r_bar)^2 = (0.01 * 58 / 59)^2 = 0.0001 * (3364 / 3481).
+        // For -0.01: (r - r_bar)^2 = (-0.01 * 60 / 59)^2 = 0.0001 * (3600 / 3481).
+        // Sum of squared deviations SS = 30 * 0.0001 * (3364/3481) + 29 * 0.0001 * (3600/3481)
+        //                               = 0.0001 * (100920 + 104400) / 3481 = 20.532 / 3481.
+        // Sample variance s^2 = SS / (59 - 1) = (205320 * 0.0001) / (3481 * 58) = 0.354 / 3481.
+        // Sample std dev s = sqrt(0.354 / 3481) ≈ 0.010084389681792102.
+        // Annualised volatility = s * sqrt(252) = sqrt(0.354 * 252 / 3481) = sqrt(89.208 / 3481) ≈ 0.1600847233313279.
+        let mut prices = vec![100.0];
+        for i in 0..59 {
+            let r: f64 = if i < 30 { 0.01 } else { -0.01 };
+            let last_px = *prices.last().unwrap();
+            prices.push(last_px * r.exp());
+        }
+        assert_eq!(prices.len(), 60);
+
+        let hour_ns = 3_600_000_000_000_i64;
+        let bars: Vec<spectra_core::Bar> = prices
+            .iter()
+            .enumerate()
+            .map(|(i, &p)| {
+                let px = spectra_core::Price::from_f64(p).unwrap();
+                spectra_core::Bar::new(hour_ns * (i as i64 + 1), 0, px, px, px, px, spectra_core::Qty::ZERO)
+            })
+            .collect();
+
+        let vol = volatility_from_bars("AAPL", &bars).unwrap();
+        let expected_vol = (89.208 / 3481.0_f64).sqrt();
+        assert!((vol - expected_vol).abs() < 1e-8, "vol {vol} must match expected {expected_vol}");
+    }
+
+    #[test]
+    fn test_volatility_from_bars_59_bars_returns_error_data() {
+        let hour_ns = 3_600_000_000_000_i64;
+        let bars: Vec<spectra_core::Bar> = (0..59)
+            .map(|i| {
+                let px = spectra_core::Price::from_f64(100.0).unwrap();
+                spectra_core::Bar::new(hour_ns * (i + 1), 0, px, px, px, px, spectra_core::Qty::ZERO)
+            })
+            .collect();
+        assert_eq!(bars.len(), 59);
+
+        let err = volatility_from_bars("AAPL", &bars).unwrap_err();
+        match err {
+            spectra_core::Error::Data(msg) => {
+                assert_eq!(msg, "insufficient price history for AAPL: need 60 bars, have 59");
+            }
+            other => panic!("expected Error::Data, got {other:?}"),
+        }
     }
 }

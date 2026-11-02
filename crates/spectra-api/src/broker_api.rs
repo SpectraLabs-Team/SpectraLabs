@@ -436,7 +436,10 @@ async fn handle_create_order(
             symbol_price = p.price;
         }
         // Risk sees value per unit: price times the contract multiplier.
-        positions.insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol) });
+        positions.insert(
+            p.symbol.clone(),
+            PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol), volatility: 0.20 },
+        );
     }
     let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
         (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
@@ -984,7 +987,8 @@ pub(crate) async fn handle_venue_order(
 
         let mut positions = HashMap::new();
         for p in &db_positions {
-            positions.insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price });
+            positions
+                .insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price, volatility: 0.20 });
         }
 
         let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
@@ -1094,7 +1098,7 @@ pub(crate) async fn handle_venue_reconcile(body: Result<Bytes, BytesRejection>) 
 
     let mut local_map = HashMap::new();
     for (sym, qty) in payload.local_positions {
-        local_map.insert(sym, PositionSnapshot { qty, price: 100.0 });
+        local_map.insert(sym, PositionSnapshot { qty, price: 100.0, volatility: 0.20 });
     }
 
     let report = reconcile_positions_and_fills(

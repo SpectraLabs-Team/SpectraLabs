@@ -2489,14 +2489,31 @@ fn run_inner<'s>(
                         if !pos.qty.is_zero() {
                             let mark_price =
                                 ledger.mark_price(inst).map_or(fill_px, spectra_core::Fixed::to_f64);
+                            let inst_bars = history.get(&inst).map_or(&[][..], Vec::as_slice);
+                            let sym = format!("INST_{inst}");
+                            let vol = spectra_risk::enforcement::volatility_from_bars(&sym, inst_bars)?;
                             positions.insert(
-                                format!("INST_{inst}"),
+                                sym,
                                 spectra_risk::enforcement::PositionSnapshot {
                                     qty: pos.qty.to_f64(),
                                     price: unit(inst, mark_price),
+                                    volatility: vol,
                                 },
                             );
                         }
+                    }
+                    let cand_sym = format!("INST_{}", o.instrument);
+                    if !positions.contains_key(&cand_sym) {
+                        let inst_bars = history.get(&o.instrument).map_or(&[][..], Vec::as_slice);
+                        let vol = spectra_risk::enforcement::volatility_from_bars(&cand_sym, inst_bars)?;
+                        positions.insert(
+                            cand_sym.clone(),
+                            spectra_risk::enforcement::PositionSnapshot {
+                                qty: 0.0,
+                                price: unit(o.instrument, fill_px),
+                                volatility: vol,
+                            },
+                        );
                     }
                     let snap = spectra_risk::enforcement::PortfolioSnapshot {
                         cash: ledger.cash().to_f64(),

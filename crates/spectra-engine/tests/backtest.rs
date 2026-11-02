@@ -674,19 +674,21 @@ fn property_books_always_reconcile_and_runs_reproduce() {
 #[test]
 fn backtest_enforces_daily_loss_limit() {
     let hour_ns = 3_600_000_000_000_i64;
-    // Hour 1: strategy submits Order 1
-    // Hour 2: Order 1 fills at 100.0, marks at 100.0
-    // Hour 3: price drops to 80.0 (daily loss is $20, exceeding $1 limit); strategy submits Order 2
-    // Hour 4: Order 2 evaluates to fill, but daily loss of $20 exceeds $1 limit -> Rejected!
-    let bars = vec![
-        mk1(hour_ns, A, 100.0, 101.0, 99.0, 100.0),
-        mk1(hour_ns * 2, A, 100.0, 101.0, 99.0, 100.0),
-        mk1(hour_ns * 3, A, 80.0, 81.0, 79.0, 80.0),
-        mk1(hour_ns * 4, A, 80.0, 81.0, 79.0, 80.0),
-    ];
+    // 60 bars of price history with price variations around 100.0, so volatility is computed from real history:
+    let mut bars = Vec::with_capacity(62);
+    for i in 1..=60 {
+        let px = if i % 2 == 0 { 100.5 } else { 99.5 };
+        bars.push(mk1(hour_ns * i, A, px, px + 0.5, px - 0.5, px));
+    }
+    // Hour 61: price drops to 80.0 (daily loss is ~$20, exceeding $1 limit); strategy submits Order 2
+    bars.push(mk1(hour_ns * 61, A, 80.0, 81.0, 79.0, 80.0));
+    // Hour 62: Order 2 evaluates to fill, but daily loss exceeds $1 limit -> Rejected!
+    bars.push(mk1(hour_ns * 62, A, 80.0, 81.0, 79.0, 80.0));
+
     let mut s = FnStrategy {
         bar_fn: Some(Box::new(|c, bars| {
-            if bars[0].ts_ns <= 3_600_000_000_000_i64 * 3 {
+            let ts = bars[0].ts_ns;
+            if ts == 3_600_000_000_000_i64 * 59 || ts == 3_600_000_000_000_i64 * 61 {
                 c.market(A, Side::Buy, q(1.0));
             }
         })),

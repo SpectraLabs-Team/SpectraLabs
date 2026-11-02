@@ -468,8 +468,8 @@ fn test_enforcement_var_pct_hardcodes_t_copula_dof_4() {
     // finding for Task 7/8: PortfolioSnapshot::var_pct hardcodes TCopula with degrees_of_freedom = 4
     // without allowing caller configuration (enforcement.rs line 143).
     let mut positions = HashMap::new();
-    positions.insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0 });
-    positions.insert("MSFT".to_string(), PositionSnapshot { qty: 50.0, price: 300.0 });
+    positions.insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0, volatility: 0.20 });
+    positions.insert("MSFT".to_string(), PositionSnapshot { qty: 50.0, price: 300.0, volatility: 0.20 });
 
     let snap = PortfolioSnapshot {
         cash: 50_000.0,

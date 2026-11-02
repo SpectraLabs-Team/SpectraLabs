@@ -227,11 +227,14 @@ impl BondTerms {
     /// The first coupon after today is the fraction of its own period still
     /// to run away (a whole period on a coupon date); each later one is a
     /// period further.
-    fn flows(&self, ts_ns: i64) -> Vec<(f64, f64)> {
+    ///
+    /// # Errors
+    /// [`Error::Data`] when the schedule exceeds 2,400 periods.
+    pub fn flows(&self, ts_ns: i64) -> Result<Vec<(f64, f64)>> {
         let day = ts_ns.div_euclid(DAY_NS);
-        let days = self.coupon_days_between(ts_ns, self.maturity_ns).unwrap_or_default();
-        let Some(&first) = days.first() else { return Vec::new() };
-        let Some((start, end)) = self.period_around(first * DAY_NS).ok().flatten() else { return Vec::new() };
+        let days = self.coupon_days_between(ts_ns, self.maturity_ns)?;
+        let Some(&first) = days.first() else { return Ok(Vec::new()) };
+        let Some((start, end)) = self.period_around(first * DAY_NS)? else { return Ok(Vec::new()) };
         let t0 = (end - day) as f64 / (end - start).max(1) as f64;
         let mut out = Vec::with_capacity(days.len());
         let mut prev = start;
@@ -242,21 +245,27 @@ impl BondTerms {
         if let Some(last) = out.last_mut() {
             last.1 += 100.0;
         }
-        out
+        Ok(out)
     }
 
     /// Remaining cash flows at `ts_ns` as `(years from now, amount per 100
     /// face)`, a period being `1 / frequency` years: for pricing off a curve.
-    pub fn cash_flows(&self, ts_ns: i64) -> Vec<(f64, f64)> {
+    ///
+    /// # Errors
+    /// [`Error::Data`] when the schedule exceeds 2,400 periods.
+    pub fn cash_flows(&self, ts_ns: i64) -> Result<Vec<(f64, f64)>> {
         let f = f64::from(self.frequency);
-        self.flows(ts_ns).into_iter().map(|(t, cf)| (t / f, cf)).collect()
+        Ok(self.flows(ts_ns)?.into_iter().map(|(t, cf)| (t / f, cf)).collect())
     }
 
     /// Dirty price per 100 face for an annual yield `y` compounded `frequency` times a year.
-    pub fn price_from_yield(&self, y: f64, ts_ns: i64) -> f64 {
+    ///
+    /// # Errors
+    /// [`Error::Data`] when the schedule exceeds 2,400 periods.
+    pub fn price_from_yield(&self, y: f64, ts_ns: i64) -> Result<f64> {
         let f = f64::from(self.frequency);
         let base = 1.0 + y / f;
-        self.flows(ts_ns).iter().map(|&(t, cf)| cf / base.powf(t)).sum()
+        Ok(self.flows(ts_ns)?.iter().map(|&(t, cf)| cf / base.powf(t)).sum())
     }
 
     /// Yield to maturity (annual, compounded `frequency` times a year) that
@@ -265,16 +274,21 @@ impl BondTerms {
     /// # Errors
     /// [`Error::InvalidArgument`] after maturity, for a non-positive price, or
     /// when no yield between -99% and 1000% reprices it.
+    /// [`Error::Data`] when the schedule exceeds 2,400 periods.
     pub fn yield_from_price(&self, dirty: f64, ts_ns: i64) -> Result<f64> {
         if !dirty.is_finite() || dirty <= 0.0 {
             return Err(Error::InvalidArgument("price must be positive".into()));
         }
-        if self.flows(ts_ns).is_empty() {
+        let flows = self.flows(ts_ns)?;
+        if flows.is_empty() {
             return Err(Error::InvalidArgument("the bond has matured".into()));
         }
         let f = f64::from(self.frequency);
         let (mut lo, mut hi) = (-0.99 * f, 10.0);
-        let g = |y: f64| self.price_from_yield(y, ts_ns) - dirty;
+        let g = |y: f64| -> f64 {
+            let base = 1.0 + y / f;
+            flows.iter().map(|&(t, cf)| cf / base.powf(t)).sum::<f64>() - dirty
+        };
         if g(lo) * g(hi) > 0.0 {
             return Err(Error::InvalidArgument("no yield reprices the bond to this price".into()));
         }
@@ -300,25 +314,32 @@ impl BondTerms {
 
     /// Macaulay duration in years, modified duration, convexity (years²)
     /// and DV01 (price change per 100 face for a 1bp fall in yield), at yield `y`.
-    pub fn risk(&self, y: f64, ts_ns: i64) -> BondRisk {
+    ///
+    /// # Errors
+    /// [`Error::Data`] when the schedule exceeds 2,400 periods.
+    pub fn risk(&self, y: f64, ts_ns: i64) -> Result<BondRisk> {
         let f = f64::from(self.frequency);
         let base = 1.0 + y / f;
-        let flows = self.flows(ts_ns);
+        let flows = self.flows(ts_ns)?;
         let price: f64 = flows.iter().map(|&(t, cf)| cf / base.powf(t)).sum();
         if price <= 0.0 {
-            return BondRisk::default();
+            return Ok(BondRisk::default());
         }
         let mac_periods: f64 = flows.iter().map(|&(t, cf)| t * cf / base.powf(t)).sum::<f64>() / price;
         let conv_periods: f64 =
             flows.iter().map(|&(t, cf)| t * (t + 1.0) * cf / base.powf(t + 2.0)).sum::<f64>() / price;
         let macaulay = mac_periods / f;
         let modified = macaulay / base;
-        BondRisk {
+        let price_at = |y_adj: f64| -> f64 {
+            let b = 1.0 + y_adj / f;
+            flows.iter().map(|&(t, cf)| cf / b.powf(t)).sum()
+        };
+        Ok(BondRisk {
             macaulay,
             modified,
             convexity: conv_periods / (f * f),
-            dv01: (self.price_from_yield(y - 0.0001, ts_ns) - self.price_from_yield(y + 0.0001, ts_ns)) / 2.0,
-        }
+            dv01: (price_at(y - 0.0001) - price_at(y + 0.0001)) / 2.0,
+        })
     }
 }
 
@@ -411,12 +432,12 @@ mod tests {
     fn par_bond_yields_its_coupon_on_a_coupon_date() {
         let b = semi(0.05, ns(2036, 6, 15), DayCount::ActActIcma);
         let t = ns(2026, 6, 15);
-        assert!((b.price_from_yield(0.05, t) - 100.0).abs() < 1e-9);
+        assert!((b.price_from_yield(0.05, t).unwrap() - 100.0).abs() < 1e-9);
         assert!((b.yield_from_price(100.0, t).unwrap() - 0.05).abs() < 1e-10);
         // Below par, the yield is above the coupon, and it round-trips.
         let y = b.yield_from_price(95.0, t).unwrap();
         assert!(y > 0.05);
-        assert!((b.price_from_yield(y, t) - 95.0).abs() < 1e-9);
+        assert!((b.price_from_yield(y, t).unwrap() - 95.0).abs() < 1e-9);
     }
 
     #[test]
@@ -427,7 +448,7 @@ mod tests {
             frequency: 1,
             day_count: DayCount::ActActIcma,
         };
-        let r = b.risk(0.04, ns(2026, 6, 15));
+        let r = b.risk(0.04, ns(2026, 6, 15)).unwrap();
         assert!((r.macaulay - 10.0).abs() < 1e-9);
         assert!((r.modified - 10.0 / 1.04).abs() < 1e-9);
         assert!(r.dv01 > 0.0 && r.convexity > 0.0);
@@ -442,9 +463,30 @@ mod tests {
             frequency: 1,
             day_count: DayCount::ActActIcma,
         };
-        let r = b.risk(0.10, ns(2026, 1, 1));
+        let r = b.risk(0.10, ns(2026, 1, 1)).unwrap();
         assert!((r.macaulay - 7.0439).abs() < 1e-4, "{}", r.macaulay);
-        assert!((b.price_from_yield(0.10, ns(2026, 1, 1)) - 87.7109).abs() < 1e-4);
+        assert!((b.price_from_yield(0.10, ns(2026, 1, 1)).unwrap() - 87.7109).abs() < 1e-4);
+    }
+
+    #[test]
+    fn bond_terms_flows_on_a_bond_whose_schedule_exceeds_2400_periods_returns_error_data() {
+        // Frequency = 12 (monthly, step = 30 days).
+        // 2,500 periods * 30 days = 75,000 days (~205.5 years).
+        // Walking back 2,400 periods covers only 72,000 days, leaving 3,000 days > from_day (0).
+        // The guard k > 2,400 triggers Error::Data.
+        let b = BondTerms {
+            maturity_ns: 75_000 * DAY_NS,
+            coupon_rate: 0.05,
+            frequency: 12,
+            day_count: DayCount::ActActIcma,
+        };
+        let err = b.flows(0).unwrap_err();
+        match err {
+            Error::Data(msg) => {
+                assert!(msg.contains("2400 periods"), "expected 2400 periods in message, got: {msg}");
+            }
+            other => panic!("expected Error::Data for flows, got: {other:?}"),
+        }
     }
 
     #[test]

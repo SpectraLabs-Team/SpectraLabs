@@ -142,7 +142,11 @@ pub(crate) async fn price_bond(body: Result<Bytes, BytesRejection>) -> Response 
         if !y.is_finite() {
             return invalid_fields(&[("yield".into(), "must be a finite number".into())]);
         }
-        (terms.price_from_yield(y, as_of), y)
+        let px = match terms.price_from_yield(y, as_of) {
+            Ok(px) => px,
+            Err(e) => return invalid_fields(&[("yield".into(), e.to_string())]),
+        };
+        (px, y)
     } else {
         let dirty = req.dirty_price.unwrap_or_else(|| req.clean_price.unwrap_or(0.0) + accrued);
         match terms.yield_from_price(dirty, as_of) {
@@ -153,14 +157,23 @@ pub(crate) async fn price_bond(body: Result<Bytes, BytesRejection>) -> Response 
             }
         }
     };
-    let r = terms.risk(y, as_of);
+    let r = match terms.risk(y, as_of) {
+        Ok(r) => r,
+        Err(e) => return invalid_fields(&[("as_of".into(), e.to_string())]),
+    };
     let z_spread = match req.curve.as_ref().map(CurveInput::build) {
         None => None,
         Some(Err(e)) => return invalid_fields(&prefix("curve", e)),
-        Some(Ok(curve)) => match spectra_engine::z_spread(&terms.cash_flows(as_of), &curve, dirty) {
-            Ok(z) => Some(z),
-            Err(e) => return invalid_fields(&[("curve".into(), e.to_string())]),
-        },
+        Some(Ok(curve)) => {
+            let flows = match terms.cash_flows(as_of) {
+                Ok(cf) => cf,
+                Err(e) => return invalid_fields(&[("curve".into(), e.to_string())]),
+            };
+            match spectra_engine::z_spread(&flows, &curve, dirty) {
+                Ok(z) => Some(z),
+                Err(e) => return invalid_fields(&[("curve".into(), e.to_string())]),
+            }
+        }
     };
     to_json(
         200,

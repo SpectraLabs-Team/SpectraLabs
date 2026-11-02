@@ -624,7 +624,7 @@ fn bonds_json(out: &BacktestOutput) -> Result<Option<Json>> {
                 .with("dirty_price", num(dirty))
                 .with("accrued_interest", num(accrued));
             if let Ok(y) = terms.yield_from_price(dirty, ts) {
-                let r = terms.risk(y, ts);
+                let r = terms.risk(y, ts)?;
                 j = j
                     .with("yield_to_maturity", num(y))
                     .with("macaulay_duration", num(r.macaulay))

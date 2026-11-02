@@ -179,6 +179,7 @@ impl Chains {
                 continue;
             }
             let Some(expiry) = inst.expiry_ns else { continue };
+            // Fall back to symbol when no underlying is set: the contract trades on its own symbol.
             let chain = inst.underlying.clone().unwrap_or_else(|| inst.symbol.clone());
             c.by_chain.entry(chain.clone()).or_default().push((expiry, id));
             c.chain_of.insert(id, chain);

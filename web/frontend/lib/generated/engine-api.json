@@ -9836,6 +9836,13 @@
           "qty": {
             "type": "number",
             "format": "double"
+          },
+          "volatility": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
           }
         }
       },

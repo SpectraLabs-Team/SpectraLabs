@@ -3683,6 +3683,8 @@ export interface components {
             price: number;
             /** Format: double */
             qty: number;
+            /** Format: double */
+            volatility?: number | null;
         };
         PreTradeCheckRequest: {
             portfolio?: null | components["schemas"]["PortfolioSnapshotDto"];

@@ -753,7 +753,10 @@ pub(crate) async fn pre_trade_check(
 
     // 4. Run pre-trade check
     let candidate = OrderCandidate { symbol: req.symbol.clone(), side, qty: req.qty, price: req.price };
-    let result = PreTradeChecker::evaluate(&limits, &portfolio, &candidate, kill_switch_active);
+    let result = match PreTradeChecker::evaluate(&limits, &portfolio, &candidate, kill_switch_active) {
+        Ok(r) => r,
+        Err(e) => return error_response(422, format!("Pre-trade risk check failed: {e}")),
+    };
 
     let verdict_str = match result.verdict {
         PreTradeVerdict::Approved => "approved",
@@ -1255,7 +1258,10 @@ pub(crate) async fn replay_decision(
         positions,
     };
 
-    let replay_res = PreTradeChecker::evaluate(&limits, &portfolio, &candidate, ks_active);
+    let replay_res = match PreTradeChecker::evaluate(&limits, &portfolio, &candidate, ks_active) {
+        Ok(r) => r,
+        Err(e) => return error_response(422, format!("Pre-trade risk check replay failed: {e}")),
+    };
     let replay_verdict = match replay_res.verdict {
         PreTradeVerdict::Approved => "approved",
         PreTradeVerdict::Reduced => "reduced",
@@ -1362,10 +1368,18 @@ pub(crate) async fn get_metrics(
             (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
         };
         let p = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
-        (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), p.var_pct())
+        let var = match p.var_pct() {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
+        };
+        (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), var)
     } else {
         let p = PortfolioSnapshot::default();
-        (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), p.var_pct())
+        let var = match p.var_pct() {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
+        };
+        (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), var)
     };
 
     let u = LimitUtilization::new(gross, net, lev, dd, loss, var_pct, &limits);

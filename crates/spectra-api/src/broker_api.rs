@@ -453,7 +453,23 @@ async fn handle_create_order(
         qty,
         price: symbol_price * mult(&order_req.symbol),
     };
-    let eval_res = PreTradeChecker::evaluate(&limits, &portfolio, &candidate, kill_switch_active);
+    let eval_res = match PreTradeChecker::evaluate(&limits, &portfolio, &candidate, kill_switch_active) {
+        Ok(r) => r,
+        Err(e) => {
+            return fail_closed_response(
+                pool,
+                ws,
+                None,
+                &order_req.symbol,
+                side,
+                qty,
+                100.0,
+                &format!("Pre-trade risk check failed: {e}"),
+                user_id,
+            )
+            .await;
+        }
+    };
 
     // If order is rejected: STOP BEFORE REACHING BROKER!
     let breaches_json = json!(eval_res

@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 
+use spectra_core::Error;
 use spectra_risk::copula::{simulate_correlated, DependenceModel};
 use spectra_risk::enforcement::{PortfolioSnapshot, PositionSnapshot};
 use spectra_risk::portfolio::Portfolio;
@@ -489,7 +490,7 @@ fn test_parser_defaults_in_dependence_model_parse() {
 }
 
 #[test]
-fn test_enforcement_var_pct_hardcodes_t_copula_dof_4() {
+fn test_enforcement_var_pct_rejects_zero_dof() {
     // finding for Task 7/8: PortfolioSnapshot::var_pct hardcodes TCopula with degrees_of_freedom = 4
     // without allowing caller configuration (enforcement.rs line 143).
     let mut positions = HashMap::new();
@@ -504,7 +505,7 @@ fn test_enforcement_var_pct_hardcodes_t_copula_dof_4() {
         positions,
     };
 
-    let var_default = snap.var_pct();
+    let var_default = snap.var_pct().unwrap();
     let var_t4 = snap.var_pct_with_model(DependenceModel::TCopula { degrees_of_freedom: 4 }).unwrap();
     let var_gauss = snap.var_pct_with_model(DependenceModel::GaussianCopula).unwrap();
 
@@ -525,8 +526,93 @@ fn test_enforcement_var_pct_hardcodes_t_copula_dof_4() {
     );
 
     // TCopula with degrees_of_freedom == 0 returns Error::InvalidArgument
+    let err = snap.var_pct_with_model(DependenceModel::TCopula { degrees_of_freedom: 0 }).unwrap_err();
     assert!(
-        snap.var_pct_with_model(DependenceModel::TCopula { degrees_of_freedom: 0 }).is_err(),
-        "TCopula with dof 0 must return an error"
+        matches!(err, Error::InvalidArgument(_)),
+        "TCopula with dof 0 must return Error::InvalidArgument, got {err:?}"
     );
+}
+
+#[test]
+fn test_enforcement_var_pct_simulation_failure_returns_error_data() {
+    let mut positions = HashMap::new();
+    // Input: position with infinite quantity makes portfolio validation inside simulate_correlated fail
+    positions.insert("AAPL".to_string(), PositionSnapshot { qty: f64::INFINITY, price: 150.0 });
+
+    let snap = PortfolioSnapshot {
+        cash: 50_000.0,
+        equity: 100_000.0,
+        peak_equity: 100_000.0,
+        daily_start_equity: 100_000.0,
+        positions,
+    };
+
+    let err = snap.var_pct().unwrap_err();
+    match err {
+        Error::Data(msg) => {
+            assert!(
+                msg.contains("var_pct simulation failed"),
+                "expected 'var_pct simulation failed' in error message, got: {msg}"
+            );
+        }
+        other => panic!("expected Error::Data, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_enforcement_var_pct_with_invalid_model_returns_error_not_zero() {
+    let mut positions = HashMap::new();
+    positions.insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0 });
+
+    let snap = PortfolioSnapshot {
+        cash: 50_000.0,
+        equity: 100_000.0,
+        peak_equity: 100_000.0,
+        daily_start_equity: 100_000.0,
+        positions,
+    };
+
+    // An invalid model returns Err(Error::InvalidArgument) and does NOT silently default to 0.0
+    let res = snap.var_pct_with_model(DependenceModel::TCopula { degrees_of_freedom: 0 });
+    assert!(res.is_err(), "must return an error");
+    let err = res.unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidArgument(_)),
+        "invalid model must return Error::InvalidArgument, got: {err:?}"
+    );
+}
+
+#[test]
+fn test_enforcement_multi_asset_divergence_fixture() {
+    // Multi-asset fixture demonstrating option (b) divergence:
+    // Old behaviour: fallback to parametric formula (leverage * 0.0165 * 2.33)
+    // New behaviour: Monte Carlo simulation under independent-assets assumption (explicit identity matrix)
+    let mut positions = HashMap::new();
+    positions.insert("AAPL".to_string(), PositionSnapshot { qty: 100.0, price: 150.0 }); // $15,000
+    positions.insert("MSFT".to_string(), PositionSnapshot { qty: 50.0, price: 300.0 }); // $15,000
+
+    let snap = PortfolioSnapshot {
+        cash: 50_000.0,
+        equity: 100_000.0,
+        peak_equity: 100_000.0,
+        daily_start_equity: 100_000.0,
+        positions,
+    };
+
+    // Old parametric fallback value:
+    // gross exposure = 30,000; leverage = 30,000 / 100,000 = 0.3
+    // old_var = 0.3 * 0.0165 * 2.33 = 0.0115335 (1.153%)
+    let old_parametric_var = (snap.leverage() * 0.0165 * 2.33).max(0.0);
+    assert!((old_parametric_var - 0.011_533_5).abs() < 1e-7);
+
+    // New independent-assets Monte Carlo VaR (TCopula df=4):
+    let new_simulated_var = snap.var_pct().unwrap();
+    let expected_new_var = 0.009_010_267_051_396_0; // ~0.901%
+    assert!(
+        (new_simulated_var - expected_new_var).abs() < 1e-10,
+        "new simulated VaR {new_simulated_var} must match {expected_new_var}"
+    );
+
+    // The two values diverge as documented:
+    assert!((new_simulated_var - old_parametric_var).abs() > 1e-4);
 }

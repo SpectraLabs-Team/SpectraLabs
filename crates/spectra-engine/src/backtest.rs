@@ -2516,7 +2516,7 @@ fn run_inner<'s>(
                         &snap,
                         &candidate,
                         cfg.kill_switch,
-                    );
+                    )?;
                     match res.verdict {
                         spectra_risk::enforcement::PreTradeVerdict::Rejected => {
                             o.state = OrderState::Rejected;

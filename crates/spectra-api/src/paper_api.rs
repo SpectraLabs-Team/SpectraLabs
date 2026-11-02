@@ -89,7 +89,10 @@ pub(crate) struct PaperAccountView {
 impl PaperAccountView {
     /// The view, with each position valued at its price times its contract
     /// multiplier (`records`: the workspace's instrument records).
-    fn new(acc: PaperAccount, records: &HashMap<String, spectra_core::Instrument>) -> Self {
+    fn new(
+        acc: PaperAccount,
+        records: &HashMap<String, spectra_core::Instrument>,
+    ) -> spectra_core::Result<Self> {
         let mut positions_map = HashMap::new();
         for pos in &acc.positions {
             let price = pos.price * crate::instruments_api::multiplier_of(records, &pos.symbol);
@@ -102,11 +105,11 @@ impl PaperAccountView {
             daily_start_equity: acc.balance.daily_start_equity,
             positions: positions_map,
         };
-        let var_pct = snap.var_pct();
+        let var_pct = snap.var_pct()?;
         let var_dollar = var_pct * snap.equity;
         let cvar_dollar = var_dollar * 1.25;
 
-        Self {
+        Ok(Self {
             workspace_id: acc.workspace_id,
             strategy_id: acc.strategy_id,
             cash: acc.balance.cash,
@@ -118,7 +121,7 @@ impl PaperAccountView {
             var_pct,
             var_dollar,
             cvar_dollar,
-        }
+        })
     }
 }
 
@@ -301,7 +304,10 @@ pub(crate) async fn get_account(
         Err(r) => return r,
     };
     match spectra_db::paper::get_or_init_paper_account(&pool, ws, q.strategy_id, q.initial_cash).await {
-        Ok(acc) => json_response(200, json!(PaperAccountView::new(acc, &records)).to_string()),
+        Ok(acc) => match PaperAccountView::new(acc, &records) {
+            Ok(v) => json_response(200, json!(v).to_string()),
+            Err(e) => error_response(422, format!("Failed to compute paper account metrics: {e}")),
+        },
         Err(e) => db_error(&e),
     }
 }
@@ -434,7 +440,10 @@ pub(crate) async fn reset_account(
         Err(r) => return r,
     };
     match spectra_db::paper::reset_paper_account(&pool, ws, req.strategy_id, req.initial_cash).await {
-        Ok(acc) => json_response(200, json!(PaperAccountView::new(acc, &records)).to_string()),
+        Ok(acc) => match PaperAccountView::new(acc, &records) {
+            Ok(v) => json_response(200, json!(v).to_string()),
+            Err(e) => error_response(422, format!("Failed to compute paper account metrics: {e}")),
+        },
         Err(e) => db_error(&e),
     }
 }
@@ -605,7 +614,10 @@ pub(crate) async fn create_order(
     };
 
     // Run M8 Pre-Trade Risk Check (Task 3)
-    let pre_trade = PreTradeChecker::evaluate(&limits, &snapshot, &candidate, kill_switch_active);
+    let pre_trade = match PreTradeChecker::evaluate(&limits, &snapshot, &candidate, kill_switch_active) {
+        Ok(r) => r,
+        Err(e) => return error_response(422, format!("Pre-trade risk check failed: {e}")),
+    };
 
     // Record decision in risk audit trail
     let breach_codes: Vec<String> = pre_trade.breaches.iter().map(|b| b.code.clone()).collect();
@@ -1229,12 +1241,17 @@ pub(crate) async fn step_strategy(
             Err(e) => return db_error(&e),
         };
 
+    let account = match PaperAccountView::new(updated_account, &step_records) {
+        Ok(v) => v,
+        Err(e) => return error_response(422, format!("Failed to compute paper account metrics: {e}")),
+    };
+
     let resp = StepPaperResponse {
         strategy_id: req.strategy_id,
         strategy_version_id: Some(version.id),
         orders: order_views,
         fills: fill_views,
-        account: PaperAccountView::new(updated_account, &step_records),
+        account,
     };
 
     json_response(200, json!(resp).to_string())

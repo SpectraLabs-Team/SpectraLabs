@@ -142,9 +142,11 @@ impl PortfolioSnapshot {
 
     /// Parametric or correlated copula 1-day 99% VaR approximation based on portfolio holdings.
     /// Uses Student-t copula with 4 degrees of freedom.
-    pub fn var_pct(&self) -> f64 {
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidArgument`] or [`Error::Data`] if the simulation or model fails.
+    pub fn var_pct(&self) -> Result<f64> {
         self.var_pct_with_model(crate::copula::DependenceModel::TCopula { degrees_of_freedom: 4 })
-            .unwrap_or(0.0)
     }
 
     /// Calculates 1-day 99% VaR as a fraction of equity under a specific dependence model.
@@ -192,9 +194,9 @@ impl PortfolioSnapshot {
         match crate::copula::simulate_correlated(&p, id.as_deref(), model, 2_000, 42, 1.0 / 252.0, 0.99) {
             Ok(sim) => match crate::metrics::value_at_risk(&sim.portfolio_losses, 0.99) {
                 Ok(var_dollars) => Ok(var_dollars.max(0.0) / self.equity),
-                Err(_) => Ok((self.leverage() * 0.0165 * 2.33).max(0.0)),
+                Err(e) => Err(Error::Data(format!("var_pct quantile calculation failed: {e}"))),
             },
-            Err(_) => Ok((self.leverage() * 0.0165 * 2.33).max(0.0)),
+            Err(e) => Err(Error::Data(format!("var_pct simulation failed: {e}"))),
         }
     }
 }
@@ -313,12 +315,15 @@ impl PreTradeChecker {
     }
 
     /// Perform pre-trade evaluation of `order` against `limits` given current `portfolio` and kill-switch status.
+    ///
+    /// # Errors
+    /// Returns an error if risk calculation or portfolio VaR fails.
     pub fn evaluate(
         limits: &RiskLimits,
         portfolio: &PortfolioSnapshot,
         order: &OrderCandidate,
         kill_switch_active: bool,
-    ) -> PreTradeResult {
+    ) -> Result<PreTradeResult> {
         let mut breaches = Vec::new();
         let current_pos_qty = portfolio.positions.get(&order.symbol).map_or(0.0, |p| p.qty);
 
@@ -336,7 +341,7 @@ impl PreTradeChecker {
                     projected: 1.0,
                     message: "Emergency kill switch is currently active; opening orders are blocked.".into(),
                 });
-                return PreTradeResult {
+                return Ok(PreTradeResult {
                     verdict: PreTradeVerdict::Rejected,
                     requested_qty: order.qty,
                     approved_qty: 0.0,
@@ -349,9 +354,9 @@ impl PreTradeChecker {
                         concentration_pct: 0.0,
                         drawdown_pct: portfolio.drawdown_pct(),
                         daily_loss: portfolio.daily_loss(),
-                        var_pct: portfolio.var_pct(),
+                        var_pct: portfolio.var_pct()?,
                     },
-                };
+                });
             }
 
             // Order is closing: check if quantity exceeds existing position (which would flip/open new risk)
@@ -371,7 +376,7 @@ impl PreTradeChecker {
                         projected_gross / portfolio.equity
                     };
 
-                    return PreTradeResult {
+                    return Ok(PreTradeResult {
                         verdict: PreTradeVerdict::Reduced,
                         requested_qty: order.qty,
                         approved_qty,
@@ -394,7 +399,7 @@ impl PreTradeChecker {
                             daily_loss: portfolio.daily_loss(),
                             var_pct: 0.0,
                         },
-                    };
+                    });
                 }
 
                 breaches.push(RiskBreach {
@@ -406,7 +411,7 @@ impl PreTradeChecker {
                         order.qty, max_close_qty
                     ),
                 });
-                return PreTradeResult {
+                return Ok(PreTradeResult {
                     verdict: PreTradeVerdict::Rejected,
                     requested_qty: order.qty,
                     approved_qty: 0.0,
@@ -419,9 +424,9 @@ impl PreTradeChecker {
                         concentration_pct: 0.0,
                         drawdown_pct: portfolio.drawdown_pct(),
                         daily_loss: portfolio.daily_loss(),
-                        var_pct: portfolio.var_pct(),
+                        var_pct: portfolio.var_pct()?,
                     },
-                };
+                });
             }
 
             // Order is fully within existing position: approved to flatten/reduce
@@ -442,7 +447,7 @@ impl PreTradeChecker {
             let projected_leverage =
                 if portfolio.equity <= 0.0 { f64::INFINITY } else { projected_gross / portfolio.equity };
 
-            return PreTradeResult {
+            return Ok(PreTradeResult {
                 verdict: PreTradeVerdict::Approved,
                 requested_qty: order.qty,
                 approved_qty: order.qty,
@@ -459,9 +464,9 @@ impl PreTradeChecker {
                     },
                     drawdown_pct: portfolio.drawdown_pct(),
                     daily_loss: portfolio.daily_loss(),
-                    var_pct: portfolio.var_pct(),
+                    var_pct: portfolio.var_pct()?,
                 },
-            };
+            });
         }
 
         // 2. Drawdown & Daily Loss limits (Task 2: stored equity history)
@@ -493,7 +498,7 @@ impl PreTradeChecker {
         }
 
         if !breaches.is_empty() {
-            return PreTradeResult {
+            return Ok(PreTradeResult {
                 verdict: PreTradeVerdict::Rejected,
                 requested_qty: order.qty,
                 approved_qty: 0.0,
@@ -506,9 +511,9 @@ impl PreTradeChecker {
                     concentration_pct: 0.0,
                     drawdown_pct: current_dd,
                     daily_loss: current_loss,
-                    var_pct: portfolio.var_pct(),
+                    var_pct: portfolio.var_pct()?,
                 },
-            };
+            });
         }
 
         // 3. Project new position for target symbol
@@ -562,7 +567,7 @@ impl PreTradeChecker {
             daily_start_equity: portfolio.daily_start_equity,
             positions: projected_positions,
         };
-        let projected_var = projected_portfolio.var_pct();
+        let projected_var = projected_portfolio.var_pct()?;
 
         let projected_metrics = ProjectedMetrics {
             gross_exposure: projected_gross,
@@ -653,13 +658,13 @@ impl PreTradeChecker {
 
         // If no breaches, approved in full!
         if breaches.is_empty() {
-            return PreTradeResult {
+            return Ok(PreTradeResult {
                 verdict: PreTradeVerdict::Approved,
                 requested_qty: order.qty,
                 approved_qty: order.qty,
                 breaches,
                 projected_metrics,
-            };
+            });
         }
 
         // 5. Size reduction policy
@@ -682,23 +687,23 @@ impl PreTradeChecker {
                 max_qty_for_pos.min(max_qty_for_gross).min(max_qty_for_lev).min(max_qty_for_var);
 
             if permissible_qty > 0.0 && permissible_qty < order.qty {
-                return PreTradeResult {
+                return Ok(PreTradeResult {
                     verdict: PreTradeVerdict::Reduced,
                     requested_qty: order.qty,
                     approved_qty: (permissible_qty * 100.0).floor() / 100.0,
                     breaches,
                     projected_metrics,
-                };
+                });
             }
         }
 
-        PreTradeResult {
+        Ok(PreTradeResult {
             verdict: PreTradeVerdict::Rejected,
             requested_qty: order.qty,
             approved_qty: 0.0,
             breaches,
             projected_metrics,
-        }
+        })
     }
 }
 
@@ -712,7 +717,7 @@ mod tests {
         let portfolio = PortfolioSnapshot::default();
         let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 100.0, price: 150.0 };
 
-        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap();
         assert_eq!(res.verdict, PreTradeVerdict::Approved);
         assert_eq!(res.approved_qty, 100.0);
         assert!(res.breaches.is_empty());
@@ -724,7 +729,7 @@ mod tests {
         let portfolio = PortfolioSnapshot::default();
         let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 10.0, price: 150.0 };
 
-        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, true);
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, true).unwrap();
         assert_eq!(res.verdict, PreTradeVerdict::Rejected);
         assert_eq!(res.approved_qty, 0.0);
         assert_eq!(res.breaches[0].code, "kill_switch_active");
@@ -744,7 +749,7 @@ mod tests {
 
         // Sell 100 on existing long 100 is flattening -> Approved even under kill switch!
         let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Sell, qty: 100.0, price: 150.0 };
-        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, true);
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, true).unwrap();
         assert_eq!(res.verdict, PreTradeVerdict::Approved);
         assert_eq!(res.approved_qty, 100.0);
         assert!(res.breaches.is_empty());
@@ -752,7 +757,7 @@ mod tests {
         // But Buy 10 on existing long 100 is opening more -> Rejected!
         let buy_order =
             OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 10.0, price: 150.0 };
-        let buy_res = PreTradeChecker::evaluate(&limits, &portfolio, &buy_order, true);
+        let buy_res = PreTradeChecker::evaluate(&limits, &portfolio, &buy_order, true).unwrap();
         assert_eq!(buy_res.verdict, PreTradeVerdict::Rejected);
         assert_eq!(buy_res.breaches[0].code, "kill_switch_active");
     }
@@ -771,7 +776,7 @@ mod tests {
 
         // Sell 100 when holding 50 with size reduction -> Reduced to 50
         let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Sell, qty: 100.0, price: 150.0 };
-        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, true);
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, true).unwrap();
         assert_eq!(res.verdict, PreTradeVerdict::Reduced);
         assert_eq!(res.approved_qty, 50.0);
         assert_eq!(res.breaches[0].code, "kill_switch_closing_only");
@@ -789,7 +794,7 @@ mod tests {
             price: 200.0, // 20,000 exceeds 15,000
         };
 
-        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap();
         assert_eq!(res.verdict, PreTradeVerdict::Reduced);
         assert_eq!(res.approved_qty, 75.0); // 15,000 / 200 = 75
         assert_eq!(res.breaches[0].code, "position_size_exceeded");
@@ -807,7 +812,7 @@ mod tests {
         };
         let order = OrderCandidate { symbol: "MSFT".into(), side: OrderSide::Buy, qty: 10.0, price: 300.0 };
 
-        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap();
         assert_eq!(res.verdict, PreTradeVerdict::Rejected);
         assert_eq!(res.breaches[0].code, "drawdown_exceeded");
     }
@@ -830,7 +835,7 @@ mod tests {
             let max_safe_qty = max_qty_pos.min(max_qty_conc);
             let safe_qty = max_safe_qty * 0.8;
             let order = OrderCandidate { symbol: "TEST".into(), side: OrderSide::Buy, qty: safe_qty, price };
-            let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
+            let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap();
             assert_eq!(res.verdict, PreTradeVerdict::Approved, "Safe order must be approved");
             assert_eq!(res.approved_qty, safe_qty);
 
@@ -838,7 +843,7 @@ mod tests {
             let over_qty = max_qty_pos * 1.5;
             let over_order =
                 OrderCandidate { symbol: "TEST".into(), side: OrderSide::Buy, qty: over_qty, price };
-            let over_res = PreTradeChecker::evaluate(&limits, &portfolio, &over_order, false);
+            let over_res = PreTradeChecker::evaluate(&limits, &portfolio, &over_order, false).unwrap();
             assert_eq!(over_res.verdict, PreTradeVerdict::Rejected, "Over-limit order must be rejected");
         }
     }
@@ -868,7 +873,7 @@ mod tests {
             price: 200.0, // $50,000
         };
 
-        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap();
         assert_eq!(res.verdict, PreTradeVerdict::Rejected);
         assert!(res.breaches.iter().any(|b| b.code == "var_limit_exceeded"));
     }
@@ -893,7 +898,7 @@ mod tests {
         // Buying another $60,000 of MSFT pushes gross to $90,000, 0.9x leverage
         let order = OrderCandidate { symbol: "MSFT".into(), side: OrderSide::Buy, qty: 200.0, price: 300.0 };
 
-        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false);
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap();
         assert_eq!(res.verdict, PreTradeVerdict::Rejected);
         assert!(res.breaches.iter().any(|b| b.code == "var_limit_exceeded"));
         assert!(res.projected_metrics.var_pct > 0.02);

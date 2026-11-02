@@ -173,7 +173,7 @@ fn test_pre_trade_enforcement_kill_switch_fixture() {
     // 1. Buy 10 AAPL: opening order while kill switch active -> Rejected, approved 0.0, breach "kill_switch_active"
     let buy_order =
         OrderCandidate { symbol: "AAPL".to_string(), side: OrderSide::Buy, qty: 10.0, price: 100.0 };
-    let res_buy = PreTradeChecker::evaluate(&limits, &portfolio, &buy_order, true);
+    let res_buy = PreTradeChecker::evaluate(&limits, &portfolio, &buy_order, true).unwrap();
     assert_eq!(res_buy.verdict, PreTradeVerdict::Rejected);
     assert_eq!(res_buy.approved_qty, 0.0);
     assert!(res_buy.breaches.iter().any(|b| b.code == "kill_switch_active"));
@@ -181,7 +181,7 @@ fn test_pre_trade_enforcement_kill_switch_fixture() {
     // 2. Sell 20 AAPL: closing order <= 50 shares -> Approved, approved 20.0
     let sell_close =
         OrderCandidate { symbol: "AAPL".to_string(), side: OrderSide::Sell, qty: 20.0, price: 100.0 };
-    let res_close = PreTradeChecker::evaluate(&limits, &portfolio, &sell_close, true);
+    let res_close = PreTradeChecker::evaluate(&limits, &portfolio, &sell_close, true).unwrap();
     assert_eq!(res_close.verdict, PreTradeVerdict::Approved);
     assert_eq!(res_close.approved_qty, 20.0);
     assert!(res_close.breaches.is_empty());
@@ -190,7 +190,7 @@ fn test_pre_trade_enforcement_kill_switch_fixture() {
     let limits_reduced = RiskLimits { size_reduction_enabled: true, ..RiskLimits::default() };
     let sell_oversize =
         OrderCandidate { symbol: "AAPL".to_string(), side: OrderSide::Sell, qty: 80.0, price: 100.0 };
-    let res_reduced = PreTradeChecker::evaluate(&limits_reduced, &portfolio, &sell_oversize, true);
+    let res_reduced = PreTradeChecker::evaluate(&limits_reduced, &portfolio, &sell_oversize, true).unwrap();
     assert_eq!(res_reduced.verdict, PreTradeVerdict::Reduced);
     assert_eq!(res_reduced.approved_qty, 50.0);
     assert!(res_reduced.breaches.iter().any(|b| b.code == "kill_switch_closing_only"));

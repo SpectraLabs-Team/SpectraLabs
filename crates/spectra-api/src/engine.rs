@@ -407,7 +407,7 @@ pub fn evt(j: &Json) -> Reply {
 
     let model = spectra_risk::EvtTailModel::fit(&losses, threshold_quantile).map_err(|e| engine_error(&e))?;
     let evt_var = model.var(confidence);
-    let evt_cvar = model.cvar(confidence);
+    let evt_cvar = model.cvar(confidence).map_err(|e| engine_error(&e))?;
 
     Ok(Json::object()
         .with("threshold", Json::number(model.threshold).unwrap_or(Json::Null))

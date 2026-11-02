@@ -47,7 +47,19 @@ fn moments_match_the_reference() {
     near("mean", m.mean, REF_MEAN);
     near("stdev", m.stdev, REF_STDEV);
     near("skew", m.skew, REF_SKEW);
-    near("raw kurtosis", m.kurt, REF_KURT_RAW);
+    near("raw kurtosis", m.raw_kurtosis, REF_KURT_RAW);
+}
+
+#[test]
+fn raw_kurtosis_and_engine_excess_kurtosis_agree_on_reference_series() {
+    let m = moments(&RETURNS);
+    near("raw kurtosis", m.raw_kurtosis, REF_KURT_RAW);
+    let engine_excess = spectra_engine::performance::excess_kurtosis(&RETURNS).unwrap();
+    let excess_from_raw = m.raw_kurtosis - 3.0;
+    assert!(
+        (excess_from_raw - engine_excess).abs() < 1e-12,
+        "excess mismatch: raw - 3 = {excess_from_raw}, engine = {engine_excess}"
+    );
 }
 
 #[test]
@@ -59,7 +71,7 @@ fn per_period_sharpe_matches_the_reference() {
 fn probabilistic_sharpe_matches_the_reference() {
     let m = moments(&RETURNS);
     let sr = sharpe_per_period(&RETURNS);
-    near("PSR vs 0", probabilistic_sharpe(sr, 0.0, m.n, m.skew, m.kurt), REF_PSR_VS_ZERO);
+    near("PSR vs 0", probabilistic_sharpe(sr, 0.0, m.n, m.skew, m.raw_kurtosis), REF_PSR_VS_ZERO);
 }
 
 #[test]
@@ -76,7 +88,7 @@ fn deflated_sharpe_matches_the_reference() {
 fn minimum_track_record_length_matches_the_reference() {
     let m = moments(&RETURNS);
     let sr = sharpe_per_period(&RETURNS);
-    near("MinTRL at 95%", min_track_record_length(sr, 0.0, m.skew, m.kurt, 0.95), REF_MINTRL_095);
+    near("MinTRL at 95%", min_track_record_length(sr, 0.0, m.skew, m.raw_kurtosis, 0.95), REF_MINTRL_095);
 }
 
 #[test]
@@ -92,7 +104,7 @@ fn normal_quantiles_match_the_reference() {
 fn undefined_inputs_are_not_silently_numbers() {
     let m = moments(&RETURNS);
     let sr = sharpe_per_period(&RETURNS);
-    assert!(probabilistic_sharpe(sr, 0.0, 1, m.skew, m.kurt).is_nan(), "one observation");
+    assert!(probabilistic_sharpe(sr, 0.0, 1, m.skew, m.raw_kurtosis).is_nan(), "one observation");
     // Variance term <= 0: huge negative skew with a positive Sharpe.
     assert!(probabilistic_sharpe(1.0, 0.0, 30, 10.0, 3.0).is_nan(), "variance term not positive");
     assert_eq!(expected_max_sharpe(0.01, 1), 0.0, "one trial has no maximum to deflate");
@@ -110,7 +122,7 @@ fn zero_trial_variance_reduces_dsr_to_psr_against_zero() {
     near(
         "DSR with V=0",
         deflated_sharpe(&RETURNS, 10, 0.0),
-        probabilistic_sharpe(sr, 0.0, m.n, m.skew, m.kurt),
+        probabilistic_sharpe(sr, 0.0, m.n, m.skew, m.raw_kurtosis),
     );
 }
 

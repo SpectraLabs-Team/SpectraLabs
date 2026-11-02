@@ -1149,9 +1149,9 @@ pub(crate) async fn compute_overfitting(body: Result<Bytes, BytesRejection>) -> 
     let sr_var = sr_moments.stdev * sr_moments.stdev;
 
     let benchmark = req.benchmark_sharpe.unwrap_or(0.0);
-    let psr = probabilistic_sharpe(best_sr, benchmark, m.n, m.skew, m.kurt);
+    let psr = probabilistic_sharpe(best_sr, benchmark, m.n, m.skew, m.raw_kurtosis);
     let dsr = deflated_sharpe(best_returns, n_trials, sr_var);
-    let min_trl = min_track_record_length(best_sr, benchmark, m.skew, m.kurt, req.confidence);
+    let min_trl = min_track_record_length(best_sr, benchmark, m.skew, m.raw_kurtosis, req.confidence);
     let exp_max_sr = expected_max_sharpe(sr_var, n_trials);
 
     // PBO is undefined with fewer than two trials or too few observations, and when CSCV fails.

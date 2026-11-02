@@ -247,17 +247,17 @@ pub struct Moments {
     /// m3 / m2^1.5 (population moments).
     pub skew: f64,
     /// m4 / m2^2 (NOT excess; a normal has 3).
-    pub kurt: f64,
+    pub raw_kurtosis: f64,
 }
 
 impl Default for Moments {
     fn default() -> Self {
-        Self { n: 0, mean: 0.0, stdev: 0.0, skew: 0.0, kurt: 3.0 }
+        Self { n: 0, mean: 0.0, stdev: 0.0, skew: 0.0, raw_kurtosis: 3.0 }
     }
 }
 
 /// Moments of `x`. With fewer than 2 points or zero variance: stdev 0, skew
-/// 0, kurt 3.
+/// 0, raw_kurtosis 3.
 pub fn moments(x: &[f64]) -> Moments {
     let mut m = Moments { n: x.len(), ..Moments::default() };
     if x.len() < 2 {
@@ -290,7 +290,7 @@ pub fn moments(x: &[f64]) -> Moments {
     m4 /= n;
     if m2 > 0.0 {
         m.skew = m3 / m2.powf(1.5);
-        m.kurt = m4 / (m2 * m2);
+        m.raw_kurtosis = m4 / (m2 * m2);
     }
     m
 }
@@ -308,11 +308,11 @@ pub fn sharpe_per_period(returns: &[f64]) -> f64 {
 /// Probability that the true Sharpe exceeds `sr_benchmark`, given an observed
 /// per-period Sharpe `sr` over `n_obs` returns with the given skew/kurtosis.
 /// NaN when `n_obs < 2` or the variance term is not positive.
-pub fn probabilistic_sharpe(sr: f64, sr_benchmark: f64, n_obs: usize, skew: f64, kurt: f64) -> f64 {
+pub fn probabilistic_sharpe(sr: f64, sr_benchmark: f64, n_obs: usize, skew: f64, raw_kurt: f64) -> f64 {
     if n_obs < 2 {
         return f64::NAN;
     }
-    let var_term = 1.0 - skew * sr + (kurt - 1.0) / 4.0 * sr * sr;
+    let var_term = 1.0 - skew * sr + (raw_kurt - 1.0) / 4.0 * sr * sr;
     if !(var_term > 0.0) {
         return f64::NAN;
     }
@@ -336,16 +336,16 @@ pub fn expected_max_sharpe(sr_variance: f64, n_trials: usize) -> f64 {
 pub fn deflated_sharpe(returns: &[f64], n_trials: usize, sr_variance: f64) -> f64 {
     let m = moments(returns);
     let sr = if m.stdev > 0.0 { m.mean / m.stdev } else { 0.0 };
-    probabilistic_sharpe(sr, expected_max_sharpe(sr_variance, n_trials), m.n, m.skew, m.kurt)
+    probabilistic_sharpe(sr, expected_max_sharpe(sr_variance, n_trials), m.n, m.skew, m.raw_kurtosis)
 }
 
 /// Observations needed for PSR(sr vs benchmark) to reach `confidence`.
 /// +inf when `sr <= benchmark`; NaN when the variance term is not positive.
-pub fn min_track_record_length(sr: f64, sr_benchmark: f64, skew: f64, kurt: f64, confidence: f64) -> f64 {
+pub fn min_track_record_length(sr: f64, sr_benchmark: f64, skew: f64, raw_kurt: f64, confidence: f64) -> f64 {
     if sr <= sr_benchmark {
         return f64::INFINITY;
     }
-    let var_term = 1.0 - skew * sr + (kurt - 1.0) / 4.0 * sr * sr;
+    let var_term = 1.0 - skew * sr + (raw_kurt - 1.0) / 4.0 * sr * sr;
     if !(var_term > 0.0) {
         return f64::NAN;
     }
@@ -380,7 +380,7 @@ mod tests {
         assert_eq!(min_track_record_length(0.0, 0.1, 0.0, 3.0, 0.95), f64::INFINITY);
         let m = moments(&[1.0, 2.0, 3.0, 4.0]);
         assert_eq!(m.mean, 2.5);
-        assert!((m.kurt - 1.64).abs() < 1e-12);
-        assert_eq!(moments(&[1.0]).kurt, 3.0);
+        assert!((m.raw_kurtosis - 1.64).abs() < 1e-12);
+        assert_eq!(moments(&[1.0]).raw_kurtosis, 3.0);
     }
 }

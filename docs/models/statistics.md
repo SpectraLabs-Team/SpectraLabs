@@ -12,11 +12,12 @@ Sign-off: pending (product owner, M26 decision 3). Reference-value tests: task 3
 - **Per-period, not annualized.** `sharpe_per_period` = mean / sample stdev of the returns, in the
   return frequency. PSR, DSR and MinTRL all take this per-period value. Multiply by √periods
   only for display.
-- **Raw kurtosis, not excess.** `moments().kurt` = m4 / m2² (normal = 3). PSR's variance term
-  uses (kurt − 1)/4, which is correct for raw kurtosis. `performance::excess_kurtosis` is excess
+- **Raw kurtosis, not excess.** `moments().raw_kurtosis` = m4 / m2² (normal = 3). PSR's variance term
+  uses (raw_kurt − 1)/4, which is correct for raw kurtosis. `performance::excess_kurtosis` is excess
   (normal = 0); never pass it where PSR expects raw.
 - **Population skew and kurtosis; sample stdev.** `moments` divides m2, m3, m4 by n, and the
   stdev by n − 1. Mixing these changes results only in small samples; keep it as is.
+- **Field naming (M26 task 4):** Field `raw_kurtosis` in `Moments` and `ValidationReport` is raw kurtosis (non-excess, normal = 3); `excess_kurtosis` in performance (`spectra-engine/performance.rs`) and metrics (`spectra-risk/metrics.rs`) is excess (normal = 0). Old name `kurt`. No value changed.
 
 ## Inputs
 

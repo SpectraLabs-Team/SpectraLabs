@@ -22,7 +22,7 @@ pub struct ValidationReport {
     /// Skewness.
     pub skew: f64,
     /// Kurtosis (not excess).
-    pub kurt: f64,
+    pub raw_kurtosis: f64,
     /// Variance of per-period Sharpe across trials.
     pub sr_variance_across_trials: f64,
     /// Per-period benchmark the selection must beat.
@@ -64,12 +64,12 @@ pub fn validate_selection(
         sharpe_per_period: sharpe_pp,
         sharpe_annualized: sharpe_pp * periods_per_year.sqrt(),
         skew: m.skew,
-        kurt: m.kurt,
+        raw_kurtosis: m.raw_kurtosis,
         sr_variance_across_trials: sr_var,
         expected_max_sharpe: ems,
-        psr_vs_zero: probabilistic_sharpe(sharpe_pp, 0.0, m.n, m.skew, m.kurt),
-        dsr: probabilistic_sharpe(sharpe_pp, ems, m.n, m.skew, m.kurt),
-        min_track_record_obs: min_track_record_length(sharpe_pp, ems, m.skew, m.kurt, confidence),
+        psr_vs_zero: probabilistic_sharpe(sharpe_pp, 0.0, m.n, m.skew, m.raw_kurtosis),
+        dsr: probabilistic_sharpe(sharpe_pp, ems, m.n, m.skew, m.raw_kurtosis),
+        min_track_record_obs: min_track_record_length(sharpe_pp, ems, m.skew, m.raw_kurtosis, confidence),
         confidence,
         pbo_available: pbo.is_some(),
         pbo: pbo.map_or(0.0, |p| p.pbo),
@@ -109,10 +109,10 @@ pub fn validate_selection(
             r.n_trials
         ));
     }
-    if m.kurt > 10.0 {
+    if m.raw_kurtosis > 10.0 {
         r.warnings.push(format!(
             "Heavy tails (kurtosis {}): PSR/DSR confidence intervals are likely too narrow.",
-            fmt_f(m.kurt, 6)
+            fmt_f(m.raw_kurtosis, 6)
         ));
     }
     if r.min_track_record_obs.is_infinite() {
@@ -144,7 +144,7 @@ pub fn format_report(r: &ValidationReport) -> String {
     out += &format!("observations               {}\n", r.n_obs);
     out += &format!("Sharpe (annualized)        {}\n", fmt_f(r.sharpe_annualized, 3));
     out += &format!("Sharpe (per period)        {}\n", fmt_f(r.sharpe_per_period, 5));
-    out += &format!("skew / kurtosis            {} / {}\n", fmt_f(r.skew, 3), fmt_f(r.kurt, 3));
+    out += &format!("skew / kurtosis            {} / {}\n", fmt_f(r.skew, 3), fmt_f(r.raw_kurtosis, 3));
     out += &format!("Sharpe variance, trials    {}\n", fmt_e(r.sr_variance_across_trials, 3));
     out += &format!("expected max Sharpe (N)    {} per period\n", fmt_f(r.expected_max_sharpe, 5));
     out += &format!("PSR (vs 0)                 {}\n", fmt_f(r.psr_vs_zero, 3));

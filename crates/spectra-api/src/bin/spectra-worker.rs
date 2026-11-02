@@ -1751,11 +1751,21 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                 let m = spectra_research::moments(&best.returns);
                 let sr_mom = spectra_research::moments(&sharpes);
                 let sr_var = sr_mom.stdev * sr_mom.stdev;
-                let psr =
-                    spectra_research::probabilistic_sharpe(best.metrics.sharpe, 0.0, m.n, m.skew, m.kurt);
+                let psr = spectra_research::probabilistic_sharpe(
+                    best.metrics.sharpe,
+                    0.0,
+                    m.n,
+                    m.skew,
+                    m.raw_kurtosis,
+                );
                 let dsr = spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var);
-                let min_trl =
-                    spectra_research::min_track_record_length(best.metrics.sharpe, 0.0, m.skew, m.kurt, 0.95);
+                let min_trl = spectra_research::min_track_record_length(
+                    best.metrics.sharpe,
+                    0.0,
+                    m.skew,
+                    m.raw_kurtosis,
+                    0.95,
+                );
                 // PBO is undefined (None, stored as NULL) when CSCV cannot run or fails, not 0.0 (M26 task 5).
                 let pbo = if returns_matrix.len() >= 2 && returns_matrix.first().is_some_and(|r| r.len() >= 8)
                 {

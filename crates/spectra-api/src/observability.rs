@@ -4,6 +4,8 @@ use std::sync::OnceLock;
 
 use metrics::{counter, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use sentry::integrations::tracing::{BreadcrumbLayer, ErrorLayer, SpanLayer};
+use tracing_subscriber::filter::{filter_fn, LevelFilter};
 use tracing_subscriber::fmt;
 use tracing_subscriber::prelude::*;
 
@@ -29,19 +31,23 @@ pub fn init_observability() {
         opts.release = sentry::release_name!();
         sentry::init(sentry::apply_defaults(opts))
     });
-    let sentry_layer = sentry::integrations::tracing::layer().event_filter(|metadata| {
-        if *metadata.level() == tracing::Level::ERROR {
-            sentry::integrations::tracing::EventFilter::Event
-        } else {
-            sentry::integrations::tracing::EventFilter::Breadcrumb
-        }
-    });
+    let sentry_span_layer = SpanLayer::new().with_filter(LevelFilter::INFO);
+    let sentry_breadcrumb_layer = BreadcrumbLayer::new().with_filter(filter_fn(|metadata| {
+        matches!(*metadata.level(), tracing::Level::WARN | tracing::Level::INFO)
+    }));
+    let sentry_error_layer = ErrorLayer::new().with_filter(LevelFilter::ERROR);
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
     // Fails only if a subscriber is already set, which is fine.
-    let _ = tracing_subscriber::registry().with(env_filter).with(json_layer).with(sentry_layer).try_init();
+    let _ = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(json_layer)
+        .with(sentry_span_layer)
+        .with(sentry_breadcrumb_layer)
+        .with(sentry_error_layer)
+        .try_init();
 
     if PROMETHEUS.get().is_none() {
         let builder = match PrometheusBuilder::new().set_buckets(BUCKETS) {

@@ -53,6 +53,7 @@ pub struct CostDecomposition {
     pub slippage_costs: f64,
     pub borrow_fees: f64,
     pub financing_interest: f64,
+    pub interest_income: f64,
     pub dividends: f64,
     /// Bond coupons received (paid when negative, on shorts).
     pub coupons: f64,
@@ -127,6 +128,7 @@ impl PnlAttribution {
             .with("slippage_costs", num(self.costs.slippage_costs))
             .with("borrow_fees", num(self.costs.borrow_fees))
             .with("financing_interest", num(self.costs.financing_interest))
+            .with("interest_income", num(self.costs.interest_income))
             .with("dividends", num(self.costs.dividends))
             .with("coupons", num(self.costs.coupons))
             .with("total_costs", num(self.costs.total_costs));
@@ -175,6 +177,7 @@ pub fn compute_pnl_attribution(
     let mut commission_fees = Money::ZERO;
     let mut borrow_fees = Money::ZERO;
     let mut financing_interest = Money::ZERO;
+    let mut interest_income = Money::ZERO;
     let mut dividends = Money::ZERO;
     let mut coupons = Money::ZERO;
     let mut total_notional = 0.0f64;
@@ -192,6 +195,8 @@ pub fn compute_pnl_attribution(
             EntryType::Interest => {
                 if e.amount.raw() < 0 {
                     financing_interest = financing_interest.checked_add(e.amount)?;
+                } else if e.amount.raw() > 0 {
+                    interest_income = interest_income.checked_add(e.amount)?;
                 }
             }
             EntryType::Dividend => {
@@ -311,6 +316,7 @@ pub fn compute_pnl_attribution(
     let comm_f64 = commission_fees.to_f64();
     let borrow_f64 = borrow_fees.to_f64();
     let int_f64 = financing_interest.to_f64().abs();
+    let int_income_f64 = interest_income.to_f64().abs();
     let div_f64 = dividends.to_f64();
     let total_costs = comm_f64 + slippage_cost_f64 + borrow_f64 + int_f64;
 
@@ -319,6 +325,7 @@ pub fn compute_pnl_attribution(
         slippage_costs: slippage_cost_f64,
         borrow_fees: borrow_f64,
         financing_interest: int_f64,
+        interest_income: int_income_f64,
         dividends: div_f64,
         coupons: coupons.to_f64(),
         total_costs,

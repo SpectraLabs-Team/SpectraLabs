@@ -55,8 +55,8 @@ fn goodness_of_fit_statistic_matches_the_reference() {
 fn var_matches_the_gpd_tail_formula() {
     // VaR_p = u + (beta / xi) * ((N / Nu) (1 - p))^(-xi) - beta / xi
     let m = EvtTailModel::fit(&heavy_tail_losses(), 0.8).unwrap();
-    close(m.var(0.95), 6.573_814_510_660_889, "VaR 95%");
-    close(m.var(0.99), 10.768_904_334_183_269, "VaR 99%");
+    close(m.var(0.95).unwrap(), 6.573_814_510_660_889, "VaR 95%");
+    close(m.var(0.99).unwrap(), 10.768_904_334_183_269, "VaR 99%");
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn a_light_tail_fit_matches_the_reference() {
     close(m.xi, 1.0 / 21.0, "shape");
     close(m.beta, 41.0 / 30.0, "scale");
     close(m.ks_statistic, 0.089_809_359_345_619_35, "KS statistic");
-    close(m.var(0.99), 5.384_907_620_559_730, "VaR 99%");
+    close(m.var(0.99).unwrap(), 5.384_907_620_559_730, "VaR 99%");
     close(m.cvar(0.99).unwrap(), 7.039_153_001_587_717, "CVaR 99%");
 }
 

@@ -39,13 +39,55 @@ impl DependenceModel {
     }
 
     pub fn parse(s: &str) -> Result<Self> {
-        match s.to_ascii_lowercase().as_str() {
+        let (name, param) = match s.split_once(':') {
+            Some((m, p)) => (m.trim(), Some(p.trim())),
+            None => (s.trim(), None),
+        };
+        match name.to_ascii_lowercase().as_str() {
             "aggregate" | "single_factor" => Ok(Self::Aggregate),
             "gaussian" | "gaussian_copula" | "copula" => Ok(Self::GaussianCopula),
-            "t_copula" | "student_t" | "t" => Ok(Self::TCopula { degrees_of_freedom: 4 }),
-            "clayton" | "clayton_copula" => Ok(Self::ClaytonCopula { theta: 2.0 }),
+            "t_copula" | "student_t" | "t" => {
+                let Some(p) = param else {
+                    return Err(Error::InvalidArgument(
+                        "t_copula requires degrees_of_freedom (dof) parameter (e.g. t_copula:4)".into(),
+                    ));
+                };
+                let dof_f: f64 = p.parse().map_err(|_| {
+                    Error::InvalidArgument(format!("invalid degrees_of_freedom for t_copula: {p}"))
+                })?;
+                if dof_f < 1.0 {
+                    return Err(Error::InvalidArgument(
+                        "degrees_of_freedom must be at least 1".into(),
+                    ));
+                }
+                if dof_f.fract() != 0.0 || dof_f > u32::MAX as f64 {
+                    return Err(Error::InvalidArgument(format!(
+                        "invalid degrees_of_freedom for t_copula: {p}"
+                    )));
+                }
+                let dof = dof_f as u32;
+                Ok(Self::TCopula {
+                    degrees_of_freedom: dof,
+                })
+            }
+            "clayton" | "clayton_copula" => {
+                let Some(p) = param else {
+                    return Err(Error::InvalidArgument(
+                        "clayton requires theta parameter (e.g. clayton:2.0)".into(),
+                    ));
+                };
+                let theta: f64 = p.parse().map_err(|_| {
+                    Error::InvalidArgument(format!("invalid theta for clayton: {p}"))
+                })?;
+                if !(theta >= 0.1 && theta.is_finite()) {
+                    return Err(Error::InvalidArgument(
+                        "theta must be at least 0.1".into(),
+                    ));
+                }
+                Ok(Self::ClaytonCopula { theta })
+            }
             _ => Err(Error::InvalidArgument(format!(
-                "Unknown dependence model: {s} (use aggregate, gaussian_copula, t_copula, or clayton_copula)"
+                "Unknown dependence model: {s} (use aggregate, gaussian_copula, t_copula:<dof>, or clayton_copula:<theta>)"
             ))),
         }
     }
@@ -412,6 +454,37 @@ mod tests {
         assert!(
             cvar_clayton > cvar_gauss,
             "Clayton lower tail crash dependence must produce higher CVaR ({cvar_clayton}) than Gaussian ({cvar_gauss})"
+        );
+    }
+
+    #[test]
+    fn test_copula_parse_requires_parameters() {
+        // Missing parameter errors
+        match DependenceModel::parse("t_copula") {
+            Err(Error::InvalidArgument(msg)) => {
+                assert!(msg.contains("degrees_of_freedom") || msg.contains("dof"));
+            }
+            other => panic!("expected Error::InvalidArgument naming dof, got {other:?}"),
+        }
+        match DependenceModel::parse("clayton") {
+            Err(Error::InvalidArgument(msg)) => {
+                assert!(msg.contains("theta"));
+            }
+            other => panic!("expected Error::InvalidArgument naming theta, got {other:?}"),
+        }
+
+        // dof 0.5 and theta 0.05 return error
+        assert!(matches!(DependenceModel::parse("t_copula:0.5"), Err(Error::InvalidArgument(_))));
+        assert!(matches!(DependenceModel::parse("clayton:0.05"), Err(Error::InvalidArgument(_))));
+
+        // Valid parses
+        assert_eq!(
+            DependenceModel::parse("t_copula:4").unwrap(),
+            DependenceModel::TCopula { degrees_of_freedom: 4 }
+        );
+        assert_eq!(
+            DependenceModel::parse("clayton:2.0").unwrap(),
+            DependenceModel::ClaytonCopula { theta: 2.0 }
         );
     }
 }

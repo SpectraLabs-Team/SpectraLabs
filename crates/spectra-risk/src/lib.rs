@@ -61,7 +61,8 @@ pub use evt::EvtTailModel;
 pub use garch::{Egarch11, Garch11, GjrGarch11};
 pub use regime::{MarketRegime, Regime3State, RegimeModel, RegimeState, StatisticalJumpModel};
 pub use returns::{
-    cholesky, correlation, correlation_matrix, covariance, fit_asset_returns, AssetReturnStats,
+    cholesky, correlation, correlation_matrix, covariance, fit_asset_returns, volatility_from_bars,
+    AssetReturnStats, MIN_VOLATILITY_BARS,
 };
 
 pub use engine::{

@@ -2,7 +2,7 @@
 //!
 //! Standard-library only: zero external dependencies.
 
-use spectra_core::{Error, Result};
+use spectra_core::{Bar, Error, Result};
 
 /// Trading days in a standard year for annualizing daily returns.
 pub const TRADING_DAYS_PER_YEAR: f64 = 252.0;
@@ -48,6 +48,63 @@ pub fn variance(values: &[f64]) -> f64 {
 /// Calculate sample standard deviation (volatility).
 pub fn std_dev(values: &[f64]) -> f64 {
     variance(values).sqrt()
+}
+
+/// Minimum number of bars of price history required to compute volatility.
+pub const MIN_VOLATILITY_BARS: usize = 60;
+
+/// Compute annualized sample volatility from a series of bars for a given symbol and interval.
+///
+/// Uses the sample standard deviation ($N - 1$) of log returns, then annualizes
+/// with the factor corresponding to the interval.
+///
+/// # Supported intervals
+/// - Daily: `"daily"`, `"1d"`, `"day"`, `"d"` (annualized with $\sqrt{252}$).
+/// - Hourly: `"hourly"`, `"1h"`, `"hour"`, `"h"` (returns an error because no
+///   hourly factor is defined in the repo; product decision required).
+///
+/// # Errors
+/// - [`Error::Data`] if `bars.len() < 60`:
+///   `"insufficient price history for {symbol}: need 60 bars, have {n}"`
+/// - [`Error::InvalidArgument`] if `interval` is unknown or unrecognized.
+/// - [`Error::InvalidArgument`] if `interval` is hourly (until an hourly factor is chosen).
+/// - [`Error::Data`] if any non-positive or non-finite price is encountered.
+pub fn volatility_from_bars(symbol: &str, bars: &[Bar], interval: &str) -> Result<f64> {
+    let n = bars.len();
+    if n < MIN_VOLATILITY_BARS {
+        return Err(Error::Data(format!("insufficient price history for {symbol}: need 60 bars, have {n}")));
+    }
+
+    let factor = match interval.trim().to_ascii_lowercase().as_str() {
+        "daily" | "1d" | "day" | "d" => TRADING_DAYS_PER_YEAR.sqrt(),
+        "hourly" | "1h" | "hour" | "h" => {
+            return Err(Error::InvalidArgument(
+                "hourly annualization factor is not defined in repo; product decision required".into(),
+            ));
+        }
+        other => {
+            return Err(Error::InvalidArgument(format!("unknown bar interval: '{other}'")));
+        }
+    };
+
+    let mut log_returns = Vec::with_capacity(n - 1);
+    for w in bars.windows(2) {
+        let p_prev = w[0].close.to_f64();
+        let p_curr = w[1].close.to_f64();
+        if p_prev <= 0.0 || !p_prev.is_finite() || p_curr <= 0.0 || !p_curr.is_finite() {
+            return Err(Error::Data(format!(
+                "non-positive or non-finite price encountered for {symbol} when computing volatility"
+            )));
+        }
+        log_returns.push((p_curr / p_prev).ln());
+    }
+
+    let sd = std_dev(&log_returns);
+    let vol = sd * factor;
+    if !vol.is_finite() {
+        return Err(Error::Data(format!("computed volatility is non-finite for {symbol}")));
+    }
+    Ok(vol)
 }
 
 /// Calculate sample covariance between two series of equal length.

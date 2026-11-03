@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 
+use spectra_core::Error;
 use spectra_risk::copula::{simulate_correlated, DependenceModel};
 use spectra_risk::enforcement::{PortfolioSnapshot, PositionSnapshot};
 use spectra_risk::portfolio::Portfolio;
@@ -437,28 +438,104 @@ fn test_default_volatility_fallback_when_nonpositive() {
 
 #[test]
 fn test_parser_defaults_in_dependence_model_parse() {
-    // finding for Task 7/8: DependenceModel::parse() hardcodes silent defaults:
-    // "t_copula" -> dof 4, "clayton" -> theta 2.0.
+    // Task 7: DependenceModel::parse() requires explicit parameters instead of hardcoded silent defaults:
+    // "t_copula" without parameter returns Error::InvalidArgument, "t_copula:4" returns dof 4.
+    // "clayton" without parameter returns Error::InvalidArgument, "clayton:2.0" returns theta 2.0.
+    match DependenceModel::parse("t_copula") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(
+                msg.contains("degrees_of_freedom") || msg.contains("dof"),
+                "error message must name degrees_of_freedom/dof: {msg}"
+            );
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
+    match DependenceModel::parse("student_t") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(
+                msg.contains("degrees_of_freedom") || msg.contains("dof"),
+                "error message must name degrees_of_freedom/dof: {msg}"
+            );
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
+    match DependenceModel::parse("t") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(
+                msg.contains("degrees_of_freedom") || msg.contains("dof"),
+                "error message must name degrees_of_freedom/dof: {msg}"
+            );
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
+
+    match DependenceModel::parse("clayton") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("theta"), "error message must name theta: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
+    match DependenceModel::parse("clayton_copula") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("theta"), "error message must name theta: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
+
+    // dof < 1 (including dof 0 and dof 0.5) returns Error::InvalidArgument
+    match DependenceModel::parse("t_copula:0") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("at least 1"), "expected error on dof 0: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument on dof 0, got {other:?}"),
+    }
+    match DependenceModel::parse("t_copula:0.5") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(
+                msg.contains("at least 1") || msg.contains("invalid degrees_of_freedom"),
+                "expected error on dof 0.5: {msg}"
+            );
+        }
+        other => panic!("expected Error::InvalidArgument on dof 0.5, got {other:?}"),
+    }
+
+    // theta < 0.1 (including theta 0.0 and theta 0.05) returns Error::InvalidArgument
+    match DependenceModel::parse("clayton:0.0") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("at least 0.1"), "expected error on theta 0.0: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument on theta 0.0, got {other:?}"),
+    }
+    match DependenceModel::parse("clayton:0.05") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("at least 0.1"), "expected error on theta 0.05: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument on theta 0.05, got {other:?}"),
+    }
+
+    // Explicit valid parameters parse correctly
     assert_eq!(
-        DependenceModel::parse("t_copula").expect("parse t_copula"),
+        DependenceModel::parse("t_copula:4").expect("parse t_copula:4"),
         DependenceModel::TCopula { degrees_of_freedom: 4 }
     );
     assert_eq!(
-        DependenceModel::parse("student_t").expect("parse student_t"),
-        DependenceModel::TCopula { degrees_of_freedom: 4 }
+        DependenceModel::parse("student_t:8").expect("parse student_t:8"),
+        DependenceModel::TCopula { degrees_of_freedom: 8 }
     );
     assert_eq!(
-        DependenceModel::parse("t").expect("parse t"),
-        DependenceModel::TCopula { degrees_of_freedom: 4 }
+        DependenceModel::parse("t:3").expect("parse t:3"),
+        DependenceModel::TCopula { degrees_of_freedom: 3 }
     );
+
     assert_eq!(
-        DependenceModel::parse("clayton").expect("parse clayton"),
+        DependenceModel::parse("clayton:2.0").expect("parse clayton:2.0"),
         DependenceModel::ClaytonCopula { theta: 2.0 }
     );
     assert_eq!(
-        DependenceModel::parse("clayton_copula").expect("parse clayton_copula"),
-        DependenceModel::ClaytonCopula { theta: 2.0 }
+        DependenceModel::parse("clayton_copula:1.5").expect("parse clayton_copula:1.5"),
+        DependenceModel::ClaytonCopula { theta: 1.5 }
     );
+
     assert_eq!(DependenceModel::parse("gaussian").expect("parse gaussian"), DependenceModel::GaussianCopula);
     assert_eq!(DependenceModel::parse("aggregate").expect("parse aggregate"), DependenceModel::Aggregate);
 }

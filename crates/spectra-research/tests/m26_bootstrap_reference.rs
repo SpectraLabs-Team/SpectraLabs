@@ -39,7 +39,7 @@ fn a_block_covering_the_whole_series_gives_the_same_terminal_return_every_time()
 #[test]
 fn a_block_covering_the_whole_series_gives_the_sharpe_of_the_returns_every_time() {
     // A rotation keeps the mean and stdev, so Sharpe = sharpe_per_period(R) * sqrt(ppy) for all resamples.
-    let want = sharpe_per_period(&R) * PPY.sqrt();
+    let want = sharpe_per_period(&R).unwrap() * PPY.sqrt();
     let out = block_bootstrap_returns(&R, EQUITY, PPY, R.len(), 40, 7);
     close(out.annualized_sharpe.p05, want, "Sharpe 5th");
     close(out.annualized_sharpe.p95, want, "Sharpe 95th");

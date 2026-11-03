@@ -301,3 +301,28 @@ impl Default for Moments {
 - **Total Affected Callers in Workspace:** 19 call sites across 6 crates/binaries (`spectra-api`, `spectra-worker`, `spectra-research`, `spectra-registry`, `spectra-cli`).
 - **Total Test Call Sites to Update:** 18 in `tests/m26_stats_reference.rs`, `tests/m26_bootstrap_reference.rs`, `tests/learn_formula_drift.rs`, and inline unit tests.
 - **Affected Golden File Lines:** **0** lines in `parity/golden/research.golden` (all golden scenarios have $n \ge 160$, non-zero volatility, positive trial variance, and retain `mintrl inf`).
+
+---
+
+## 5. Divergence Entries
+
+Documented divergences for each undefined case that previously returned a number or silent placeholder:
+
+| Function | Input Condition | Old Value / Behavior | New Behavior | Mathematical / Rationale |
+|---|---|---|---|---|
+| `moments` | Empty series (`x = []`, $n=0$) | `Moments { n: 0, mean: 0.0, stdev: 0.0, skew: 0.0, raw_kurtosis: 3.0 }` | `Err(Error::InvalidArgument("moments require at least 2 observations, got 0"))` | Sample variance divisor $n-1 = -1$ is undefined; skew/kurtosis undefined. |
+| `moments` | Single observation (`x = [c]`, $n=1$) | `Moments { n: 1, mean: 0.0, stdev: 0.0, skew: 0.0, raw_kurtosis: 3.0 }` | `Err(Error::InvalidArgument("moments require at least 2 observations, got 1"))` | Sample variance divisor $n-1 = 0$ is division by zero; mean was silently discarded as 0.0. |
+| `moments` | Zero variance (`s \le 10^{-12} \cdot \text{scale}`) | `Moments { n, mean: \bar{x}, stdev: 0.0, skew: 0.0, raw_kurtosis: 3.0 }` | `Err(Error::InvalidArgument("sample has zero variance; higher moments undefined"))` | Higher moments ($m_3 / m_2^{1.5}$ and $m_4 / m_2^2$) are $0/0$ (indeterminate); normal placeholders (0.0, 3.0) falsely implied Gaussian distribution. |
+| `sharpe_per_period` | Fewer than 2 returns ($n < 2$) | `0.0` | `Err(Error::InvalidArgument(...))` | Sample standard deviation is undefined with $n < 2$. Conflating with Sharpe 0.0 masks missing data. |
+| `sharpe_per_period` | Zero volatility ($s_r = 0.0$) | `0.0` | `Err(Error::InvalidArgument("stdev is zero"))` | Sharpe ratio $\bar{r} / s_r$ has division by zero ($s_r = 0$). Conflating with 0.0 masks zero-risk assets as zero-return under risk. |
+| `expected_max_sharpe` | Zero trials ($N = 0$) | `0.0` | `Err(Error::InvalidArgument("n_trials must be at least 1"))` | Evaluation of maximum over empty set of trials is undefined. |
+| `expected_max_sharpe` | Negative or non-finite variance ($V < 0.0$ or NaN) | `0.0` | `Err(Error::InvalidArgument("sr_variance must be finite and non-negative..."))` | Trial Sharpe variance cannot be negative or non-finite. |
+| `deflated_sharpe` | Zero volatility / constant returns | Evaluated PSR with substituted $SR = 0.0$ returning a pseudo-probability | `Err(Error::InvalidArgument(...))` | Strategy Sharpe is undefined; computing DSR from synthetic $SR = 0$ misreports statistical confidence for an undefined metric. |
+| `deflated_sharpe` | Fewer than 2 returns ($n < 2$) | `NaN` (via PSR) | `Err(Error::InvalidArgument(...))` | Insufficient return observations to compute moments or Sharpe. |
+| `deflated_sharpe` | Zero trials ($N = 0$) or negative variance | Evaluated PSR against $E[\max SR] = 0.0$ | `Err(Error::InvalidArgument(...))` | Invalid trial ledger parameters propagate explicit errors rather than defaulting benchmark to 0. |
+| `probabilistic_sharpe` | $n_{\text{obs}} < 2$ | `NaN` | `Err(Error::InvalidArgument("probabilistic_sharpe requires n_obs >= 2, got {n_obs}"))` | Degrees of freedom in numerator $\sqrt{n-1} \le 0$ requires at least 2 observations; errors loudly rather than passing raw NaN. |
+| `probabilistic_sharpe` | Non-positive variance term ($\text{var\_term} \le 0$) | `NaN` | `Err(Error::InvalidArgument("probabilistic_sharpe variance term ({var_term}) must be positive"))` | Square root of non-positive variance term is undefined in real numbers. |
+| `probabilistic_sharpe` | Non-finite inputs (NaN / $\pm\infty$) | `NaN` | `Err(Error::InvalidArgument("probabilistic_sharpe inputs must be finite"))` | Invalid arguments rejected explicitly. |
+| `min_track_record_length` | Non-positive variance term ($\text{var\_term} \le 0$) | `NaN` | `Err(Error::InvalidArgument("min_track_record_length variance term ({var_term}) must be positive"))` | Variance term in asymptotic variance formula must be strictly positive. |
+| `min_track_record_length` | Invalid confidence level ($p \le 0$ or $p \ge 1$ or non-finite) | Float or `NaN` | `Err(Error::InvalidArgument("confidence must be in (0, 1), got {confidence}"))` | Confidence probability must be strictly within $(0, 1)$. |
+| `normal_inv_cdf` | Argument outside $[0, 1]$ or non-finite | `NaN` | `Err(Error::InvalidArgument("normal_inv_cdf argument must be in [0, 1], got {p}"))` | Quantile function $\Phi^{-1}(p)$ is defined on $[0, 1]$; returns `Ok(-inf)` at 0, `Ok(+inf)` at 1, and `Err` outside. |

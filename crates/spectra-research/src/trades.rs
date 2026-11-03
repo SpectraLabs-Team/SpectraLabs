@@ -339,7 +339,9 @@ pub fn block_bootstrap_returns(
             losses += 1;
         }
         terminal.push(total_return);
-        sharpes.push(crate::stats::sharpe_per_period(&sampled) * periods_per_year.sqrt());
+        if let Ok(sr) = crate::stats::sharpe_per_period(&sampled) {
+            sharpes.push(sr * periods_per_year.sqrt());
+        }
         drawdowns.push(max_dd);
     }
     out.terminal_return = band(terminal);

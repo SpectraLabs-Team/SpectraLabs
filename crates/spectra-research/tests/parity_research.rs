@@ -140,7 +140,7 @@ fn scenario(
         ledger.next_trial_id(),
     )
     .unwrap();
-    ledger.add("full-sample sweep", &sweep);
+    ledger.add("full-sample sweep", &sweep).unwrap();
     let best = sweep.best_trial().unwrap();
     writeln!(out, "trials {} best {} {}", sweep.trials.len(), sweep.best, best.params.canonical()).unwrap();
     for t in &sweep.trials {
@@ -172,7 +172,7 @@ fn scenario(
         .unwrap();
     }
     let pbo = cscv_pbo(&all, 16).unwrap();
-    let rep = validate_selection(best, &ledger, cfg.periods_per_year, Some(&pbo), 0.95);
+    let rep = validate_selection(best, &ledger, cfg.periods_per_year, Some(&pbo), 0.95).unwrap();
     out.push_str(&format_report(&rep));
     g(out, "dsr", rep.dsr);
     g(out, "psr", rep.psr_vs_zero);
@@ -211,7 +211,7 @@ fn scenario(
     g(out, "wf_mean_oos", w.mean_out_of_sample_objective);
     g(out, "wf_oos_sharpe", w.oos_metrics.sharpe);
     g(out, "wf_oos_return", w.oos_metrics.total_return);
-    let rep2 = validate_selection(best, &ledger, cfg.periods_per_year, None, 0.9);
+    let rep2 = validate_selection(best, &ledger, cfg.periods_per_year, None, 0.9).unwrap();
     out.push_str(&format_report(&rep2));
 
     let sc = SurvivalConfig {

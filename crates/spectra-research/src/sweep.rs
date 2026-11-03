@@ -321,18 +321,22 @@ pub struct TrialLedger {
 
 impl TrialLedger {
     /// Records every trial of a sweep.
-    pub fn add(&mut self, label: &str, sweep: &SweepResult) {
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidArgument`] if any trial's returns have undefined Sharpe ratio.
+    pub fn add(&mut self, label: &str, sweep: &SweepResult) -> Result<()> {
         for t in &sweep.trials {
             self.trials.push(TrialSummary {
                 id: t.id,
                 label: label.into(),
                 params: t.params.canonical(),
                 result_sha256: t.run.result_sha256.clone(),
-                sharpe_per_period: sharpe_per_period(&t.returns),
+                sharpe_per_period: sharpe_per_period(&t.returns)?,
                 n_obs: t.returns.len(),
                 objective: t.objective,
             });
         }
+        Ok(())
     }
     /// Records one summary.
     pub fn add_summary(&mut self, summary: TrialSummary) {

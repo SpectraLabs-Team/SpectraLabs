@@ -1766,12 +1766,11 @@ pub fn run_survival_lab_controlled<'a>(
                         mean /= values.len() as f64;
                         out.mean_return = mean;
                         if values.len() >= sc.regime_min_per_bucket {
-                            let mo = moments(values);
-                            out.sharpe = if mo.stdev > 0.0 {
-                                mean / mo.stdev * config.periods_per_year.sqrt()
-                            } else {
-                                0.0
-                            };
+                            if let Ok(mo) = moments(values) {
+                                if mo.stdev > 0.0 {
+                                    out.sharpe = mean / mo.stdev * config.periods_per_year.sqrt();
+                                }
+                            }
                         }
                     }
                     if out.periods < sc.regime_min_per_bucket {
@@ -1829,12 +1828,12 @@ pub fn run_survival_lab_controlled<'a>(
                     if !values.is_empty() {
                         bucket.mean_return = values.iter().sum::<f64>() / values.len() as f64;
                         if values.len() >= sc.regime_min_per_bucket {
-                            let distribution = moments(&values);
-                            bucket.sharpe = if distribution.stdev > 0.0 {
-                                distribution.mean / distribution.stdev * config.periods_per_year.sqrt()
-                            } else {
-                                0.0
-                            };
+                            if let Ok(distribution) = moments(&values) {
+                                if distribution.stdev > 0.0 {
+                                    bucket.sharpe = distribution.mean / distribution.stdev
+                                        * config.periods_per_year.sqrt();
+                                }
+                            }
                         }
                     }
                     rg.market_states.push(bucket);

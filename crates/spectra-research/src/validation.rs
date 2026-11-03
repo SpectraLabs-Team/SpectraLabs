@@ -3,9 +3,12 @@
 //! into a single opaque score.
 
 use spectra_core::cfmt::{fmt_e, fmt_f};
+use spectra_core::Result;
 
 use crate::pbo::PboResult;
-use crate::stats::{expected_max_sharpe, min_track_record_length, moments, probabilistic_sharpe};
+use crate::stats::{
+    expected_max_sharpe, min_track_record_length, moments, probabilistic_sharpe, sharpe_per_period,
+};
 use crate::sweep::{Trial, TrialLedger};
 
 /// What can honestly be claimed about a selected trial.
@@ -46,18 +49,24 @@ pub struct ValidationReport {
 }
 
 /// Validates the selection of `selected` out of everything in `ledger`.
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if the selected trial's returns or the ledger have undefined statistics.
 pub fn validate_selection(
     selected: &Trial,
     ledger: &TrialLedger,
     periods_per_year: f64,
     pbo: Option<&PboResult>,
     confidence: f64,
-) -> ValidationReport {
-    let m = moments(&selected.returns);
-    let sharpe_pp = if m.stdev > 0.0 { m.mean / m.stdev } else { 0.0 };
+) -> Result<ValidationReport> {
+    let m = moments(&selected.returns)?;
+    let sharpe_pp = sharpe_per_period(&selected.returns)?;
     let sr_var = ledger.sharpe_variance();
     let n_trials = ledger.count();
-    let ems = expected_max_sharpe(sr_var, n_trials);
+    let ems = expected_max_sharpe(sr_var, n_trials)?;
+    let psr_vs_zero = probabilistic_sharpe(sharpe_pp, 0.0, m.n, m.skew, m.raw_kurtosis)?;
+    let dsr = probabilistic_sharpe(sharpe_pp, ems, m.n, m.skew, m.raw_kurtosis)?;
+    let min_track_record_obs = min_track_record_length(sharpe_pp, ems, m.skew, m.raw_kurtosis, confidence)?;
     let mut r = ValidationReport {
         n_trials,
         n_obs: selected.returns.len(),
@@ -67,9 +76,9 @@ pub fn validate_selection(
         raw_kurtosis: m.raw_kurtosis,
         sr_variance_across_trials: sr_var,
         expected_max_sharpe: ems,
-        psr_vs_zero: probabilistic_sharpe(sharpe_pp, 0.0, m.n, m.skew, m.raw_kurtosis),
-        dsr: probabilistic_sharpe(sharpe_pp, ems, m.n, m.skew, m.raw_kurtosis),
-        min_track_record_obs: min_track_record_length(sharpe_pp, ems, m.skew, m.raw_kurtosis, confidence),
+        psr_vs_zero,
+        dsr,
+        min_track_record_obs,
         confidence,
         pbo_available: pbo.is_some(),
         pbo: pbo.map_or(0.0, |p| p.pbo),
@@ -134,7 +143,7 @@ pub fn validate_selection(
                 .into(),
         );
     }
-    r
+    Ok(r)
 }
 
 /// Plain-text rendering for logs and reports.

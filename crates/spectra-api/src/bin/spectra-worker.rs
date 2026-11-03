@@ -1212,7 +1212,9 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         {
             Ok(Resolved::Found(v)) => v,
             Ok(Resolved::Sealed { holdout }) => {
-                let message = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+                let message = format!(
+                    "The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it."
+                );
                 fail_job(&ctx, &job, started, &message, false).await;
                 drop(permit);
                 return;
@@ -1531,7 +1533,9 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
     {
         Ok(Resolved::Found(v)) => v,
         Ok(Resolved::Sealed { holdout }) => {
-            let message = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+            let message = format!(
+                "The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it."
+            );
             fail_job(&ctx, &job, started, &message, false).await;
             drop(permit);
             return;
@@ -1701,11 +1705,9 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     "annualized_volatility": trial.metrics.annualized_volatility,
                     "max_drawdown": trial.metrics.max_drawdown,
                 });
-                let (ret_mean, ret_vol) = if trial.returns.is_empty() {
-                    (None, None)
-                } else {
-                    let m = spectra_research::moments(&trial.returns);
-                    (Some(m.mean), Some(m.stdev))
+                let (ret_mean, ret_vol) = match spectra_research::moments(&trial.returns) {
+                    Ok(m) => (Some(m.mean), Some(m.stdev)),
+                    Err(_) => (None, None),
                 };
                 let _ = optimization::insert_trial(
                     &ctx.pool,
@@ -1748,24 +1750,37 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
 
             let (dsr, psr, min_trl, pbo, best_params_json, best_metrics_json) = if let Some(best) = best_trial
             {
-                let m = spectra_research::moments(&best.returns);
-                let sr_mom = spectra_research::moments(&sharpes);
-                let sr_var = sr_mom.stdev * sr_mom.stdev;
-                let psr = spectra_research::probabilistic_sharpe(
-                    best.metrics.sharpe,
-                    0.0,
-                    m.n,
-                    m.skew,
-                    m.raw_kurtosis,
-                );
-                let dsr = spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var);
-                let min_trl = spectra_research::min_track_record_length(
-                    best.metrics.sharpe,
-                    0.0,
-                    m.skew,
-                    m.raw_kurtosis,
-                    0.95,
-                );
+                let m_opt = spectra_research::moments(&best.returns).ok();
+                let sr_var = if sharpes.len() >= 2 {
+                    match spectra_research::moments(&sharpes) {
+                        Ok(sr_m) => sr_m.stdev * sr_m.stdev,
+                        Err(_) => 0.0,
+                    }
+                } else {
+                    0.0
+                };
+                let psr = m_opt.as_ref().and_then(|m| {
+                    spectra_research::probabilistic_sharpe(
+                        best.metrics.sharpe,
+                        0.0,
+                        m.n,
+                        m.skew,
+                        m.raw_kurtosis,
+                    )
+                    .ok()
+                });
+                let dsr =
+                    spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var).ok();
+                let min_trl = m_opt.as_ref().and_then(|m| {
+                    spectra_research::min_track_record_length(
+                        best.metrics.sharpe,
+                        0.0,
+                        m.skew,
+                        m.raw_kurtosis,
+                        0.95,
+                    )
+                    .ok()
+                });
                 // PBO is undefined (None, stored as NULL) when CSCV cannot run or fails, not 0.0 (M26 task 5).
                 let pbo = if returns_matrix.len() >= 2 && returns_matrix.first().is_some_and(|r| r.len() >= 8)
                 {
@@ -1785,9 +1800,9 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     "max_drawdown": best.metrics.max_drawdown,
                 });
                 (
-                    dsr.is_finite().then_some(dsr),
-                    psr.is_finite().then_some(psr),
-                    min_trl.is_finite().then_some(min_trl),
+                    dsr.filter(|v| v.is_finite()),
+                    psr.filter(|v| v.is_finite()),
+                    min_trl.filter(|v| v.is_finite()),
                     pbo,
                     Some(serde_json::Value::Object(b_params)),
                     Some(b_metrics),
@@ -1906,7 +1921,9 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
     {
         Ok(Resolved::Found(v)) => v,
         Ok(Resolved::Sealed { holdout }) => {
-            let message = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+            let message = format!(
+                "The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it."
+            );
             fail_job(&ctx, &job, started, &message, false).await;
             drop(permit);
             return;

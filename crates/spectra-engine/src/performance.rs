@@ -161,11 +161,16 @@ pub fn rolling_sharpe(r: &[f64], window: usize, ppy: f64) -> Vec<f64> {
 }
 
 /// Rolling annualized volatility over `window` periods.
+///
+/// Returns an empty vec if `window < 2` or there are fewer observations than
+/// `window`.  Each element is `stdev(window) * sqrt(ppy)`.
 pub fn rolling_volatility(r: &[f64], window: usize, ppy: f64) -> Vec<f64> {
     if window < 2 || r.len() < window {
         return Vec::new();
     }
-    r.windows(window).map(|w| stdev(w).unwrap_or(0.0) * ppy.sqrt()).collect()
+    r.windows(window)
+        .map(|w| stdev(w).expect("stdev is always defined when window >= 2") * ppy.sqrt())
+        .collect()
 }
 
 /// Every measure above for one return series.

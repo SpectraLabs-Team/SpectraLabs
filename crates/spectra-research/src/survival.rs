@@ -1274,24 +1274,34 @@ pub fn run_survival_lab_controlled<'a>(
     let base = run_one(bars, factory, config, params)?;
     let base_sum = summarize(&base);
     let base_returns = spectra_engine::returns_from_curve(&base.equity_curve);
-    rep.statistical_strength.return_bootstrap = block_bootstrap_returns(
+    rep.baseline_fills = count_fills(&base.ledger);
+    let extraction = extract_trades(&base.ledger)?;
+    rep.trade_pnl_sorted = extraction.trades.iter().map(|trade| trade.net.to_f64()).collect();
+    rep.trade_pnl_sorted.sort_by(f64::total_cmp);
+    let traded = rep.baseline_fills > 0 && base_sum.valid;
+
+    rep.statistical_strength.return_bootstrap = match block_bootstrap_returns(
         &base_returns,
         config.initial_cash.to_f64(),
         config.periods_per_year,
         sc.return_bootstrap_block_length.min(base_returns.len()),
         sc.return_bootstrap_resamples,
         sc.seed,
-    );
+    ) {
+        Ok(b) => b,
+        Err(_) => ReturnBlockBootstrap {
+            valid: true,
+            periods: base_returns.len(),
+            block_length: sc.return_bootstrap_block_length.min(base_returns.len()),
+            resamples: sc.return_bootstrap_resamples,
+            ..ReturnBlockBootstrap::default()
+        },
+    };
     rep.baseline_equity = equity_index(&base_returns);
     rep.drawdown_curve = drawdowns(&rep.baseline_equity);
     rep.benchmark_equity = equity_index(&benchmark_returns(bars));
     rep.baseline = base.metrics;
     rep.baseline_run = base.run.clone();
-    rep.baseline_fills = count_fills(&base.ledger);
-    let extraction = extract_trades(&base.ledger)?;
-    rep.trade_pnl_sorted = extraction.trades.iter().map(|trade| trade.net.to_f64()).collect();
-    rep.trade_pnl_sorted.sort_by(f64::total_cmp);
-    let traded = rep.baseline_fills > 0 && base_sum.valid;
 
     rep.assumptions = [
         "Every test re-runs the full event-driven backtest on the same bars; only the named input changes.",
@@ -1766,11 +1776,10 @@ pub fn run_survival_lab_controlled<'a>(
                         mean /= values.len() as f64;
                         out.mean_return = mean;
                         if values.len() >= sc.regime_min_per_bucket {
-                            if let Ok(mo) = moments(values) {
-                                if mo.stdev > 0.0 {
-                                    out.sharpe = mean / mo.stdev * config.periods_per_year.sqrt();
-                                }
-                            }
+                            out.sharpe = match moments(values) {
+                                Ok(mo) => mean / mo.stdev * config.periods_per_year.sqrt(),
+                                Err(_) => f64::NAN,
+                            };
                         }
                     }
                     if out.periods < sc.regime_min_per_bucket {
@@ -1828,12 +1837,12 @@ pub fn run_survival_lab_controlled<'a>(
                     if !values.is_empty() {
                         bucket.mean_return = values.iter().sum::<f64>() / values.len() as f64;
                         if values.len() >= sc.regime_min_per_bucket {
-                            if let Ok(distribution) = moments(&values) {
-                                if distribution.stdev > 0.0 {
-                                    bucket.sharpe = distribution.mean / distribution.stdev
-                                        * config.periods_per_year.sqrt();
+                            bucket.sharpe = match moments(&values) {
+                                Ok(distribution) => {
+                                    distribution.mean / distribution.stdev * config.periods_per_year.sqrt()
                                 }
-                            }
+                                Err(_) => f64::NAN,
+                            };
                         }
                     }
                     rg.market_states.push(bucket);

@@ -1737,7 +1737,7 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                 .bind(&metrics_json)
                 .bind(&strategy)
                 .bind(&version.checksum)
-                .bind(ret_mean.unwrap_or(0.0))
+                .bind(ret_mean)
                 .bind(trial.returns.len() as i64)
                 .execute(&ctx.pool)
                 .await;
@@ -1750,37 +1750,94 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
 
             let (dsr, psr, min_trl, pbo, best_params_json, best_metrics_json) = if let Some(best) = best_trial
             {
-                let m_opt = spectra_research::moments(&best.returns).ok();
-                let sr_var = if sharpes.len() >= 2 {
-                    match spectra_research::moments(&sharpes) {
-                        Ok(sr_m) => sr_m.stdev * sr_m.stdev,
-                        Err(_) => 0.0,
+                let m = match spectra_research::moments(&best.returns) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        fail_job(
+                            &ctx,
+                            &job,
+                            started,
+                            &format!("Failed to compute moments for best trial: {e}"),
+                            false,
+                        )
+                        .await;
+                        return;
                     }
+                };
+                let sr_var = if sharpes.len() >= 2 {
+                    let mean = sharpes.iter().sum::<f64>() / sharpes.len() as f64;
+                    let ss: f64 = sharpes.iter().map(|s| (s - mean) * (s - mean)).sum();
+                    let v = ss / (sharpes.len() - 1) as f64;
+                    if !v.is_finite() || v < 0.0 {
+                        fail_job(
+                            &ctx,
+                            &job,
+                            started,
+                            "Sharpe variance across sweep trials is non-finite or negative",
+                            false,
+                        )
+                        .await;
+                        return;
+                    }
+                    v
                 } else {
                     0.0
                 };
-                let psr = m_opt.as_ref().and_then(|m| {
-                    spectra_research::probabilistic_sharpe(
-                        best.metrics.sharpe,
-                        0.0,
-                        m.n,
-                        m.skew,
-                        m.raw_kurtosis,
-                    )
-                    .ok()
-                });
+                let psr = match spectra_research::probabilistic_sharpe(
+                    best.metrics.sharpe,
+                    0.0,
+                    m.n,
+                    m.skew,
+                    m.raw_kurtosis,
+                ) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        fail_job(
+                            &ctx,
+                            &job,
+                            started,
+                            &format!("Failed to compute probabilistic Sharpe for best trial: {e}"),
+                            false,
+                        )
+                        .await;
+                        return;
+                    }
+                };
                 let dsr =
-                    spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var).ok();
-                let min_trl = m_opt.as_ref().and_then(|m| {
-                    spectra_research::min_track_record_length(
-                        best.metrics.sharpe,
-                        0.0,
-                        m.skew,
-                        m.raw_kurtosis,
-                        0.95,
-                    )
-                    .ok()
-                });
+                    match spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var) {
+                        Ok(d) => Some(d),
+                        Err(e) => {
+                            fail_job(
+                                &ctx,
+                                &job,
+                                started,
+                                &format!("Failed to compute deflated Sharpe for best trial: {e}"),
+                                false,
+                            )
+                            .await;
+                            return;
+                        }
+                    };
+                let min_trl = match spectra_research::min_track_record_length(
+                    best.metrics.sharpe,
+                    0.0,
+                    m.skew,
+                    m.raw_kurtosis,
+                    0.95,
+                ) {
+                    Ok(trl) => trl.is_finite().then_some(trl),
+                    Err(e) => {
+                        fail_job(
+                            &ctx,
+                            &job,
+                            started,
+                            &format!("Failed to compute min track record length for best trial: {e}"),
+                            false,
+                        )
+                        .await;
+                        return;
+                    }
+                };
                 // PBO is undefined (None, stored as NULL) when CSCV cannot run or fails, not 0.0 (M26 task 5).
                 let pbo = if returns_matrix.len() >= 2 && returns_matrix.first().is_some_and(|r| r.len() >= 8)
                 {
@@ -1799,14 +1856,7 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     "annualized_volatility": best.metrics.annualized_volatility,
                     "max_drawdown": best.metrics.max_drawdown,
                 });
-                (
-                    dsr.filter(|v| v.is_finite()),
-                    psr.filter(|v| v.is_finite()),
-                    min_trl.filter(|v| v.is_finite()),
-                    pbo,
-                    Some(serde_json::Value::Object(b_params)),
-                    Some(b_metrics),
-                )
+                (dsr, psr, min_trl, pbo, Some(serde_json::Value::Object(b_params)), Some(b_metrics))
             } else {
                 (None, None, None, None, None, None)
             };

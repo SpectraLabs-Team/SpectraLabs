@@ -326,3 +326,78 @@ Documented divergences for each undefined case that previously returned a number
 | `min_track_record_length` | Non-positive variance term ($\text{var\_term} \le 0$) | `NaN` | `Err(Error::InvalidArgument("min_track_record_length variance term ({var_term}) must be positive"))` | Variance term in asymptotic variance formula must be strictly positive. |
 | `min_track_record_length` | Invalid confidence level ($p \le 0$ or $p \ge 1$ or non-finite) | Float or `NaN` | `Err(Error::InvalidArgument("confidence must be in (0, 1), got {confidence}"))` | Confidence probability must be strictly within $(0, 1)$. |
 | `normal_inv_cdf` | Argument outside $[0, 1]$ or non-finite | `NaN` | `Err(Error::InvalidArgument("normal_inv_cdf argument must be in [0, 1], got {p}"))` | Quantile function $\Phi^{-1}(p)$ is defined on $[0, 1]$; returns `Ok(-inf)` at 0, `Ok(+inf)` at 1, and `Err` outside. |
+
+### Detailed Divergence Records by Undefined Case
+
+#### 1. `moments()` — Empty Sample
+- **Function:** `moments`
+- **Input:** `&[]` ($n = 0$)
+- **Old value:** `Moments { n: 0, mean: 0.0, stdev: 0.0, skew: 0.0, raw_kurtosis: 3.0 }`
+- **New behavior:** `Err(Error::InvalidArgument("moments require at least 2 observations, got 0"))`
+
+#### 2. `moments()` — Single Observation
+- **Function:** `moments`
+- **Input:** `&[c]` ($n = 1$)
+- **Old value:** `Moments { n: 1, mean: 0.0, stdev: 0.0, skew: 0.0, raw_kurtosis: 3.0 }` (silently dropped `c` as mean)
+- **New behavior:** `Err(Error::InvalidArgument("moments require at least 2 observations, got 1"))`
+
+#### 3. `moments()` — Zero Variance
+- **Function:** `moments`
+- **Input:** Constant slice `&[c, c, ...]` ($s \le 10^{-12} \cdot \text{scale}$)
+- **Old value:** `Moments { n, mean: c, stdev: 0.0, skew: 0.0, raw_kurtosis: 3.0 }` (silent normal distribution placeholder)
+- **New behavior:** `Err(Error::InvalidArgument("sample has zero variance; higher moments undefined"))`
+
+#### 4. `sharpe_per_period()` — Empty Sample ($n = 0$)
+- **Function:** `sharpe_per_period`
+- **Input:** `&[]` ($n = 0$)
+- **Old value:** `0.0`
+- **New behavior:** `Err(Error::InvalidArgument("sharpe_per_period requires at least 2 return observations, got 0"))`
+
+#### 5. `sharpe_per_period()` — Single Observation ($n = 1$)
+- **Function:** `sharpe_per_period`
+- **Input:** `&[c]` ($n = 1$)
+- **Old value:** `0.0`
+- **New behavior:** `Err(Error::InvalidArgument("sharpe_per_period requires at least 2 return observations, got 1"))`
+
+#### 6. `sharpe_per_period()` — Zero Volatility
+- **Function:** `sharpe_per_period`
+- **Input:** `&[c; n]` where all returns are identical ($s_r = 0.0$)
+- **Old value:** `0.0`
+- **New behavior:** `Err(Error::InvalidArgument("stdev is zero"))`
+
+#### 7. `expected_max_sharpe()` — Zero Trials ($N = 0$)
+- **Function:** `expected_max_sharpe`
+- **Input:** `expected_max_sharpe(V, 0)`
+- **Old value:** `0.0`
+- **New behavior:** `Err(Error::InvalidArgument("n_trials must be at least 1"))`
+
+#### 8. `expected_max_sharpe()` — Negative or Non-Finite Variance
+- **Function:** `expected_max_sharpe`
+- **Input:** `expected_max_sharpe(-0.01, 10)` or `expected_max_sharpe(f64::NAN, 10)`
+- **Old value:** `0.0`
+- **New behavior:** `Err(Error::InvalidArgument("sr_variance must be finite and non-negative, got ..."))`
+
+#### 9. `deflated_sharpe()` — Zero Volatility / Constant Returns
+- **Function:** `deflated_sharpe`
+- **Input:** `deflated_sharpe(&[0.01; 10], 10, 0.01)`
+- **Old value:** Evaluated PSR with substituted $SR = 0.0$ against $E[\max SR]$ ($\approx 0.3929$)
+- **New behavior:** `Err(Error::InvalidArgument("stdev is zero"))`
+
+#### 10. `deflated_sharpe()` — Zero Trials ($N = 0$)
+- **Function:** `deflated_sharpe`
+- **Input:** `deflated_sharpe(&RETURNS, 0, 0.01)`
+- **Old value:** Evaluated PSR against benchmark $0.0$ (returning unadjusted PSR)
+- **New behavior:** `Err(Error::InvalidArgument("n_trials must be at least 1"))`
+
+#### 11. `deflated_sharpe()` — Negative Trial Sharpe Variance ($V < 0.0$)
+- **Function:** `deflated_sharpe`
+- **Input:** `deflated_sharpe(&RETURNS, 10, -0.01)`
+- **Old value:** Evaluated PSR against benchmark $0.0$
+- **New behavior:** `Err(Error::InvalidArgument("sr_variance must be finite and non-negative, got -0.01"))`
+
+#### 12. `block_bootstrap_returns()` — Zero Volatility Sample
+- **Function:** `block_bootstrap_returns`
+- **Input:** `block_bootstrap_returns(&[-0.01; 4], ...)`
+- **Old value:** `ReturnBlockBootstrap` with empty `annualized_sharpe` band
+- **New behavior:** `Err(Error::InvalidArgument("stdev is zero"))`
+

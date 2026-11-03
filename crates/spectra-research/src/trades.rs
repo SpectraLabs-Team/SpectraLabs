@@ -279,6 +279,11 @@ pub struct ReturnBlockBootstrap {
 ///
 /// The returned bands are empirical percentile intervals, not formal
 /// posterior probabilities. The caller should label them as such.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidArgument`] if any bootstrap resample encounters an
+/// undefined statistic (such as zero volatility or insufficient observations).
 pub fn block_bootstrap_returns(
     returns: &[f64],
     initial_equity: f64,
@@ -286,7 +291,7 @@ pub fn block_bootstrap_returns(
     block_length: usize,
     resamples: usize,
     seed: u64,
-) -> ReturnBlockBootstrap {
+) -> Result<ReturnBlockBootstrap> {
     let mut out = ReturnBlockBootstrap {
         periods: returns.len(),
         block_length,
@@ -303,7 +308,7 @@ pub fn block_bootstrap_returns(
         || periods_per_year <= 0.0
         || returns.iter().any(|r| !r.is_finite() || *r <= -1.0)
     {
-        return out;
+        return Ok(out);
     }
     out.valid = true;
     let mut rng = Rng::new(seed);
@@ -339,16 +344,15 @@ pub fn block_bootstrap_returns(
             losses += 1;
         }
         terminal.push(total_return);
-        if let Ok(sr) = crate::stats::sharpe_per_period(&sampled) {
-            sharpes.push(sr * periods_per_year.sqrt());
-        }
+        let sr = crate::stats::sharpe_per_period(&sampled)?;
+        sharpes.push(sr * periods_per_year.sqrt());
         drawdowns.push(max_dd);
     }
     out.terminal_return = band(terminal);
     out.annualized_sharpe = band(sharpes);
     out.max_drawdown = band(drawdowns);
     out.probability_of_loss = losses as f64 / resamples as f64;
-    out
+    Ok(out)
 }
 
 fn histogram(values: &[f64]) -> Vec<DistributionBin> {
@@ -534,13 +538,13 @@ mod tests {
     #[test]
     fn block_bootstrap_is_deterministic_and_rejects_invalid_returns() {
         let returns = [0.02, -0.01, 0.03, -0.02, 0.01, 0.005];
-        let a = block_bootstrap_returns(&returns, 100.0, 252.0, 2, 500, 42);
-        let b = block_bootstrap_returns(&returns, 100.0, 252.0, 2, 500, 42);
+        let a = block_bootstrap_returns(&returns, 100.0, 252.0, 2, 500, 42).unwrap();
+        let b = block_bootstrap_returns(&returns, 100.0, 252.0, 2, 500, 42).unwrap();
         assert_eq!(a, b);
         assert!(a.valid);
         assert_eq!(a.periods, returns.len());
         assert_eq!(a.resamples, 500);
         assert!(a.annualized_sharpe.p05 <= a.annualized_sharpe.p95);
-        assert!(!block_bootstrap_returns(&[0.1, -1.0], 100.0, 252.0, 1, 10, 42).valid);
+        assert!(!block_bootstrap_returns(&[0.1, -1.0], 100.0, 252.0, 1, 10, 42).unwrap().valid);
     }
 }

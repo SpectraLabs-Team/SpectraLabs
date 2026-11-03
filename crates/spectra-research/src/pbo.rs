@@ -96,6 +96,15 @@ pub fn cscv_pbo(returns: &[Vec<f64>], n_blocks: usize) -> Result<PboResult> {
     if t < n_blocks * 2 {
         return Err(Error::InvalidArgument("cscv_pbo: need at least 2 observations per block".into()));
     }
+    for (s, r) in returns.iter().enumerate() {
+        for (i, &v) in r.iter().enumerate() {
+            if !v.is_finite() {
+                return Err(Error::InvalidArgument(format!(
+                    "cscv_pbo: non-finite return for strategy {s} at index {i}"
+                )));
+            }
+        }
+    }
 
     let block_len = t / n_blocks;
     let block_n = block_len as f64;
@@ -214,5 +223,30 @@ mod tests {
             n += 1;
         }
         assert_eq!(n, 6);
+    }
+
+    #[test]
+    fn nan_return_returns_err() {
+        let mut r: Vec<Vec<f64>> =
+            (0..2).map(|s| (0..16).map(|t| f64::from((s * 7 + t * 3) % 5) - 2.0).collect()).collect();
+        r[0][5] = f64::NAN;
+        let res = cscv_pbo(&r, 4);
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains("strategy 0"), "expected strategy 0 in error: {err}");
+        assert!(err.contains("index 5"), "expected index 5 in error: {err}");
+    }
+
+    #[test]
+    fn defined_case_is_bit_identical_to_origin_main() {
+        let r: Vec<Vec<f64>> =
+            (0..3).map(|s| (0..16).map(|t| f64::from((s * 7 + t * 3) % 5) - 2.0).collect()).collect();
+        let p = cscv_pbo(&r, 4).unwrap();
+        assert_eq!(p.combinations, 6);
+        assert_eq!(p.strategies, 3);
+        assert_eq!(p.observations_used, 16);
+        assert_eq!(p.pbo, 1.0 / 3.0);
+        assert_eq!(p.prob_oos_loss, 1.0 / 3.0);
+        assert_eq!(p.mean_logit, 0.549_306_144_334_054_9);
     }
 }

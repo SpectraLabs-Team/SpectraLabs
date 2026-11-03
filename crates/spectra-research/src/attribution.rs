@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use spectra_core::{EntryType, InstrumentId, Json, Ledger, Money, Result};
+use spectra_core::{EntryType, Error, InstrumentId, Json, Ledger, Money, Result};
 
 use crate::trades::extract_trades;
 
@@ -182,9 +182,13 @@ pub fn compute_pnl_attribution(
     let mut coupons = Money::ZERO;
     let mut total_notional = 0.0f64;
 
+    let mut first_fill = None;
     for e in ledger.journal() {
         match e.kind {
             EntryType::Fill => {
+                if first_fill.is_none() {
+                    first_fill = Some(e);
+                }
                 commission_fees = commission_fees.checked_add(e.fill.fee)?;
                 let n = ledger.notional_of(e.fill.instrument, e.fill.price, e.fill.qty)?.to_f64();
                 total_notional += n;
@@ -209,7 +213,19 @@ pub fn compute_pnl_attribution(
         }
     }
 
-    let bps = slippage_bps.unwrap_or(0.0).max(0.0);
+    let bps = if let Some(bps) = slippage_bps {
+        bps.max(0.0)
+    } else {
+        if let Some(entry) = first_fill {
+            let sym = symbols.and_then(|s| s.get(entry.fill.instrument as usize)).map_or("", String::as_str);
+            let sym_str = if sym.is_empty() { entry.fill.instrument.to_string() } else { sym.to_string() };
+            return Err(Error::InvalidArgument(format!(
+                "attribution requires slippage for each fill; missing for {sym_str} at {}",
+                entry.ts_ns
+            )));
+        }
+        0.0
+    };
     let slippage_cost_f64 = total_notional * (bps / 10_000.0);
 
     // 2. Instrument & Direction Aggregation

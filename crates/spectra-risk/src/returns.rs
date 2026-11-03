@@ -2,7 +2,7 @@
 //!
 //! Standard-library only: zero external dependencies.
 
-use spectra_core::{Error, Result};
+use spectra_core::{Bar, Error, Result};
 
 /// Trading days in a standard year for annualizing daily returns.
 pub const TRADING_DAYS_PER_YEAR: f64 = 252.0;
@@ -48,6 +48,58 @@ pub fn variance(values: &[f64]) -> f64 {
 /// Calculate sample standard deviation (volatility).
 pub fn std_dev(values: &[f64]) -> f64 {
     variance(values).sqrt()
+}
+
+/// Minimum number of bars of price history required to compute volatility.
+pub const MIN_VOLATILITY_BARS: usize = 60;
+
+/// Compute annualized sample volatility from a series of bars for a given symbol and annualization factor.
+///
+/// Uses the sample standard deviation ($N - 1$) of log returns, then annualizes
+/// with `sqrt(periods_per_year)`.
+///
+/// # Errors
+/// - [`Error::InvalidArgument`] if `periods_per_year` is not finite or is $\le 0$.
+/// - [`Error::Data`] if `bars.len() < 60`:
+///   `"insufficient price history for {symbol}: need 60 bars, have {n}"`
+/// - [`Error::Data`] if any non-positive or non-finite price is encountered, naming the symbol and bar index.
+pub fn volatility_from_bars(symbol: &str, bars: &[Bar], periods_per_year: f64) -> Result<f64> {
+    if !periods_per_year.is_finite() || periods_per_year <= 0.0 {
+        return Err(Error::InvalidArgument(format!(
+            "periods_per_year must be positive and finite, got {periods_per_year}"
+        )));
+    }
+
+    let n = bars.len();
+    if n < MIN_VOLATILITY_BARS {
+        return Err(Error::Data(format!("insufficient price history for {symbol}: need 60 bars, have {n}")));
+    }
+
+    let mut log_returns = Vec::with_capacity(n - 1);
+    let mut prev_price = bars[0].close.to_f64();
+    if prev_price <= 0.0 || !prev_price.is_finite() {
+        return Err(Error::Data(format!(
+            "non-positive or non-finite price encountered for {symbol} at bar index 0: {prev_price}"
+        )));
+    }
+
+    for (i, bar) in bars.iter().enumerate().skip(1) {
+        let p = bar.close.to_f64();
+        if p <= 0.0 || !p.is_finite() {
+            return Err(Error::Data(format!(
+                "non-positive or non-finite price encountered for {symbol} at bar index {i}: {p}"
+            )));
+        }
+        log_returns.push((p / prev_price).ln());
+        prev_price = p;
+    }
+
+    let sd = std_dev(&log_returns);
+    let vol = sd * periods_per_year.sqrt();
+    if !vol.is_finite() {
+        return Err(Error::Data(format!("computed volatility is non-finite for {symbol}")));
+    }
+    Ok(vol)
 }
 
 /// Calculate sample covariance between two series of equal length.

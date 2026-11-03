@@ -933,13 +933,19 @@ fn futures_json(out: &BacktestOutput) -> Result<Option<Json>> {
 }
 
 /// The strategy against an equal-weight buy-and-hold of the same bars (no costs).
+#[allow(clippy::unnecessary_wraps)]
 fn benchmark_json(out: &BacktestOutput) -> Result<Json> {
-    let s = spectra_research::aligned_returns(&out.result.equity_curve);
+    let Ok(s) = spectra_research::aligned_returns(&out.result.equity_curve) else {
+        return Ok(Json::object().with("valid", Json::boolean(false)));
+    };
     let b = &out.benchmark;
     if b.len() != s.len() || s.len() < 2 {
         return Ok(Json::object().with("valid", Json::boolean(false)));
     }
-    let m = spectra_research::compute_benchmark_metrics(&s, b, out.request.config.periods_per_year)?;
+    let Ok(m) = spectra_research::compute_benchmark_metrics(&s, b, out.request.config.periods_per_year)
+    else {
+        return Ok(Json::object().with("valid", Json::boolean(false)));
+    };
     let total = b.iter().fold(1.0, |acc, x| acc * (1.0 + x)) - 1.0;
     Ok(Json::object()
         .with("valid", Json::boolean(m.valid))

@@ -1675,11 +1675,12 @@ pub fn run_survival_lab_controlled<'a>(
 
     // ---- 7. Regime sensitivity & 8. Benchmark-relative -----------------------
     {
-        let rs = aligned_returns(&base.equity_curve);
+        let rs_res = aligned_returns(&base.equity_curve);
         let rb = benchmark_returns(bars);
         let rg = &mut rep.regimes;
         let bm = &mut rep.benchmark;
-        if !traded || rs.len() != rb.len() {
+        let rs_valid = rs_res.as_ref().is_ok_and(|rs| rs.len() == rb.len());
+        if !traded || !rs_valid {
             rg.finding = if traded {
                 "Strategy and benchmark return series are not aligned.".into()
             } else {
@@ -1687,17 +1688,18 @@ pub fn run_survival_lab_controlled<'a>(
             };
             bm.finding.clone_from(&rg.finding);
         } else {
-            bm.metrics = compute_benchmark_metrics(&rs, &rb, config.periods_per_year)?;
-            let (mut sum, mut cnt) = (0.0, 0usize);
-            for p in &base.equity_curve {
-                let e = p.equity.to_f64();
-                if e > 0.0 {
-                    sum += (e - p.cash.to_f64()).abs() / e;
-                    cnt += 1;
+            let rs = rs_res.expect("rs_valid is true");
+            if let Ok(m) = compute_benchmark_metrics(&rs, &rb, config.periods_per_year) {
+                bm.metrics = m;
+                let (mut sum, mut cnt) = (0.0, 0usize);
+                for p in &base.equity_curve {
+                    let e = p.equity.to_f64();
+                    if e > 0.0 {
+                        sum += (e - p.cash.to_f64()).abs() / e;
+                        cnt += 1;
+                    }
                 }
-            }
-            bm.average_net_exposure = if cnt > 0 { sum / cnt as f64 } else { 0.0 };
-            if bm.metrics.valid {
+                bm.average_net_exposure = if cnt > 0 { sum / cnt as f64 } else { 0.0 };
                 let m = &bm.metrics;
                 bm.verdict = if m.alpha_annualized <= 0.0 || m.information_ratio <= 0.0 {
                     Verdict::Warn
@@ -1714,6 +1716,7 @@ pub fn run_survival_lab_controlled<'a>(
                     fmt_f(bm.average_net_exposure * 100.0, 1)
                 );
             } else {
+                bm.verdict = Verdict::Insufficient;
                 bm.finding = "The benchmark has no variance or too few periods to compare against.".into();
             }
 
@@ -1858,7 +1861,8 @@ pub fn run_survival_lab_controlled<'a>(
         let rk = &mut rep.risk;
         let eq: Vec<f64> = base.equity_curve.iter().map(|p| p.equity.to_f64()).collect();
         rk.drawdown = compute_drawdown_stats(&eq);
-        rk.tail = compute_tail_stats(&aligned_returns(&base.equity_curve), sc.tail_level);
+        let ret = aligned_returns(&base.equity_curve).unwrap_or_default();
+        rk.tail = compute_tail_stats(&ret, sc.tail_level);
         if rk.drawdown.valid {
             rk.verdict = if rk.drawdown.max_drawdown >= sc.max_drawdown_fail {
                 Verdict::Fail

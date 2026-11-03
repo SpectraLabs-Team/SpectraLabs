@@ -19,19 +19,25 @@ use spectra_core::{Bar, Error, InstrumentId, Price, Result};
 use spectra_engine::EquityPoint;
 
 /// Period returns of an equity curve, aligned to it (one per consecutive pair
-/// of points; 0 when the previous equity is not positive).
-pub fn aligned_returns(curve: &[EquityPoint]) -> Vec<f64> {
-    curve
-        .windows(2)
-        .map(|w| {
-            let prev = w[0].equity.to_f64();
-            if prev > 0.0 {
-                w[1].equity.to_f64() / prev - 1.0
-            } else {
-                0.0
-            }
-        })
-        .collect()
+/// of points; returns -1.0 when current equity is non-positive).
+///
+/// # Errors
+/// If any previous equity point is non-positive or non-finite.
+pub fn aligned_returns(curve: &[EquityPoint]) -> Result<Vec<f64>> {
+    let mut out = Vec::with_capacity(curve.len().saturating_sub(1));
+    for w in curve.windows(2) {
+        let prev = w[0].equity.to_f64();
+        if prev <= 0.0 || !prev.is_finite() {
+            return Err(Error::InvalidArgument(format!("aligned_returns: non-positive prior equity {prev}")));
+        }
+        let curr = w[1].equity.to_f64();
+        if curr <= 0.0 {
+            out.push(-1.0);
+        } else {
+            out.push(curr / prev - 1.0);
+        }
+    }
+    Ok(out)
 }
 
 /// Equal-weight benchmark returns, one per consecutive pair of unique timestamps.
@@ -89,16 +95,24 @@ pub struct BenchmarkMetrics {
 /// Computes [`BenchmarkMetrics`] for equal-length series.
 ///
 /// # Errors
-/// If the series differ in length.
+/// If the series differ in length, have fewer than 2 observations, `ppy <= 0.0`,
+/// or if the benchmark has zero variance or contains NaN.
 pub fn compute_benchmark_metrics(s: &[f64], b: &[f64], ppy: f64) -> Result<BenchmarkMetrics> {
     if s.len() != b.len() {
         return Err(Error::InvalidArgument("benchmark metrics: series differ in length".into()));
     }
-    let mut m = BenchmarkMetrics::default();
     let n = s.len();
-    if n < 2 || ppy <= 0.0 {
-        return Ok(m);
+    if n < 2 {
+        return Err(Error::InvalidArgument(format!(
+            "benchmark metrics: need at least 2 observations, got {n}"
+        )));
     }
+    if ppy <= 0.0 || !ppy.is_finite() {
+        return Err(Error::InvalidArgument(format!(
+            "benchmark metrics: periods_per_year must be positive, got {ppy}"
+        )));
+    }
+    let mut m = BenchmarkMetrics::default();
     let nd = n as f64;
     let (mut ms, mut mb) = (0.0, 0.0);
     for i in 0..n {
@@ -121,7 +135,9 @@ pub fn compute_benchmark_metrics(s: &[f64], b: &[f64], ppy: f64) -> Result<Bench
     vb /= nd - 1.0;
     vd /= nd - 1.0;
     if !(vb > 0.0) {
-        return Ok(m);
+        return Err(Error::InvalidArgument(
+            "benchmark metrics: zero benchmark variance or NaN in benchmark".into(),
+        ));
     }
     m.valid = true;
     m.beta = cov / vb;
@@ -168,5 +184,46 @@ mod tests {
         assert!(compute_benchmark_metrics(&r, &r[..2], 252.0).is_err());
         let doubled: Vec<f64> = r.iter().map(|x| 2.0 * x).collect();
         assert!((compute_benchmark_metrics(&doubled, &r, 252.0).unwrap().beta - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn invalid_inputs_return_err() {
+        let r = [0.01, -0.02, 0.03];
+        // n < 2
+        assert!(compute_benchmark_metrics(&[], &[], 252.0).is_err());
+        assert!(compute_benchmark_metrics(&[0.01], &[0.01], 252.0).is_err());
+        // ppy <= 0.0
+        assert!(compute_benchmark_metrics(&r, &r, 0.0).is_err());
+        assert!(compute_benchmark_metrics(&r, &r, -1.0).is_err());
+        // zero benchmark variance
+        let flat = [0.01, 0.01, 0.01];
+        assert!(compute_benchmark_metrics(&r, &flat, 252.0).is_err());
+        // NaN in benchmark
+        let nan_b = [0.01, f64::NAN, 0.03];
+        assert!(compute_benchmark_metrics(&r, &nan_b, 252.0).is_err());
+    }
+
+    #[test]
+    fn aligned_returns_validates_inputs() {
+        use spectra_core::Money;
+
+        let pt = |e: f64| EquityPoint {
+            ts_ns: 0,
+            equity: Money::from_f64(e).unwrap(),
+            cash: Money::from_f64(e).unwrap(),
+        };
+
+        // prev <= 0 returns Err
+        let curve_zero = [pt(0.0), pt(100.0)];
+        assert!(aligned_returns(&curve_zero).is_err());
+
+        // prev > 0 and curr <= 0 returns -1.0
+        let curve_loss = [pt(100.0), pt(0.0)];
+        assert_eq!(aligned_returns(&curve_loss).unwrap(), vec![-1.0]);
+
+        // normal positive return
+        let curve_normal = [pt(100.0), pt(110.0)];
+        let ret = aligned_returns(&curve_normal).unwrap();
+        assert!((ret[0] - 0.1).abs() < 1e-12);
     }
 }

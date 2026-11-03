@@ -8,9 +8,8 @@
 //! sample stdev of the active return times sqrt(ppy)), worked independently at
 //! 40 digits (mpmath).
 //!
-//! Not covered here: invalid-input zeros. Returning zeros without an error is a
-//! documented defect (task 8), so a test would lock in the wrong behaviour; the
-//! `valid` flag is checked instead.
+//! Invalid-input cases (zero benchmark variance, n < 2, non-positive ppy)
+//! return explicit errors.
 
 use spectra_research::benchmark::compute_benchmark_metrics;
 
@@ -72,8 +71,7 @@ fn unequal_series_are_refused() {
 
 #[test]
 fn a_constant_benchmark_is_flagged_invalid() {
-    // Zero benchmark variance: beta is undefined, and the valid flag says so.
+    // Zero benchmark variance: beta is undefined, returns Err(InvalidArgument).
     let flat = [0.01; 5];
-    let m = compute_benchmark_metrics(&S, &flat, PPY).unwrap();
-    assert!(!m.valid, "a constant benchmark must not be reported as valid");
+    assert!(compute_benchmark_metrics(&S, &flat, PPY).is_err(), "a constant benchmark must return Err");
 }

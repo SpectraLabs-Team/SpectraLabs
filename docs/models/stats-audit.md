@@ -140,7 +140,7 @@ impl Default for Moments {
    - `crates/spectra-api/src/optimization_api.rs:1137`:
      `req.returns_matrix.iter().map(|r| sharpe_per_period(r)).collect::<Result<Vec<f64>>>()?` — breaks; handle with `?`.
    - `crates/spectra-research/src/sweep.rs:331`:
-     `sharpe_per_period: sharpe_per_period(&t.returns)?` — breaks; propagate with `?`.
+     `TrialLedger::add` uses `sharpe_per_period(&t.returns).unwrap_or(0.0)` so degenerate sweep trials with zero variance (e.g. inactive strategy parameters in walk-forward folds) are recorded as 0.0 matching C++ quantforge reference behavior rather than aborting the ledger.
    - `crates/spectra-research/src/trades.rs:342`:
      `sharpe_per_period(&sampled)?` — breaks; handle with `?`.
    - `crates/spectra-registry/src/registry.rs:1009`:

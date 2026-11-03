@@ -320,10 +320,11 @@ pub struct TrialLedger {
 }
 
 impl TrialLedger {
-    /// Records every trial of a sweep.
+    /// Records every trial of a sweep. Undefined Sharpe (e.g. constant returns / zero trades)
+    /// defaults to 0.0 in the ledger summary matching C++ quantforge behavior.
     ///
     /// # Errors
-    /// Returns [`Error::InvalidArgument`] if any trial's returns have undefined Sharpe ratio.
+    /// Returns `Ok(())`. Retained as fallible for API compatibility.
     pub fn add(&mut self, label: &str, sweep: &SweepResult) -> Result<()> {
         for t in &sweep.trials {
             self.trials.push(TrialSummary {
@@ -331,7 +332,7 @@ impl TrialLedger {
                 label: label.into(),
                 params: t.params.canonical(),
                 result_sha256: t.run.result_sha256.clone(),
-                sharpe_per_period: sharpe_per_period(&t.returns)?,
+                sharpe_per_period: sharpe_per_period(&t.returns).unwrap_or(0.0),
                 n_obs: t.returns.len(),
                 objective: t.objective,
             });

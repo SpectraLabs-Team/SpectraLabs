@@ -1709,6 +1709,9 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     Ok(m) => (Some(m.mean), Some(m.stdev)),
                     Err(_) => (None, None),
                 };
+                // Per-period Sharpe for this trial. Undefined (flat or too-short returns) is stored as NULL,
+                // so one degenerate trial does not fail the whole sweep (M26 task 8).
+                let sharpe_pp = spectra_research::sharpe_per_period(&trial.returns).ok();
                 let _ = optimization::insert_trial(
                     &ctx.pool,
                     sweep_id,
@@ -1737,7 +1740,7 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                 .bind(&metrics_json)
                 .bind(&strategy)
                 .bind(&version.checksum)
-                .bind(ret_mean)
+                .bind(sharpe_pp)
                 .bind(trial.returns.len() as i64)
                 .execute(&ctx.pool)
                 .await;
@@ -1838,10 +1841,23 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                         return;
                     }
                 };
-                // PBO is undefined (None, stored as NULL) when CSCV cannot run or fails, not 0.0 (M26 task 5).
+                // PBO is None (stored as NULL) only when CSCV cannot run on the input shape. A CSCV error fails the job (M26 task 5).
                 let pbo = if returns_matrix.len() >= 2 && returns_matrix.first().is_some_and(|r| r.len() >= 8)
                 {
-                    spectra_research::cscv_pbo(&returns_matrix, 16).ok().map(|p| p.pbo)
+                    match spectra_research::cscv_pbo(&returns_matrix, 16) {
+                        Ok(p) => Some(p.pbo),
+                        Err(e) => {
+                            fail_job(
+                                &ctx,
+                                &job,
+                                started,
+                                &format!("Failed to compute PBO for best trial: {e}"),
+                                false,
+                            )
+                            .await;
+                            return;
+                        }
+                    }
                 } else {
                     None
                 };

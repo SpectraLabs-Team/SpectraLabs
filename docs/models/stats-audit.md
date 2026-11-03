@@ -326,6 +326,8 @@ Documented divergences for each undefined case that previously returned a number
 | `min_track_record_length` | Non-positive variance term ($\text{var\_term} \le 0$) | `NaN` | `Err(Error::InvalidArgument("min_track_record_length variance term ({var_term}) must be positive"))` | Variance term in asymptotic variance formula must be strictly positive. |
 | `min_track_record_length` | Invalid confidence level ($p \le 0$ or $p \ge 1$ or non-finite) | Float or `NaN` | `Err(Error::InvalidArgument("confidence must be in (0, 1), got {confidence}"))` | Confidence probability must be strictly within $(0, 1)$. |
 | `normal_inv_cdf` | Argument outside $[0, 1]$ or non-finite | `NaN` | `Err(Error::InvalidArgument("normal_inv_cdf argument must be in [0, 1], got {p}"))` | Quantile function $\Phi^{-1}(p)$ is defined on $[0, 1]$; returns `Ok(-inf)` at 0, `Ok(+inf)` at 1, and `Err` outside. |
+| `cscv_pbo` | Non-finite returns (`NaN` / `±inf`) | Silent NaN propagation into block sums, OOS Sharpe, logits, and PBO | `Err(Error::InvalidArgument("cscv_pbo: non-finite return for strategy {s} at index {i}"))` | Explicit validation rejects corrupt return inputs upfront rather than propagating NaNs into ranking logic. |
+| `TrialLedger::add` / `cscv_pbo` | Zero-variance trials / flat blocks | `TrialLedger::add` defaulted to `0.0`; `cscv_pbo` `sharpe_from_sums` returned `0.0` | Retained fallback to `0.0` (user-approved 2026-11-04 parity behavior) | Preserves C++ reference parity for inactive strategies (e.g., zero trades in walk-forward folds). DSR effect: recording 0.0 Sharpe enters the trial variance, lowering it and reducing estimated expected maximum Sharpe. |
 
 ### Detailed Divergence Records by Undefined Case
 
@@ -400,4 +402,17 @@ Documented divergences for each undefined case that previously returned a number
 - **Input:** `block_bootstrap_returns(&[-0.01; 4], ...)`
 - **Old value:** `ReturnBlockBootstrap` with empty `annualized_sharpe` band
 - **New behavior:** `Err(Error::InvalidArgument("stdev is zero"))`
+
+#### 13. `cscv_pbo()` — Non-Finite Return Observations
+- **Function:** `cscv_pbo`
+- **Input:** Any series with `NaN` or `±inf` values (e.g. `returns[s][i] = f64::NAN`)
+- **Old value:** Silent `NaN` propagation through `BlockSums`, partition Sharpe ratios, rank calculations, and final `PboResult`
+- **New behavior:** `Err(Error::InvalidArgument("cscv_pbo: non-finite return for strategy {s} at index {i}"))`
+
+#### 14. `TrialLedger::add()` & `cscv_pbo()` — Zero-Variance Trials and Flat Blocks (Approved Parity Behavior)
+- **Functions:** `TrialLedger::add` (`sweep.rs`), `cscv_pbo` / `sharpe_from_sums` (`pbo.rs`)
+- **Input:** Zero-variance or flat return series (e.g. inactive strategy parameters producing 0 trades across an entire fold or partition block)
+- **Old behavior:** `TrialLedger::add` silently recorded `0.0`; `cscv_pbo::sharpe_from_sums` returned `0.0` when `var <= 0.0` or `n < 2`
+- **New behavior:** Retained fallback to `0.0` (user-approved 2026-11-04)
+- **Impact / DSR effect:** Preserves bit-identical parity with the frozen C++ quantforge v0.6.0 engine and `parity/golden/research.golden`. When an inactive trial receives Sharpe `0.0`, this zero enters the ledger's trial Sharpe distribution, lowering the cross-trial Sharpe variance $V$. Because $E[\max SR] \approx \sqrt{V} \cdot ((1 - \gamma) Z^{-1}(1 - 1/N) + \gamma Z^{-1}(1 - 1/(N e)))$, lowering trial variance lowers the hurdle rate for Deflated Sharpe Ratio (DSR), slightly increasing reported DSR for outperforming strategies.
 

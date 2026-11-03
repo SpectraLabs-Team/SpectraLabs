@@ -79,7 +79,7 @@ fn run_scenario(title: &str, bars: &[Bar]) -> Result<()> {
 
     let mut ledger = TrialLedger::default();
     let sweep = run_sweep(bars, &factory, &cfg, &params, &objective_sharpe, opts, ledger.next_trial_id())?;
-    ledger.add("full-sample sweep", &sweep);
+    ledger.add("full-sample sweep", &sweep)?;
     let best = sweep.best_trial().expect("non-empty sweep");
     println!("\n1) Best of {} parameter sets, in-sample", sweep.trials.len());
     println!(
@@ -92,7 +92,7 @@ fn run_scenario(title: &str, bars: &[Bar]) -> Result<()> {
 
     let all: Vec<Vec<f64>> = sweep.trials.iter().map(|t| t.returns.clone()).collect();
     let pbo = cscv_pbo(&all, 16)?;
-    let report = validate_selection(best, &ledger, cfg.periods_per_year, Some(&pbo), 0.95);
+    let report = validate_selection(best, &ledger, cfg.periods_per_year, Some(&pbo), 0.95)?;
     print!("\n2) Validation of that selection\n{}", format_report(&report));
 
     let wf = WalkForwardConfig { train: 300, test: 100, ..WalkForwardConfig::default() };

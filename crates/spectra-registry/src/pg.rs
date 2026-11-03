@@ -473,7 +473,8 @@ impl PgRegistry {
         let params = params_to_json(&input.params)?;
         let config = config_to_json(&input.config)?;
         let metrics = metrics_to_json(&input.metrics)?;
-        let sharpe_period = sharpe_per_period(&input.returns);
+        let sharpe_period = sharpe_per_period(&input.returns)
+            .map_err(|e| PgRegistryError::Invalid(format!("invalid returns for Sharpe calculation: {e}")))?;
         if !sharpe_period.is_finite() {
             return Err(PgRegistryError::Invalid("non-finite per-period Sharpe cannot be recorded".into()));
         }

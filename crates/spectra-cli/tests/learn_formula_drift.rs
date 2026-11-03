@@ -394,7 +394,7 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
             (
                 "√V × ((1−γ)·Φ⁻¹(1−1/N) + γ·Φ⁻¹(1−1/(N·e)))",
                 emax_written,
-                expected_max_sharpe(ledger.sharpe_variance(), n as usize),
+                expected_max_sharpe(ledger.sharpe_variance(), n as usize).unwrap(),
             ),
         ),
     ])

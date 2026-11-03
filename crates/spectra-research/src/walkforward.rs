@@ -174,7 +174,7 @@ pub fn run_walk_forward(
         let sweep = run_sweep(train, factory, config, params, objective, options, next_id)?;
         next_id += sweep.trials.len() as u64;
         if let Some(l) = ledger.as_deref_mut() {
-            l.add(&format!("walk-forward fold {k}"), &sweep);
+            l.add(&format!("walk-forward fold {k}"), &sweep)?;
         }
         let best = sweep.best_trial().expect("non-empty sweep");
         let oos = run_one(test, factory, config, &best.params)?;

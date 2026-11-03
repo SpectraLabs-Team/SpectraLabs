@@ -167,7 +167,8 @@ fn workflow(work: &Path) -> String {
     let best1 = sweep1.best_trial().unwrap().clone();
     writeln!(out, "exp1 {exp1} best {} {}", best1.params.canonical(), cfmt::fmt_g17(best1.metrics.sharpe))
         .unwrap();
-    let v1 = validate_selection(&best1, &registry.trial_ledger().unwrap(), cfg.periods_per_year, None, 0.95);
+    let v1 = validate_selection(&best1, &registry.trial_ledger().unwrap(), cfg.periods_per_year, None, 0.95)
+        .unwrap();
     writeln!(out, "v1 {} {} {}", v1.n_trials, cfmt::fmt_g17(v1.psr_vs_zero), cfmt::fmt_g17(v1.dsr)).unwrap();
 
     let exp2 = registry
@@ -191,7 +192,8 @@ fn workflow(work: &Path) -> String {
         .unwrap(),
     );
     registry.record_sweep(&exp2, &research.info.id, strategy, &source, &cfg, &sweep2).unwrap();
-    let v2 = validate_selection(&best1, &registry.trial_ledger().unwrap(), cfg.periods_per_year, None, 0.95);
+    let v2 = validate_selection(&best1, &registry.trial_ledger().unwrap(), cfg.periods_per_year, None, 0.95)
+        .unwrap();
     writeln!(out, "v2 {} {} {}", v2.n_trials, cfmt::fmt_g17(v2.psr_vs_zero), cfmt::fmt_g17(v2.dsr)).unwrap();
     out.push_str("lineage");
     for id in registry.lineage(&exp2).unwrap() {

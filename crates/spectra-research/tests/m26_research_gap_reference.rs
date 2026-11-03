@@ -68,7 +68,7 @@ fn make_validation_fixture() -> (Trial, TrialLedger) {
 #[test]
 fn test_moments_and_kurtosis() {
     let (trial, ledger) = make_validation_fixture();
-    let rep = validate_selection(&trial, &ledger, 252.0, None, 0.95);
+    let rep = validate_selection(&trial, &ledger, 252.0, None, 0.95).unwrap();
 
     // raw_kurtosis = m4 / (m2^2) = (6517/16) / (361/16) = 6517.0 / 361.0
     close(rep.raw_kurtosis, 6517.0 / 361.0, 1e-10, "raw_kurtosis equals 6517/361");
@@ -88,7 +88,7 @@ fn test_moments_and_kurtosis() {
 #[test]
 fn test_warning_strings() {
     let (trial, ledger) = make_validation_fixture();
-    let rep = validate_selection(&trial, &ledger, 252.0, None, 0.95);
+    let rep = validate_selection(&trial, &ledger, 252.0, None, 0.95).unwrap();
 
     let warnings = &rep.warnings;
 
@@ -114,7 +114,7 @@ fn test_warning_strings() {
 #[test]
 fn test_no_pbo_warning_when_pbo_absent() {
     let (trial, ledger) = make_validation_fixture();
-    let rep = validate_selection(&trial, &ledger, 252.0, None, 0.95);
+    let rep = validate_selection(&trial, &ledger, 252.0, None, 0.95).unwrap();
 
     assert!(
         !rep.warnings.iter().any(|w| w.starts_with("PBO")),

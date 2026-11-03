@@ -124,7 +124,7 @@ fn run(work: &std::path::Path) -> Result<bool> {
     );
 
     heading("4. Validate that winner using the TRUE number of trials in the registry");
-    let v1 = validate_selection(&best1, &registry.trial_ledger()?, cfg.periods_per_year, None, 0.95);
+    let v1 = validate_selection(&best1, &registry.trial_ledger()?, cfg.periods_per_year, None, 0.95)?;
     println!(
         "trials recorded {} | PSR {:.3} | DSR {:.3} (needs >= 0.95)",
         v1.n_trials, v1.psr_vs_zero, v1.dsr
@@ -138,7 +138,7 @@ fn run(work: &std::path::Path) -> Result<bool> {
         .add("slow", vec![10.0, 14.0, 18.0, 22.0, 28.0, 35.0, 45.0, 70.0])?;
     let sweep2 = run_sweep(&research.bars, &factory, &cfg, &grid2.all(), &objective_sharpe, opts, 1)?;
     registry.record_sweep(&exp2, &research.info.id, strategy, &source, &cfg, &sweep2)?;
-    let v1_again = validate_selection(&best1, &registry.trial_ledger()?, cfg.periods_per_year, None, 0.95);
+    let v1_again = validate_selection(&best1, &registry.trial_ledger()?, cfg.periods_per_year, None, 0.95)?;
     println!(
         "the SAME winner, now judged against {} recorded trials: DSR {:.3} (was {:.3})",
         v1_again.n_trials, v1_again.dsr, v1.dsr

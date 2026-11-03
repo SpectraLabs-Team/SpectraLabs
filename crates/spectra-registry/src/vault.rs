@@ -24,7 +24,9 @@
 use spectra_core::{Error, Json, Result};
 use spectra_data::{DataStore, Dataset};
 use spectra_engine::{config_fingerprint, returns_from_curve, run_backtest, BacktestConfig, Metrics};
-use spectra_research::{expected_max_sharpe, moments, probabilistic_sharpe, ParamSet, StrategyFactory};
+use spectra_research::{
+    expected_max_sharpe, moments, probabilistic_sharpe, sharpe_per_period, ParamSet, StrategyFactory,
+};
 
 use crate::registry::{metrics_to_json, params_to_json, Event, Registry};
 
@@ -340,8 +342,8 @@ impl<'a> Vault<'a> {
 
         // 3. Statistics from this evaluation and the earlier ones against the same holdout.
         let returns = returns_from_curve(&result.equity_curve);
-        let m = moments(&returns);
-        let sharpe_pp = if m.stdev > 0.0 { m.mean / m.stdev } else { 0.0 };
+        let m = moments(&returns)?;
+        let sharpe_pp = sharpe_per_period(&returns)?;
         let mut sharpes = Vec::new();
         for e in self.registry.events()? {
             if e.kind == "holdout.evaluation_completed" && e.payload.at("name")?.as_str()? == name {
@@ -355,7 +357,7 @@ impl<'a> Vault<'a> {
             let ss: f64 = sharpes.iter().map(|v| (v - mean) * (v - mean)).sum();
             sr_variance = ss / (sharpes.len() - 1) as f64;
         }
-        let ems = expected_max_sharpe(sr_variance, evaluation_no);
+        let ems = expected_max_sharpe(sr_variance, evaluation_no)?;
         let mut out = HoldoutResult {
             name: name.into(),
             evaluation_no,
@@ -364,8 +366,8 @@ impl<'a> Vault<'a> {
             metrics: result.metrics,
             sharpe_per_period: sharpe_pp,
             n_obs: returns.len(),
-            psr_vs_zero: probabilistic_sharpe(sharpe_pp, 0.0, m.n, m.skew, m.raw_kurtosis),
-            dsr: probabilistic_sharpe(sharpe_pp, ems, m.n, m.skew, m.raw_kurtosis),
+            psr_vs_zero: probabilistic_sharpe(sharpe_pp, 0.0, m.n, m.skew, m.raw_kurtosis)?,
+            dsr: probabilistic_sharpe(sharpe_pp, ems, m.n, m.skew, m.raw_kurtosis)?,
             expected_max_sharpe: ems,
             evaluations_used: evaluation_no,
             result_sha256: result.run.result_sha256.clone(),

@@ -1212,7 +1212,9 @@ async fn run_survival_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSem
         {
             Ok(Resolved::Found(v)) => v,
             Ok(Resolved::Sealed { holdout }) => {
-                let message = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+                let message = format!(
+                    "The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it."
+                );
                 fail_job(&ctx, &job, started, &message, false).await;
                 drop(permit);
                 return;
@@ -1531,7 +1533,9 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
     {
         Ok(Resolved::Found(v)) => v,
         Ok(Resolved::Sealed { holdout }) => {
-            let message = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+            let message = format!(
+                "The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it."
+            );
             fail_job(&ctx, &job, started, &message, false).await;
             drop(permit);
             return;
@@ -1701,12 +1705,13 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     "annualized_volatility": trial.metrics.annualized_volatility,
                     "max_drawdown": trial.metrics.max_drawdown,
                 });
-                let (ret_mean, ret_vol) = if trial.returns.is_empty() {
-                    (None, None)
-                } else {
-                    let m = spectra_research::moments(&trial.returns);
-                    (Some(m.mean), Some(m.stdev))
+                let (ret_mean, ret_vol) = match spectra_research::moments(&trial.returns) {
+                    Ok(m) => (Some(m.mean), Some(m.stdev)),
+                    Err(_) => (None, None),
                 };
+                // Per-period Sharpe for this trial. Undefined (flat or too-short returns) is stored as NULL,
+                // so one degenerate trial does not fail the whole sweep (M26 task 8).
+                let sharpe_pp = spectra_research::sharpe_per_period(&trial.returns).ok();
                 let _ = optimization::insert_trial(
                     &ctx.pool,
                     sweep_id,
@@ -1735,7 +1740,7 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                 .bind(&metrics_json)
                 .bind(&strategy)
                 .bind(&version.checksum)
-                .bind(ret_mean.unwrap_or(0.0))
+                .bind(sharpe_pp)
                 .bind(trial.returns.len() as i64)
                 .execute(&ctx.pool)
                 .await;
@@ -1748,28 +1753,111 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
 
             let (dsr, psr, min_trl, pbo, best_params_json, best_metrics_json) = if let Some(best) = best_trial
             {
-                let m = spectra_research::moments(&best.returns);
-                let sr_mom = spectra_research::moments(&sharpes);
-                let sr_var = sr_mom.stdev * sr_mom.stdev;
-                let psr = spectra_research::probabilistic_sharpe(
+                let m = match spectra_research::moments(&best.returns) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        fail_job(
+                            &ctx,
+                            &job,
+                            started,
+                            &format!("Failed to compute moments for best trial: {e}"),
+                            false,
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                let sr_var = if sharpes.len() >= 2 {
+                    let mean = sharpes.iter().sum::<f64>() / sharpes.len() as f64;
+                    let ss: f64 = sharpes.iter().map(|s| (s - mean) * (s - mean)).sum();
+                    let v = ss / (sharpes.len() - 1) as f64;
+                    if !v.is_finite() || v < 0.0 {
+                        fail_job(
+                            &ctx,
+                            &job,
+                            started,
+                            "Sharpe variance across sweep trials is non-finite or negative",
+                            false,
+                        )
+                        .await;
+                        return;
+                    }
+                    v
+                } else {
+                    0.0
+                };
+                let psr = match spectra_research::probabilistic_sharpe(
                     best.metrics.sharpe,
                     0.0,
                     m.n,
                     m.skew,
                     m.raw_kurtosis,
-                );
-                let dsr = spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var);
-                let min_trl = spectra_research::min_track_record_length(
+                ) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        fail_job(
+                            &ctx,
+                            &job,
+                            started,
+                            &format!("Failed to compute probabilistic Sharpe for best trial: {e}"),
+                            false,
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                let dsr =
+                    match spectra_research::deflated_sharpe(&best.returns, sweep_res.trials.len(), sr_var) {
+                        Ok(d) => Some(d),
+                        Err(e) => {
+                            fail_job(
+                                &ctx,
+                                &job,
+                                started,
+                                &format!("Failed to compute deflated Sharpe for best trial: {e}"),
+                                false,
+                            )
+                            .await;
+                            return;
+                        }
+                    };
+                let min_trl = match spectra_research::min_track_record_length(
                     best.metrics.sharpe,
                     0.0,
                     m.skew,
                     m.raw_kurtosis,
                     0.95,
-                );
-                // PBO is undefined (None, stored as NULL) when CSCV cannot run or fails, not 0.0 (M26 task 5).
+                ) {
+                    Ok(trl) => trl.is_finite().then_some(trl),
+                    Err(e) => {
+                        fail_job(
+                            &ctx,
+                            &job,
+                            started,
+                            &format!("Failed to compute min track record length for best trial: {e}"),
+                            false,
+                        )
+                        .await;
+                        return;
+                    }
+                };
+                // PBO is None (stored as NULL) only when CSCV cannot run on the input shape. A CSCV error fails the job (M26 task 5).
                 let pbo = if returns_matrix.len() >= 2 && returns_matrix.first().is_some_and(|r| r.len() >= 8)
                 {
-                    spectra_research::cscv_pbo(&returns_matrix, 16).ok().map(|p| p.pbo)
+                    match spectra_research::cscv_pbo(&returns_matrix, 16) {
+                        Ok(p) => Some(p.pbo),
+                        Err(e) => {
+                            fail_job(
+                                &ctx,
+                                &job,
+                                started,
+                                &format!("Failed to compute PBO for best trial: {e}"),
+                                false,
+                            )
+                            .await;
+                            return;
+                        }
+                    }
                 } else {
                     None
                 };
@@ -1784,14 +1872,7 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
                     "annualized_volatility": best.metrics.annualized_volatility,
                     "max_drawdown": best.metrics.max_drawdown,
                 });
-                (
-                    dsr.is_finite().then_some(dsr),
-                    psr.is_finite().then_some(psr),
-                    min_trl.is_finite().then_some(min_trl),
-                    pbo,
-                    Some(serde_json::Value::Object(b_params)),
-                    Some(b_metrics),
-                )
+                (dsr, psr, min_trl, pbo, Some(serde_json::Value::Object(b_params)), Some(b_metrics))
             } else {
                 (None, None, None, None, None, None)
             };
@@ -1906,7 +1987,9 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
     {
         Ok(Resolved::Found(v)) => v,
         Ok(Resolved::Sealed { holdout }) => {
-            let message = format!("The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it.");
+            let message = format!(
+                "The dataset version is sealed as holdout '{holdout}'; only a holdout evaluation may read it."
+            );
             fail_job(&ctx, &job, started, &message, false).await;
             drop(permit);
             return;

@@ -43,7 +43,7 @@ fn near(label: &str, got: f64, want: f64) {
 
 #[test]
 fn moments_match_the_reference() {
-    let m = moments(&RETURNS);
+    let m = moments(&RETURNS).unwrap();
     near("mean", m.mean, REF_MEAN);
     near("stdev", m.stdev, REF_STDEV);
     near("skew", m.skew, REF_SKEW);
@@ -52,7 +52,7 @@ fn moments_match_the_reference() {
 
 #[test]
 fn raw_kurtosis_and_engine_excess_kurtosis_agree_on_reference_series() {
-    let m = moments(&RETURNS);
+    let m = moments(&RETURNS).unwrap();
     near("raw kurtosis", m.raw_kurtosis, REF_KURT_RAW);
     let engine_excess = spectra_engine::performance::excess_kurtosis(&RETURNS).unwrap();
     let excess_from_raw = m.raw_kurtosis - 3.0;
@@ -64,70 +64,87 @@ fn raw_kurtosis_and_engine_excess_kurtosis_agree_on_reference_series() {
 
 #[test]
 fn per_period_sharpe_matches_the_reference() {
-    near("sharpe", sharpe_per_period(&RETURNS), REF_SR);
+    near("sharpe", sharpe_per_period(&RETURNS).unwrap(), REF_SR);
 }
 
 #[test]
 fn probabilistic_sharpe_matches_the_reference() {
-    let m = moments(&RETURNS);
-    let sr = sharpe_per_period(&RETURNS);
-    near("PSR vs 0", probabilistic_sharpe(sr, 0.0, m.n, m.skew, m.raw_kurtosis), REF_PSR_VS_ZERO);
+    let m = moments(&RETURNS).unwrap();
+    let sr = sharpe_per_period(&RETURNS).unwrap();
+    near("PSR vs 0", probabilistic_sharpe(sr, 0.0, m.n, m.skew, m.raw_kurtosis).unwrap(), REF_PSR_VS_ZERO);
 }
 
 #[test]
 fn expected_max_sharpe_matches_the_reference() {
-    near("E[max SR], V=0.01, N=10", expected_max_sharpe(0.01, 10), REF_EMAX_V001_N10);
+    near("E[max SR], V=0.01, N=10", expected_max_sharpe(0.01, 10).unwrap(), REF_EMAX_V001_N10);
 }
 
 #[test]
 fn deflated_sharpe_matches_the_reference() {
-    near("DSR, V=0.01, N=10", deflated_sharpe(&RETURNS, 10, 0.01), REF_DSR_V001_N10);
+    near("DSR, V=0.01, N=10", deflated_sharpe(&RETURNS, 10, 0.01).unwrap(), REF_DSR_V001_N10);
 }
 
 #[test]
 fn minimum_track_record_length_matches_the_reference() {
-    let m = moments(&RETURNS);
-    let sr = sharpe_per_period(&RETURNS);
-    near("MinTRL at 95%", min_track_record_length(sr, 0.0, m.skew, m.raw_kurtosis, 0.95), REF_MINTRL_095);
+    let m = moments(&RETURNS).unwrap();
+    let sr = sharpe_per_period(&RETURNS).unwrap();
+    near(
+        "MinTRL at 95%",
+        min_track_record_length(sr, 0.0, m.skew, m.raw_kurtosis, 0.95).unwrap(),
+        REF_MINTRL_095,
+    );
 }
 
 #[test]
 fn normal_quantiles_match_the_reference() {
-    near("Phi^-1(0.95)", normal_inv_cdf(0.95), REF_PHI_INV_095);
-    near("Phi^-1(0.975)", normal_inv_cdf(0.975), REF_PHI_INV_0975);
-    assert!(normal_inv_cdf(0.0) == f64::NEG_INFINITY && normal_inv_cdf(1.0) == f64::INFINITY);
-    assert!(normal_inv_cdf(1.5).is_nan());
+    near("Phi^-1(0.95)", normal_inv_cdf(0.95).unwrap(), REF_PHI_INV_095);
+    near("Phi^-1(0.975)", normal_inv_cdf(0.975).unwrap(), REF_PHI_INV_0975);
+    assert!(
+        normal_inv_cdf(0.0).unwrap() == f64::NEG_INFINITY && normal_inv_cdf(1.0).unwrap() == f64::INFINITY
+    );
+    assert!(normal_inv_cdf(1.5).is_err());
 }
 
-/// The degenerate cases must say so: a NaN or an infinity, never a plausible-looking number.
+/// The degenerate cases must say so: an explicit Err, never a plausible-looking number or silent default.
 #[test]
 fn undefined_inputs_are_not_silently_numbers() {
-    let m = moments(&RETURNS);
-    let sr = sharpe_per_period(&RETURNS);
-    assert!(probabilistic_sharpe(sr, 0.0, 1, m.skew, m.raw_kurtosis).is_nan(), "one observation");
+    let m = moments(&RETURNS).unwrap();
+    let sr = sharpe_per_period(&RETURNS).unwrap();
+    assert!(probabilistic_sharpe(sr, 0.0, 1, m.skew, m.raw_kurtosis).is_err(), "one observation");
     // Variance term <= 0: huge negative skew with a positive Sharpe.
-    assert!(probabilistic_sharpe(1.0, 0.0, 30, 10.0, 3.0).is_nan(), "variance term not positive");
-    assert_eq!(expected_max_sharpe(0.01, 1), 0.0, "one trial has no maximum to deflate");
-    assert_eq!(expected_max_sharpe(0.0, 10), 0.0, "zero trial variance");
-    assert_eq!(min_track_record_length(0.1, 0.2, 0.0, 3.0, 0.95), f64::INFINITY, "SR below benchmark");
-    assert_eq!(sharpe_per_period(&[0.01; 10]), 0.0, "zero volatility");
+    assert!(probabilistic_sharpe(1.0, 0.0, 30, 10.0, 3.0).is_err(), "variance term not positive");
+    assert_eq!(expected_max_sharpe(0.01, 1).unwrap(), 0.0, "one trial has no maximum to deflate");
+    assert_eq!(expected_max_sharpe(0.0, 10).unwrap(), 0.0, "zero trial variance");
+    assert!(expected_max_sharpe(0.01, 0).is_err(), "zero trials");
+    assert!(expected_max_sharpe(-0.01, 10).is_err(), "negative trial variance");
+    assert_eq!(
+        min_track_record_length(0.1, 0.2, 0.0, 3.0, 0.95).unwrap(),
+        f64::INFINITY,
+        "SR below benchmark"
+    );
+    assert!(min_track_record_length(0.2, 0.1, 0.0, 3.0, 1.5).is_err(), "invalid confidence");
+    assert!(sharpe_per_period(&[0.01; 10]).is_err(), "zero volatility");
+    assert!(moments(&[]).is_err(), "empty moments input");
+    assert!(moments(&[1.0]).is_err(), "single observation moments");
+    assert!(moments(&[1.0, 1.0, 1.0]).is_err(), "zero variance moments");
+    assert!(deflated_sharpe(&[0.01; 10], 10, 0.01).is_err(), "zero volatility DSR");
 }
 
 /// A trial variance of zero means "no spread between trials", so the expected maximum is zero
 /// and the DSR reduces to the PSR against zero. This is the behaviour the callers need.
 #[test]
 fn zero_trial_variance_reduces_dsr_to_psr_against_zero() {
-    let m = moments(&RETURNS);
-    let sr = sharpe_per_period(&RETURNS);
+    let m = moments(&RETURNS).unwrap();
+    let sr = sharpe_per_period(&RETURNS).unwrap();
     near(
         "DSR with V=0",
-        deflated_sharpe(&RETURNS, 10, 0.0),
-        probabilistic_sharpe(sr, 0.0, m.n, m.skew, m.raw_kurtosis),
+        deflated_sharpe(&RETURNS, 10, 0.0).unwrap(),
+        probabilistic_sharpe(sr, 0.0, m.n, m.skew, m.raw_kurtosis).unwrap(),
     );
 }
 
 #[test]
 fn expected_max_sharpe_grows_with_trials_and_variance() {
-    assert!(expected_max_sharpe(0.01, 100) > expected_max_sharpe(0.01, 10));
-    assert!(expected_max_sharpe(0.04, 10) > expected_max_sharpe(0.01, 10));
+    assert!(expected_max_sharpe(0.01, 100).unwrap() > expected_max_sharpe(0.01, 10).unwrap());
+    assert!(expected_max_sharpe(0.04, 10).unwrap() > expected_max_sharpe(0.01, 10).unwrap());
 }

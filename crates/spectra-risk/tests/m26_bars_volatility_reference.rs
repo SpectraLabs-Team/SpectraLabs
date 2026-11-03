@@ -40,13 +40,9 @@ fn test_volatility_from_bars_daily_61_bars_hand_computed() {
         })
         .collect();
 
-    let vol = volatility_from_bars("AAPL", &bars, "daily").unwrap();
+    let vol = volatility_from_bars("AAPL", &bars, 252.0).unwrap();
     let expected_vol = (6.048 / 59.0_f64).sqrt();
     assert!((vol - expected_vol).abs() < 1e-8, "vol {vol} must match expected {expected_vol}");
-
-    // Also verify "1d" alias works identically
-    let vol_1d = volatility_from_bars("AAPL", &bars, "1d").unwrap();
-    assert_eq!(vol, vol_1d);
 }
 
 #[test]
@@ -60,7 +56,7 @@ fn test_volatility_from_bars_under_60_bars_returns_exact_error() {
         .collect();
     assert_eq!(bars.len(), 59);
 
-    let err = volatility_from_bars("AAPL", &bars, "daily").unwrap_err();
+    let err = volatility_from_bars("AAPL", &bars, 252.0).unwrap_err();
     match err {
         Error::Data(msg) => {
             assert_eq!(msg, "insufficient price history for AAPL: need 60 bars, have 59");
@@ -70,7 +66,7 @@ fn test_volatility_from_bars_under_60_bars_returns_exact_error() {
 }
 
 #[test]
-fn test_volatility_from_bars_unknown_interval_returns_error() {
+fn test_volatility_from_bars_invalid_periods_per_year_returns_error() {
     let day_ns = 86_400_000_000_000_i64;
     let bars: Vec<Bar> = (0..61)
         .map(|i| {
@@ -79,14 +75,54 @@ fn test_volatility_from_bars_unknown_interval_returns_error() {
         })
         .collect();
 
-    let err = volatility_from_bars("AAPL", &bars, "unknown_interval").unwrap_err();
+    for bad in [0.0, -252.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let err = volatility_from_bars("AAPL", &bars, bad).unwrap_err();
+        match err {
+            Error::InvalidArgument(msg) => {
+                assert!(
+                    msg.contains("periods_per_year must be positive and finite"),
+                    "expected 'periods_per_year must be positive and finite' in message, got: {msg}"
+                );
+            }
+            other => panic!("expected Error::InvalidArgument for {bad}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_volatility_from_bars_rejects_non_positive_price_naming_symbol_and_bar_index() {
+    let day_ns = 86_400_000_000_000_i64;
+    let mut bars: Vec<Bar> = (0..61)
+        .map(|i| {
+            let px = Price::from_f64(100.0).unwrap();
+            Bar::new(day_ns * (i + 1), 0, px, px, px, px, Qty::ZERO)
+        })
+        .collect();
+
+    // Zero price at index 10
+    bars[10].close = Price::ZERO;
+    let err = volatility_from_bars("MSFT", &bars, 252.0).unwrap_err();
     match err {
-        Error::InvalidArgument(msg) => {
+        Error::Data(msg) => {
             assert!(
-                msg.contains("unknown bar interval"),
-                "expected 'unknown bar interval' in message, got: {msg}"
+                msg.contains("MSFT") && msg.contains("10"),
+                "expected symbol 'MSFT' and bar index '10' in error, got: {msg}"
             );
         }
-        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+        other => panic!("expected Error::Data, got {other:?}"),
+    }
+
+    // Zero price at index 0
+    bars[10].close = Price::from_f64(100.0).unwrap();
+    bars[0].close = Price::ZERO;
+    let err_0 = volatility_from_bars("TSLA", &bars, 252.0).unwrap_err();
+    match err_0 {
+        Error::Data(msg) => {
+            assert!(
+                msg.contains("TSLA") && msg.contains('0'),
+                "expected symbol 'TSLA' and bar index '0' in error, got: {msg}"
+            );
+        }
+        other => panic!("expected Error::Data, got {other:?}"),
     }
 }

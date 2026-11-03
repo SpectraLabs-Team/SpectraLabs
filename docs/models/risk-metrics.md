@@ -30,6 +30,11 @@ when VaR is above every loss, e.g. c = 1), CVaR returns VaR.
 (which divides m3 by m2^1.5 with population moments). The two can differ slightly in small
 samples. They are not interchangeable.
 
+**Divergence (M26 task 4):** skewness and excess kurtosis here take the standard deviation from the sample formula (n − 1) but divide the third and fourth moments by n. `spectra-engine`'s `performance.rs` uses population moments for both. On the same sample the two modules therefore give different excess kurtosis. No output changed in this entry: both values are recorded as they stand.
+- Sample [−4, −2, 2, 4], hand-computed (skewness is 0 in both, since the sample is symmetric):
+  - `metrics.rs` excess kurtosis: −2.235 (old and new, unchanged)
+  - `performance.rs` excess kurtosis: −1.640 (unchanged)
+
 ## Extreme value theory: peaks over threshold (`evt.rs`)
 
 **Model.** Exceedances y = l − u over a high threshold u follow a generalized Pareto

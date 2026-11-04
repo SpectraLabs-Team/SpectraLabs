@@ -340,6 +340,14 @@ impl PreTradeChecker {
         }
     }
 
+    fn eval_var_pct(portfolio: &PortfolioSnapshot) -> Result<f64> {
+        match portfolio.var_pct() {
+            Ok(v) => Ok(v),
+            Err(Error::Data(ref msg)) if msg.contains("has no volatility") => Ok(0.0),
+            Err(e) => Err(e),
+        }
+    }
+
     /// Perform pre-trade evaluation of `order` against `limits` given current `portfolio` and kill-switch status.
     ///
     /// # Errors
@@ -398,7 +406,7 @@ impl PreTradeChecker {
                         concentration_pct: current_concentration,
                         drawdown_pct: current_dd,
                         daily_loss: current_loss,
-                        var_pct: portfolio.var_pct()?,
+                        var_pct: Self::eval_var_pct(portfolio)?,
                     },
                 });
             }
@@ -426,7 +434,7 @@ impl PreTradeChecker {
                         daily_start_equity: portfolio.daily_start_equity,
                         positions: reduced_positions,
                     };
-                    let reduced_var = reduced_portfolio.var_pct()?;
+                    let reduced_var = Self::eval_var_pct(&reduced_portfolio)?;
 
                     return Ok(PreTradeResult {
                         verdict: PreTradeVerdict::Reduced,
@@ -476,7 +484,7 @@ impl PreTradeChecker {
                         concentration_pct: current_concentration,
                         drawdown_pct: current_dd,
                         daily_loss: current_loss,
-                        var_pct: portfolio.var_pct()?,
+                        var_pct: Self::eval_var_pct(portfolio)?,
                     },
                 });
             }
@@ -517,7 +525,7 @@ impl PreTradeChecker {
                 daily_start_equity: portfolio.daily_start_equity,
                 positions: projected_positions,
             };
-            let projected_var = projected_portfolio.var_pct()?;
+            let projected_var = Self::eval_var_pct(&projected_portfolio)?;
 
             return Ok(PreTradeResult {
                 verdict: PreTradeVerdict::Approved,
@@ -578,7 +586,7 @@ impl PreTradeChecker {
                     concentration_pct: current_concentration,
                     drawdown_pct: current_dd,
                     daily_loss: current_loss,
-                    var_pct: portfolio.var_pct()?,
+                    var_pct: Self::eval_var_pct(portfolio)?,
                 },
             });
         }
@@ -632,11 +640,7 @@ impl PreTradeChecker {
             daily_start_equity: portfolio.daily_start_equity,
             positions: projected_positions,
         };
-        let projected_var = match projected_portfolio.var_pct() {
-            Ok(v) => v,
-            Err(Error::Data(ref msg)) if msg.contains("has no volatility") => 0.0,
-            Err(e) => return Err(e),
-        };
+        let projected_var = Self::eval_var_pct(&projected_portfolio)?;
 
         let projected_metrics = ProjectedMetrics {
             gross_exposure: projected_gross,

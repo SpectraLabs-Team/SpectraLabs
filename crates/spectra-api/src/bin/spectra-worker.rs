@@ -2030,6 +2030,8 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
         .execute(&ctx.pool)
         .await;
 
+    // Jobs queued before this deploy missing required fields (param_grid, mode, train_size, test_size, objective)
+    // will fail here with a clear message naming the missing field instead of proceeding under silent defaults.
     let Some(param_grid_val) = job.payload.get("param_grid").cloned() else {
         fail_job(&ctx, &job, started, "Walk-forward job missing param_grid.", false).await;
         drop(permit);
@@ -2054,6 +2056,7 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
         drop(permit);
         return;
     };
+    // When step_size is omitted or zero, walk-forward advances by test_size; this is the defined convention.
     let step_size = match job.payload.get("step_size").and_then(serde_json::Value::as_u64) {
         Some(s) if s > 0 => s as usize,
         _ => test_size,
@@ -2084,11 +2087,26 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
     };
     let param_sets = grid.all();
 
-    let wf_mode = if mode_str == "anchored" {
-        spectra_research::WalkForwardMode::Anchored
-    } else {
-        spectra_research::WalkForwardMode::Rolling
+    let wf_mode = match mode_str.parse::<spectra_research::WalkForwardMode>() {
+        Ok(m) => m,
+        Err(e) => {
+            fail_job(&ctx, &job, started, &format!("Invalid walk-forward mode: {e}"), false).await;
+            drop(permit);
+            return;
+        }
     };
+    if !spectra_research::VALID_OBJECTIVES.contains(&objective.as_str()) {
+        fail_job(
+            &ctx,
+            &job,
+            started,
+            &format!("Invalid walk-forward objective '{objective}': expected 'sharpe' or 'total_return'"),
+            false,
+        )
+        .await;
+        drop(permit);
+        return;
+    }
     let wf_config = spectra_research::WalkForwardConfig {
         train: train_size,
         test: test_size,

@@ -327,7 +327,7 @@ pub struct CreateWalkForwardRequest {
     #[serde(default)]
     pub step_size: Option<usize>,
     #[serde(default)]
-    pub embargo: usize,
+    pub embargo: Option<usize>,
     pub param_grid: serde_json::Value,
     pub objective: String,
 }
@@ -992,7 +992,7 @@ pub(crate) async fn queue_walk_forward(
     let Ok(bytes) = body else { return error_response(400, "Could not read the request body.") };
     let req: CreateWalkForwardRequest = match serde_json::from_slice(&bytes) {
         Ok(r) => r,
-        Err(e) => return error_response(400, format!("Invalid walk-forward request: {e}")),
+        Err(e) => return error_response(422, format!("Invalid walk-forward request: {e}")),
     };
 
     if req.train_size == 0 {
@@ -1001,12 +1001,21 @@ pub(crate) async fn queue_walk_forward(
     if req.test_size == 0 {
         return error_response(400, "Invalid walk-forward request: test_size must be > 0.");
     }
-    if req.mode != "rolling" && req.mode != "anchored" {
+    if req.mode.parse::<spectra_research::WalkForwardMode>().is_err() {
         return error_response(400, "Invalid walk-forward request: mode must be 'rolling' or 'anchored'.");
+    }
+    if !spectra_research::VALID_OBJECTIVES.contains(&req.objective.as_str()) {
+        return error_response(
+            400,
+            "Invalid walk-forward request: objective must be 'sharpe' or 'total_return'.",
+        );
     }
     if req.strategy.is_none() && req.dsl_code.is_none() {
         return error_response(400, "Invalid walk-forward request: strategy or dsl_code is required.");
     }
+
+    // Zero embargo (no skipped timestamps between train and test) is the defined value when omitted.
+    let embargo = req.embargo.unwrap_or(0);
 
     // The database refuses (and logs) a sealed holdout: only an evaluation may read it.
     match datasets::resolve_version(
@@ -1038,7 +1047,7 @@ pub(crate) async fn queue_walk_forward(
             Some(s) => s,
             None => req.test_size,
         },
-        "embargo": req.embargo,
+        "embargo": embargo,
         "param_grid": req.param_grid,
         "objective": req.objective,
     });
@@ -1072,7 +1081,7 @@ pub(crate) async fn queue_walk_forward(
             Some(s) => s as i32,
             None => req.test_size as i32,
         },
-        req.embargo as i32,
+        embargo as i32,
         &req.objective,
         &req.param_grid,
         user_of(&id),

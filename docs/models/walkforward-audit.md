@@ -200,8 +200,11 @@ Summary of divergences between the legacy behavior (returning default numbers, e
 | `walk_forward_efficiency` | NaN in objective input ($\bar{O}_{\text{IS}}$ or $\bar{O}_{\text{OOS}}$ is NaN) | Silently returned `0.0` when $\bar{O}_{\text{IS}} = \text{NaN}$ | `Err(Error::InvalidArgument("walk-forward: NaN objective in efficiency calculation"))` | Masked data corruption, failed optimizations, or invalid Sharpe ratios as a clean numeric efficiency of 0.0. |
 | `WalkForwardResult::efficiency` | Default or zero in-sample objective ($\bar{O}_{\text{IS}} = 0.0$) | `0.0` | `Err(Error::InvalidArgument("walk-forward: undefined efficiency with zero or flat in-sample objective"))` | Delegates to `walk_forward_efficiency` and propagates error instead of returning 0.0. |
 | `run_walk_forward` | Timestamps cannot fit one fold ($n_{\text{ts}} < \text{train} + \text{embargo} + \text{test}$) | `Ok(WalkForwardResult::default())` (0 folds, invalid metrics) | `Err(Error::InvalidArgument)` propagated from `make_folds` | Prevents returning an `Ok` result when no folds or returns were produced. |
-| `POST /api/v1/optimization/walkforward` | Missing window parameters (`train_size` or `test_size`) | 422 or worker default (`unwrap_or(200)`, `unwrap_or(50)`) | HTTP 400 Bad Request naming the missing field | Window sizes are fundamental experimental parameters that must be provided explicitly by the client. |
-| `spectra-worker.rs` | Missing payload properties (`mode`, `param_grid`, `objective`, `strategy/dsl_code`) | Silently defaulted via `unwrap_or` | Explicit job failure via `fail_job` naming the missing property | Ensures queued worker tasks fail loudly on malformed payloads rather than proceeding under arbitrary defaults. |
+| `POST /api/v1/optimization/walkforward` | Missing required parameters (`train_size`, `test_size`, `mode`, `objective`) | 422 or worker default (`unwrap_or(200)`, `unwrap_or(50)`) | HTTP 422 Unprocessable Entity naming the missing field | Fields are required contract properties; serde deserialization fails loudly on missing required fields. |
+| `POST /api/v1/optimization/walkforward` | Explicit validation failure (`train_size == 0`, `test_size == 0`, invalid `mode`, invalid `objective`) | Silently defaulted in worker or DB failure | HTTP 400 Bad Request with an explicit descriptive error message | Parameter values must be positive, mode must be 'rolling' or 'anchored', and objective must be 'sharpe' or 'total_return'. |
+| `POST /api/v1/optimization/walkforward` | Omitted `embargo` parameter | Silently defaulted via `unwrap_or(0)` | `embargo: Option<usize>` defaults via serde to `None`, mapped explicitly to `0` | Zero embargo (no gap between train and test) is the defined default value. |
+| `spectra-worker.rs` | Missing payload properties (`mode`, `param_grid`, `train_size`, `test_size`, `objective`, `strategy/dsl_code`) | Silently defaulted via `unwrap_or` | Explicit job failure via `fail_job` naming the missing property | Ensures pre-deploy or malformed queued jobs fail loudly naming the missing property rather than proceeding under arbitrary defaults. |
+| `spectra-worker.rs` | Step size omitted or zero | `unwrap_or(test_size)` | Defaults to `test_size` | Defined convention: walk-forward step advances by the test window when not explicitly configured. |
 | `spectra-worker.rs` | Empty folds produced by walk-forward | Marked job as `"succeeded"` and stored 0 folds | Checks `wf_res.folds.is_empty()`, marks report as `"failed"`, and calls `fail_job` | A validation run with 0 folds is a pipeline failure and must not be reported as a success. |
 
 ### Detailed Divergence Records by Case
@@ -236,17 +239,18 @@ Summary of divergences between the legacy behavior (returning default numbers, e
 - **Old value:** `Ok(WalkForwardResult::default())` with `folds.is_empty()`, `oos_metrics.valid = false`, all fields `0.0`
 - **New behavior:** Returns `Err(Error::InvalidArgument)` propagated via `?` from `make_folds`
 
-#### 6. `queue_walk_forward` API Endpoint — HTTP 400 for Missing Window Fields
+#### 6. `queue_walk_forward` API Endpoint — HTTP 422 for Missing Fields, HTTP 400 for Validation Failures
 - **Endpoint:** `POST /api/v1/optimization/walkforward`
-- **Input:** JSON payload omitting `train_size` or `test_size` (or supplying `<= 0`)
-- **Old value:** Returned 422 Unprocessable Entity or relied on worker fallback (`unwrap_or(200)`, `unwrap_or(50)`)
-- **New behavior:** Returns HTTP 400 Bad Request with error body naming the missing/invalid field (`train_size` or `test_size`)
+- **Missing Required Fields (`train_size`, `test_size`, `mode`, `objective`):** Returns HTTP 422 Unprocessable Entity naming the missing field from serde deserialization.
+- **Invalid Field Values:** Returns HTTP 400 Bad Request if `train_size == 0`, `test_size == 0`, `mode` is not in `['rolling', 'anchored']`, `objective` is not in `['sharpe', 'total_return']`, or both `strategy` and `dsl_code` are omitted.
+- **Omitted `embargo`:** Returns HTTP 202 Accepted; `embargo` defaults to `0` (the defined value).
 
 #### 7. `spectra-worker.rs` — Elimination of Silent Defaults in Job Execution
 - **Component:** `run_walk_forward_job` in `spectra-worker.rs`
-- **Input:** Job payload missing `param_grid`, `mode`, `objective`, or `strategy`/`dsl_code`
+- **Input:** Job payload missing required properties or containing invalid mode/objective
 - **Old value:** Replaced missing values with `"rolling"`, `json!({})`, `"sharpe"`, `"sma_cross"`
-- **New behavior:** Calls `fail_job` immediately, logging the missing field and marking the job as failed
+- **New behavior:** Calls `fail_job` immediately, logging the missing or invalid field. Pre-deploy jobs queued without required fields fail loudly with a clear message.
+- **Step Size:** When omitted or zero, step size defaults to `test_size` (the defined convention).
 
 #### 8. `spectra-worker.rs` — Elimination of False Succeeded Status for Empty Folds
 - **Component:** `run_walk_forward_job` in `spectra-worker.rs`

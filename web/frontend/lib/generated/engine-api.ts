@@ -2705,7 +2705,7 @@ export interface components {
             /** Format: uuid */
             dataset_version_id: string;
             dsl_code?: string | null;
-            embargo?: number;
+            embargo?: number | null;
             mode: string;
             objective: string;
             param_grid: unknown;

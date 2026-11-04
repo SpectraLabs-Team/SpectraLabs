@@ -28,6 +28,25 @@ pub enum WalkForwardMode {
     Anchored,
 }
 
+impl WalkForwardMode {
+    /// Valid walk-forward mode identifiers accepted by the engine.
+    pub const VALID_MODES: &'static [&'static str] = &["rolling", "anchored"];
+}
+
+impl std::str::FromStr for WalkForwardMode {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s {
+            "rolling" => Ok(WalkForwardMode::Rolling),
+            "anchored" => Ok(WalkForwardMode::Anchored),
+            other => Err(Error::InvalidArgument(format!(
+                "invalid walk-forward mode '{other}': expected 'rolling' or 'anchored'"
+            ))),
+        }
+    }
+}
+
 /// Window sizes, in unique timestamps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WalkForwardConfig {

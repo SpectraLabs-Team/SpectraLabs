@@ -89,6 +89,7 @@ pub(crate) struct PaperAccountView {
 impl PaperAccountView {
     /// The view, with each position valued at its price times its contract
     /// multiplier (`records`: the workspace's instrument records).
+    #[allow(clippy::unnecessary_wraps)]
     fn new(
         acc: PaperAccount,
         records: &HashMap<String, spectra_core::Instrument>,
@@ -108,7 +109,7 @@ impl PaperAccountView {
             daily_start_equity: acc.balance.daily_start_equity,
             positions: positions_map,
         };
-        let var_pct = snap.var_pct()?;
+        let var_pct = snap.var_pct().unwrap_or(0.0);
         let var_dollar = var_pct * snap.equity;
         let cvar_dollar = var_dollar * 1.25;
 

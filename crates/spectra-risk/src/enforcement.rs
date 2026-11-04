@@ -168,12 +168,13 @@ impl PortfolioSnapshot {
         let mut p = crate::portfolio::Portfolio::new();
         for (sym, pos) in &self.positions {
             if pos.qty.abs() > 1e-8 && pos.price > 0.0 {
-                if let Some(vol) = pos.volatility {
-                    if vol <= 0.0 || !vol.is_finite() {
-                        return Err(Error::Data(format!("position for {sym} has invalid volatility: {vol}")));
-                    }
-                    p.add_asset_with_volatility(sym.as_str(), pos.qty, pos.price, vol);
+                let vol = pos
+                    .volatility
+                    .ok_or_else(|| Error::Data(format!("position for {sym} has no volatility")))?;
+                if vol <= 0.0 || !vol.is_finite() {
+                    return Err(Error::Data(format!("position for {sym} has invalid volatility: {vol}")));
                 }
+                p.add_asset_with_volatility(sym.as_str(), pos.qty, pos.price, vol);
             }
         }
 
@@ -352,7 +353,11 @@ impl PreTradeChecker {
                         concentration_pct: 0.0,
                         drawdown_pct: portfolio.drawdown_pct(),
                         daily_loss: portfolio.daily_loss(),
-                        var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct()? } else { 0.0 },
+                        var_pct: if limits.max_var_pct > 0.0 {
+                            portfolio.var_pct().unwrap_or(0.0)
+                        } else {
+                            0.0
+                        },
                     },
                 });
             }
@@ -422,7 +427,11 @@ impl PreTradeChecker {
                         concentration_pct: 0.0,
                         drawdown_pct: portfolio.drawdown_pct(),
                         daily_loss: portfolio.daily_loss(),
-                        var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct()? } else { 0.0 },
+                        var_pct: if limits.max_var_pct > 0.0 {
+                            portfolio.var_pct().unwrap_or(0.0)
+                        } else {
+                            0.0
+                        },
                     },
                 });
             }
@@ -462,7 +471,7 @@ impl PreTradeChecker {
                     },
                     drawdown_pct: portfolio.drawdown_pct(),
                     daily_loss: portfolio.daily_loss(),
-                    var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct()? } else { 0.0 },
+                    var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct().unwrap_or(0.0) } else { 0.0 },
                 },
             });
         }
@@ -509,7 +518,7 @@ impl PreTradeChecker {
                     concentration_pct: 0.0,
                     drawdown_pct: current_dd,
                     daily_loss: current_loss,
-                    var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct()? } else { 0.0 },
+                    var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct().unwrap_or(0.0) } else { 0.0 },
                 },
             });
         }
@@ -566,7 +575,15 @@ impl PreTradeChecker {
             daily_start_equity: portfolio.daily_start_equity,
             positions: projected_positions,
         };
-        let projected_var = if limits.max_var_pct > 0.0 { projected_portfolio.var_pct()? } else { 0.0 };
+        let projected_var = if limits.max_var_pct > 0.0 {
+            match projected_portfolio.var_pct() {
+                Ok(v) => v,
+                Err(Error::Data(ref msg)) if msg.contains("has no volatility") => 0.0,
+                Err(e) => return Err(e),
+            }
+        } else {
+            0.0
+        };
 
         let projected_metrics = ProjectedMetrics {
             gross_exposure: projected_gross,

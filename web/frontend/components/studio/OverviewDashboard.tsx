@@ -1039,7 +1039,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
                     </span>
                     <span className="font-mono font-semibold text-ink">{v.symbol}</span>
                     <span className="num text-[11px] text-ink/50">
-                      {v.requested_qty} @ ${v.price.toFixed(2)}
+                      {v.requested_qty} @ {v.price == null ? '—' : `$${v.price.toFixed(2)}`}
                     </span>
                   </div>
                   <p className="mt-0.5 text-[10.5px] text-ink/40">

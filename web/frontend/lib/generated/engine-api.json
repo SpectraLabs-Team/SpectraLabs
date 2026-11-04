@@ -10076,10 +10076,7 @@
           "peak_equity",
           "daily_start_equity",
           "positions",
-          "updated_at",
-          "var_pct",
-          "var_dollar",
-          "cvar_dollar"
+          "updated_at"
         ],
         "properties": {
           "cash": {
@@ -10087,8 +10084,12 @@
             "format": "double"
           },
           "cvar_dollar": {
-            "type": "number",
-            "format": "double"
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "1-day 99% CVaR (mean loss at or beyond VaR) in currency, from the same simulation as\nVaR; `null` with `var_pct`."
           },
           "daily_start_equity": {
             "type": "number",
@@ -10117,12 +10118,27 @@
             "format": "date-time"
           },
           "var_dollar": {
-            "type": "number",
-            "format": "double"
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "VaR in currency; `null` with `var_pct`."
           },
           "var_pct": {
-            "type": "number",
-            "format": "double"
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "1-day 99% VaR as a fraction of equity; `null` when it cannot be computed (see\n`var_unavailable_reason`)."
+          },
+          "var_unavailable_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why VaR and CVaR are `null`, for example a position with no volatility."
           },
           "workspace_id": {
             "type": "string",
@@ -11452,7 +11468,6 @@
           "symbol",
           "side",
           "requested_qty",
-          "price",
           "approved_qty",
           "verdict",
           "breaches",
@@ -11483,8 +11498,12 @@
           },
           "metrics": {},
           "price": {
-            "type": "number",
-            "format": "double"
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "`null` when no price was known (a kill-switch rejection of a market order)."
           },
           "reasons": {
             "type": "array",

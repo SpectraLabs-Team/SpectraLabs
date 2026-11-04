@@ -524,3 +524,121 @@ async fn test_alpaca_order_sync_and_reconciliation() {
 
     f.clean_up().await;
 }
+
+/// Sends a signed request as the fixture's user; `Value::Null` sends an empty body.
+async fn call(f: &TestFixture, method: &str, path: &str, body: &Value) -> (u16, Value) {
+    let bytes = if body.is_null() { Vec::new() } else { serde_json::to_vec(body).unwrap() };
+    read_json(f.app.clone().oneshot(signed_req(method, path, &f.user, &f.ws, bytes)).await.unwrap()).await
+}
+
+#[tokio::test]
+async fn paper_account_var_and_cvar_are_computed_or_explained() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+    let account_path = format!("/api/v1/paper/account?strategy_id={}", f.strategy);
+
+    // A position with no dataset behind it: no volatility, so VaR and CVaR are null with a reason.
+    let (status, _) = call(&f, "GET", &account_path, &Value::Null).await;
+    assert_eq!(status, 200);
+    spectra_db::risk_center::upsert_position(&f.pool, f.ws, Some(f.strategy), "META", 10.0, 300.0)
+        .await
+        .unwrap();
+    let (status, body) = call(&f, "GET", &account_path, &Value::Null).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(body["var_pct"].is_null(), "{body}");
+    assert!(body["var_dollar"].is_null(), "{body}");
+    assert!(body["cvar_dollar"].is_null(), "{body}");
+    assert!(body["var_unavailable_reason"].as_str().unwrap().contains("META"), "{body}");
+
+    // With a dataset, VaR and CVaR come from the same simulation and CVaR is at least VaR.
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["META"]).await;
+    let (status, body) = call(&f, "GET", &account_path, &Value::Null).await;
+    assert_eq!(status, 200, "{body}");
+    let var = body["var_dollar"].as_f64().expect("var_dollar");
+    let cvar = body["cvar_dollar"].as_f64().expect("cvar_dollar");
+    assert!(var > 0.0, "{body}");
+    assert!(cvar >= var, "{body}");
+    assert!(body["var_unavailable_reason"].is_null(), "{body}");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn paper_attribution_comes_from_fills_and_restarts_after_reset() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["AAPL"]).await;
+    let attribution_path = format!("/api/v1/paper/attribution?strategy_id={}", f.strategy);
+
+    // One round trip: buy 10 at 100, sell 10 at 110.
+    let mut fills = Vec::new();
+    for (side, price) in [("buy", 100.0), ("sell", 110.0)] {
+        let order = json!({
+            "strategy_id": f.strategy, "symbol": "AAPL", "side": side, "order_type": "market",
+            "qty": 10.0, "fill_price": price, "fill_now": true
+        });
+        let (status, body) = call(&f, "POST", "/api/v1/paper/orders", &order).await;
+        assert_eq!(status, 201, "{body}");
+        assert_eq!(body["status"], "filled", "{body}");
+        fills.push(body["fills"][0].clone());
+    }
+    let fee_sum: f64 = fills.iter().map(|x| x["fee"].as_f64().unwrap()).sum();
+    let buy_px = fills[0]["price"].as_f64().unwrap();
+    let sell_px = fills[1]["price"].as_f64().unwrap();
+
+    let (status, attr) = call(&f, "GET", &attribution_path, &Value::Null).await;
+    assert_eq!(status, 200, "{attr}");
+    assert_eq!(attr["total_trades"], 1, "{attr}");
+    assert!((attr["total_fees"].as_f64().unwrap() - fee_sum).abs() < 1e-6, "fees {fee_sum}: {attr}");
+    let gross = attr["total_gross_pnl"].as_f64().unwrap();
+    assert!((gross - (sell_px - buy_px) * 10.0).abs() < 1e-6, "gross: {attr}");
+    let net = attr["total_net_pnl"].as_f64().unwrap();
+    assert!((net - (gross - fee_sum)).abs() < 1e-6, "net = gross - fees: {attr}");
+    assert_eq!(attr["overall_win_rate"].as_f64().unwrap(), 1.0, "{attr}");
+    assert_eq!(attr["direction"]["long_trades"], 1, "{attr}");
+    assert_eq!(attr["direction"]["short_trades"], 0, "{attr}");
+
+    // After a reset, fills from before it no longer count.
+    let reset = json!({ "strategy_id": f.strategy });
+    let (status, body) = call(&f, "POST", "/api/v1/paper/account/reset", &reset).await;
+    assert_eq!(status, 200, "{body}");
+    let (status, attr) = call(&f, "GET", &attribution_path, &Value::Null).await;
+    assert_eq!(status, 200, "{attr}");
+    assert_eq!(attr["total_trades"], 0, "{attr}");
+    assert_eq!(attr["total_fees"].as_f64().unwrap(), 0.0, "{attr}");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn kill_switch_rejection_without_price_is_audited() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+
+    let ks = json!({ "strategy_id": f.strategy, "active": true, "reason": "Audit test" });
+    let (status, _) = call(&f, "POST", "/api/v1/risk/kill-switch", &ks).await;
+    assert_eq!(status, 200);
+
+    // A market order with no price and no position: no price is known.
+    let order = json!({
+        "strategy_id": f.strategy, "symbol": "NFLX", "side": "buy", "order_type": "market",
+        "qty": 3.0, "fill_now": false
+    });
+    let (status, body) = call(&f, "POST", "/api/v1/paper/orders", &order).await;
+    assert_eq!(status, 422, "{body}");
+    assert_eq!(body["status"], "rejected", "{body}");
+
+    // The rejection is in the audit trail, with no price.
+    let (status, audit) = call(&f, "GET", "/api/v1/risk/audit", &Value::Null).await;
+    assert_eq!(status, 200, "{audit}");
+    let entry = audit
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["symbol"] == "NFLX")
+        .unwrap_or_else(|| panic!("kill-switch rejection must be audited: {audit}"));
+    assert_eq!(entry["verdict"], "rejected", "{entry}");
+    assert!(entry["price"].is_null(), "{entry}");
+
+    f.clean_up().await;
+}

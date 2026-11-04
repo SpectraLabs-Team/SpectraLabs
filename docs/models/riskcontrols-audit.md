@@ -214,3 +214,35 @@ Every single one of the 10 PR #202 `PositionSnapshot` sites overlaps with the si
 - **Old value / Old behavior:** The volatility error was discarded (`if let Ok(vol)`), so the instrument had no volatility and its VaR counted as 0.0 in the pre-trade check.
 - **New behavior:** The backtest returns the volatility error. A backtest or paper step with risk limits needs at least 60 bars per instrument. Note: volatility is still estimated from the whole input bar series, including bars after the decision time; that look-ahead is a known issue for a later task.
 
+
+### Paper path (Task 6b)
+
+#### 15. `PaperAccountView` — VaR Fallback (paper_api.rs)
+- **Function:** `PaperAccountView::new` (GET `/api/v1/paper/account`, account reset, paper step)
+- **Input:** A position with no volatility, or any other VaR failure (multi-asset without a correlation matrix, equity ≤ 0, invalid price).
+- **Old value / Old behavior:** `snap.var_pct().unwrap_or(0.0)`: VaR, VaR in currency and CVaR all showed 0.
+- **New behavior:** `var_pct`, `var_dollar` and `cvar_dollar` are `null`, with `var_unavailable_reason` naming the cause ("no volatility for SYM (no dataset with at least 60 bars)", or the VaR error text). The account itself still loads: this is a read-only view. The pre-trade check is unchanged and still rejects or errors as before.
+
+#### 16. `PaperAccountView` — Made-up CVaR (paper_api.rs)
+- **Function:** `PaperAccountView::new`
+- **Input:** Any account with VaR available.
+- **Old value / Old behavior:** `cvar_dollar = var_dollar * 1.25`, a fixed multiple not computed from anything.
+- **New behavior:** CVaR is the mean simulated loss at or beyond the 99% VaR, read from the same 2,000-run simulation as VaR (`PortfolioSnapshot::var_and_cvar_pct`, `metrics::conditional_var`). VaR values are unchanged (same simulation, same seed); a unit test checks they are identical.
+
+#### 17. `get_paper_attribution` — Synthetic Attribution Report (paper_api.rs)
+- **Function:** GET `/api/v1/paper/attribution`
+- **Input:** Any paper account.
+- **Old value / Old behavior:** Gross P&L was today's equity change (equity − start-of-day equity) split across open positions by market value; fees were 0 although every fill stores its fee; each open position counted as one trade; per-position win rate 1.0 or 0.0; overall win rate always 1.0 when any position existed; every position counted as long; the cost breakdown was all zeros.
+- **New behavior:** The account's fills since it started are replayed into a ledger and the backtest attribution (`spectra_research::compute_pnl_attribution`) runs over it with the paper slippage rate (`PAPER_SLIPPAGE_BPS`). Fees, trades, win rates, long/short split and costs are real. As for backtests, it covers closed trades; open positions are not in it. "Since the account started" means since creation or the last reset (`portfolio_balances.started_at`, new column; existing rows backfilled to the epoch). Any fill that cannot be replayed returns 422.
+
+#### 18. Paper Kill-Switch Rejection — Decision Not Recorded Without a Price (paper_api.rs)
+- **Function:** paper order submission while the kill switch is active
+- **Input:** A market order with no fill price, no limit price and no position in the symbol.
+- **Old value / Old behavior:** The decision was recorded with price `0.0`; `risk_decisions.price` has `CHECK (price > 0)`, so the insert failed and `let _ =` hid the error. The rejection never reached the audit trail.
+- **New behavior:** `risk_decisions.price` allows NULL (migration; the CHECK still rejects zero and negative prices). The rejection is recorded with `price: null`. Replay of a decision with no price returns 422 "Decision has no price, so it cannot be replayed." The audit table in the Risk Center shows "—".
+
+#### 19. Paper Step — Volatility Errors Dropped (paper_api.rs)
+- **Function:** POST `/api/v1/paper/step`, account view after the step
+- **Input:** A volatility error on the step's own bars, or a failed dataset lookup.
+- **Old value / Old behavior:** Both errors were discarded (`if let Ok`); the symbol simply had no volatility.
+- **New behavior:** With fewer than 60 step bars for a symbol, its volatility comes from the stored dataset, as before. Any other volatility error, and any dataset lookup error, returns 422.

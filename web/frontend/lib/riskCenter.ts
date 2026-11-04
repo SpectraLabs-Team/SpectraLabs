@@ -161,7 +161,8 @@ export interface RiskDecision {
   symbol: string;
   side: string;
   requested_qty: number;
-  price: number;
+  /** null when no price was known (a kill-switch rejection of a market order). */
+  price: number | null;
   approved_qty: number;
   verdict: string;
   breaches: RiskBreach[] | unknown;

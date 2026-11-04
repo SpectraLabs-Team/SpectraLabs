@@ -200,9 +200,12 @@ export interface PaperAccountView {
   daily_start_equity: number;
   positions: PaperPosition[];
   updated_at: string;
-  var_pct: number;
-  var_dollar: number;
-  cvar_dollar: number;
+  /** null when VaR cannot be computed; see var_unavailable_reason. */
+  var_pct: number | null;
+  var_dollar: number | null;
+  /** 1-day 99% CVaR from the same simulation as VaR; null with var_pct. */
+  cvar_dollar: number | null;
+  var_unavailable_reason?: string | null;
 }
 
 export interface PaperFillView {

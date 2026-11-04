@@ -1110,7 +1110,9 @@ export function RiskCenter() {
                       <td className="px-3 py-2.5 uppercase text-ink/80">{log.side}</td>
                       <td className="px-3 py-2.5 text-ink">{log.requested_qty}</td>
                       <td className="px-3 py-2.5 text-ink">{log.approved_qty}</td>
-                      <td className="px-3 py-2.5 text-ink">${log.price.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 text-ink">
+                        {log.price == null ? '—' : `$${log.price.toFixed(2)}`}
+                      </td>
                       <td className="px-3 py-2.5">
                         <span
                           className={cn(

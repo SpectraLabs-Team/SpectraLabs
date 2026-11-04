@@ -4,4 +4,4 @@
 # Skip once with `git push --no-verify` (CI will still check, and main requires it to pass).
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
-exec scripts/ci-local.sh
+exec scripts/ci-local.sh --quick

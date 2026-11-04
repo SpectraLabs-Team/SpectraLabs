@@ -1584,9 +1584,46 @@ async fn run_sweep_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaph
     let seed = job.payload.get("seed").and_then(serde_json::Value::as_u64).unwrap_or(42);
     let objective =
         job.payload.get("objective").and_then(serde_json::Value::as_str).unwrap_or("sharpe").to_string();
-    let dsl_code = job.payload.get("dsl_code").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
-    let strategy =
+    let mut dsl_code = job.payload.get("dsl_code").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
+    let mut strategy =
         job.payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("sma_cross").to_string();
+
+    let custom_id = strategy_version_id.or_else(|| {
+        if strategy.starts_with("custom:") || strategy.starts_with("Custom:") {
+            let id_str = strategy.trim_start_matches("custom:").trim_start_matches("Custom:").trim();
+            Uuid::parse_str(id_str).ok()
+        } else {
+            None
+        }
+    });
+
+    if let Some(cid) = custom_id {
+        if let Ok(Some(v)) = spectra_db::strategies::get_version(&ctx.pool, job.workspace_id, cid).await {
+            if v.builtin == "dsl" || v.code.is_some() {
+                if dsl_code.is_none() {
+                    dsl_code = v.code;
+                }
+            } else {
+                strategy = v.builtin;
+            }
+        } else if let Ok(Some(s)) = spectra_db::strategies::get(&ctx.pool, job.workspace_id, cid).await {
+            if let Some(lvid) = s.latest_version_id {
+                if let Ok(Some(v)) =
+                    spectra_db::strategies::get_version(&ctx.pool, job.workspace_id, lvid).await
+                {
+                    if v.builtin == "dsl" || v.code.is_some() {
+                        if dsl_code.is_none() {
+                            dsl_code = v.code;
+                        }
+                    } else {
+                        strategy = v.builtin;
+                    }
+                }
+            }
+        }
+    } else if strategy.starts_with("Custom: ") {
+        strategy = strategy.trim_start_matches("Custom: ").trim().to_string();
+    }
 
     let grid = match parse_grid_from_json(&param_grid_val) {
         Ok(g) => g,
@@ -1976,6 +2013,11 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
         drop(permit);
         return;
     };
+    let strategy_version_id = job
+        .payload
+        .get("strategy_version_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok());
 
     let version = match datasets::resolve_version(
         &ctx.pool,
@@ -2069,8 +2111,50 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
         drop(permit);
         return;
     };
-    let dsl_code = job.payload.get("dsl_code").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
-    let strategy = job.payload.get("strategy").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
+    let mut dsl_code = job.payload.get("dsl_code").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
+    let mut strategy = job.payload.get("strategy").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
+
+    let custom_id = strategy_version_id.or_else(|| {
+        strategy.as_deref().and_then(|s| {
+            if s.starts_with("custom:") || s.starts_with("Custom:") {
+                let id_str = s.trim_start_matches("custom:").trim_start_matches("Custom:").trim();
+                Uuid::parse_str(id_str).ok()
+            } else {
+                None
+            }
+        })
+    });
+
+    if let Some(cid) = custom_id {
+        if let Ok(Some(v)) = spectra_db::strategies::get_version(&ctx.pool, job.workspace_id, cid).await {
+            if v.builtin == "dsl" || v.code.is_some() {
+                if dsl_code.is_none() {
+                    dsl_code = v.code;
+                }
+            } else {
+                strategy = Some(v.builtin);
+            }
+        } else if let Ok(Some(s)) = spectra_db::strategies::get(&ctx.pool, job.workspace_id, cid).await {
+            if let Some(lvid) = s.latest_version_id {
+                if let Ok(Some(v)) =
+                    spectra_db::strategies::get_version(&ctx.pool, job.workspace_id, lvid).await
+                {
+                    if v.builtin == "dsl" || v.code.is_some() {
+                        if dsl_code.is_none() {
+                            dsl_code = v.code;
+                        }
+                    } else {
+                        strategy = Some(v.builtin);
+                    }
+                }
+            }
+        }
+    } else if let Some(s) = strategy.as_deref() {
+        if s.starts_with("Custom: ") {
+            strategy = Some(s.trim_start_matches("Custom: ").trim().to_string());
+        }
+    }
+
     if dsl_code.is_none() && strategy.is_none() {
         fail_job(&ctx, &job, started, "Walk-forward job missing strategy or dsl_code.", false).await;
         drop(permit);

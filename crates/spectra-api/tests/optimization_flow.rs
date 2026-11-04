@@ -496,6 +496,74 @@ async fn holdout_vault_budget_lockout_flow() {
 }
 
 #[tokio::test]
+async fn holdout_evaluation_strategy_validation_preserves_budget() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+    let holdout_id = seal(&f, ds_ver, "Holdout Strategy Test", 2).await;
+
+    // 1. Unknown strategy rejected with 422 before spending budget
+    let (status, resp) = f
+        .call(
+            "POST",
+            &format!("/api/v1/optimization/holdout/{holdout_id}/evaluate"),
+            &json!({ "strategy": "non_existent_strategy_xyz" }),
+        )
+        .await;
+    assert_eq!(status, 422, "status: {status}, body: {resp}");
+
+    // Budget must remain untouched
+    let (_, detail) =
+        f.call("GET", &format!("/api/v1/optimization/holdout/{holdout_id}"), &Value::Null).await;
+    assert_eq!(detail["holdout"]["evaluations_used"], 0);
+
+    // 2. Non-existent strategy version id rejected with 404 before spending budget
+    let bogus_vid = spectra_db::new_id();
+    let (status, resp) = f
+        .call(
+            "POST",
+            &format!("/api/v1/optimization/holdout/{holdout_id}/evaluate"),
+            &json!({ "strategy_version_id": bogus_vid }),
+        )
+        .await;
+    assert_eq!(status, 404, "status: {status}, body: {resp}");
+
+    let (_, detail) =
+        f.call("GET", &format!("/api/v1/optimization/holdout/{holdout_id}"), &Value::Null).await;
+    assert_eq!(detail["holdout"]["evaluations_used"], 0);
+
+    // 3. Invalid parameter type rejected with 422 before spending budget
+    let (status, resp) = f
+        .call(
+            "POST",
+            &format!("/api/v1/optimization/holdout/{holdout_id}/evaluate"),
+            &json!({ "strategy": "sma_cross", "parameters": { "fast": "not_a_number" } }),
+        )
+        .await;
+    assert_eq!(status, 422, "status: {status}, body: {resp}");
+
+    let (_, detail) =
+        f.call("GET", &format!("/api/v1/optimization/holdout/{holdout_id}"), &Value::Null).await;
+    assert_eq!(detail["holdout"]["evaluations_used"], 0);
+
+    // 4. Valid strategy and params passes validation (fails with 500 only on missing bars, budget spent)
+    let (status, resp) = f
+        .call(
+            "POST",
+            &format!("/api/v1/optimization/holdout/{holdout_id}/evaluate"),
+            &json!({ "strategy": "sma_cross", "parameters": { "fast": 5, "slow": 20 } }),
+        )
+        .await;
+    assert_eq!(status, 500, "status: {status}, body: {resp}");
+
+    let (_, detail) =
+        f.call("GET", &format!("/api/v1/optimization/holdout/{holdout_id}"), &Value::Null).await;
+    assert_eq!(detail["holdout"]["evaluations_used"], 1);
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
 async fn holdout_sealed_direct_read_refused() {
     let Some(pool) = pool().await else { return };
     let f = Fixture::new(pool);

@@ -686,7 +686,9 @@ pub(crate) async fn create_order(
         return json_response(422, json!(PaperOrderView::from(order)).to_string());
     }
 
-    // Order is accepted
+    // Order is accepted (with pre-trade size reduction if applicable)
+    let order_qty =
+        if pre_trade.verdict == PreTradeVerdict::Reduced { pre_trade.approved_qty } else { req.qty };
     let order = match spectra_db::paper::insert_paper_order(
         &pool,
         ws,
@@ -694,7 +696,7 @@ pub(crate) async fn create_order(
         &symbol,
         &side_str,
         &order_type_str,
-        req.qty,
+        order_qty,
         req.limit_price,
         req.stop_price,
         &tif,

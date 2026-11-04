@@ -703,7 +703,7 @@ fn regime_sensitivity_fails_when_two_or_three_buckets_have_negative_mean() {
 #[test]
 fn benchmark_relative_insufficient_when_benchmark_has_zero_variance() {
     // Constant prices: benchmark variance is 0.0, so compute_benchmark_metrics
-    // sets valid = false, leaving verdict as Insufficient.
+    // returns Err, which survival maps explicitly to Verdict::Insufficient.
     let closes = vec![100.0; 80];
     let bars = bars_from(&closes);
     let factory = move |_: &ParamSet| -> Result<Box<dyn Strategy>> { Ok(Box::new(BuyAndHold)) };

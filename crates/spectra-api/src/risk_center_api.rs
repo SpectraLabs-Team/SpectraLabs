@@ -1277,7 +1277,10 @@ pub(crate) async fn get_alerts(
 
     let mut alerts = Vec::new();
     let gross = portfolio.gross_exposure();
-    let gross_pct = utilization(gross, limits.max_gross_exposure).unwrap_or(0.0);
+    let gross_pct = match utilization(gross, limits.max_gross_exposure) {
+        Ok(v) => v,
+        Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+    };
     if gross_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if gross_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1290,7 +1293,10 @@ pub(crate) async fn get_alerts(
     }
 
     let lev = portfolio.leverage();
-    let lev_pct = utilization(lev, limits.max_leverage).unwrap_or(0.0);
+    let lev_pct = match utilization(lev, limits.max_leverage) {
+        Ok(v) => v,
+        Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+    };
     if lev_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if lev_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1302,8 +1308,14 @@ pub(crate) async fn get_alerts(
         });
     }
 
-    let dd = portfolio.drawdown_pct().unwrap_or(0.0);
-    let dd_pct = utilization(dd, limits.max_drawdown_pct).unwrap_or(0.0);
+    let dd = match portfolio.drawdown_pct() {
+        Ok(v) => v,
+        Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
+    };
+    let dd_pct = match utilization(dd, limits.max_drawdown_pct) {
+        Ok(v) => v,
+        Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+    };
     if dd_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if dd_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1316,7 +1328,10 @@ pub(crate) async fn get_alerts(
     }
 
     let loss = portfolio.daily_loss();
-    let loss_pct = utilization(loss, limits.max_daily_loss).unwrap_or(0.0);
+    let loss_pct = match utilization(loss, limits.max_daily_loss) {
+        Ok(v) => v,
+        Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+    };
     if loss_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if loss_pct >= 1.0 { "breach".into() } else { "warning".into() },

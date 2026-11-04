@@ -119,6 +119,7 @@ Summary of divergences between the legacy behavior (returning default numbers/st
 | `aligned_returns` | Non-positive prior equity ($E_{t-1} \le 0.0$ or non-finite) | `0.0` return | `Err(Error::InvalidArgument("aligned_returns: non-positive prior equity {prev}"))` | Return calculation $\frac{E_t}{E_{t-1}} - 1$ has non-positive or undefined divisor; masking as 0.0 hid account deficit/insolvency. |
 | `aligned_returns` | Prior equity positive and current equity non-positive ($E_{t-1} > 0 \land E_t \le 0$) | `0.0` return | `-1.0` return | Total loss is formula-defined: wiping out account equity represents a $-100\%$ return ($-1.0$). |
 | `run_survival_lab` | Benchmark evaluation error from `compute_benchmark_metrics` | Silent default `Verdict::Insufficient` via unassigned field | Explicit `bm.verdict = Verdict::Insufficient;` assignment | Explicitly handles benchmark calculation errors, setting finding and verdict deterministically. |
+| `run_survival_lab` | Non-positive prior equity in risk tail evaluation (`aligned_returns` returns Err) | Swallowed error via `unwrap_or_default()` into empty series | Explicit `rk.verdict = Verdict::Insufficient;` with finding | Prevents silent fallback to empty-series tail statistics when equity curve has non-positive prior equity. |
 
 ### Detailed Divergence Records by Case
 
@@ -157,3 +158,9 @@ Summary of divergences between the legacy behavior (returning default numbers/st
 - **Input:** Strategies or benchmarks producing an error in `compute_benchmark_metrics`
 - **Old value:** Swallowed error via `bm.metrics.valid == false` branch, leaving `bm.verdict` as default
 - **New behavior:** Explicitly matches on `compute_benchmark_metrics` and sets `bm.verdict = Verdict::Insufficient` and finding message
+
+#### 7. `run_survival_lab()` — Risk Tail Non-Positive Prior Equity
+- **Function:** `run_survival_lab_controlled` / Component 9 (`survival.rs`)
+- **Input:** Equity curve containing consecutive points where $E_{t-1} \le 0.0$ or non-finite
+- **Old value:** Swallowed `aligned_returns` error via `unwrap_or_default()`, computing tail statistics on an empty slice (yielding `TailStats::default()` and a fallback `"; too few returns for tail estimates."` finding)
+- **New behavior:** Explicitly checks the result of `aligned_returns`. On `Err`, leaves `rk.tail` at default, sets `rk.verdict = Verdict::Insufficient`, and sets finding stating `"Tail statistics are undefined because the equity curve has non-positive prior equity."`

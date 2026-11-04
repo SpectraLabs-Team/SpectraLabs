@@ -129,3 +129,22 @@ fn a_fifty_percent_fall_is_a_failure() {
     assert!((0.45..=0.50).contains(&dd), "drawdown {dd}");
     assert_eq!(r.risk.verdict, Verdict::Fail);
 }
+
+#[test]
+fn non_positive_prior_equity_yields_insufficient_for_risk_tail() {
+    let closes: Vec<f64> = (0..60).map(|i| 100.0 + f64::from(i)).collect();
+    let n = closes.len();
+    let bars = bars_from(&closes);
+    let factory =
+        move |_: &ParamSet| -> Result<Box<dyn Strategy>> { Ok(Box::new(BuyAndSell { last_bar: n })) };
+    let backtest_cfg = BacktestConfig { initial_cash: Money::ZERO, ..BacktestConfig::default() };
+    let r =
+        run_survival_lab(&bars, &factory, &backtest_cfg, &ParamSet::default(), &SurvivalConfig::default())
+            .unwrap();
+    assert_eq!(r.risk.verdict, Verdict::Insufficient);
+    assert_eq!(
+        r.risk.finding,
+        "Tail statistics are undefined because the equity curve has non-positive prior equity."
+    );
+    assert_eq!(r.risk.tail, TailStats::default());
+}

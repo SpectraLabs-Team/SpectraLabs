@@ -1861,33 +1861,42 @@ pub fn run_survival_lab_controlled<'a>(
         let rk = &mut rep.risk;
         let eq: Vec<f64> = base.equity_curve.iter().map(|p| p.equity.to_f64()).collect();
         rk.drawdown = compute_drawdown_stats(&eq);
-        let ret = aligned_returns(&base.equity_curve).unwrap_or_default();
-        rk.tail = compute_tail_stats(&ret, sc.tail_level);
-        if rk.drawdown.valid {
-            rk.verdict = if rk.drawdown.max_drawdown >= sc.max_drawdown_fail {
-                Verdict::Fail
-            } else if rk.drawdown.max_drawdown >= sc.max_drawdown_warn {
-                Verdict::Warn
-            } else {
-                Verdict::Pass
-            };
-            rk.finding = format!(
-                "Max drawdown {}%, longest time under water {} periods",
-                fmt_f(rk.drawdown.max_drawdown * 100.0, 1),
-                rk.drawdown.longest_underwater
-            );
-            rk.finding += &if rk.tail.valid {
-                format!(
-                    "; historical {}% VaR {}% and ES {}% per period.",
-                    fmt_f(sc.tail_level * 100.0, 0),
-                    f2(rk.tail.var * 100.0),
-                    f2(rk.tail.es * 100.0)
-                )
-            } else {
-                "; too few returns for tail estimates.".into()
-            };
-        } else {
-            rk.finding = "Too few equity points to measure drawdown.".into();
+        match aligned_returns(&base.equity_curve) {
+            Err(_) => {
+                rk.verdict = Verdict::Insufficient;
+                rk.finding =
+                    "Tail statistics are undefined because the equity curve has non-positive prior equity."
+                        .into();
+            }
+            Ok(ret) => {
+                rk.tail = compute_tail_stats(&ret, sc.tail_level);
+                if rk.drawdown.valid {
+                    rk.verdict = if rk.drawdown.max_drawdown >= sc.max_drawdown_fail {
+                        Verdict::Fail
+                    } else if rk.drawdown.max_drawdown >= sc.max_drawdown_warn {
+                        Verdict::Warn
+                    } else {
+                        Verdict::Pass
+                    };
+                    rk.finding = format!(
+                        "Max drawdown {}%, longest time under water {} periods",
+                        fmt_f(rk.drawdown.max_drawdown * 100.0, 1),
+                        rk.drawdown.longest_underwater
+                    );
+                    rk.finding += &if rk.tail.valid {
+                        format!(
+                            "; historical {}% VaR {}% and ES {}% per period.",
+                            fmt_f(sc.tail_level * 100.0, 0),
+                            f2(rk.tail.var * 100.0),
+                            f2(rk.tail.es * 100.0)
+                        )
+                    } else {
+                        "; too few returns for tail estimates.".into()
+                    };
+                } else {
+                    rk.finding = "Too few equity points to measure drawdown.".into();
+                }
+            }
         }
     }
     execution.complete_test(9);

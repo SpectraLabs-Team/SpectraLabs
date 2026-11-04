@@ -316,7 +316,9 @@ pub struct ProjectedMetrics {
     pub concentration_pct: f64,
     pub drawdown_pct: f64,
     pub daily_loss: f64,
-    pub var_pct: f64,
+    /// Projected 1-day 99% VaR as a fraction of equity. `None` when it cannot be computed
+    /// because an open position has no volatility (no dataset to estimate it from).
+    pub var_pct: Option<f64>,
 }
 
 /// Evaluates pre-trade risk checks on candidate orders.
@@ -340,12 +342,15 @@ impl PreTradeChecker {
         }
     }
 
-    fn eval_var_pct(portfolio: &PortfolioSnapshot) -> Result<f64> {
-        match portfolio.var_pct() {
-            Ok(v) => Ok(v),
-            Err(Error::Data(ref msg)) if msg.contains("has no volatility") => Ok(0.0),
-            Err(e) => Err(e),
+    /// VaR of `portfolio` as a fraction of equity, or `None` when any open position has no
+    /// volatility. Every other failure (equity, price, correlation, simulation) propagates.
+    fn var_if_available(portfolio: &PortfolioSnapshot) -> Result<Option<f64>> {
+        let missing_volatility =
+            portfolio.positions.values().any(|p| p.qty.abs() > 1e-8 && p.volatility.is_none());
+        if missing_volatility {
+            return Ok(None);
         }
+        portfolio.var_pct().map(Some)
     }
 
     /// Perform pre-trade evaluation of `order` against `limits` given current `portfolio` and kill-switch status.
@@ -406,7 +411,7 @@ impl PreTradeChecker {
                         concentration_pct: current_concentration,
                         drawdown_pct: current_dd,
                         daily_loss: current_loss,
-                        var_pct: Self::eval_var_pct(portfolio)?,
+                        var_pct: Self::var_if_available(portfolio)?,
                     },
                 });
             }
@@ -434,7 +439,7 @@ impl PreTradeChecker {
                         daily_start_equity: portfolio.daily_start_equity,
                         positions: reduced_positions,
                     };
-                    let reduced_var = Self::eval_var_pct(&reduced_portfolio)?;
+                    let reduced_var = Self::var_if_available(&reduced_portfolio)?;
 
                     return Ok(PreTradeResult {
                         verdict: PreTradeVerdict::Reduced,
@@ -484,7 +489,7 @@ impl PreTradeChecker {
                         concentration_pct: current_concentration,
                         drawdown_pct: current_dd,
                         daily_loss: current_loss,
-                        var_pct: Self::eval_var_pct(portfolio)?,
+                        var_pct: Self::var_if_available(portfolio)?,
                     },
                 });
             }
@@ -525,7 +530,7 @@ impl PreTradeChecker {
                 daily_start_equity: portfolio.daily_start_equity,
                 positions: projected_positions,
             };
-            let projected_var = Self::eval_var_pct(&projected_portfolio)?;
+            let projected_var = Self::var_if_available(&projected_portfolio)?;
 
             return Ok(PreTradeResult {
                 verdict: PreTradeVerdict::Approved,
@@ -586,7 +591,7 @@ impl PreTradeChecker {
                     concentration_pct: current_concentration,
                     drawdown_pct: current_dd,
                     daily_loss: current_loss,
-                    var_pct: Self::eval_var_pct(portfolio)?,
+                    var_pct: Self::var_if_available(portfolio)?,
                 },
             });
         }
@@ -640,7 +645,7 @@ impl PreTradeChecker {
             daily_start_equity: portfolio.daily_start_equity,
             positions: projected_positions,
         };
-        let projected_var = Self::eval_var_pct(&projected_portfolio)?;
+        let projected_var = Self::var_if_available(&projected_portfolio)?;
 
         let projected_metrics = ProjectedMetrics {
             gross_exposure: projected_gross,
@@ -716,17 +721,35 @@ impl PreTradeChecker {
             });
         }
 
-        if projected_var > limits.max_var_pct {
-            breaches.push(RiskBreach {
-                code: "var_limit_exceeded".into(),
-                limit: limits.max_var_pct,
-                projected: projected_var,
-                message: format!(
-                    "Projected VaR {:.2}% would exceed limit {:.2}%.",
-                    projected_var * 100.0,
-                    limits.max_var_pct * 100.0
-                ),
-            });
+        // An order that only reduces the existing position (same side, smaller size) is not
+        // blocked when VaR is unavailable, so a position can always be closed.
+        let reduces_exposure = projected_pos_qty.abs() <= current_pos_qty.abs() + 1e-8
+            && projected_pos_qty * current_pos_qty >= 0.0;
+        match projected_var {
+            Some(v) if v > limits.max_var_pct => {
+                breaches.push(RiskBreach {
+                    code: "var_limit_exceeded".into(),
+                    limit: limits.max_var_pct,
+                    projected: v,
+                    message: format!(
+                        "Projected VaR {:.2}% would exceed limit {:.2}%.",
+                        v * 100.0,
+                        limits.max_var_pct * 100.0
+                    ),
+                });
+            }
+            Some(_) => {}
+            None if reduces_exposure => {}
+            None => {
+                breaches.push(RiskBreach {
+                    code: "var_unavailable".into(),
+                    limit: limits.max_var_pct,
+                    projected: 0.0,
+                    message: "VaR cannot be computed because a position has no volatility (no dataset with \
+                              enough bars). Orders that add exposure are rejected until data is loaded."
+                        .into(),
+                });
+            }
         }
 
         // If no breaches, approved in full!
@@ -748,31 +771,36 @@ impl PreTradeChecker {
             let max_qty_for_gross = ((limits.max_gross_exposure - other_gross) / order.price).max(0.0);
             let max_qty_for_lev =
                 (((limits.max_leverage * portfolio.equity) - other_gross) / order.price).max(0.0);
-            let max_qty_for_var = if let Some(vol) = existing_vol {
-                if vol <= 0.0 || !vol.is_finite() {
-                    return Err(Error::Data(format!(
-                        "position for {} has invalid volatility: {vol}",
-                        order.symbol
-                    )));
+            // Without volatility there is no VaR-based quantity cap, so the order is never
+            // reduced; it falls through to rejection.
+            let max_qty_for_var = match existing_vol {
+                Some(vol) => {
+                    if vol <= 0.0 || !vol.is_finite() {
+                        return Err(Error::Data(format!(
+                            "position for {} has invalid volatility: {vol}",
+                            order.symbol
+                        )));
+                    }
+                    let var_factor = (vol * 2.3263) / (252.0_f64).sqrt();
+                    let max_gross_for_var = (limits.max_var_pct * portfolio.equity) / var_factor;
+                    Some(((max_gross_for_var - other_gross) / order.price).max(0.0))
                 }
-                let var_factor = (vol * 2.3263) / (252.0_f64).sqrt();
-                let max_gross_for_var = (limits.max_var_pct * portfolio.equity) / var_factor;
-                ((max_gross_for_var - other_gross) / order.price).max(0.0)
-            } else {
-                f64::INFINITY
+                None => None,
             };
 
-            let permissible_qty =
-                max_qty_for_pos.min(max_qty_for_gross).min(max_qty_for_lev).min(max_qty_for_var);
+            if let (Some(max_qty_for_var), Some(_)) = (max_qty_for_var, projected_metrics.var_pct) {
+                let permissible_qty =
+                    max_qty_for_pos.min(max_qty_for_gross).min(max_qty_for_lev).min(max_qty_for_var);
 
-            if permissible_qty > 0.0 && permissible_qty < order.qty {
-                return Ok(PreTradeResult {
-                    verdict: PreTradeVerdict::Reduced,
-                    requested_qty: order.qty,
-                    approved_qty: (permissible_qty * 100.0).floor() / 100.0,
-                    breaches,
-                    projected_metrics,
-                });
+                if permissible_qty > 0.0 && permissible_qty < order.qty {
+                    return Ok(PreTradeResult {
+                        verdict: PreTradeVerdict::Reduced,
+                        requested_qty: order.qty,
+                        approved_qty: (permissible_qty * 100.0).floor() / 100.0,
+                        breaches,
+                        projected_metrics,
+                    });
+                }
             }
         }
 
@@ -1213,8 +1241,8 @@ mod tests {
             res_ks.projected_metrics.concentration_pct
         );
         assert!(
-            res_ks.projected_metrics.var_pct > 0.0,
-            "VaR must be positive real simulation, got {}",
+            res_ks.projected_metrics.var_pct.is_some_and(|v| v > 0.0),
+            "VaR must be positive real simulation, got {:?}",
             res_ks.projected_metrics.var_pct
         );
 
@@ -1226,7 +1254,7 @@ mod tests {
         assert_eq!(res_reduce.verdict, PreTradeVerdict::Reduced);
         assert_eq!(res_reduce.approved_qty, 100.0);
         // Portfolio is flattened, so VaR is 0.0 (empty portfolio has 0.0 VaR mathematically)
-        assert_eq!(res_reduce.projected_metrics.var_pct, 0.0);
+        assert_eq!(res_reduce.projected_metrics.var_pct, Some(0.0));
 
         // 3. Drawdown rejection computes real concentration and VaR
         let limits_dd = RiskLimits { max_drawdown_pct: 0.05, ..RiskLimits::default() };
@@ -1252,7 +1280,7 @@ mod tests {
             "concentration must be 15,000 / 90,000, got {}",
             res_dd.projected_metrics.concentration_pct
         );
-        assert!(res_dd.projected_metrics.var_pct > 0.0);
+        assert!(res_dd.projected_metrics.var_pct.is_some_and(|v| v > 0.0));
     }
 
     #[test]
@@ -1277,5 +1305,79 @@ mod tests {
             })
             .unwrap();
         assert_eq!(var_snap, var_explicit);
+    }
+
+    fn snapshot_without_volatility(symbol: &str, qty: f64, price: f64) -> PortfolioSnapshot {
+        let mut positions = HashMap::new();
+        positions.insert(symbol.to_string(), PositionSnapshot { qty, price, volatility: None });
+        PortfolioSnapshot {
+            cash: 100_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions,
+        }
+    }
+
+    #[test]
+    fn test_missing_volatility_rejects_opening_order() {
+        let portfolio = snapshot_without_volatility("AAPL", 0.0, 150.0);
+        let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 10.0, price: 150.0 };
+        let res = PreTradeChecker::evaluate(&RiskLimits::default(), &portfolio, &order, false).unwrap();
+        assert_eq!(res.verdict, PreTradeVerdict::Rejected);
+        assert_eq!(res.approved_qty, 0.0);
+        assert!(res.breaches.iter().any(|b| b.code == "var_unavailable"));
+        assert_eq!(res.projected_metrics.var_pct, None);
+    }
+
+    #[test]
+    fn test_missing_volatility_allows_reducing_order() {
+        let portfolio = snapshot_without_volatility("AAPL", 100.0, 150.0);
+        let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Sell, qty: 50.0, price: 150.0 };
+        let res = PreTradeChecker::evaluate(&RiskLimits::default(), &portfolio, &order, false).unwrap();
+        assert_eq!(res.verdict, PreTradeVerdict::Approved);
+        assert_eq!(res.approved_qty, 50.0);
+        assert_eq!(res.projected_metrics.var_pct, None);
+    }
+
+    #[test]
+    fn test_missing_volatility_rejects_position_flip() {
+        let portfolio = snapshot_without_volatility("AAPL", 100.0, 150.0);
+        let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Sell, qty: 150.0, price: 150.0 };
+        let res = PreTradeChecker::evaluate(&RiskLimits::default(), &portfolio, &order, false).unwrap();
+        assert_eq!(res.verdict, PreTradeVerdict::Rejected);
+        assert!(res.breaches.iter().any(|b| b.code == "var_unavailable"));
+    }
+
+    #[test]
+    fn test_missing_volatility_is_never_size_reduced() {
+        let limits =
+            RiskLimits { max_position_size: 15_000.0, size_reduction_enabled: true, ..RiskLimits::default() };
+        let portfolio = snapshot_without_volatility("TSLA", 0.0, 200.0);
+        let order = OrderCandidate { symbol: "TSLA".into(), side: OrderSide::Buy, qty: 100.0, price: 200.0 };
+        let res = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap();
+        assert_eq!(res.verdict, PreTradeVerdict::Rejected);
+        assert_eq!(res.approved_qty, 0.0);
+        assert!(res.breaches.iter().any(|b| b.code == "var_unavailable"));
+    }
+
+    #[test]
+    fn test_kill_switch_rejection_reports_unavailable_var() {
+        let portfolio = snapshot_without_volatility("TSLA", 100.0, 200.0);
+        let order = OrderCandidate { symbol: "TSLA".into(), side: OrderSide::Buy, qty: 10.0, price: 200.0 };
+        let res = PreTradeChecker::evaluate(&RiskLimits::default(), &portfolio, &order, true).unwrap();
+        assert_eq!(res.verdict, PreTradeVerdict::Rejected);
+        assert_eq!(res.breaches[0].code, "kill_switch_active");
+        assert_eq!(res.projected_metrics.var_pct, None);
+    }
+
+    #[test]
+    fn test_kill_switch_flatten_allowed_without_volatility() {
+        let portfolio = snapshot_without_volatility("TSLA", 100.0, 200.0);
+        let order = OrderCandidate { symbol: "TSLA".into(), side: OrderSide::Sell, qty: 100.0, price: 200.0 };
+        let res = PreTradeChecker::evaluate(&RiskLimits::default(), &portfolio, &order, true).unwrap();
+        assert_eq!(res.verdict, PreTradeVerdict::Approved);
+        assert_eq!(res.approved_qty, 100.0);
+        assert_eq!(res.projected_metrics.var_pct, Some(0.0));
     }
 }

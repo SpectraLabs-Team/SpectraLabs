@@ -19,6 +19,8 @@ use spectra_db::{connect, migrate, PgPool, PoolConfig};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+mod common;
+
 const SECRET: &str = "test-secret-test-secret-test-secret!";
 
 async fn pool() -> Option<PgPool> {
@@ -111,6 +113,7 @@ async fn paper_orders_report_503_without_database() {
 struct TestFixture {
     app: Router,
     pool: PgPool,
+    dir: std::path::PathBuf,
     user: Uuid,
     ws: Uuid,
     strategy: Uuid,
@@ -147,10 +150,12 @@ impl TestFixture {
         .await
         .unwrap();
 
-        let cfg = ApiConfig::new(Secret::new(SECRET));
+        let dir = std::env::temp_dir().join(format!("spectra-paper-{}", ws.simple()));
+        let mut cfg = ApiConfig::new(Secret::new(SECRET));
+        cfg.data_dir = Some(dir.join("data"));
         let app = router(cfg, Some(pool.clone()));
 
-        Self { app, pool, user, ws, strategy }
+        Self { app, pool, dir, user, ws, strategy }
     }
 
     async fn clean_up(&self) {
@@ -186,6 +191,7 @@ impl TestFixture {
             sqlx::query("DELETE FROM strategies WHERE id = $1").bind(self.strategy).execute(&self.pool).await;
         let _ = sqlx::query("DELETE FROM workspaces WHERE id = $1").bind(self.ws).execute(&self.pool).await;
         let _ = sqlx::query("DELETE FROM users WHERE id = $1").bind(self.user).execute(&self.pool).await;
+        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
@@ -193,6 +199,7 @@ impl TestFixture {
 async fn paper_trading_full_lifecycle() {
     let Some(pool) = pool().await else { return };
     let f = TestFixture::setup(pool).await;
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["AAPL", "MSFT", "GOOGL"]).await;
 
     // 1. Task 1: Paper Account Model
     // Query account: should auto-initialize with starting balance and 0 positions.
@@ -369,11 +376,14 @@ async fn test_paper_backtest_parity() {
     // 2. Prepare fixed sequence of daily bars
     let day_ns: i64 = 86_400_000_000_000;
     let base_ts: i64 = 1_700_000_000_000_000_000;
-    let prices = [
-        (100.0, 105.0, 99.0, 104.0, 10_000.0),
-        (104.0, 110.0, 103.0, 108.0, 12_000.0),
-        (108.0, 112.0, 107.0, 111.0, 15_000.0),
-    ];
+    // 61 daily bars: with risk limits on, the backtest needs at least 60 bars per
+    // instrument to estimate volatility.
+    let prices: Vec<(f64, f64, f64, f64, f64)> = (0..61_u32)
+        .map(|i| {
+            let c = 100.0 + f64::from(i % 7) * 1.5;
+            (c - 1.0, c + 2.0, c - 2.0, c, 10_000.0 + f64::from(i) * 100.0)
+        })
+        .collect();
 
     let mut paper_bars = Vec::new();
     let mut engine_bars = Vec::new();

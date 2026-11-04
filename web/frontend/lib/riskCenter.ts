@@ -85,7 +85,8 @@ export interface ProjectedMetrics {
   concentration_pct: number;
   drawdown_pct: number;
   daily_loss: number;
-  var_pct?: number;
+  /** null when VaR cannot be computed because a position has no volatility. */
+  var_pct?: number | null;
 }
 
 export interface PortfolioPositionView {

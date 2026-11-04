@@ -10757,8 +10757,7 @@
           "position_size",
           "concentration_pct",
           "drawdown_pct",
-          "daily_loss",
-          "var_pct"
+          "daily_loss"
         ],
         "properties": {
           "concentration_pct": {
@@ -10790,8 +10789,12 @@
             "format": "double"
           },
           "var_pct": {
-            "type": "number",
-            "format": "double"
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "`null` when VaR cannot be computed because a position has no volatility."
           }
         }
       },

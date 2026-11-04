@@ -3925,8 +3925,11 @@ export interface components {
             net_exposure: number;
             /** Format: double */
             position_size: number;
-            /** Format: double */
-            var_pct: number;
+            /**
+             * Format: double
+             * @description `null` when VaR cannot be computed because a position has no volatility.
+             */
+            var_pct?: number | null;
         };
         /** @description List of provider configurations. */
         ProviderConfigListView: {

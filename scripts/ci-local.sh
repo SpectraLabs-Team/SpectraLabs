@@ -52,6 +52,10 @@ if changed "${rust_paths[@]}"; then
     step "standard-library-only engine crates"
     cargo metadata --format-version 1 --no-deps | python3 scripts/check_std_only.py
 
+    step "silent defaults and literal costs"
+    python3 scripts/check_silent_defaults.py --self-test
+    python3 scripts/check_silent_defaults.py
+
     step "tests"
     cargo test --workspace
     cargo test -p spectra-db --features s3 --lib

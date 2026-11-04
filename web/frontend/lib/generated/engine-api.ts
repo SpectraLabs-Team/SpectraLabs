@@ -3753,6 +3753,10 @@ export interface components {
             timestamp_ns: number;
         };
         PaperFillView: {
+            /** @description The cost configuration that priced the fill (`name`, `version`, `slippage_bps`,
+             *     `min_fee`, and for a strategy run the preset's other costs); `null` for fills recorded
+             *     before it was stored. */
+            cost_config?: Record<string, never> | null;
             /** Format: date-time */
             created_at: string;
             /** Format: double */

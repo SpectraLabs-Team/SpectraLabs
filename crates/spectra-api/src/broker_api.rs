@@ -535,7 +535,7 @@ async fn handle_create_order(
     });
 
     if eval_res.verdict == PreTradeVerdict::Rejected {
-        let _ = risk_center::record_decision(
+        if let Err(e) = risk_center::record_decision(
             pool,
             ws,
             None,
@@ -553,7 +553,10 @@ async fn handle_create_order(
             &metrics_json,
             user_id,
         )
-        .await;
+        .await
+        {
+            return crate::risk_center_api::decision_not_recorded(&e);
+        }
 
         return (
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -580,7 +583,7 @@ async fn handle_create_order(
         PreTradeVerdict::Reduced => "reduced",
         PreTradeVerdict::Rejected => "rejected",
     };
-    let _ = risk_center::record_decision(
+    if let Err(e) = risk_center::record_decision(
         pool,
         ws,
         None,
@@ -598,7 +601,10 @@ async fn handle_create_order(
         &metrics_json,
         user_id,
     )
-    .await;
+    .await
+    {
+        return crate::risk_center_api::decision_not_recorded(&e);
+    }
 
     // 5. Forward to broker or execute simulated paper fill
     if let Some((key_id, secret_key)) = creds {

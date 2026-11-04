@@ -98,15 +98,62 @@ pub(crate) const PAPER_SLIPPAGE_BPS: f64 = 5.0;
 /// Minimum commission charged on each paper fill.
 pub(crate) const PAPER_MIN_FEE: f64 = 1.0;
 
-/// The cost model applied to paper fills.
-///
-/// # Errors
-/// The named cost values do not convert to fixed point.
-fn paper_cost_model() -> Result<CostModel, spectra_core::ArithmeticError> {
-    Ok(CostModel {
-        slippage: spectra_core::Bps::from_f64(PAPER_SLIPPAGE_BPS)?,
-        commission: CommissionModel { min_fee: Money::from_f64(PAPER_MIN_FEE)?, ..Default::default() },
-        ..Default::default()
+/// A named, versioned paper cost configuration. Each fill it prices stores it in
+/// `paper_fills.cost_config`, so a fill says which costs it was charged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PaperCostConfig {
+    pub name: &'static str,
+    /// Bumped whenever a value below changes.
+    pub version: u32,
+    pub slippage_bps: f64,
+    pub min_fee: f64,
+}
+
+/// The costs of manual paper fills (submitted orders): slippage and a minimum fee, no other
+/// commission, spread or volume slippage.
+pub(crate) const PAPER_COST_CONFIG: PaperCostConfig = PaperCostConfig {
+    name: "paper-default",
+    version: 1,
+    slippage_bps: PAPER_SLIPPAGE_BPS,
+    min_fee: PAPER_MIN_FEE,
+};
+
+impl PaperCostConfig {
+    /// The cost model applied to paper fills.
+    ///
+    /// # Errors
+    /// The named cost values do not convert to fixed point.
+    fn cost_model(self) -> Result<CostModel, spectra_core::ArithmeticError> {
+        Ok(CostModel {
+            slippage: spectra_core::Bps::from_f64(self.slippage_bps)?,
+            commission: CommissionModel { min_fee: Money::from_f64(self.min_fee)?, ..Default::default() },
+            ..Default::default()
+        })
+    }
+
+    /// The form stored with each fill and returned in fill views.
+    pub(crate) fn to_json(self) -> serde_json::Value {
+        json!({
+            "name": self.name,
+            "version": self.version,
+            "slippage_bps": self.slippage_bps,
+            "min_fee": self.min_fee,
+        })
+    }
+}
+
+/// The cost config of a fill from a paper strategy run, which is priced by the run's config
+/// preset (not [`PAPER_COST_CONFIG`]): the preset's name and every cost it charges.
+fn preset_cost_config_json(preset: Preset, costs: &CostModel) -> serde_json::Value {
+    json!({
+        "name": format!("preset:{}", preset.name()),
+        "version": 1,
+        "slippage_bps": costs.slippage.to_f64(),
+        "min_fee": costs.commission.min_fee.to_f64(),
+        "commission_bps": costs.commission.bps_of_notional.to_f64(),
+        "commission_per_unit": costs.commission.per_unit.to_f64(),
+        "spread_bps": costs.spread.to_f64(),
+        "volume_slippage_bps": costs.volume_slippage.to_f64(),
     })
 }
 
@@ -253,6 +300,11 @@ pub(crate) struct PaperFillView {
     pub qty: f64,
     pub price: f64,
     pub fee: f64,
+    /// The cost configuration that priced the fill (`name`, `version`, `slippage_bps`,
+    /// `min_fee`, and for a strategy run the preset's other costs); `null` for fills recorded
+    /// before it was stored.
+    #[schema(value_type = Option<Object>)]
+    pub cost_config: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -268,6 +320,7 @@ impl From<PaperFillRow> for PaperFillView {
             qty: r.qty,
             price: r.price,
             fee: r.fee,
+            cost_config: r.cost_config,
             created_at: r.created_at,
         }
     }
@@ -664,7 +717,7 @@ pub(crate) async fn create_order(
         // `None` when no price is known (a market order with no position): the decision is
         // still recorded, with no price, instead of a 0.0 the audit table refuses.
         let known_price = req.fill_price.or(req.limit_price).or(current_sym_price);
-        let _ = spectra_db::risk_center::record_decision(
+        if let Err(e) = spectra_db::risk_center::record_decision(
             &pool,
             ws,
             Some(strat_id),
@@ -684,7 +737,10 @@ pub(crate) async fn create_order(
             &json!({}),
             user_id,
         )
-        .await;
+        .await
+        {
+            return crate::risk_center_api::decision_not_recorded(&e);
+        }
 
         let order = match spectra_db::paper::insert_paper_order(
             &pool,
@@ -823,7 +879,7 @@ pub(crate) async fn create_order(
         "portfolio_snapshot": crate::risk_center_api::portfolio_snapshot_json(&snapshot),
     });
 
-    let _ = spectra_db::risk_center::record_decision(
+    if let Err(e) = spectra_db::risk_center::record_decision(
         &pool,
         ws,
         Some(strat_id),
@@ -838,7 +894,10 @@ pub(crate) async fn create_order(
         &metrics_json,
         user_id,
     )
-    .await;
+    .await
+    {
+        return crate::risk_center_api::decision_not_recorded(&e);
+    }
 
     // If rejected, store rejected order with reason (Task 3: "Done when a rejected order is stored with its reason")
     if pre_trade.verdict == PreTradeVerdict::Rejected {
@@ -900,7 +959,7 @@ pub(crate) async fn create_order(
 
     // Tasks 4 & 5: Fills and Positions/Equity update
     // Cost model: routed through spectra_engine::costs (CostModel, slipped_price, commission_fee)
-    let cost_model = match paper_cost_model() {
+    let cost_model = match PAPER_COST_CONFIG.cost_model() {
         Ok(m) => m,
         Err(e) => return error_response(500, format!("Paper cost model is invalid: {e}")),
     };
@@ -933,7 +992,16 @@ pub(crate) async fn create_order(
 
     // Record fill
     let fill_row = match spectra_db::paper::insert_paper_fill(
-        &pool, order.id, ws, strat_id, &symbol, &side_str, fill_qty, fill_price, fee,
+        &pool,
+        order.id,
+        ws,
+        strat_id,
+        &symbol,
+        &side_str,
+        fill_qty,
+        fill_price,
+        fee,
+        &PAPER_COST_CONFIG.to_json(),
     )
     .await
     {
@@ -1231,6 +1299,45 @@ pub(crate) async fn step_strategy(
         };
         let reject_reason = o.reject_reason.map(|r| r.as_str().to_string());
 
+        // Record the risk decision first: if the audit insert fails, the order is not stored (fail closed).
+        let verdict_str = if o.state == OrderState::Rejected { "rejected" } else { "approved" };
+        let eval_price = match limit_px
+            .or(stop_px)
+            .or_else(|| engine_bars.iter().rfind(|b| b.instrument == o.instrument).map(|b| b.close.to_f64()))
+        {
+            Some(px) if px > 0.0 && px.is_finite() => px,
+            _ => {
+                return error_response(
+                    422,
+                    format!("Could not determine evaluation price for order on symbol {sym}"),
+                );
+            }
+        };
+        let breach_msgs = if o.state == OrderState::Rejected {
+            vec![reject_reason.clone().unwrap_or_else(|| "Rejected by risk check".to_string())]
+        } else {
+            vec![]
+        };
+        if let Err(e) = spectra_db::risk_center::record_decision(
+            &pool,
+            ws,
+            Some(req.strategy_id),
+            &sym,
+            side_str,
+            qty,
+            Some(eval_price),
+            if o.state == OrderState::Rejected { 0.0 } else { qty },
+            verdict_str,
+            &json!([]),
+            &breach_msgs,
+            &json!({}),
+            user_id,
+        )
+        .await
+        {
+            return crate::risk_center_api::decision_not_recorded(&e);
+        }
+
         let inserted = match spectra_db::paper::insert_paper_order(
             &pool,
             ws,
@@ -1252,46 +1359,11 @@ pub(crate) async fn step_strategy(
             Err(e) => return db_error(&e),
         };
 
-        // Record risk decision audit trail
-        let verdict_str = if o.state == OrderState::Rejected { "rejected" } else { "approved" };
-        let eval_price = match limit_px
-            .or(stop_px)
-            .or_else(|| engine_bars.iter().rfind(|b| b.instrument == o.instrument).map(|b| b.close.to_f64()))
-        {
-            Some(px) if px > 0.0 && px.is_finite() => px,
-            _ => {
-                return error_response(
-                    422,
-                    format!("Could not determine evaluation price for order on symbol {sym}"),
-                );
-            }
-        };
-        let breach_msgs = if o.state == OrderState::Rejected {
-            vec![reject_reason.clone().unwrap_or_else(|| "Rejected by risk check".to_string())]
-        } else {
-            vec![]
-        };
-        let _ = spectra_db::risk_center::record_decision(
-            &pool,
-            ws,
-            Some(req.strategy_id),
-            &sym,
-            side_str,
-            qty,
-            Some(eval_price),
-            if o.state == OrderState::Rejected { 0.0 } else { qty },
-            verdict_str,
-            &json!([]),
-            &breach_msgs,
-            &json!({}),
-            user_id,
-        )
-        .await;
-
         order_id_to_db.insert(o.id, inserted);
     }
 
     // Persist fills
+    let cost_config = preset_cost_config_json(preset, &cfg.costs);
     let mut fill_views = Vec::new();
     let mut fill_order_idx = 0usize;
     let mut order_fills_map: HashMap<Uuid, Vec<PaperFillView>> = HashMap::new();
@@ -1319,6 +1391,7 @@ pub(crate) async fn step_strategy(
                     f.qty.to_f64(),
                     f.price.to_f64(),
                     f.fee.to_f64(),
+                    &cost_config,
                 )
                 .await
                 {

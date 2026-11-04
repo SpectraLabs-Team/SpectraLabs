@@ -44,6 +44,10 @@ jobs:
           cargo clippy -p spectra-db -p spectra-api --features spectra-api/s3 --all-targets -- -D warnings
       - name: Standard-library-only engine crates
         run: cargo metadata --format-version 1 --no-deps | python3 scripts/check_std_only.py
+      - name: Silent defaults and literal costs
+        run: |
+          python3 scripts/check_silent_defaults.py --self-test
+          python3 scripts/check_silent_defaults.py
 
   test:
     runs-on: ubuntu-24.04

@@ -1,0 +1,67 @@
+# Approved silent defaults, checked by scripts/check_silent_defaults.py.
+#
+#   file | category | code text | reason
+#
+# The code text is matched as a substring of the flagged line in that file (not by line number),
+# so edits elsewhere do not break an entry; an entry that no longer matches fails the check.
+# The code text may contain " | "; the reason may not. Categories:
+#   defined      the value is defined by the formula or data structure (no position = qty 0)
+#   parity       an approved divergence from the C++ golden
+#   unreachable  the input is validated before this line; the reason names where
+#   follow-up    a known silent default left for a later PR; the reason names it
+# How to add an entry: docs/models/INVENTORY.md, "Silent defaults check".
+
+# spectra-core
+crates/spectra-core/src/json.rs | defined | self.t.get(self.pos).copied().unwrap_or(0) | parser peek: byte 0 is the end-of-input sentinel, matched by no token
+crates/spectra-core/src/ledger.rs | defined | self.multipliers.get(&instrument).copied().unwrap_or(Ratio::ONE) | an unregistered instrument is a cash equity with multiplier 1
+crates/spectra-core/src/ledger.rs | defined | self.positions.get(&instrument).copied().unwrap_or_default() | a never-traded instrument has the zero position
+crates/spectra-core/src/ledger.rs | defined | if p.qty != qty.get(&id).copied().unwrap_or_default() | journal replay: no fills for an instrument = quantity 0, so a mismatch is still caught
+
+# spectra-data
+crates/spectra-data/src/dataset.rs | defined | first_ts: bars.first().map_or(0, |b| b.ts_ns) | an empty dataset has no timestamps; bar_count 0 says so
+crates/spectra-data/src/dataset.rs | defined | last_ts: bars.last().map_or(0, |b| b.ts_ns) | an empty dataset has no timestamps; bar_count 0 says so
+crates/spectra-data/src/report.rs | unreachable | Json::integer(i64::try_from(n).unwrap_or(i64::MAX)) | n counts in-memory items, at most isize::MAX, which fits an i64
+crates/spectra-data/src/report.rs | defined | Json::string(d.symbols.name(b.instrument).unwrap_or_default()) | preview row display: an id without a name prints an empty symbol; no value is computed from it
+crates/spectra-data/src/settings.rs | unreachable | opt.stale_run = usize::try_from(v).unwrap_or(5) | v is range-checked 2..=100_000 on the line above
+crates/spectra-data/src/settings.rs | unreachable | Json::integer(i64::try_from(opt.stale_run).unwrap_or(i64::MAX)) | stale_run is the default 5 or parsed within 2..=100_000 (parse_settings)
+crates/spectra-data/src/settings.rs | defined | .unwrap_or_default(); | settings guess: no timestamp column = no sample values to guess a format from
+crates/spectra-data/src/settings.rs | defined | .map(|v| v.trim_start_matches('-').len()).max().unwrap_or(0) | settings guess: longest of an empty sample is 0 digits
+# spectra-engine
+crates/spectra-engine/src/backtest.rs | unreachable | .map_or(0.0, Money::to_f64) | turnover: Ledger::apply_fill computed the same notional_of for this fill and rejects it on overflow
+crates/spectra-engine/src/backtest.rs | follow-up | self.book.equity().unwrap_or_default() | strategy Context::equity returns 0 on overflow; fix makes Context return a Result (every strategy and the DSL change)
+crates/spectra-engine/src/backtest.rs | follow-up | self.account.equity().unwrap_or_default() | strategy Context::account_equity returns 0 on overflow; same Context Result follow-up
+crates/spectra-engine/src/backtest.rs | follow-up | self.book.position_value(instrument).unwrap_or_default() | strategy Context::position_value returns 0 on overflow; same Context Result follow-up
+crates/spectra-engine/src/backtest.rs | follow-up | self.book.position_exposure(instrument).unwrap_or_default() | strategy Context::position_exposure returns 0 on overflow; same Context Result follow-up
+crates/spectra-engine/src/backtest.rs | defined | let first_ts = bars.first().map_or(0, |b| b.ts_ns) | an empty bar series has no first timestamp; no bar is processed
+crates/spectra-engine/src/backtest.rs | defined | std::mem::take(&mut b.ledgers)).unwrap_or_default() | a single-strategy run has no per-strategy books (the strategy sees the account)
+crates/spectra-engine/src/backtest.rs | defined | ledger.positions().get(&o.instrument).map_or(0.0, |p| p.qty.to_f64()) | kill switch: no position = quantity 0, so no order is closing
+crates/spectra-engine/src/curves.rs | unreachable | if t <= nodes.last().map_or(0.0, |n| n.0) | nodes starts as vec![(0.0, 1.0)] two lines above, so last() is never None
+crates/spectra-engine/src/dsl/eval.rs | follow-up | Self::Int(i) => Qty::from_f64(i as f64).unwrap_or(Qty::ZERO) | a DSL number that does not convert to a quantity becomes 0; fix makes DSL evaluation return an error
+crates/spectra-engine/src/dsl/eval.rs | follow-up | Self::Float(f) => Qty::from_f64(f).unwrap_or(Qty::ZERO) | as above (DSL evaluation errors follow-up)
+crates/spectra-engine/src/dsl/eval.rs | follow-up | Self::Int(i) => Price::from_f64(i as f64).unwrap_or(Price::ZERO) | a DSL number that does not convert to a price becomes 0; DSL evaluation errors follow-up
+crates/spectra-engine/src/dsl/eval.rs | follow-up | Self::Float(f) => Price::from_f64(f).unwrap_or(Price::ZERO) | as above (DSL evaluation errors follow-up)
+crates/spectra-engine/src/instruments.rs | defined | let curve = inst.underlying.as_deref().unwrap_or_default() | a swap with no curve gets "", which names no curve, so the check below returns an error
+crates/spectra-engine/src/instruments.rs | defined | q.kind.frequency().unwrap_or(0), | fingerprint text: a deposit quote has no payment frequency, written as 0 (swaps are at least 1)
+crates/spectra-engine/src/rebalance.rs | defined | policy.max_gross_leverage.map_or(1.0, spectra_core::Fixed::to_f64) | no ledger leverage limit: the rebalancer's own gross_cap alone applies (x1)
+crates/spectra-engine/src/rebalance.rs | defined | (actual - self.targets.get(&id).copied().unwrap_or(0.0)).abs() > th | held but not in targets = target 0 (decided: liquidation is intended)
+crates/spectra-engine/src/rebalance.rs | defined | let want = self.targets.get(&id).copied().unwrap_or(0.0) * equity / close | held but not in targets = target 0 (decided: liquidation is intended)
+
+# spectra-research
+crates/spectra-research/src/survival.rs | defined | fmt_f(c.levels.last().map_or(0.0, |l| l.extra_bps), 0) | finding text only: with no cost levels tested the sentence reads +0 bps
+crates/spectra-research/src/sweep.rs | parity | sharpe_per_period: sharpe_per_period(&t.returns).unwrap_or(0.0) | TrialLedger zero-variance Sharpe = 0, matching the C++ golden (approved 2026-11-04)
+crates/spectra-research/src/validation.rs | follow-up | pbo: pbo.map_or(0.0, |p| p.pbo) | pbo 0 when not available (pbo_available says so); fix makes pbo an Option (null) in the validation JSON
+crates/spectra-research/src/walkforward.rs | defined | ledger.as_ref().map_or(1, |l| l.next_trial_id()) | without a trial ledger, trial ids start at 1
+
+# spectra-risk
+crates/spectra-risk/src/enforcement.rs | defined | portfolio.positions.get(&order.symbol).map_or(0.0, |p| p.qty) | no position in the symbol = quantity 0
+crates/spectra-risk/src/engine.rs | defined | Vec::with_capacity(usize::try_from(config.simulations).unwrap_or(0)) | capacity hint only; the vector grows to the paths actually run
+crates/spectra-risk/src/simulation.rs | defined | std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get) | thread count unknown: run on one thread (results do not depend on it)
+
+# spectra-backtest
+crates/spectra-backtest/src/instruments.rs | defined | roll: self.roll.unwrap_or_default() | request without a futures roll rule: the documented default rule
+crates/spectra-backtest/src/instruments.rs | defined | bond_quote: self.bond_quote.unwrap_or_default() | request without a bond quote convention: the documented default
+crates/spectra-backtest/src/output.rs | defined | r.equity_curve.first().map_or(0.0, |_| out.request.config.initial_cash.to_f64()) | an empty run has no starting equity; contributions are then 0
+crates/spectra-backtest/src/output.rs | defined | let mut peak = curve.first().map_or(0.0, |p| p.equity.to_f64()) | drawdown of an empty curve is empty; mirrors compute_drawdown_stats
+crates/spectra-backtest/src/run.rs | unreachable | Ratio::from_f64(a.weight).map_or(0, spectra_core::Fixed::raw) | weights are validated finite, in (0, 1] and convertible to Ratio when the request is parsed (run.rs strategies parser)
+crates/spectra-backtest/src/run.rs | defined | instruments: instruments.unwrap_or_default(), | a request without instrument records: every symbol is a cash equity
+crates/spectra-backtest/src/strategies/mod.rs | unreachable | Qty::from_f64(v).unwrap_or(Qty::ZERO) | quantity parameters are validated finite and in range by the parameter schema before build

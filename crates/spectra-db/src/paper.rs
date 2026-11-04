@@ -58,6 +58,8 @@ pub struct PaperFillRow {
     pub qty: f64,
     pub price: f64,
     pub fee: f64,
+    /// The cost configuration that priced the fill; `None` for fills stored before it was recorded.
+    pub cost_config: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -266,6 +268,7 @@ pub async fn insert_paper_fill(
     qty: f64,
     price: f64,
     fee: f64,
+    cost_config: &serde_json::Value,
 ) -> Result<PaperFillRow, Error> {
     sqlx::query_as(INSERT_FILL_SQL)
         .bind(order_id)
@@ -276,6 +279,7 @@ pub async fn insert_paper_fill(
         .bind(qty)
         .bind(price)
         .bind(fee)
+        .bind(cost_config)
         .fetch_one(pool)
         .await
 }

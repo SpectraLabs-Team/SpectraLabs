@@ -294,7 +294,7 @@ fn summary_and_artifacts_record_the_rolls() {
     assert_eq!(rolls[0].at("from").unwrap().as_str().unwrap(), "ESA");
     assert_eq!(rolls[0].at("to").unwrap().as_str().unwrap(), "ESB");
     assert!(f.at("gaps").unwrap().items().unwrap()[0].as_str().unwrap().contains("Margin is not modelled"));
-    let names: Vec<&str> = artifacts(&out.result).iter().map(|a| a.name).collect();
+    let names: Vec<&str> = artifacts(&out.result).unwrap().iter().map(|a| a.name).collect();
     assert!(names.contains(&"rolls.csv") && names.contains(&"continuous.csv"));
 
     // The stored request re-runs to the same fingerprint, roll rule included.

@@ -32,14 +32,14 @@ fn garch() -> Garch11 {
 #[test]
 fn garch_one_step_forecast_is_the_recursion() {
     // h_1 = omega + alpha * r^2 + beta * h_last = 1e-5 + 0.1 * 4e-4 + 0.85 * 3e-4
-    let h = garch().forecast_variance(0.02, Some(3e-4), 1);
+    let h = garch().forecast_variance(0.02, Some(3e-4), 1).unwrap();
     close(h, 3.05e-4, TOL, "GARCH one-step variance");
 }
 
 #[test]
 fn garch_without_a_last_variance_uses_the_unconditional_one() {
     // h_1 = 1e-5 + 0.1 * 4e-4 + 0.85 * 2e-4
-    let h = garch().forecast_variance(0.02, None, 1);
+    let h = garch().forecast_variance(0.02, None, 1).unwrap();
     close(h, 2.2e-4, TOL, "GARCH one-step variance, no last variance");
 }
 
@@ -47,11 +47,11 @@ fn garch_without_a_last_variance_uses_the_unconditional_one() {
 fn garch_multi_step_forecast_decays_to_the_unconditional_variance() {
     // h_k = UV + persistence^(k-1) (h_1 - UV), with persistence 0.95.
     let m = garch();
-    close(m.forecast_variance(0.02, Some(3e-4), 2), 2.9975e-4, TOL, "GARCH k=2");
-    close(m.forecast_variance(0.02, Some(3e-4), 3), 2.947_625e-4, TOL, "GARCH k=3");
-    close(m.forecast_variance(0.02, Some(3e-4), 10), 2.661_761_880_210_84e-4, TOL, "GARCH k=10");
+    close(m.forecast_variance(0.02, Some(3e-4), 2).unwrap(), 2.9975e-4, TOL, "GARCH k=2");
+    close(m.forecast_variance(0.02, Some(3e-4), 3).unwrap(), 2.947_625e-4, TOL, "GARCH k=3");
+    close(m.forecast_variance(0.02, Some(3e-4), 10).unwrap(), 2.661_761_880_210_84e-4, TOL, "GARCH k=10");
     // Far ahead the forecast is the unconditional variance.
-    close(m.forecast_variance(0.02, Some(3e-4), 2000), 2e-4, 1e-12, "GARCH k=2000");
+    close(m.forecast_variance(0.02, Some(3e-4), 2000).unwrap(), 2e-4, 1e-12, "GARCH k=2000");
 }
 
 #[test]
@@ -89,9 +89,9 @@ fn gjr() -> GjrGarch11 {
 fn gjr_applies_the_leverage_term_only_after_negative_returns() {
     let m = gjr();
     // Negative return -0.02: (alpha + gamma) * 4e-4 + omega + beta * 3e-4 = 3.25e-4.
-    close(m.forecast_variance(-0.02, Some(3e-4), 1), 3.25e-4, TOL, "GJR after a negative return");
+    close(m.forecast_variance(-0.02, Some(3e-4), 1).unwrap(), 3.25e-4, TOL, "GJR after a negative return");
     // Positive return +0.02: alpha * 4e-4 + omega + beta * 3e-4 = 2.85e-4.
-    close(m.forecast_variance(0.02, Some(3e-4), 1), 2.85e-4, TOL, "GJR after a positive return");
+    close(m.forecast_variance(0.02, Some(3e-4), 1).unwrap(), 2.85e-4, TOL, "GJR after a positive return");
 }
 
 /// EGARCH with omega -0.1, alpha 0.2, gamma -0.05, beta 0.95.
@@ -111,7 +111,7 @@ fn egarch() -> Egarch11 {
 #[test]
 fn egarch_one_step_forecast_is_the_log_variance_recursion() {
     // z = 0.02 / sqrt(3e-4); log h_1 = omega + alpha (|z| - sqrt(2/pi)) + gamma z + beta ln h_last.
-    let h = egarch().forecast_variance(0.02, Some(3e-4), 1);
+    let h = egarch().forecast_variance(0.02, Some(3e-4), 1).unwrap();
     close(h, 4.128_139_666_021_002_5e-4, 1e-13, "EGARCH one-step variance");
     close(
         egarch().forecast_volatility_annualized(0.02, Some(3e-4)),
@@ -125,8 +125,8 @@ fn egarch_one_step_forecast_is_the_log_variance_recursion() {
 fn egarch_multi_step_forecast_decays_in_log_variance() {
     // log h_k = ln UV + beta^(k-1) (log h_1 - ln UV), persistence = beta.
     let m = egarch();
-    close(m.forecast_variance(0.02, Some(3e-4), 2), 3.981_238_203_764_815_7e-4, 1e-13, "EGARCH k=2");
-    close(m.forecast_variance(0.02, Some(3e-4), 3), 3.846_526_727_991_086_9e-4, 1e-13, "EGARCH k=3");
+    close(m.forecast_variance(0.02, Some(3e-4), 2).unwrap(), 3.981_238_203_764_815_7e-4, 1e-13, "EGARCH k=2");
+    close(m.forecast_variance(0.02, Some(3e-4), 3).unwrap(), 3.846_526_727_991_086_9e-4, 1e-13, "EGARCH k=3");
 }
 
 #[test]
@@ -135,4 +135,16 @@ fn inverse_normal_cdf_matches_the_standard_quantiles() {
     close(normal_quantile(0.975), 1.959_963_984_540_054, 1e-8, "97.5%");
     close(normal_quantile(0.999), 3.090_232_306_167_813, 1e-8, "99.9%");
     close(normal_quantile(0.025), -1.959_963_984_540_054, 1e-8, "2.5%");
+}
+
+/// Task 9: a horizon whose exponent `k - 1` does not fit an `i32` is an error. It used to fall
+/// back to exponent 1, so any such horizon silently returned the two-step forecast.
+#[test]
+fn a_horizon_past_the_i32_exponent_is_an_error() {
+    let Ok(last_ok) = usize::try_from(i64::from(i32::MAX) + 1) else { return };
+    let too_long = last_ok + 1;
+    assert!(garch().forecast_variance(0.02, Some(3e-4), last_ok).unwrap().is_finite());
+    assert!(garch().forecast_variance(0.02, Some(3e-4), too_long).is_err(), "GARCH");
+    assert!(egarch().forecast_variance(0.02, Some(3e-4), too_long).is_err(), "EGARCH");
+    assert!(gjr().forecast_variance(0.02, Some(3e-4), too_long).is_err(), "GJR");
 }

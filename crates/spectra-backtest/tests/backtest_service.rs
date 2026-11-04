@@ -447,7 +447,7 @@ fn data_rows(a: &Artifact) -> Vec<String> {
 fn artifacts_have_one_row_per_record() {
     let out = sample_output();
     let r = &out.result;
-    let arts = artifacts(r);
+    let arts = artifacts(r).unwrap();
     let names: Vec<&str> = arts.iter().map(|a| a.name).collect();
     assert_eq!(names, ["equity.csv", "orders.csv", "fills.csv", "returns.csv"]);
     assert!(arts.iter().all(|a| a.media_type == "text/csv"));
@@ -496,6 +496,20 @@ fn summary_has_metrics_fingerprints_and_trades() {
     assert!(t.find("count").unwrap().as_int().unwrap() > 5);
     let wr = t.find("win_rate").unwrap().as_double().unwrap();
     assert!((0.0..=1.0).contains(&wr));
+}
+
+/// M26 Task 9: a backtest summary records the cost config the run used.
+#[test]
+fn summary_records_the_cost_config_used() {
+    let out = sample_output();
+    let s = Json::parse(&summary_json(&out).unwrap().dump()).unwrap();
+    let config = s.find("run").unwrap().find("config").unwrap();
+    let num = |k: &str| config.find(k).unwrap_or_else(|| panic!("{k}")).as_double().unwrap();
+    assert_eq!(num("slippage_bps"), 2.0);
+    assert_eq!(num("commission_bps"), 1.0);
+    for k in ["commission_per_unit", "commission_min", "spread_bps", "volume_slippage_bps"] {
+        assert_eq!(num(k), 0.0, "{k}");
+    }
 }
 
 #[test]

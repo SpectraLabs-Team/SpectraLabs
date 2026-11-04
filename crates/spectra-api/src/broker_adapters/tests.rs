@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use spectra_core::{InstrumentType, OptionRight};
+use spectra_core::{Error, InstrumentType, OptionRight};
 use spectra_risk::enforcement::{OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, RiskLimits};
 
 use super::binance::{compute_funding_payment, evaluate_binance_quarterly_settlement, BinanceUsdmAdapter};
@@ -184,6 +184,25 @@ fn test_options_greeks_and_settlement() {
     assert!(settlement.is_in_the_money);
     assert_eq!(settlement.total_cash_settlement, 5.0 * 10.0 * 100.0);
     assert!(!settlement.delivery_required);
+}
+
+#[test]
+fn test_compute_option_greeks_invalid_arguments() {
+    // volatility 0.0 returns InvalidArgument
+    let err = compute_option_greeks(OptionRight::Call, 100.0, 100.0, 1.0 / 12.0, 0.05, 0.0, 0.0, 1.0, 100.0)
+        .unwrap_err();
+    assert_eq!(err, Error::InvalidArgument("volatility must be positive and finite".into()));
+
+    // negative years returns InvalidArgument
+    let err = compute_option_greeks(OptionRight::Call, 100.0, 100.0, -0.05, 0.05, 0.0, 0.20, 1.0, 100.0)
+        .unwrap_err();
+    assert_eq!(err, Error::InvalidArgument("time to expiry must not be negative".into()));
+
+    // volatility NaN returns InvalidArgument
+    let err =
+        compute_option_greeks(OptionRight::Call, 100.0, 100.0, 1.0 / 12.0, 0.05, 0.0, f64::NAN, 1.0, 100.0)
+            .unwrap_err();
+    assert_eq!(err, Error::InvalidArgument("volatility must be positive and finite".into()));
 }
 
 #[test]

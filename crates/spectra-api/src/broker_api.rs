@@ -1192,6 +1192,6 @@ pub(crate) async fn handle_venue_options_greeks(body: Result<Bytes, BytesRejecti
         payload.multiplier.unwrap_or(100.0),
     ) {
         Ok(greeks) => json_response(200, serde_json::to_string(&greeks).unwrap_or_default()),
-        Err(e) => error_response(422, e),
+        Err(e) => error_response(422, e.to_string()),
     }
 }

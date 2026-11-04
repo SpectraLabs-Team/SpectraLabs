@@ -321,7 +321,6 @@ pub struct CreateWalkForwardRequest {
     pub strategy: Option<String>,
     #[serde(default)]
     pub dsl_code: Option<String>,
-    #[serde(default = "default_wf_mode")]
     pub mode: String,
     pub train_size: usize,
     pub test_size: usize,
@@ -330,12 +329,7 @@ pub struct CreateWalkForwardRequest {
     #[serde(default)]
     pub embargo: Option<usize>,
     pub param_grid: serde_json::Value,
-    #[serde(default = "default_objective")]
     pub objective: String,
-}
-
-fn default_wf_mode() -> String {
-    "rolling".to_string()
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -449,7 +443,9 @@ pub(crate) async fn queue_sweep(
         return error_with_code(
             422,
             "search_budget_exceeded",
-            format!("Search budget exceeded: parameter sweep capped at 1000 trials. Grid has {total_points} combinations; specify max_trials <= 1000 or reduce the parameter space."),
+            format!(
+                "Search budget exceeded: parameter sweep capped at 1000 trials. Grid has {total_points} combinations; specify max_trials <= 1000 or reduce the parameter space."
+            ),
         );
     }
 
@@ -999,6 +995,28 @@ pub(crate) async fn queue_walk_forward(
         Err(e) => return error_response(422, format!("Invalid walk-forward request: {e}")),
     };
 
+    if req.train_size == 0 {
+        return error_response(400, "Invalid walk-forward request: train_size must be > 0.");
+    }
+    if req.test_size == 0 {
+        return error_response(400, "Invalid walk-forward request: test_size must be > 0.");
+    }
+    if req.mode.parse::<spectra_research::WalkForwardMode>().is_err() {
+        return error_response(400, "Invalid walk-forward request: mode must be 'rolling' or 'anchored'.");
+    }
+    if !spectra_research::VALID_OBJECTIVES.contains(&req.objective.as_str()) {
+        return error_response(
+            400,
+            "Invalid walk-forward request: objective must be 'sharpe' or 'total_return'.",
+        );
+    }
+    if req.strategy.is_none() && req.dsl_code.is_none() {
+        return error_response(400, "Invalid walk-forward request: strategy or dsl_code is required.");
+    }
+
+    // Zero embargo (no skipped timestamps between train and test) is the defined value when omitted.
+    let embargo = req.embargo.unwrap_or(0);
+
     // The database refuses (and logs) a sealed holdout: only an evaluation may read it.
     match datasets::resolve_version(
         &pool,
@@ -1025,8 +1043,11 @@ pub(crate) async fn queue_walk_forward(
         "mode": req.mode,
         "train_size": req.train_size,
         "test_size": req.test_size,
-        "step_size": req.step_size.unwrap_or(req.test_size),
-        "embargo": req.embargo.unwrap_or(0),
+        "step_size": match req.step_size {
+            Some(s) => s,
+            None => req.test_size,
+        },
+        "embargo": embargo,
         "param_grid": req.param_grid,
         "objective": req.objective,
     });
@@ -1056,8 +1077,11 @@ pub(crate) async fn queue_walk_forward(
         &req.mode,
         req.train_size as i32,
         req.test_size as i32,
-        req.step_size.unwrap_or(req.test_size) as i32,
-        req.embargo.unwrap_or(0) as i32,
+        match req.step_size {
+            Some(s) => s as i32,
+            None => req.test_size as i32,
+        },
+        embargo as i32,
         &req.objective,
         &req.param_grid,
         user_of(&id),
@@ -1134,7 +1158,11 @@ pub(crate) async fn compute_overfitting(body: Result<Bytes, BytesRejection>) -> 
         return error_response(422, "Each trial returns vector must have at least 2 observations.");
     }
 
-    let sharpes: Vec<f64> = req.returns_matrix.iter().map(|r| sharpe_per_period(r)).collect();
+    let sharpes: Vec<f64> =
+        match req.returns_matrix.iter().map(|r| sharpe_per_period(r)).collect::<Result<Vec<f64>, _>>() {
+            Ok(s) => s,
+            Err(e) => return error_response(400, format!("Invalid returns for Sharpe calculation: {e}")),
+        };
     let mut best_idx = 0;
     for i in 1..sharpes.len() {
         if sharpes[i] > sharpes[best_idx] {
@@ -1143,16 +1171,37 @@ pub(crate) async fn compute_overfitting(body: Result<Bytes, BytesRejection>) -> 
     }
     let best_sr = sharpes[best_idx];
     let best_returns = &req.returns_matrix[best_idx];
-    let m = moments(best_returns);
+    let m = match moments(best_returns) {
+        Ok(m) => m,
+        Err(e) => return error_response(400, format!("Invalid returns for moments calculation: {e}")),
+    };
 
-    let sr_moments = moments(&sharpes);
-    let sr_var = sr_moments.stdev * sr_moments.stdev;
+    let sr_var = if sharpes.len() >= 2 {
+        match moments(&sharpes) {
+            Ok(sr_m) => sr_m.stdev * sr_m.stdev,
+            Err(e) => return error_response(400, format!("Invalid Sharpe distribution: {e}")),
+        }
+    } else {
+        0.0
+    };
 
     let benchmark = req.benchmark_sharpe.unwrap_or(0.0);
-    let psr = probabilistic_sharpe(best_sr, benchmark, m.n, m.skew, m.raw_kurtosis);
-    let dsr = deflated_sharpe(best_returns, n_trials, sr_var);
-    let min_trl = min_track_record_length(best_sr, benchmark, m.skew, m.raw_kurtosis, req.confidence);
-    let exp_max_sr = expected_max_sharpe(sr_var, n_trials);
+    let psr = match probabilistic_sharpe(best_sr, benchmark, m.n, m.skew, m.raw_kurtosis) {
+        Ok(p) => p,
+        Err(e) => return error_response(400, format!("Invalid parameters for PSR: {e}")),
+    };
+    let dsr = match deflated_sharpe(best_returns, n_trials, sr_var) {
+        Ok(d) => d,
+        Err(e) => return error_response(400, format!("Invalid parameters for DSR: {e}")),
+    };
+    let min_trl = match min_track_record_length(best_sr, benchmark, m.skew, m.raw_kurtosis, req.confidence) {
+        Ok(l) => l,
+        Err(e) => return error_response(400, format!("Invalid parameters for MinTRL: {e}")),
+    };
+    let exp_max_sr = match expected_max_sharpe(sr_var, n_trials) {
+        Ok(ems) => ems,
+        Err(e) => return error_response(400, format!("Invalid parameters for expected max Sharpe: {e}")),
+    };
 
     // PBO is undefined with fewer than two trials or too few observations, and when CSCV fails.
     // It used to be reported as 0.0, which reads as "no overfitting" (M26 task 5).
@@ -1379,7 +1428,7 @@ pub(crate) async fn evaluate_holdout(
                 return error_response(
                     500,
                     "The holdout backtest failed, so no result was produced. This evaluation was logged and its budget is spent.",
-                )
+                );
             }
         }
     };

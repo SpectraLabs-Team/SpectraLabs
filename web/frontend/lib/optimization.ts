@@ -153,13 +153,13 @@ export interface CreateWalkForwardPayload {
   strategy_version_id?: string;
   strategy?: string;
   dsl_code?: string;
-  mode?: 'rolling' | 'anchored';
+  mode: 'rolling' | 'anchored';
   train_size: number;
   test_size: number;
   step_size?: number;
   embargo?: number;
   param_grid: Record<string, unknown>;
-  objective?: 'sharpe' | 'total_return';
+  objective: 'sharpe' | 'total_return';
 }
 
 export const queueSweep = (data: CreateSweepPayload) =>

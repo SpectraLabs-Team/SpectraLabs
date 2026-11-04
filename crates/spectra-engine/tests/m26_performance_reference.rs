@@ -7,7 +7,9 @@
 //! episode. Expected values follow the table in `docs/models/engine-models.md`
 //! and were checked at 40 digits (mpmath). Undefined cases return `None`.
 
-use spectra_engine::performance::{burke, cagr, calmar, drawdown_episodes, omega, sortino, stdev, sterling};
+use spectra_engine::performance::{
+    burke, cagr, calmar, drawdown_episodes, omega, rolling_volatility, sortino, stdev, sterling,
+};
 
 const TOL: f64 = 1e-12;
 
@@ -84,4 +86,51 @@ fn undefined_ratios_are_none_not_zero() {
 
     // One observation has no sample standard deviation.
     assert!(stdev(&[0.01]).is_none(), "stdev of one return");
+}
+
+#[test]
+fn rolling_volatility_uses_expect_not_silent_default() {
+    // A 3-element window over 5 returns produces 3 windows.
+    // Returns: [-0.1, 0.2, -0.05, 0.1, -0.15]
+    //
+    // Window 0: [-0.1, 0.2, -0.05]
+    //   mean = 0.05/3 ≈ 0.016667
+    //   sum sq = (-0.1 - 0.016667)^2 + (0.2 - 0.016667)^2 + (-0.05 - 0.016667)^2
+    //          = 0.013611 + 0.033611 + 0.004444
+    //          = 0.051667
+    //   stdev = sqrt(0.051667 / 2) ≈ 0.160728
+    //   annualised (ppy=12) = 0.160728 * sqrt(12) ≈ 0.556776
+    //
+    // Window 1: [0.2, -0.05, 0.1]
+    //   mean = 0.25/3 ≈ 0.083333
+    //   sum sq = (0.2 - 0.083333)^2 + (-0.05 - 0.083333)^2 + (0.1 - 0.083333)^2
+    //          = 0.013611 + 0.017778 + 0.000278
+    //          = 0.031667
+    //   stdev = sqrt(0.031667 / 2) ≈ 0.125831
+    //   annualised (ppy=12) = 0.125831 * sqrt(12) ≈ 0.435890
+    //
+    // Window 2: [-0.05, 0.1, -0.15]
+    //   mean = -0.1/3 ≈ -0.033333
+    //   sum sq = (-0.05 + 0.033333)^2 + (0.1 + 0.033333)^2 + (-0.15 + 0.033333)^2
+    //          = 0.000278 + 0.017778 + 0.013611
+    //          = 0.031667
+    //   stdev = sqrt(0.031667 / 2) ≈ 0.125831
+    //   annualised (ppy=12) = 0.125831 * sqrt(12) ≈ 0.435890
+    let r = [-0.1, 0.2, -0.05, 0.1, -0.15];
+    let ppy = 12.0;
+    let rv = rolling_volatility(&r, 3, ppy);
+    assert_eq!(rv.len(), 3, "3-element window over 5 returns = 3 windows");
+
+    // Check each window against hand-computed stdev * sqrt(ppy).
+    let sd0 = (0.051_666_666_666_666_666_f64 / 2.0).sqrt();
+    let sd1 = (0.031_666_666_666_666_666_f64 / 2.0).sqrt();
+    close(rv[0], sd0 * ppy.sqrt(), "rolling_vol window 0");
+    close(rv[1], sd1 * ppy.sqrt(), "rolling_vol window 1");
+    close(rv[2], sd1 * ppy.sqrt(), "rolling_vol window 2");
+}
+
+#[test]
+fn rolling_volatility_empty_when_window_too_large() {
+    assert!(rolling_volatility(&[0.01, 0.02], 3, 252.0).is_empty());
+    assert!(rolling_volatility(&[0.01], 2, 252.0).is_empty());
 }

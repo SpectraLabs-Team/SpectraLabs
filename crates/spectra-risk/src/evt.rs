@@ -27,6 +27,8 @@ pub struct EvtTailModel {
 
 impl EvtTailModel {
     /// Fit a GPD to the upper tail of `losses` using Peaks-Over-Threshold (POT).
+    ///
+    /// Callers must check the GoF flag; not enforced here (see Task 8 findings).
     pub fn fit(losses: &[f64], threshold_quantile: f64) -> Result<Self> {
         let n = losses.len();
         if n < 50 {
@@ -62,19 +64,17 @@ impl EvtTailModel {
         let a_1 = a_1_sum / n_u as f64;
 
         let denom = a_0 - 2.0 * a_1;
-        let (mut xi, mut beta) = if denom.abs() > 1e-9 {
-            let xi_est = 2.0 - a_0 / denom;
-            let beta_est = (2.0 * a_0 * a_1) / denom;
-            (xi_est, beta_est)
-        } else {
-            (0.0, a_0)
-        };
+        if denom.abs() <= 1e-9 {
+            return Err(Error::Data("EVT PWM shape undefined: zero-variance tail exceedances".into()));
+        }
+        let xi = 2.0 - a_0 / denom;
+        let beta = (2.0 * a_0 * a_1) / denom;
 
         if beta <= 0.0 {
-            beta = a_0.max(1e-6);
-            xi = 0.0;
-        } else {
-            xi = xi.clamp(-0.5, 0.9);
+            return Err(Error::Data("EVT scale must be positive".into()));
+        }
+        if !(-0.5..=0.9).contains(&xi) {
+            return Err(Error::Data(format!("EVT shape {xi} outside the supported range [-0.5, 0.9]")));
         }
 
         let mut ks_stat = 0.0f64;
@@ -104,25 +104,38 @@ impl EvtTailModel {
     }
 
     /// Calculate EVT Value-at-Risk at confidence level `p` (e.g. 0.99 or 0.999).
-    pub fn var(&self, p: f64) -> f64 {
-        let p_clamped = p.clamp(0.0, 0.99999);
-        let ratio = (self.total_observations as f64 / self.exceedances_count as f64) * (1.0 - p_clamped);
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidArgument`] if `p` is not strictly in `(0, 1)`.
+    pub fn var(&self, p: f64) -> Result<f64> {
+        if !(p > 0.0 && p < 1.0) {
+            return Err(Error::InvalidArgument(format!("confidence level p must be in (0, 1), got {p}")));
+        }
+        let ratio = (self.total_observations as f64 / self.exceedances_count as f64) * (1.0 - p);
 
-        if self.xi.abs() < 1e-6 {
+        let val = if self.xi.abs() < 1e-6 {
             self.threshold - self.beta * ratio.max(1e-18).ln()
         } else {
             let term = ratio.max(1e-18).powf(-self.xi);
             self.threshold + (self.beta / self.xi) * (term - 1.0)
-        }
+        };
+        Ok(val)
     }
 
     /// Calculate EVT Expected Shortfall (CVaR) at confidence level `p`.
-    pub fn cvar(&self, p: f64) -> f64 {
-        let var_val = self.var(p);
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Data`] if the tail shape parameter $\xi \ge 1$, where the expected
+    /// shortfall is mathematically undefined (infinite mean).
+    /// Returns [`Error::InvalidArgument`] if `p` is not strictly in `(0, 1)`.
+    pub fn cvar(&self, p: f64) -> Result<f64> {
         if self.xi >= 1.0 {
-            return var_val;
+            return Err(Error::Data("EVT CVaR undefined for shape >= 1".into()));
         }
-        (var_val + self.beta - self.xi * self.threshold) / (1.0 - self.xi)
+        let var_val = self.var(p)?;
+        Ok((var_val + self.beta - self.xi * self.threshold) / (1.0 - self.xi))
     }
 }
 
@@ -150,10 +163,43 @@ mod tests {
             model.ks_statistic
         );
 
-        let var99 = model.var(0.99);
-        let cvar99 = model.cvar(0.99);
+        let var99 = model.var(0.99).unwrap();
+        let cvar99 = model.cvar(0.99).unwrap();
 
         assert!(var99 > model.threshold);
         assert!(cvar99 >= var99, "CVaR ({cvar99}) must be >= VaR ({var99})");
+    }
+
+    #[test]
+    fn test_evt_fit_zero_variance_tail_returns_error() {
+        // 81 losses at 1.0, 20 exceedances identical at 2.0 (all y_j = 1.0).
+        // For identical exceedances, a_0 = 1.0 and a_1 = 0.5, so denom = a_0 - 2*a_1 = 0.0.
+        let mut losses = vec![1.0; 81];
+        losses.extend(vec![2.0; 20]);
+        let err = EvtTailModel::fit(&losses, 0.8).unwrap_err();
+        assert_eq!(err, Error::Data("EVT PWM shape undefined: zero-variance tail exceedances".into()));
+    }
+
+    #[test]
+    fn test_evt_var_and_cvar_invalid_confidence() {
+        let mut losses = Vec::with_capacity(1000);
+        for i in 0..1000 {
+            let z = ((i as f64 * 0.17).sin() + (i as f64 * 0.53).cos()) * 0.7071;
+            let chi = (1.0 + (i as f64 * 0.31).sin().powi(2) + (i as f64 * 0.71).cos().powi(2)) / 3.0;
+            let t_val = z / chi.sqrt();
+            losses.push(100.0 * (t_val * 0.02));
+        }
+        let model = EvtTailModel::fit(&losses, 0.90).unwrap();
+
+        for bad_p in [0.0, 1.0, -0.05, 1.05, f64::NAN] {
+            assert!(
+                matches!(model.var(bad_p), Err(Error::InvalidArgument(_))),
+                "model.var({bad_p}) should be InvalidArgument"
+            );
+            assert!(
+                matches!(model.cvar(bad_p), Err(Error::InvalidArgument(_))),
+                "model.cvar({bad_p}) should be InvalidArgument"
+            );
+        }
     }
 }

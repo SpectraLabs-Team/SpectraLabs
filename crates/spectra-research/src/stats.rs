@@ -15,6 +15,8 @@
 
 pub use spectra_engine::metrics::nearest_rank_index;
 
+use spectra_core::{Error, Result};
+
 const EULER_GAMMA: f64 = 0.577_215_664_901_532_9;
 
 // --- erfc ---------------------------------------------------------------------
@@ -177,9 +179,12 @@ pub fn normal_cdf(x: f64) -> f64 {
 }
 
 /// Inverse standard normal CDF: Acklam's rational approximation plus one
-/// Halley refinement step. -inf at 0, +inf at 1, NaN outside [0, 1].
+/// Halley refinement step. -inf at 0, +inf at 1, Err outside [0, 1].
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if `p` is not in `[0, 1]` or is not finite.
 #[allow(clippy::unreadable_literal)]
-pub fn normal_inv_cdf(p: f64) -> f64 {
+pub fn normal_inv_cdf(p: f64) -> Result<f64> {
     const A: [f64; 6] = [
         -3.969683028665376e+01,
         2.209460984245205e+02,
@@ -207,14 +212,14 @@ pub fn normal_inv_cdf(p: f64) -> f64 {
         [7.784695709041462e-03, 3.224671290700398e-01, 2.445134137142996e+00, 3.754408661907416e+00];
     const P_LOW: f64 = 0.02425;
 
-    if !(0.0..=1.0).contains(&p) {
-        return f64::NAN;
+    if !p.is_finite() || !(0.0..=1.0).contains(&p) {
+        return Err(Error::InvalidArgument(format!("normal_inv_cdf argument must be in [0, 1], got {p}")));
     }
     if p == 0.0 {
-        return f64::NEG_INFINITY;
+        return Ok(f64::NEG_INFINITY);
     }
     if p == 1.0 {
-        return f64::INFINITY;
+        return Ok(f64::INFINITY);
     }
     let x = if p < P_LOW {
         let q = (-2.0 * p.ln()).sqrt();
@@ -232,7 +237,7 @@ pub fn normal_inv_cdf(p: f64) -> f64 {
     };
     let e = normal_cdf(x) - p;
     let u = e * (2.0 * std::f64::consts::PI).sqrt() * (x * x / 2.0).exp();
-    x - u / (1.0 + x * u / 2.0)
+    Ok(x - u / (1.0 + x * u / 2.0))
 }
 
 /// Sample moments.
@@ -250,22 +255,25 @@ pub struct Moments {
     pub raw_kurtosis: f64,
 }
 
-impl Default for Moments {
-    fn default() -> Self {
-        Self { n: 0, mean: 0.0, stdev: 0.0, skew: 0.0, raw_kurtosis: 3.0 }
-    }
-}
-
-/// Moments of `x`. With fewer than 2 points or zero variance: stdev 0, skew
-/// 0, raw_kurtosis 3.
-pub fn moments(x: &[f64]) -> Moments {
-    let mut m = Moments { n: x.len(), ..Moments::default() };
+/// Moments of `x`. Err when `x.len() < 2` or sample standard deviation is zero
+/// up to floating-point residue (sample_sd <= 1e-12 * scale).
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if `x` contains fewer than 2 elements, non-finite values,
+/// or has zero variance (sample standard deviation <= 1e-12 * scale).
+pub fn moments(x: &[f64]) -> Result<Moments> {
     if x.len() < 2 {
-        return m;
+        return Err(Error::InvalidArgument(format!(
+            "moments require at least 2 observations, got {}",
+            x.len()
+        )));
     }
     let n = x.len() as f64;
     let mut mean = 0.0;
     for &v in x {
+        if !v.is_finite() {
+            return Err(Error::InvalidArgument("non-finite value in moments input".into()));
+        }
         mean += v;
     }
     mean /= n;
@@ -276,82 +284,128 @@ pub fn moments(x: &[f64]) -> Moments {
         m3 += dv * dv * dv;
         m4 += dv * dv * dv * dv;
     }
-    m.mean = mean;
     // A series constant up to rounding has no spread. Without this test, sum-of-squares residue
     // gives a stdev around 1e-18 and a Sharpe near 1e15 (M26 task 5).
     let scale = x.iter().fold(0.0f64, |a, v| a.max(v.abs()));
     let sample_sd = (m2 / (n - 1.0)).sqrt();
     if sample_sd <= 1e-12 * scale {
-        return m;
+        return Err(Error::InvalidArgument("sample has zero variance; higher moments undefined".into()));
     }
-    m.stdev = sample_sd;
     m2 /= n;
     m3 /= n;
     m4 /= n;
-    if m2 > 0.0 {
-        m.skew = m3 / m2.powf(1.5);
-        m.raw_kurtosis = m4 / (m2 * m2);
-    }
-    m
+    let (skew, raw_kurtosis) = if m2 > 0.0 { (m3 / m2.powf(1.5), m4 / (m2 * m2)) } else { (0.0, 3.0) };
+    Ok(Moments { n: x.len(), mean, stdev: sample_sd, skew, raw_kurtosis })
 }
 
-/// Per-period Sharpe ratio; 0 when the standard deviation is 0 or n < 2.
-pub fn sharpe_per_period(returns: &[f64]) -> f64 {
-    let m = moments(returns);
-    if m.stdev > 0.0 {
-        m.mean / m.stdev
-    } else {
-        0.0
+/// Per-period Sharpe ratio; Err when n < 2 or the sample standard deviation is zero.
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if returns have fewer than 2 observations or zero variance.
+pub fn sharpe_per_period(returns: &[f64]) -> Result<f64> {
+    let m = moments(returns)?;
+    if !(m.stdev > 0.0) {
+        return Err(Error::InvalidArgument("stdev is zero".into()));
     }
+    Ok(m.mean / m.stdev)
 }
 
 /// Probability that the true Sharpe exceeds `sr_benchmark`, given an observed
 /// per-period Sharpe `sr` over `n_obs` returns with the given skew/kurtosis.
-/// NaN when `n_obs < 2` or the variance term is not positive.
-pub fn probabilistic_sharpe(sr: f64, sr_benchmark: f64, n_obs: usize, skew: f64, raw_kurt: f64) -> f64 {
+/// Err when `n_obs < 2`, the variance term is not positive, or inputs are non-finite.
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if any argument is non-finite, `n_obs < 2`, or the
+/// variance term is not positive.
+pub fn probabilistic_sharpe(
+    sr: f64,
+    sr_benchmark: f64,
+    n_obs: usize,
+    skew: f64,
+    raw_kurt: f64,
+) -> Result<f64> {
+    if !sr.is_finite() || !sr_benchmark.is_finite() || !skew.is_finite() || !raw_kurt.is_finite() {
+        return Err(Error::InvalidArgument("probabilistic_sharpe inputs must be finite".into()));
+    }
     if n_obs < 2 {
-        return f64::NAN;
+        return Err(Error::InvalidArgument(format!("probabilistic_sharpe requires n_obs >= 2, got {n_obs}")));
     }
     let var_term = 1.0 - skew * sr + (raw_kurt - 1.0) / 4.0 * sr * sr;
     if !(var_term > 0.0) {
-        return f64::NAN;
+        return Err(Error::InvalidArgument(format!(
+            "probabilistic_sharpe variance term ({var_term}) must be positive"
+        )));
     }
     let z = (sr - sr_benchmark) * ((n_obs - 1) as f64).sqrt() / var_term.sqrt();
-    normal_cdf(z)
+    Ok(normal_cdf(z))
 }
 
 /// Expected maximum per-period Sharpe among `n_trials` independent trials with
-/// zero true Sharpe. 0 when `n_trials <= 1` or the variance is not positive.
-pub fn expected_max_sharpe(sr_variance: f64, n_trials: usize) -> f64 {
-    if n_trials <= 1 || !(sr_variance > 0.0) {
-        return 0.0;
+/// zero true Sharpe. 0 when `n_trials == 1` or `sr_variance == 0.0`.
+/// Err when `n_trials == 0` or `sr_variance` is negative or non-finite.
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if `n_trials == 0` or `sr_variance` is negative or non-finite.
+pub fn expected_max_sharpe(sr_variance: f64, n_trials: usize) -> Result<f64> {
+    if n_trials == 0 {
+        return Err(Error::InvalidArgument("n_trials must be at least 1".into()));
+    }
+    if !sr_variance.is_finite() || sr_variance < 0.0 {
+        return Err(Error::InvalidArgument(format!(
+            "sr_variance must be finite and non-negative, got {sr_variance}"
+        )));
+    }
+    if n_trials == 1 || sr_variance == 0.0 {
+        return Ok(0.0);
     }
     let n = n_trials as f64;
-    let a = normal_inv_cdf(1.0 - 1.0 / n);
-    let b = normal_inv_cdf(1.0 - 1.0 / (n * std::f64::consts::E));
-    sr_variance.sqrt() * ((1.0 - EULER_GAMMA) * a + EULER_GAMMA * b)
+    let a = normal_inv_cdf(1.0 - 1.0 / n)?;
+    let b = normal_inv_cdf(1.0 - 1.0 / (n * std::f64::consts::E))?;
+    Ok(sr_variance.sqrt() * ((1.0 - EULER_GAMMA) * a + EULER_GAMMA * b))
 }
 
 /// Deflated Sharpe Ratio: PSR evaluated against [`expected_max_sharpe`].
-pub fn deflated_sharpe(returns: &[f64], n_trials: usize, sr_variance: f64) -> f64 {
-    let m = moments(returns);
-    let sr = if m.stdev > 0.0 { m.mean / m.stdev } else { 0.0 };
-    probabilistic_sharpe(sr, expected_max_sharpe(sr_variance, n_trials), m.n, m.skew, m.raw_kurtosis)
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if returns or trial variance are invalid or undefined.
+pub fn deflated_sharpe(returns: &[f64], n_trials: usize, sr_variance: f64) -> Result<f64> {
+    let m = moments(returns)?;
+    let sr = sharpe_per_period(returns)?;
+    let ems = expected_max_sharpe(sr_variance, n_trials)?;
+    probabilistic_sharpe(sr, ems, m.n, m.skew, m.raw_kurtosis)
 }
 
 /// Observations needed for PSR(sr vs benchmark) to reach `confidence`.
-/// +inf when `sr <= benchmark`; NaN when the variance term is not positive.
-pub fn min_track_record_length(sr: f64, sr_benchmark: f64, skew: f64, raw_kurt: f64, confidence: f64) -> f64 {
+/// +inf when `sr <= benchmark`; Err when confidence is invalid or the variance term is not positive.
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if inputs are non-finite, confidence is outside `(0, 1)`,
+/// or the variance term is not positive.
+pub fn min_track_record_length(
+    sr: f64,
+    sr_benchmark: f64,
+    skew: f64,
+    raw_kurt: f64,
+    confidence: f64,
+) -> Result<f64> {
+    if !sr.is_finite() || !sr_benchmark.is_finite() || !skew.is_finite() || !raw_kurt.is_finite() {
+        return Err(Error::InvalidArgument("min_track_record_length inputs must be finite".into()));
+    }
+    if !confidence.is_finite() || confidence <= 0.0 || confidence >= 1.0 {
+        return Err(Error::InvalidArgument(format!("confidence must be in (0, 1), got {confidence}")));
+    }
     if sr <= sr_benchmark {
-        return f64::INFINITY;
+        return Ok(f64::INFINITY);
     }
     let var_term = 1.0 - skew * sr + (raw_kurt - 1.0) / 4.0 * sr * sr;
     if !(var_term > 0.0) {
-        return f64::NAN;
+        return Err(Error::InvalidArgument(format!(
+            "min_track_record_length variance term ({var_term}) must be positive"
+        )));
     }
-    let z = normal_inv_cdf(confidence);
+    let z = normal_inv_cdf(confidence)?;
     let ratio = z / (sr - sr_benchmark);
-    1.0 + var_term * ratio * ratio
+    Ok(1.0 + var_term * ratio * ratio)
 }
 
 #[cfg(test)]
@@ -363,24 +417,43 @@ mod tests {
         assert!((normal_cdf(0.0) - 0.5).abs() < 1e-16);
         assert!((normal_cdf(1.959_963_984_540_054) - 0.975).abs() < 1e-12);
         for p in [1e-10, 0.001, 0.02425, 0.3, 0.5, 0.9, 0.99, 1.0 - 1e-9] {
-            assert!((normal_cdf(normal_inv_cdf(p)) - p).abs() < 1e-13 * p.max(1e-3) * 10.0, "p = {p}");
+            assert!(
+                (normal_cdf(normal_inv_cdf(p).unwrap()) - p).abs() < 1e-13 * p.max(1e-3) * 10.0,
+                "p = {p}"
+            );
         }
-        assert_eq!(normal_inv_cdf(0.0), f64::NEG_INFINITY);
-        assert!(normal_inv_cdf(1.5).is_nan());
+        assert_eq!(normal_inv_cdf(0.0).unwrap(), f64::NEG_INFINITY);
+        assert_eq!(normal_inv_cdf(1.0).unwrap(), f64::INFINITY);
+        assert!(normal_inv_cdf(1.5).is_err());
+        assert!(normal_inv_cdf(-0.1).is_err());
+        assert!(normal_inv_cdf(f64::NAN).is_err());
         assert_eq!(erfc(f64::INFINITY), 0.0);
         assert_eq!(erfc(f64::NEG_INFINITY), 2.0);
     }
 
     #[test]
     fn psr_dsr_and_track_record() {
-        assert!((probabilistic_sharpe(0.1, 0.1, 100, 0.0, 3.0) - 0.5).abs() < 1e-15);
-        assert!(probabilistic_sharpe(0.1, 0.0, 1, 0.0, 3.0).is_nan());
-        assert_eq!(expected_max_sharpe(0.01, 1), 0.0);
-        assert!(expected_max_sharpe(0.01, 100) > expected_max_sharpe(0.01, 10));
-        assert_eq!(min_track_record_length(0.0, 0.1, 0.0, 3.0, 0.95), f64::INFINITY);
-        let m = moments(&[1.0, 2.0, 3.0, 4.0]);
+        assert!((probabilistic_sharpe(0.1, 0.1, 100, 0.0, 3.0).unwrap() - 0.5).abs() < 1e-15);
+        assert!(probabilistic_sharpe(0.1, 0.0, 1, 0.0, 3.0).is_err());
+        assert!(probabilistic_sharpe(1.0, 0.0, 30, 10.0, 3.0).is_err());
+        assert_eq!(expected_max_sharpe(0.01, 1).unwrap(), 0.0);
+        assert_eq!(expected_max_sharpe(0.0, 10).unwrap(), 0.0);
+        assert!(expected_max_sharpe(0.01, 0).is_err());
+        assert!(expected_max_sharpe(-0.01, 10).is_err());
+        assert!(expected_max_sharpe(0.01, 100).unwrap() > expected_max_sharpe(0.01, 10).unwrap());
+        assert_eq!(min_track_record_length(0.0, 0.1, 0.0, 3.0, 0.95).unwrap(), f64::INFINITY);
+        assert!(min_track_record_length(0.2, 0.1, 0.0, 3.0, 0.95).unwrap().is_finite());
+        assert!(min_track_record_length(0.2, 0.1, 0.0, 3.0, 1.5).is_err());
+        assert!(min_track_record_length(0.2, 0.1, 0.0, 3.0, -0.1).is_err());
+        let m = moments(&[1.0, 2.0, 3.0, 4.0]).unwrap();
         assert_eq!(m.mean, 2.5);
         assert!((m.raw_kurtosis - 1.64).abs() < 1e-12);
-        assert_eq!(moments(&[1.0]).raw_kurtosis, 3.0);
+        assert!(moments(&[1.0]).is_err());
+        assert!(moments(&[2.0, 2.0, 2.0]).is_err());
+        assert!(sharpe_per_period(&[1.0, 2.0, 3.0, 4.0]).unwrap() > 0.0);
+        assert!(sharpe_per_period(&[1.0]).is_err());
+        assert!(sharpe_per_period(&[2.0, 2.0]).is_err());
+        assert!(deflated_sharpe(&[0.01, 0.02, -0.01, 0.03], 10, 0.01).unwrap().is_finite());
+        assert!(deflated_sharpe(&[0.01; 5], 10, 0.01).is_err());
     }
 }

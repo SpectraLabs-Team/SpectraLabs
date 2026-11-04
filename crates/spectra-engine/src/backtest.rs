@@ -1918,8 +1918,8 @@ fn pay_coupons(
     let Some(prev) = prev_ts else { return Ok(()) };
     for &id in setup.instruments.keys() {
         let Some(terms) = setup.bond_terms(id) else { continue };
-        for day in terms.coupon_days_between(prev, ts) {
-            let Some((start, end)) = terms.period_around(day * 86_400_000_000_000) else { continue };
+        for day in terms.coupon_days_between(prev, ts)? {
+            let Some((start, end)) = terms.period_around(day * 86_400_000_000_000)? else { continue };
             // Per 100 face, in the bond's currency, converted at the rate known now.
             let per_unit = setup.fx_convert(id, Price::from_f64(terms.coupon_amount(start, end))?, ts)?;
             if per_unit.is_zero() {
@@ -1957,7 +1957,7 @@ fn pay_coupons(
 
 /// Settles every option position once its expiry has come (M24.4): in the
 /// money, cash-settled at its intrinsic value against the underlying's last
-/// close at or before expiry; otherwise closed at zero. European, cash-settled.
+/// close at or before expiry; returns an error if no price is available at or before expiry. European, cash-settled.
 #[allow(clippy::too_many_arguments)]
 fn settle_options(
     setup: &InstrumentSetup,
@@ -1990,15 +1990,18 @@ fn settle_options(
             .underlying_of(id)
             .and_then(|u| history.get(&u))
             .and_then(|h| h.iter().rev().find(|b| b.ts_ns <= expiry))
-            .map(|b| b.close);
-        let intrinsic = spot.map_or(0.0, |s| right.intrinsic(s.to_f64(), strike.to_f64()));
+            .map(|b| b.close)
+            .ok_or_else(|| {
+                Error::Data(format!("no underlying price available at or before expiry for option {id}"))
+            })?;
+        // Defined zero: intrinsic is 0.0 when spot is known and the option is out of the money.
+        let intrinsic = right.intrinsic(spot.to_f64(), strike.to_f64());
         let settle_px = if intrinsic > 0.0 {
             Some(setup.fx_convert(id, Price::from_f64(intrinsic)?, ts)?).filter(|p| p.raw() > 0)
         } else {
             None
         };
-        let note =
-            spot.is_none().then(|| "no underlying price at or before expiry; closed at zero".to_string());
+        let note = None;
         for owner in 0..owners {
             let qty = sleeves.get(owner).unwrap_or(ledger).position(id).qty;
             if qty.is_zero() {
@@ -2107,7 +2110,7 @@ fn pay_swap_coupons(
     let Some(prev) = prev_ts else { return Ok(()) };
     for &id in setup.instruments.keys() {
         let Some(terms) = setup.swap_terms(id) else { continue };
-        for day in terms.payment_days_between(prev, ts) {
+        for day in terms.payment_days_between(prev, ts)? {
             let held = |book: &Ledger| !book.position(id).qty.is_zero();
             if !held(ledger) && !sleeves.iter().any(held) {
                 continue;
@@ -2270,7 +2273,7 @@ fn run_inner<'s>(
     let financed = !fin.is_zero();
     let interval = check_uniform_intervals(bars)?;
     let sessions = SessionRule::new(cfg.exchange, interval);
-    let chains = Chains::new(setup, &setup.roll, cfg.exchange);
+    let chains = Chains::new(setup, &setup.roll, cfg.exchange)?;
     let has_bonds = setup.instruments.values().any(|i| i.kind == InstrumentType::Bond);
     let has_options = setup.instruments.values().any(|i| i.kind == InstrumentType::Option);
     let has_swaps = setup.instruments.values().any(|i| i.kind == InstrumentType::Swap);

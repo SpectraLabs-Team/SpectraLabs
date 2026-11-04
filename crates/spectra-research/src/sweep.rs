@@ -142,6 +142,9 @@ pub type StrategyFactory<'a> = dyn Fn(&ParamSet) -> Result<Box<dyn Strategy>> + 
 /// Scores a backtest; higher is better.
 pub type Objective<'a> = dyn Fn(&BacktestResult) -> f64 + Sync + 'a;
 
+/// Valid objective function names supported by the engine.
+pub const VALID_OBJECTIVES: &[&str] = &["sharpe", "total_return"];
+
 /// Annualized Sharpe from the equity curve; -inf when metrics are not valid.
 pub fn objective_sharpe(r: &BacktestResult) -> f64 {
     if r.metrics.valid {
@@ -320,19 +323,24 @@ pub struct TrialLedger {
 }
 
 impl TrialLedger {
-    /// Records every trial of a sweep.
-    pub fn add(&mut self, label: &str, sweep: &SweepResult) {
+    /// Records every trial of a sweep. Undefined Sharpe (e.g. constant returns / zero trades)
+    /// defaults to 0.0 in the ledger summary matching C++ quantforge behavior.
+    ///
+    /// # Errors
+    /// Returns `Ok(())`. Retained as fallible for API compatibility.
+    pub fn add(&mut self, label: &str, sweep: &SweepResult) -> Result<()> {
         for t in &sweep.trials {
             self.trials.push(TrialSummary {
                 id: t.id,
                 label: label.into(),
                 params: t.params.canonical(),
                 result_sha256: t.run.result_sha256.clone(),
-                sharpe_per_period: sharpe_per_period(&t.returns),
+                sharpe_per_period: sharpe_per_period(&t.returns).unwrap_or(0.0),
                 n_obs: t.returns.len(),
                 objective: t.objective,
             });
         }
+        Ok(())
     }
     /// Records one summary.
     pub fn add_summary(&mut self, summary: TrialSummary) {

@@ -2706,8 +2706,8 @@ export interface components {
             dataset_version_id: string;
             dsl_code?: string | null;
             embargo?: number | null;
-            mode?: string;
-            objective?: string;
+            mode: string;
+            objective: string;
             param_grid: unknown;
             step_size?: number | null;
             strategy?: string | null;

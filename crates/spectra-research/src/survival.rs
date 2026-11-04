@@ -1274,24 +1274,34 @@ pub fn run_survival_lab_controlled<'a>(
     let base = run_one(bars, factory, config, params)?;
     let base_sum = summarize(&base);
     let base_returns = spectra_engine::returns_from_curve(&base.equity_curve);
-    rep.statistical_strength.return_bootstrap = block_bootstrap_returns(
+    rep.baseline_fills = count_fills(&base.ledger);
+    let extraction = extract_trades(&base.ledger)?;
+    rep.trade_pnl_sorted = extraction.trades.iter().map(|trade| trade.net.to_f64()).collect();
+    rep.trade_pnl_sorted.sort_by(f64::total_cmp);
+    let traded = rep.baseline_fills > 0 && base_sum.valid;
+
+    rep.statistical_strength.return_bootstrap = match block_bootstrap_returns(
         &base_returns,
         config.initial_cash.to_f64(),
         config.periods_per_year,
         sc.return_bootstrap_block_length.min(base_returns.len()),
         sc.return_bootstrap_resamples,
         sc.seed,
-    );
+    ) {
+        Ok(b) => b,
+        Err(_) => ReturnBlockBootstrap {
+            valid: true,
+            periods: base_returns.len(),
+            block_length: sc.return_bootstrap_block_length.min(base_returns.len()),
+            resamples: sc.return_bootstrap_resamples,
+            ..ReturnBlockBootstrap::default()
+        },
+    };
     rep.baseline_equity = equity_index(&base_returns);
     rep.drawdown_curve = drawdowns(&rep.baseline_equity);
     rep.benchmark_equity = equity_index(&benchmark_returns(bars));
     rep.baseline = base.metrics;
     rep.baseline_run = base.run.clone();
-    rep.baseline_fills = count_fills(&base.ledger);
-    let extraction = extract_trades(&base.ledger)?;
-    rep.trade_pnl_sorted = extraction.trades.iter().map(|trade| trade.net.to_f64()).collect();
-    rep.trade_pnl_sorted.sort_by(f64::total_cmp);
-    let traded = rep.baseline_fills > 0 && base_sum.valid;
 
     rep.assumptions = [
         "Every test re-runs the full event-driven backtest on the same bars; only the named input changes.",
@@ -1665,11 +1675,12 @@ pub fn run_survival_lab_controlled<'a>(
 
     // ---- 7. Regime sensitivity & 8. Benchmark-relative -----------------------
     {
-        let rs = aligned_returns(&base.equity_curve);
+        let rs_res = aligned_returns(&base.equity_curve);
         let rb = benchmark_returns(bars);
         let rg = &mut rep.regimes;
         let bm = &mut rep.benchmark;
-        if !traded || rs.len() != rb.len() {
+        let rs_valid = rs_res.as_ref().is_ok_and(|rs| rs.len() == rb.len());
+        if !traded || !rs_valid {
             rg.finding = if traded {
                 "Strategy and benchmark return series are not aligned.".into()
             } else {
@@ -1677,17 +1688,18 @@ pub fn run_survival_lab_controlled<'a>(
             };
             bm.finding.clone_from(&rg.finding);
         } else {
-            bm.metrics = compute_benchmark_metrics(&rs, &rb, config.periods_per_year)?;
-            let (mut sum, mut cnt) = (0.0, 0usize);
-            for p in &base.equity_curve {
-                let e = p.equity.to_f64();
-                if e > 0.0 {
-                    sum += (e - p.cash.to_f64()).abs() / e;
-                    cnt += 1;
+            let rs = rs_res.expect("rs_valid is true");
+            if let Ok(m) = compute_benchmark_metrics(&rs, &rb, config.periods_per_year) {
+                bm.metrics = m;
+                let (mut sum, mut cnt) = (0.0, 0usize);
+                for p in &base.equity_curve {
+                    let e = p.equity.to_f64();
+                    if e > 0.0 {
+                        sum += (e - p.cash.to_f64()).abs() / e;
+                        cnt += 1;
+                    }
                 }
-            }
-            bm.average_net_exposure = if cnt > 0 { sum / cnt as f64 } else { 0.0 };
-            if bm.metrics.valid {
+                bm.average_net_exposure = if cnt > 0 { sum / cnt as f64 } else { 0.0 };
                 let m = &bm.metrics;
                 bm.verdict = if m.alpha_annualized <= 0.0 || m.information_ratio <= 0.0 {
                     Verdict::Warn
@@ -1704,6 +1716,7 @@ pub fn run_survival_lab_controlled<'a>(
                     fmt_f(bm.average_net_exposure * 100.0, 1)
                 );
             } else {
+                bm.verdict = Verdict::Insufficient;
                 bm.finding = "The benchmark has no variance or too few periods to compare against.".into();
             }
 
@@ -1766,11 +1779,9 @@ pub fn run_survival_lab_controlled<'a>(
                         mean /= values.len() as f64;
                         out.mean_return = mean;
                         if values.len() >= sc.regime_min_per_bucket {
-                            let mo = moments(values);
-                            out.sharpe = if mo.stdev > 0.0 {
-                                mean / mo.stdev * config.periods_per_year.sqrt()
-                            } else {
-                                0.0
+                            out.sharpe = match moments(values) {
+                                Ok(mo) => mean / mo.stdev * config.periods_per_year.sqrt(),
+                                Err(_) => f64::NAN,
                             };
                         }
                     }
@@ -1829,11 +1840,11 @@ pub fn run_survival_lab_controlled<'a>(
                     if !values.is_empty() {
                         bucket.mean_return = values.iter().sum::<f64>() / values.len() as f64;
                         if values.len() >= sc.regime_min_per_bucket {
-                            let distribution = moments(&values);
-                            bucket.sharpe = if distribution.stdev > 0.0 {
-                                distribution.mean / distribution.stdev * config.periods_per_year.sqrt()
-                            } else {
-                                0.0
+                            bucket.sharpe = match moments(&values) {
+                                Ok(distribution) => {
+                                    distribution.mean / distribution.stdev * config.periods_per_year.sqrt()
+                                }
+                                Err(_) => f64::NAN,
                             };
                         }
                     }
@@ -1850,32 +1861,42 @@ pub fn run_survival_lab_controlled<'a>(
         let rk = &mut rep.risk;
         let eq: Vec<f64> = base.equity_curve.iter().map(|p| p.equity.to_f64()).collect();
         rk.drawdown = compute_drawdown_stats(&eq);
-        rk.tail = compute_tail_stats(&aligned_returns(&base.equity_curve), sc.tail_level);
-        if rk.drawdown.valid {
-            rk.verdict = if rk.drawdown.max_drawdown >= sc.max_drawdown_fail {
-                Verdict::Fail
-            } else if rk.drawdown.max_drawdown >= sc.max_drawdown_warn {
-                Verdict::Warn
-            } else {
-                Verdict::Pass
-            };
-            rk.finding = format!(
-                "Max drawdown {}%, longest time under water {} periods",
-                fmt_f(rk.drawdown.max_drawdown * 100.0, 1),
-                rk.drawdown.longest_underwater
-            );
-            rk.finding += &if rk.tail.valid {
-                format!(
-                    "; historical {}% VaR {}% and ES {}% per period.",
-                    fmt_f(sc.tail_level * 100.0, 0),
-                    f2(rk.tail.var * 100.0),
-                    f2(rk.tail.es * 100.0)
-                )
-            } else {
-                "; too few returns for tail estimates.".into()
-            };
-        } else {
-            rk.finding = "Too few equity points to measure drawdown.".into();
+        match aligned_returns(&base.equity_curve) {
+            Err(_) => {
+                rk.verdict = Verdict::Insufficient;
+                rk.finding =
+                    "Tail statistics are undefined because the equity curve has non-positive prior equity."
+                        .into();
+            }
+            Ok(ret) => {
+                rk.tail = compute_tail_stats(&ret, sc.tail_level);
+                if rk.drawdown.valid {
+                    rk.verdict = if rk.drawdown.max_drawdown >= sc.max_drawdown_fail {
+                        Verdict::Fail
+                    } else if rk.drawdown.max_drawdown >= sc.max_drawdown_warn {
+                        Verdict::Warn
+                    } else {
+                        Verdict::Pass
+                    };
+                    rk.finding = format!(
+                        "Max drawdown {}%, longest time under water {} periods",
+                        fmt_f(rk.drawdown.max_drawdown * 100.0, 1),
+                        rk.drawdown.longest_underwater
+                    );
+                    rk.finding += &if rk.tail.valid {
+                        format!(
+                            "; historical {}% VaR {}% and ES {}% per period.",
+                            fmt_f(sc.tail_level * 100.0, 0),
+                            f2(rk.tail.var * 100.0),
+                            f2(rk.tail.es * 100.0)
+                        )
+                    } else {
+                        "; too few returns for tail estimates.".into()
+                    };
+                } else {
+                    rk.finding = "Too few equity points to measure drawdown.".into();
+                }
+            }
         }
     }
     execution.complete_test(9);

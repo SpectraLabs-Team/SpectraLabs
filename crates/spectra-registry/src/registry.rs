@@ -1006,7 +1006,10 @@ impl Registry {
             .with("seed", Json::string(input.run.seed.to_string()))
             .with("bar_count", Json::integer(input.run.bar_count as i64))
             .with("metrics", metrics_to_json(&input.metrics)?)
-            .with("sharpe_per_period", finite_metric(sharpe_per_period(&input.returns), "sharpe_per_period")?)
+            .with(
+                "sharpe_per_period",
+                finite_metric(sharpe_per_period(&input.returns)?, "sharpe_per_period")?,
+            )
             .with("n_obs", Json::integer(input.returns.len() as i64))
             .with("counts_as_trial", Json::boolean(input.counts_as_trial))
             .with("note", Json::string(input.note.clone()));

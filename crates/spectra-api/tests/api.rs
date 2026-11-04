@@ -676,7 +676,7 @@ async fn preview_checks_every_row_of_the_sample_not_just_the_rows_it_returns() {
 async fn m7_regimes_endpoint() {
     let mut returns = Vec::new();
     for i in 0..50 {
-        returns.push(if i < 25 { 0.001 } else { -0.015 });
+        returns.push(if (i < 15) || (30..40).contains(&i) { 0.001 } else { -0.015 });
     }
     let body = Json::object()
         .with("returns", Json::Array(returns.into_iter().map(|v| Json::number(v).unwrap()).collect()))
@@ -710,7 +710,10 @@ async fn m7_garch_endpoint() {
 async fn m7_evt_endpoint() {
     let mut losses = Vec::new();
     for i in 0..100 {
-        losses.push(10.0 + f64::from(i));
+        let z = ((f64::from(i) * 0.17).sin() + (f64::from(i) * 0.53).cos()) * std::f64::consts::FRAC_1_SQRT_2;
+        let chi = (1.0 + (f64::from(i) * 0.31).sin().powi(2) + (f64::from(i) * 0.71).cos().powi(2)) / 3.0;
+        let t_val = z / chi.sqrt();
+        losses.push((100.0 * t_val * 0.02).abs() + 1.0);
     }
     let body = Json::object()
         .with("losses", Json::Array(losses.into_iter().map(|v| Json::number(v).unwrap()).collect()))
@@ -774,15 +777,51 @@ async fn m7_correlated_copula_risk() {
 
 #[tokio::test]
 async fn m7_advanced_regimes_3state_endpoint() {
-    let mut returns = Vec::new();
-    for i in 0..60 {
-        returns.push(if i < 20 {
-            0.002
-        } else if i < 40 {
-            -0.0005
-        } else {
-            -0.025
-        });
+    let mut rng_state = 123_456_789_u64;
+    let mut next_u01 = || {
+        rng_state = rng_state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        (rng_state >> 33) as f64 / 2_147_483_648.0
+    };
+    let mut returns = Vec::with_capacity(300);
+    let mut cur_state = 0;
+    for _ in 0..300 {
+        let u = next_u01();
+        cur_state = match cur_state {
+            0 => {
+                if u < 0.7 {
+                    0
+                } else if u < 0.9 {
+                    1
+                } else {
+                    2
+                }
+            }
+            1 => {
+                if u < 0.15 {
+                    0
+                } else if u < 0.85 {
+                    1
+                } else {
+                    2
+                }
+            }
+            _ => {
+                if u < 0.1 {
+                    0
+                } else if u < 0.3 {
+                    1
+                } else {
+                    2
+                }
+            }
+        };
+        let noise = (next_u01() - 0.5) * 0.001;
+        let val = match cur_state {
+            0 => 0.001 + noise,
+            1 => -0.0005 + noise * 3.0,
+            _ => -0.005 + noise * 10.0,
+        };
+        returns.push(val);
     }
     let body = Json::object()
         .with("returns", Json::Array(returns.into_iter().map(|v| Json::number(v).unwrap()).collect()))

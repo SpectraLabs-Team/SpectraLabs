@@ -458,11 +458,79 @@ fn test_parser_defaults_in_dependence_model_parse() {
     // Task 7: DependenceModel::parse() requires explicit parameters instead of hardcoded silent defaults:
     // "t_copula" without parameter returns Error::InvalidArgument, "t_copula:4" returns dof 4.
     // "clayton" without parameter returns Error::InvalidArgument, "clayton:2.0" returns theta 2.0.
-    assert!(DependenceModel::parse("t_copula").is_err());
-    assert!(DependenceModel::parse("student_t").is_err());
-    assert!(DependenceModel::parse("t").is_err());
-    assert!(DependenceModel::parse("t_copula:0").is_err());
+    match DependenceModel::parse("t_copula") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(
+                msg.contains("degrees_of_freedom") || msg.contains("dof"),
+                "error message must name degrees_of_freedom/dof: {msg}"
+            );
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
+    match DependenceModel::parse("student_t") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(
+                msg.contains("degrees_of_freedom") || msg.contains("dof"),
+                "error message must name degrees_of_freedom/dof: {msg}"
+            );
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
+    match DependenceModel::parse("t") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(
+                msg.contains("degrees_of_freedom") || msg.contains("dof"),
+                "error message must name degrees_of_freedom/dof: {msg}"
+            );
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
 
+    match DependenceModel::parse("clayton") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("theta"), "error message must name theta: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
+    match DependenceModel::parse("clayton_copula") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("theta"), "error message must name theta: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument, got {other:?}"),
+    }
+
+    // dof < 1 (including dof 0 and dof 0.5) returns Error::InvalidArgument
+    match DependenceModel::parse("t_copula:0") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("at least 1"), "expected error on dof 0: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument on dof 0, got {other:?}"),
+    }
+    match DependenceModel::parse("t_copula:0.5") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(
+                msg.contains("at least 1") || msg.contains("invalid degrees_of_freedom"),
+                "expected error on dof 0.5: {msg}"
+            );
+        }
+        other => panic!("expected Error::InvalidArgument on dof 0.5, got {other:?}"),
+    }
+
+    // theta < 0.1 (including theta 0.0 and theta 0.05) returns Error::InvalidArgument
+    match DependenceModel::parse("clayton:0.0") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("at least 0.1"), "expected error on theta 0.0: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument on theta 0.0, got {other:?}"),
+    }
+    match DependenceModel::parse("clayton:0.05") {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("at least 0.1"), "expected error on theta 0.05: {msg}");
+        }
+        other => panic!("expected Error::InvalidArgument on theta 0.05, got {other:?}"),
+    }
+
+    // Explicit valid parameters parse correctly
     assert_eq!(
         DependenceModel::parse("t_copula:4").expect("parse t_copula:4"),
         DependenceModel::TCopula { degrees_of_freedom: 4 }
@@ -475,6 +543,11 @@ fn test_parser_defaults_in_dependence_model_parse() {
     assert!(DependenceModel::parse("clayton").is_err());
     assert!(DependenceModel::parse("clayton_copula").is_err());
     assert!(DependenceModel::parse("clayton:0.0").is_err());
+
+    assert_eq!(
+        DependenceModel::parse("t:3").expect("parse t:3"),
+        DependenceModel::TCopula { degrees_of_freedom: 3 }
+    );
 
     assert_eq!(
         DependenceModel::parse("clayton:2.0").expect("parse clayton:2.0"),

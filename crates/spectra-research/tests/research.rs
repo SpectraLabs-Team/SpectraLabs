@@ -216,9 +216,9 @@ fn survival_lab_flags_a_lucky_noise_winner_for_validation_not_stress() {
     let mut ledger = TrialLedger::default();
     let sweep =
         run_sweep(&bars, &factory, &cfg, &grid(), &objective_sharpe, SweepOptions { threads: 4 }, 1).unwrap();
-    ledger.add("noise", &sweep);
+    ledger.add("noise", &sweep).unwrap();
     let best = sweep.best_trial().unwrap();
-    let v = validate_selection(best, &ledger, 252.0, None, 0.95);
+    let v = validate_selection(best, &ledger, 252.0, None, 0.95).unwrap();
     assert!(v.dsr < 0.95, "DSR {}", v.dsr);
     let sc = SurvivalConfig {
         integer_params: BTreeSet::from(["fast".into(), "slow".into()]),

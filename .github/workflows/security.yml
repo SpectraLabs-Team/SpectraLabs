@@ -72,5 +72,11 @@ jobs:
       # RustSec has no fixed rsa release; keep auditing everything else and re-evaluate this
       # exception when SQLx drops that optional lockfile dependency or rsa is fixed.
       # Parquet depends on paste (RUSTSEC-2024-0436 unmaintained).
+      # RUSTSEC-2026-0435: thrift 0.17.0
+      # Pulled in transitively by parquet 54.3.1 (thrift = "^0.17").
+      # Upstream patched version is >=0.23.0, which is a semver-breaking upgrade
+      # not supported by parquet 54.3.1. Requires upgrading parquet across major versions.
+      # Date: 2026-11-02
+      # remove by 2026-12-02
       - name: Audit Cargo.lock
-        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0436
+        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0435

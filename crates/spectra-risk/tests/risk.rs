@@ -359,3 +359,15 @@ fn correlated_copula_modes_produce_contributions_and_evt() {
         assert_eq!(sim.contributions.len(), 3);
     }
 }
+
+#[test]
+fn risk_engine_run_with_60_simulations_fails_due_to_evt_fit_error() {
+    let e = RiskEngine::new();
+    let p = sample();
+    let cfg = RiskConfig { simulations: 60, ..RiskConfig::default() };
+    let err = e.run(Metric::VaR, &p, &cfg).unwrap_err();
+    assert!(
+        matches!(err, Error::InvalidArgument(ref msg) if msg.contains("Too few exceedances")),
+        "expected too few exceedances EVT fit error, got: {err:?}"
+    );
+}

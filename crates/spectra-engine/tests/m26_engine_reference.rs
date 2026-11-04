@@ -133,14 +133,14 @@ fn bond() -> BondTerms {
 #[test]
 fn a_bond_on_a_coupon_date_prices_at_par_at_its_coupon_yield() {
     let val = ns(2029, 7, 1);
-    close(bond().price_from_yield(0.06, val), 100.0, 1e-9, "par price");
+    close(bond().price_from_yield(0.06, val).unwrap(), 100.0, 1e-9, "par price");
 }
 
 #[test]
 fn bond_price_at_eight_percent_matches_the_closed_form() {
     // Three periods of 3, 3 and 103 discounted at 4% a period.
     let val = ns(2029, 7, 1);
-    close(bond().price_from_yield(0.08, val), 97.224_908_966_772_87, 1e-9, "price at 8%");
+    close(bond().price_from_yield(0.08, val).unwrap(), 97.224_908_966_772_87, 1e-9, "price at 8%");
 }
 
 #[test]
@@ -162,7 +162,7 @@ fn accrued_interest_is_thirty_360_on_the_coupon() {
 #[test]
 fn bond_risk_matches_the_closed_form() {
     let val = ns(2029, 7, 1);
-    let risk = bond().risk(0.08, val);
+    let risk = bond().risk(0.08, val).unwrap();
     // Macaulay duration in years: (1*3/1.04 + 2*3/1.04^2 + 3*103/1.04^3) / P / 2.
     close(risk.macaulay, 1.456_066_302_868_930_4, 1e-9, "Macaulay duration");
     close(risk.modified, risk.macaulay / 1.04, 1e-12, "modified duration");

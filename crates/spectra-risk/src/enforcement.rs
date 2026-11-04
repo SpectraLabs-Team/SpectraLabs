@@ -162,8 +162,32 @@ impl PortfolioSnapshot {
         })
     }
 
+    /// 1-day 99% VaR and CVaR (the mean loss at or beyond VaR) as fractions of equity, from one
+    /// simulation under the enforcement dependence model. The VaR equals [`Self::var_pct`].
+    ///
+    /// # Errors
+    /// As [`Self::var_pct`].
+    pub fn var_and_cvar_pct(&self) -> Result<(f64, f64)> {
+        self.var_and_cvar_pct_with_model(crate::copula::DependenceModel::TCopula {
+            degrees_of_freedom: ENFORCEMENT_T_COPULA_DOF,
+        })
+    }
+
     /// Calculates 1-day 99% VaR as a fraction of equity under a specific dependence model.
+    ///
+    /// # Errors
+    /// As [`Self::var_and_cvar_pct_with_model`].
     pub fn var_pct_with_model(&self, model: crate::copula::DependenceModel) -> Result<f64> {
+        self.var_and_cvar_pct_with_model(model).map(|(var, _)| var)
+    }
+
+    /// 1-day 99% VaR and CVaR as fractions of equity under a specific dependence model, both
+    /// read from the same 2,000 simulated losses.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidArgument`] or [`Error::Data`] if the inputs, simulation or
+    /// quantile calculation fail.
+    pub fn var_and_cvar_pct_with_model(&self, model: crate::copula::DependenceModel) -> Result<(f64, f64)> {
         if self.equity <= 0.0 || !self.equity.is_finite() {
             return Err(Error::InvalidArgument(format!(
                 "portfolio equity must be positive to compute VaR as a fraction of equity, got {}",
@@ -171,7 +195,7 @@ impl PortfolioSnapshot {
             )));
         }
         if self.positions.is_empty() {
-            return Ok(0.0);
+            return Ok((0.0, 0.0));
         }
 
         if let crate::copula::DependenceModel::TCopula { degrees_of_freedom } = model {
@@ -203,7 +227,7 @@ impl PortfolioSnapshot {
 
         let n = p.assets().len();
         if n == 0 {
-            return Ok(0.0);
+            return Ok((0.0, 0.0));
         }
 
         if n > 1 {
@@ -213,13 +237,13 @@ impl PortfolioSnapshot {
         }
 
         // Run 2,000 simulations on 1-day horizon (1/252) at 99% confidence
-        match crate::copula::simulate_correlated(&p, None, model, 2_000, 42, 1.0 / 252.0, 0.99) {
-            Ok(sim) => match crate::metrics::value_at_risk(&sim.portfolio_losses, 0.99) {
-                Ok(var_dollars) => Ok(var_dollars.max(0.0) / self.equity),
-                Err(e) => Err(Error::Data(format!("var_pct quantile calculation failed: {e}"))),
-            },
-            Err(e) => Err(Error::Data(format!("var_pct simulation failed: {e}"))),
-        }
+        let sim = crate::copula::simulate_correlated(&p, None, model, 2_000, 42, 1.0 / 252.0, 0.99)
+            .map_err(|e| Error::Data(format!("var_pct simulation failed: {e}")))?;
+        let var_dollars = crate::metrics::value_at_risk(&sim.portfolio_losses, 0.99)
+            .map_err(|e| Error::Data(format!("var_pct quantile calculation failed: {e}")))?;
+        let cvar_dollars = crate::metrics::conditional_var(&sim.portfolio_losses, 0.99)
+            .map_err(|e| Error::Data(format!("cvar calculation failed: {e}")))?;
+        Ok((var_dollars.max(0.0) / self.equity, cvar_dollars.max(0.0) / self.equity))
     }
 }
 
@@ -1379,5 +1403,37 @@ mod tests {
         assert_eq!(res.verdict, PreTradeVerdict::Approved);
         assert_eq!(res.approved_qty, 100.0);
         assert_eq!(res.projected_metrics.var_pct, Some(0.0));
+    }
+
+    #[test]
+    fn test_var_and_cvar_share_one_simulation() {
+        let mut positions = HashMap::new();
+        positions.insert(
+            "AAPL".to_string(),
+            PositionSnapshot { qty: 100.0, price: 150.0, volatility: Some(0.25) },
+        );
+        let snap = PortfolioSnapshot {
+            cash: 85_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions,
+        };
+        let (var, cvar) = snap.var_and_cvar_pct().unwrap();
+        assert_eq!(var, snap.var_pct().unwrap(), "VaR must be unchanged by the CVaR addition");
+        assert!(var > 0.0);
+        assert!(cvar >= var, "CVaR {cvar} must be at least VaR {var}");
+    }
+
+    #[test]
+    fn test_var_and_cvar_empty_portfolio_is_zero() {
+        let snap = PortfolioSnapshot {
+            cash: 100_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions: HashMap::new(),
+        };
+        assert_eq!(snap.var_and_cvar_pct().unwrap(), (0.0, 0.0));
     }
 }

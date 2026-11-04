@@ -376,7 +376,8 @@ pub struct RiskDecisionView {
     pub symbol: String,
     pub side: String,
     pub requested_qty: f64,
-    pub price: f64,
+    /// `null` when no price was known (a kill-switch rejection of a market order).
+    pub price: Option<f64>,
     pub approved_qty: f64,
     pub verdict: String,
     pub breaches: serde_json::Value,
@@ -574,7 +575,7 @@ pub(crate) async fn fail_closed_response(
         symbol,
         side_str,
         qty,
-        price,
+        Some(price),
         0.0,
         "rejected",
         &breaches_json,
@@ -985,7 +986,7 @@ pub(crate) async fn pre_trade_check(
             OrderSide::Sell => "sell",
         },
         req.qty,
-        req.price,
+        Some(req.price),
         result.approved_qty,
         verdict_str,
         &breaches_json,
@@ -1448,12 +1449,11 @@ pub(crate) async fn replay_decision(
         "sell" => OrderSide::Sell,
         _ => OrderSide::Buy,
     };
-    let candidate = OrderCandidate {
-        symbol: decision.symbol.clone(),
-        side,
-        qty: decision.requested_qty,
-        price: decision.price,
+    let Some(price) = decision.price else {
+        return error_response(422, "Decision has no price, so it cannot be replayed.");
     };
+    let candidate =
+        OrderCandidate { symbol: decision.symbol.clone(), side, qty: decision.requested_qty, price };
 
     // Replay against the portfolio stored with the decision. Decisions recorded without a
     // snapshot (before snapshots were stored, or fail-closed decisions) cannot be replayed.

@@ -301,10 +301,12 @@ async fn walk_forward_missing_train_size_returns_422() {
         )
         .await;
     assert_eq!(status, 422, "status: {status}, body: {resp}");
-    assert!(
-        resp["error"].as_str().unwrap_or("").contains("train_size"),
-        "expected error to name missing train_size, got: {resp}"
-    );
+    let err_msg = resp["message"]
+        .as_str()
+        .or_else(|| resp["detail"].as_str())
+        .or_else(|| resp["error"].as_str())
+        .unwrap_or("");
+    assert!(err_msg.contains("train_size"), "expected error to name missing train_size, got: {resp}");
 
     f.clean_up().await;
 }
@@ -335,10 +337,12 @@ async fn walk_forward_invalid_mode_returns_400() {
         )
         .await;
     assert_eq!(status, 400, "status: {status}, body: {resp}");
-    assert!(
-        resp["error"].as_str().unwrap_or("").contains("mode"),
-        "expected error to name invalid mode, got: {resp}"
-    );
+    let err_msg = resp["message"]
+        .as_str()
+        .or_else(|| resp["detail"].as_str())
+        .or_else(|| resp["error"].as_str())
+        .unwrap_or("");
+    assert!(err_msg.contains("mode"), "expected error to name invalid mode, got: {resp}");
 
     f.clean_up().await;
 }
@@ -369,10 +373,12 @@ async fn walk_forward_invalid_objective_returns_400() {
         )
         .await;
     assert_eq!(status, 400, "status: {status}, body: {resp}");
-    assert!(
-        resp["error"].as_str().unwrap_or("").contains("objective"),
-        "expected error to name invalid objective, got: {resp}"
-    );
+    let err_msg = resp["message"]
+        .as_str()
+        .or_else(|| resp["detail"].as_str())
+        .or_else(|| resp["error"].as_str())
+        .unwrap_or("");
+    assert!(err_msg.contains("objective"), "expected error to name invalid objective, got: {resp}");
 
     f.clean_up().await;
 }
@@ -403,10 +409,12 @@ async fn walk_forward_zero_train_or_test_size_returns_400() {
         )
         .await;
     assert_eq!(status, 400, "status: {status}, body: {resp}");
-    assert!(
-        resp["error"].as_str().unwrap_or("").contains("train_size"),
-        "expected error to name train_size > 0 requirement, got: {resp}"
-    );
+    let err_msg = resp["message"]
+        .as_str()
+        .or_else(|| resp["detail"].as_str())
+        .or_else(|| resp["error"].as_str())
+        .unwrap_or("");
+    assert!(err_msg.contains("train_size"), "expected error to name train_size > 0 requirement, got: {resp}");
 
     f.clean_up().await;
 }

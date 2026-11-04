@@ -215,11 +215,12 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
         risk.gross_exposure(),
         risk.net_exposure(),
         risk.leverage(),
-        risk.drawdown_pct(),
+        risk.drawdown_pct().unwrap(),
         risk.daily_loss(),
         var_pct,
         &limits,
-    );
+    )
+    .unwrap();
 
     // Walk-forward efficiency.
     let (mean_is, mean_oos) = (0.84, 0.51);

@@ -125,3 +125,61 @@ Every single one of the 10 PR #202 `PositionSnapshot` sites overlaps with the si
   - No existing test asserts the behavior of `utilization(val, 0.0)` or `utilization(val, -10.0)`.
   - No existing test asserts `var_pct()` when `equity <= 0.0` or when all positions have `price <= 0.0`.
   - No existing test asserts `PreTradeChecker::evaluate` when `limits.max_var_pct == 0.0` or `equity <= 0.0`.
+
+---
+
+## 5. Divergence Entries & Behavior Changes
+
+#### 1. `PreTradeChecker::evaluate` & `PortfolioSnapshot::var_pct_with_model` — Non-Positive Equity ($E \le 0$)
+- **Function:** `PreTradeChecker::evaluate` and `PortfolioSnapshot::var_pct_with_model`
+- **Input:** `portfolio.equity <= 0.0` (or non-finite)
+- **Old value / Old behavior:** `var_pct_with_model` silently returned `Ok(0.0)`. In `evaluate`, concentration was defaulted to `0.0`, allowing insolvent accounts to bypass VaR and concentration checks.
+- **New behavior:** `PreTradeChecker::evaluate` immediately rejects through `PreTradeChecker::fail_closed` with verdict `Rejected`, approved quantity `0.0`, and breach code `system_fail_closed` ("portfolio equity must be positive; VaR and concentration are undefined"). Direct calls to `var_pct_with_model` return `Err(Error::InvalidArgument("portfolio equity must be positive to compute VaR as a fraction of equity, got ..."))`.
+
+#### 2. `PortfolioSnapshot::drawdown_pct` — Non-Positive Peak Equity ($E_{\text{peak}} \le 0$)
+- **Function:** `PortfolioSnapshot::drawdown_pct`
+- **Input:** `self.peak_equity <= 0.0` (or non-finite)
+- **Old value:** `0.0` (indicated 0% drawdown when peak was uninitialized or account bankrupt)
+- **New behavior:** Returns `Err(Error::InvalidArgument("drawdown is undefined when peak_equity <= 0.0, got ..."))`. Propagated by `PreTradeChecker::evaluate` instead of masking bankruptcy.
+
+#### 3. `PortfolioSnapshot::var_pct_with_model` — Non-Positive Position Price ($P \le 0$)
+- **Function:** `PortfolioSnapshot::var_pct_with_model`
+- **Input:** Position with `pos.qty.abs() > 1e-8` and `pos.price <= 0.0` (or non-finite)
+- **Old value / Old behavior:** Positions with non-positive prices were silently filtered out and dropped from simulation; returned `Ok(0.0)` if all positions were filtered out.
+- **New behavior:** Returns `Err(Error::InvalidArgument("position for {sym} has non-positive or non-finite price: ..."))`.
+
+#### 4. `utilization` & `LimitUtilization::new` — Non-Positive Limit ($\text{limit} \le 0$)
+- **Function:** `utilization` and `LimitUtilization::new`
+- **Input:** `limit <= 0.0` (or non-finite limit)
+- **Old value:** `0.0` (reported 0% utilization, masking breaches of strict zero limits)
+- **New behavior:** `utilization` returns `Err(Error::InvalidArgument("limit must be positive and finite, got ..."))`. `LimitUtilization::new` propagates the error as `Result<LimitUtilization>`.
+
+#### 5. `PreTradeChecker::evaluate` — Non-Positive VaR Limit (`max_var_pct <= 0`)
+- **Function:** `PreTradeChecker::evaluate`
+- **Input:** `limits.max_var_pct <= 0.0` (or non-finite)
+- **Old value / Old behavior:** The condition `if limits.max_var_pct > 0.0` evaluated to `false`, silently disabling pre-trade VaR enforcement entirely.
+- **New behavior:** `PreTradeChecker::evaluate` rejects the configuration with `Err(Error::InvalidArgument("RiskLimits max_var_pct must be positive and finite, got ..."))`.
+
+#### 6. `PortfolioSnapshot::var_pct_with_model` — Copula Simulation and Quantile Failures
+- **Function:** `PortfolioSnapshot::var_pct_with_model`
+- **Input:** Simulation failure (e.g. non-finite quantities/losses) or quantile calculation error
+- **Old value / Old behavior:** Silently fell back to crude parametric heuristic `(self.leverage() * 0.0165 * 2.33).max(0.0)`.
+- **New behavior:** Parametric fallback eliminated; propagates `Err(Error::Data("var_pct simulation failed: ..."))` or `Err(Error::Data("var_pct quantile calculation failed: ..."))`.
+
+#### 7. `PortfolioSnapshot::var_pct_with_model` — Multi-Asset Portfolio without Correlation Matrix
+- **Function:** `PortfolioSnapshot::var_pct_with_model`
+- **Input:** $N > 1$ assets with correlation matrix `None`
+- **Old value / Old behavior:** Silently defaulted to identity matrix ($I$), assuming complete asset independence.
+- **New behavior:** Returns `Err(Error::InvalidArgument("multi-asset VaR requires a correlation matrix; none available for {n} assets"))`.
+
+#### 8. `PreTradeChecker::evaluate` — Placeholder Zeros in Reject and Reduce Branches
+- **Function:** `PreTradeChecker::evaluate`
+- **Input:** Orders evaluated during kill-switch activation (rejected or reduced), or rejected during drawdown/daily loss limit breaches
+- **Old value / Old behavior:** Reported placeholder `0.0` for `concentration_pct` and `var_pct` in `ProjectedMetrics`.
+- **New behavior:** Computes the actual portfolio state metrics: `concentration_pct` is computed from the actual position value divided by equity (`current_pos_val / portfolio.equity`), and `var_pct` is computed from the actual existing or post-reduction portfolio via `portfolio.var_pct()?`.
+
+#### 9. `PortfolioSnapshot::var_pct` — Degrees of Freedom Literal in Enforcement Path
+- **Function:** `PortfolioSnapshot::var_pct`
+- **Location:** `crates/spectra-risk/src/enforcement.rs`
+- **Old value:** Hardcoded integer literal `4` in `DependenceModel::TCopula { degrees_of_freedom: 4 }`.
+- **New behavior:** Extracted and referenced as named constant `pub const ENFORCEMENT_T_COPULA_DOF: u32 = 4;`.

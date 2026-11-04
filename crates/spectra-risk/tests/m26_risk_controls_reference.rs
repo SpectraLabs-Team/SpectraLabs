@@ -107,6 +107,6 @@ fn a_uniform_shock_scales_the_portfolio_value_exactly() {
 
 #[test]
 fn utilization_is_value_over_limit_for_a_set_limit() {
-    close(utilization(50.0, 100.0), 0.5, TOL, "half used");
-    close(utilization(150.0, 100.0), 1.5, TOL, "over the limit");
+    close(utilization(50.0, 100.0).unwrap(), 0.5, TOL, "half used");
+    close(utilization(150.0, 100.0).unwrap(), 1.5, TOL, "over the limit");
 }

@@ -108,6 +108,9 @@ impl Default for PortfolioSnapshot {
     }
 }
 
+/// Default degrees of freedom for Student-t copula simulation in pre-trade risk enforcement.
+pub const ENFORCEMENT_T_COPULA_DOF: u32 = 4;
+
 impl PortfolioSnapshot {
     /// Calculate current gross exposure (sum of absolute position values).
     pub fn gross_exposure(&self) -> f64 {
@@ -129,11 +132,17 @@ impl PortfolioSnapshot {
     }
 
     /// Current drawdown: (peak_equity - equity) / peak_equity.
-    pub fn drawdown_pct(&self) -> f64 {
-        if self.peak_equity <= 0.0 {
-            0.0
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidArgument`] if `peak_equity <= 0.0` or is non-finite.
+    pub fn drawdown_pct(&self) -> Result<f64> {
+        if self.peak_equity <= 0.0 || !self.peak_equity.is_finite() {
+            Err(Error::InvalidArgument(format!(
+                "drawdown is undefined when peak_equity <= 0.0, got {}",
+                self.peak_equity
+            )))
         } else {
-            ((self.peak_equity - self.equity) / self.peak_equity).max(0.0)
+            Ok(((self.peak_equity - self.equity) / self.peak_equity).max(0.0))
         }
     }
 
@@ -143,17 +152,25 @@ impl PortfolioSnapshot {
     }
 
     /// Parametric or correlated copula 1-day 99% VaR approximation based on portfolio holdings.
-    /// Uses Student-t copula with 4 degrees of freedom.
+    /// Uses Student-t copula with [`ENFORCEMENT_T_COPULA_DOF`] degrees of freedom.
     ///
     /// # Errors
     /// Returns [`Error::InvalidArgument`] or [`Error::Data`] if the simulation or model fails.
     pub fn var_pct(&self) -> Result<f64> {
-        self.var_pct_with_model(crate::copula::DependenceModel::TCopula { degrees_of_freedom: 4 })
+        self.var_pct_with_model(crate::copula::DependenceModel::TCopula {
+            degrees_of_freedom: ENFORCEMENT_T_COPULA_DOF,
+        })
     }
 
     /// Calculates 1-day 99% VaR as a fraction of equity under a specific dependence model.
     pub fn var_pct_with_model(&self, model: crate::copula::DependenceModel) -> Result<f64> {
-        if self.equity <= 0.0 || self.positions.is_empty() {
+        if self.equity <= 0.0 || !self.equity.is_finite() {
+            return Err(Error::InvalidArgument(format!(
+                "portfolio equity must be positive to compute VaR as a fraction of equity, got {}",
+                self.equity
+            )));
+        }
+        if self.positions.is_empty() {
             return Ok(0.0);
         }
 
@@ -167,7 +184,13 @@ impl PortfolioSnapshot {
 
         let mut p = crate::portfolio::Portfolio::new();
         for (sym, pos) in &self.positions {
-            if pos.qty.abs() > 1e-8 && pos.price > 0.0 {
+            if pos.qty.abs() > 1e-8 {
+                if pos.price <= 0.0 || !pos.price.is_finite() {
+                    return Err(Error::InvalidArgument(format!(
+                        "position for {sym} has non-positive or non-finite price: {}",
+                        pos.price
+                    )));
+                }
                 let vol = pos
                     .volatility
                     .ok_or_else(|| Error::Data(format!("position for {sym} has no volatility")))?;
@@ -200,14 +223,15 @@ impl PortfolioSnapshot {
     }
 }
 
-/// How much of a limit is in use: `value / limit` (1.0 = at the limit). 0 when the limit is not
-/// set (`limit <= 0`).
-pub fn utilization(value: f64, limit: f64) -> f64 {
-    if limit > 0.0 {
-        value / limit
-    } else {
-        0.0
+/// How much of a limit is in use: `value / limit` (1.0 = at the limit).
+///
+/// # Errors
+/// Returns [`Error::InvalidArgument`] if `limit <= 0.0` or is non-finite.
+pub fn utilization(value: f64, limit: f64) -> Result<f64> {
+    if limit <= 0.0 || !limit.is_finite() {
+        return Err(Error::InvalidArgument(format!("limit must be positive and finite, got {limit}")));
     }
+    Ok(value / limit)
 }
 
 /// How much of each risk limit a portfolio is using, as fractions of the limit (1.0 = at the
@@ -232,6 +256,9 @@ pub struct LimitUtilization {
 
 impl LimitUtilization {
     /// Utilization from already-computed portfolio figures (`var_pct` is a fraction of equity).
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidArgument`] if any limit is non-positive or non-finite.
     pub fn new(
         gross: f64,
         net: f64,
@@ -240,15 +267,15 @@ impl LimitUtilization {
         daily_loss: f64,
         var_pct: f64,
         limits: &RiskLimits,
-    ) -> Self {
-        Self {
-            gross_exposure: utilization(gross, limits.max_gross_exposure),
-            net_exposure: utilization(net.abs(), limits.max_net_exposure),
-            leverage: utilization(leverage, limits.max_leverage),
-            drawdown: utilization(drawdown, limits.max_drawdown_pct),
-            daily_loss: utilization(daily_loss, limits.max_daily_loss),
-            var: utilization(var_pct, limits.max_var_pct),
-        }
+    ) -> Result<Self> {
+        Ok(Self {
+            gross_exposure: utilization(gross, limits.max_gross_exposure)?,
+            net_exposure: utilization(net.abs(), limits.max_net_exposure)?,
+            leverage: utilization(leverage, limits.max_leverage)?,
+            drawdown: utilization(drawdown, limits.max_drawdown_pct)?,
+            daily_loss: utilization(daily_loss, limits.max_daily_loss)?,
+            var: utilization(var_pct, limits.max_var_pct)?,
+        })
     }
 }
 
@@ -316,15 +343,33 @@ impl PreTradeChecker {
     /// Perform pre-trade evaluation of `order` against `limits` given current `portfolio` and kill-switch status.
     ///
     /// # Errors
-    /// Returns an error if risk calculation or portfolio VaR fails.
+    /// Returns an error if risk calculation or portfolio VaR fails, or if configuration parameters are invalid.
     pub fn evaluate(
         limits: &RiskLimits,
         portfolio: &PortfolioSnapshot,
         order: &OrderCandidate,
         kill_switch_active: bool,
     ) -> Result<PreTradeResult> {
-        let mut breaches = Vec::new();
+        if limits.max_var_pct <= 0.0 || !limits.max_var_pct.is_finite() {
+            return Err(Error::InvalidArgument(format!(
+                "RiskLimits max_var_pct must be positive and finite, got {}",
+                limits.max_var_pct
+            )));
+        }
+
+        if portfolio.equity <= 0.0 || !portfolio.equity.is_finite() {
+            return Ok(Self::fail_closed(
+                order,
+                "portfolio equity must be positive; VaR and concentration are undefined",
+            ));
+        }
+
+        let current_dd = portfolio.drawdown_pct()?;
+        let current_loss = portfolio.daily_loss();
         let current_pos_qty = portfolio.positions.get(&order.symbol).map_or(0.0, |p| p.qty);
+        let current_pos_val = (current_pos_qty * order.price).abs();
+        let current_concentration = current_pos_val / portfolio.equity;
+        let mut breaches = Vec::new();
 
         // 1. Emergency Kill Switch check (Task 5: block opening orders, allow closing/flattening)
         if kill_switch_active {
@@ -349,15 +394,11 @@ impl PreTradeChecker {
                         gross_exposure: portfolio.gross_exposure(),
                         net_exposure: portfolio.net_exposure(),
                         leverage: portfolio.leverage(),
-                        position_size: (current_pos_qty * order.price).abs(),
-                        concentration_pct: 0.0,
-                        drawdown_pct: portfolio.drawdown_pct(),
-                        daily_loss: portfolio.daily_loss(),
-                        var_pct: if limits.max_var_pct > 0.0 {
-                            portfolio.var_pct().unwrap_or(0.0)
-                        } else {
-                            0.0
-                        },
+                        position_size: current_pos_val,
+                        concentration_pct: current_concentration,
+                        drawdown_pct: current_dd,
+                        daily_loss: current_loss,
+                        var_pct: portfolio.var_pct()?,
                     },
                 });
             }
@@ -368,16 +409,24 @@ impl PreTradeChecker {
                 if limits.size_reduction_enabled && max_close_qty > 0.0 {
                     let approved_qty = max_close_qty;
                     let mut projected_gross = 0.0;
+                    let mut reduced_positions = portfolio.positions.clone();
+                    reduced_positions.remove(&order.symbol);
+
                     for (sym, pos) in &portfolio.positions {
                         if sym != &order.symbol {
                             projected_gross += pos.value().abs();
                         }
                     }
-                    let projected_leverage = if portfolio.equity <= 0.0 {
-                        f64::INFINITY
-                    } else {
-                        projected_gross / portfolio.equity
+                    let projected_leverage = projected_gross / portfolio.equity;
+
+                    let reduced_portfolio = PortfolioSnapshot {
+                        cash: portfolio.cash,
+                        equity: portfolio.equity,
+                        peak_equity: portfolio.peak_equity,
+                        daily_start_equity: portfolio.daily_start_equity,
+                        positions: reduced_positions,
                     };
+                    let reduced_var = reduced_portfolio.var_pct()?;
 
                     return Ok(PreTradeResult {
                         verdict: PreTradeVerdict::Reduced,
@@ -398,9 +447,9 @@ impl PreTradeChecker {
                             leverage: projected_leverage,
                             position_size: 0.0,
                             concentration_pct: 0.0,
-                            drawdown_pct: portfolio.drawdown_pct(),
-                            daily_loss: portfolio.daily_loss(),
-                            var_pct: 0.0,
+                            drawdown_pct: current_dd,
+                            daily_loss: current_loss,
+                            var_pct: reduced_var,
                         },
                     });
                 }
@@ -423,15 +472,11 @@ impl PreTradeChecker {
                         gross_exposure: portfolio.gross_exposure(),
                         net_exposure: portfolio.net_exposure(),
                         leverage: portfolio.leverage(),
-                        position_size: (current_pos_qty * order.price).abs(),
-                        concentration_pct: 0.0,
-                        drawdown_pct: portfolio.drawdown_pct(),
-                        daily_loss: portfolio.daily_loss(),
-                        var_pct: if limits.max_var_pct > 0.0 {
-                            portfolio.var_pct().unwrap_or(0.0)
-                        } else {
-                            0.0
-                        },
+                        position_size: current_pos_val,
+                        concentration_pct: current_concentration,
+                        drawdown_pct: current_dd,
+                        daily_loss: current_loss,
+                        var_pct: portfolio.var_pct()?,
                     },
                 });
             }
@@ -444,6 +489,8 @@ impl PreTradeChecker {
             let projected_pos_qty = current_pos_qty + signed_delta;
             let projected_pos_val = (projected_pos_qty * order.price).abs();
             let mut projected_gross = 0.0;
+            let mut projected_positions = portfolio.positions.clone();
+
             for (sym, pos) in &portfolio.positions {
                 if sym == &order.symbol {
                     projected_gross += projected_pos_val;
@@ -451,8 +498,26 @@ impl PreTradeChecker {
                     projected_gross += pos.value().abs();
                 }
             }
-            let projected_leverage =
-                if portfolio.equity <= 0.0 { f64::INFINITY } else { projected_gross / portfolio.equity };
+            let existing_vol = portfolio.positions.get(&order.symbol).and_then(|p| p.volatility);
+            if projected_pos_qty.abs() > 1e-8 {
+                projected_positions.insert(
+                    order.symbol.clone(),
+                    PositionSnapshot { qty: projected_pos_qty, price: order.price, volatility: existing_vol },
+                );
+            } else {
+                projected_positions.remove(&order.symbol);
+            }
+            let projected_leverage = projected_gross / portfolio.equity;
+            let projected_concentration = projected_pos_val / portfolio.equity;
+
+            let projected_portfolio = PortfolioSnapshot {
+                cash: portfolio.cash,
+                equity: portfolio.equity,
+                peak_equity: portfolio.peak_equity,
+                daily_start_equity: portfolio.daily_start_equity,
+                positions: projected_positions,
+            };
+            let projected_var = projected_portfolio.var_pct()?;
 
             return Ok(PreTradeResult {
                 verdict: PreTradeVerdict::Approved,
@@ -464,20 +529,15 @@ impl PreTradeChecker {
                     net_exposure: portfolio.net_exposure(),
                     leverage: projected_leverage,
                     position_size: projected_pos_val,
-                    concentration_pct: if portfolio.equity <= 0.0 {
-                        0.0
-                    } else {
-                        projected_pos_val / portfolio.equity
-                    },
-                    drawdown_pct: portfolio.drawdown_pct(),
-                    daily_loss: portfolio.daily_loss(),
-                    var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct().unwrap_or(0.0) } else { 0.0 },
+                    concentration_pct: projected_concentration,
+                    drawdown_pct: current_dd,
+                    daily_loss: current_loss,
+                    var_pct: projected_var,
                 },
             });
         }
 
         // 2. Drawdown & Daily Loss limits (Task 2: stored equity history)
-        let current_dd = portfolio.drawdown_pct();
         if current_dd > limits.max_drawdown_pct {
             breaches.push(RiskBreach {
                 code: "drawdown_exceeded".into(),
@@ -514,11 +574,11 @@ impl PreTradeChecker {
                     gross_exposure: portfolio.gross_exposure(),
                     net_exposure: portfolio.net_exposure(),
                     leverage: portfolio.leverage(),
-                    position_size: portfolio.positions.get(&order.symbol).map_or(0.0, |p| p.value().abs()),
-                    concentration_pct: 0.0,
+                    position_size: current_pos_val,
+                    concentration_pct: current_concentration,
                     drawdown_pct: current_dd,
                     daily_loss: current_loss,
-                    var_pct: if limits.max_var_pct > 0.0 { portfolio.var_pct().unwrap_or(0.0) } else { 0.0 },
+                    var_pct: portfolio.var_pct()?,
                 },
             });
         }
@@ -562,11 +622,8 @@ impl PreTradeChecker {
             projected_positions.remove(&order.symbol);
         }
 
-        let projected_leverage =
-            if portfolio.equity <= 0.0 { f64::INFINITY } else { projected_gross / portfolio.equity };
-
-        let projected_concentration =
-            if portfolio.equity <= 0.0 { 0.0 } else { projected_pos_val / portfolio.equity };
+        let projected_leverage = projected_gross / portfolio.equity;
+        let projected_concentration = projected_pos_val / portfolio.equity;
 
         let projected_portfolio = PortfolioSnapshot {
             cash: portfolio.cash,
@@ -575,14 +632,10 @@ impl PreTradeChecker {
             daily_start_equity: portfolio.daily_start_equity,
             positions: projected_positions,
         };
-        let projected_var = if limits.max_var_pct > 0.0 {
-            match projected_portfolio.var_pct() {
-                Ok(v) => v,
-                Err(Error::Data(ref msg)) if msg.contains("has no volatility") => 0.0,
-                Err(e) => return Err(e),
-            }
-        } else {
-            0.0
+        let projected_var = match projected_portfolio.var_pct() {
+            Ok(v) => v,
+            Err(Error::Data(ref msg)) if msg.contains("has no volatility") => 0.0,
+            Err(e) => return Err(e),
         };
 
         let projected_metrics = ProjectedMetrics {
@@ -659,7 +712,7 @@ impl PreTradeChecker {
             });
         }
 
-        if limits.max_var_pct > 0.0 && projected_var > limits.max_var_pct {
+        if projected_var > limits.max_var_pct {
             breaches.push(RiskBreach {
                 code: "var_limit_exceeded".into(),
                 limit: limits.max_var_pct,
@@ -691,20 +744,16 @@ impl PreTradeChecker {
             let max_qty_for_gross = ((limits.max_gross_exposure - other_gross) / order.price).max(0.0);
             let max_qty_for_lev =
                 (((limits.max_leverage * portfolio.equity) - other_gross) / order.price).max(0.0);
-            let max_qty_for_var = if limits.max_var_pct > 0.0 {
-                if let Some(vol) = existing_vol {
-                    if vol <= 0.0 || !vol.is_finite() {
-                        return Err(Error::Data(format!(
-                            "position for {} has invalid volatility: {vol}",
-                            order.symbol
-                        )));
-                    }
-                    let var_factor = (vol * 2.3263) / (252.0_f64).sqrt();
-                    let max_gross_for_var = (limits.max_var_pct * portfolio.equity) / var_factor;
-                    ((max_gross_for_var - other_gross) / order.price).max(0.0)
-                } else {
-                    f64::INFINITY
+            let max_qty_for_var = if let Some(vol) = existing_vol {
+                if vol <= 0.0 || !vol.is_finite() {
+                    return Err(Error::Data(format!(
+                        "position for {} has invalid volatility: {vol}",
+                        order.symbol
+                    )));
                 }
+                let var_factor = (vol * 2.3263) / (252.0_f64).sqrt();
+                let max_gross_for_var = (limits.max_var_pct * portfolio.equity) / var_factor;
+                ((max_gross_for_var - other_gross) / order.price).max(0.0)
             } else {
                 f64::INFINITY
             };
@@ -951,5 +1000,278 @@ mod tests {
             err.to_string(),
             "multi-asset VaR requires a correlation matrix; none available for 2 assets"
         );
+    }
+
+    #[test]
+    fn test_equity_non_positive_rejects_through_fail_closed() {
+        let limits = RiskLimits::default();
+        let portfolio_zero = PortfolioSnapshot {
+            cash: 0.0,
+            equity: 0.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions: HashMap::new(),
+        };
+        let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 10.0, price: 150.0 };
+
+        let res = PreTradeChecker::evaluate(&limits, &portfolio_zero, &order, false).unwrap();
+        assert_eq!(res.verdict, PreTradeVerdict::Rejected);
+        assert_eq!(res.approved_qty, 0.0);
+        assert_eq!(res.breaches[0].code, "system_fail_closed");
+        assert!(res.breaches[0].message.contains("portfolio equity must be positive"));
+
+        // Negative equity also rejects via fail_closed
+        let portfolio_neg = PortfolioSnapshot {
+            cash: -50_000.0,
+            equity: -50_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions: HashMap::new(),
+        };
+        let res_neg = PreTradeChecker::evaluate(&limits, &portfolio_neg, &order, false).unwrap();
+        assert_eq!(res_neg.verdict, PreTradeVerdict::Rejected);
+        assert_eq!(res_neg.approved_qty, 0.0);
+        assert_eq!(res_neg.breaches[0].code, "system_fail_closed");
+
+        // var_pct on non-positive equity returns Error::InvalidArgument
+        let err = portfolio_zero.var_pct().unwrap_err();
+        assert!(matches!(err, Error::InvalidArgument(_)));
+        assert!(err.to_string().contains("portfolio equity must be positive"));
+    }
+
+    #[test]
+    fn test_drawdown_non_positive_peak_returns_error() {
+        let snap_zero = PortfolioSnapshot {
+            cash: 0.0,
+            equity: 0.0,
+            peak_equity: 0.0,
+            daily_start_equity: 0.0,
+            positions: HashMap::new(),
+        };
+        let err = snap_zero.drawdown_pct().unwrap_err();
+        assert!(matches!(err, Error::InvalidArgument(_)));
+        assert!(err.to_string().contains("drawdown is undefined when peak_equity <= 0.0"));
+
+        let snap_neg = PortfolioSnapshot {
+            cash: -10.0,
+            equity: -10.0,
+            peak_equity: -5.0,
+            daily_start_equity: -5.0,
+            positions: HashMap::new(),
+        };
+        let err_neg = snap_neg.drawdown_pct().unwrap_err();
+        assert!(matches!(err_neg, Error::InvalidArgument(_)));
+
+        // PreTradeChecker::evaluate propagates this error
+        let limits = RiskLimits::default();
+        let portfolio = PortfolioSnapshot {
+            cash: 100_000.0,
+            equity: 100_000.0,
+            peak_equity: 0.0,
+            daily_start_equity: 100_000.0,
+            positions: HashMap::new(),
+        };
+        let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 10.0, price: 150.0 };
+        let eval_err = PreTradeChecker::evaluate(&limits, &portfolio, &order, false).unwrap_err();
+        assert!(matches!(eval_err, Error::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn test_var_pct_with_non_positive_position_price_returns_error() {
+        let mut positions = HashMap::new();
+        positions
+            .insert("ZERO_P".to_string(), PositionSnapshot { qty: 10.0, price: 0.0, volatility: Some(0.20) });
+        let snap = PortfolioSnapshot {
+            cash: 50_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions,
+        };
+        let err = snap.var_pct().unwrap_err();
+        assert!(matches!(err, Error::InvalidArgument(_)));
+        assert!(err.to_string().contains("has non-positive or non-finite price"));
+
+        let mut neg_positions = HashMap::new();
+        neg_positions.insert(
+            "NEG_P".to_string(),
+            PositionSnapshot { qty: 10.0, price: -150.0, volatility: Some(0.20) },
+        );
+        let snap_neg = PortfolioSnapshot {
+            cash: 50_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions: neg_positions,
+        };
+        let err_neg = snap_neg.var_pct().unwrap_err();
+        assert!(matches!(err_neg, Error::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn test_utilization_non_positive_limit_returns_error() {
+        assert!(utilization(100.0, 0.0).is_err());
+        let err_zero = utilization(100.0, 0.0).unwrap_err();
+        assert!(matches!(err_zero, Error::InvalidArgument(_)));
+        assert!(err_zero.to_string().contains("limit must be positive and finite"));
+
+        assert!(utilization(100.0, -10.0).is_err());
+        let err_neg = utilization(100.0, -10.0).unwrap_err();
+        assert!(matches!(err_neg, Error::InvalidArgument(_)));
+
+        // LimitUtilization::new also fails if any limit is non-positive
+        let limits_bad = RiskLimits { max_leverage: 0.0, ..RiskLimits::default() };
+        let u_err = LimitUtilization::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, &limits_bad).unwrap_err();
+        assert!(matches!(u_err, Error::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn test_evaluate_rejects_non_positive_max_var_pct() {
+        let limits_zero = RiskLimits { max_var_pct: 0.0, ..RiskLimits::default() };
+        let portfolio = PortfolioSnapshot::default();
+        let order = OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 10.0, price: 150.0 };
+        let err_zero = PreTradeChecker::evaluate(&limits_zero, &portfolio, &order, false).unwrap_err();
+        assert!(matches!(err_zero, Error::InvalidArgument(_)));
+        assert!(err_zero.to_string().contains("RiskLimits max_var_pct must be positive"));
+
+        let limits_neg = RiskLimits { max_var_pct: -0.05, ..RiskLimits::default() };
+        let err_neg = PreTradeChecker::evaluate(&limits_neg, &portfolio, &order, false).unwrap_err();
+        assert!(matches!(err_neg, Error::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn test_var_pct_simulation_failure_propagates_error() {
+        let mut positions = HashMap::new();
+        positions.insert(
+            "AAPL".to_string(),
+            PositionSnapshot { qty: f64::INFINITY, price: 150.0, volatility: Some(0.20) },
+        );
+        let snap = PortfolioSnapshot {
+            cash: 50_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions,
+        };
+        let err = snap.var_pct().unwrap_err();
+        assert!(matches!(err, Error::Data(_)));
+        assert!(err.to_string().contains("var_pct simulation failed"));
+    }
+
+    #[test]
+    fn test_multi_asset_var_pct_without_correlation_matrix_returns_error() {
+        let mut positions = HashMap::new();
+        positions.insert(
+            "AAPL".to_string(),
+            PositionSnapshot { qty: 100.0, price: 150.0, volatility: Some(0.20) },
+        );
+        positions
+            .insert("MSFT".to_string(), PositionSnapshot { qty: 50.0, price: 300.0, volatility: Some(0.25) });
+        let snap = PortfolioSnapshot {
+            cash: 50_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions,
+        };
+        let err = snap.var_pct().unwrap_err();
+        assert!(matches!(err, Error::InvalidArgument(_)));
+        assert_eq!(
+            err.to_string(),
+            "multi-asset VaR requires a correlation matrix; none available for 2 assets"
+        );
+    }
+
+    #[test]
+    fn test_placeholder_zeros_replaced_with_real_portfolio_metrics() {
+        let limits = RiskLimits::default();
+        let mut positions = HashMap::new();
+        positions.insert(
+            "AAPL".to_string(),
+            PositionSnapshot { qty: 100.0, price: 150.0, volatility: Some(0.20) },
+        );
+        let portfolio = PortfolioSnapshot {
+            cash: 85_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions,
+        };
+
+        // 1. Kill-switch rejection on opening order computes real concentration and real VaR (not 0.0)
+        let buy_order =
+            OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 10.0, price: 150.0 };
+        let res_ks = PreTradeChecker::evaluate(&limits, &portfolio, &buy_order, true).unwrap();
+        assert_eq!(res_ks.verdict, PreTradeVerdict::Rejected);
+        assert!(
+            (res_ks.projected_metrics.concentration_pct - 0.15).abs() < 1e-6,
+            "concentration must be 15,000 / 100,000 = 0.15, got {}",
+            res_ks.projected_metrics.concentration_pct
+        );
+        assert!(
+            res_ks.projected_metrics.var_pct > 0.0,
+            "VaR must be positive real simulation, got {}",
+            res_ks.projected_metrics.var_pct
+        );
+
+        // 2. Kill-switch size reduction computes real VaR for remaining holdings
+        let limits_reduce = RiskLimits { size_reduction_enabled: true, ..RiskLimits::default() };
+        let sell_oversize =
+            OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Sell, qty: 150.0, price: 150.0 };
+        let res_reduce = PreTradeChecker::evaluate(&limits_reduce, &portfolio, &sell_oversize, true).unwrap();
+        assert_eq!(res_reduce.verdict, PreTradeVerdict::Reduced);
+        assert_eq!(res_reduce.approved_qty, 100.0);
+        // Portfolio is flattened, so VaR is 0.0 (empty portfolio has 0.0 VaR mathematically)
+        assert_eq!(res_reduce.projected_metrics.var_pct, 0.0);
+
+        // 3. Drawdown rejection computes real concentration and VaR
+        let limits_dd = RiskLimits { max_drawdown_pct: 0.05, ..RiskLimits::default() };
+        let mut dd_positions = HashMap::new();
+        dd_positions.insert(
+            "AAPL".to_string(),
+            PositionSnapshot { qty: 100.0, price: 150.0, volatility: Some(0.20) },
+        );
+        let portfolio_dd = PortfolioSnapshot {
+            cash: 80_000.0,
+            equity: 90_000.0,
+            peak_equity: 100_000.0, // 10% drawdown > 5% limit
+            daily_start_equity: 95_000.0,
+            positions: dd_positions,
+        };
+        let dd_order =
+            OrderCandidate { symbol: "AAPL".into(), side: OrderSide::Buy, qty: 10.0, price: 150.0 };
+        let res_dd = PreTradeChecker::evaluate(&limits_dd, &portfolio_dd, &dd_order, false).unwrap();
+        assert_eq!(res_dd.verdict, PreTradeVerdict::Rejected);
+        assert_eq!(res_dd.breaches[0].code, "drawdown_exceeded");
+        assert!(
+            (res_dd.projected_metrics.concentration_pct - (15_000.0 / 90_000.0)).abs() < 1e-6,
+            "concentration must be 15,000 / 90,000, got {}",
+            res_dd.projected_metrics.concentration_pct
+        );
+        assert!(res_dd.projected_metrics.var_pct > 0.0);
+    }
+
+    #[test]
+    fn test_enforcement_t_copula_dof_constant_matches_default() {
+        assert_eq!(ENFORCEMENT_T_COPULA_DOF, 4);
+        let mut positions = HashMap::new();
+        positions.insert(
+            "AAPL".to_string(),
+            PositionSnapshot { qty: 100.0, price: 150.0, volatility: Some(0.20) },
+        );
+        let snap = PortfolioSnapshot {
+            cash: 50_000.0,
+            equity: 100_000.0,
+            peak_equity: 100_000.0,
+            daily_start_equity: 100_000.0,
+            positions,
+        };
+        let var_snap = snap.var_pct().unwrap();
+        let var_explicit = snap
+            .var_pct_with_model(crate::copula::DependenceModel::TCopula {
+                degrees_of_freedom: ENFORCEMENT_T_COPULA_DOF,
+            })
+            .unwrap();
+        assert_eq!(var_snap, var_explicit);
     }
 }

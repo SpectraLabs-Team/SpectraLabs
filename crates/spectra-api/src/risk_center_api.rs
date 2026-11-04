@@ -1277,7 +1277,7 @@ pub(crate) async fn get_alerts(
 
     let mut alerts = Vec::new();
     let gross = portfolio.gross_exposure();
-    let gross_pct = utilization(gross, limits.max_gross_exposure);
+    let gross_pct = utilization(gross, limits.max_gross_exposure).unwrap_or(0.0);
     if gross_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if gross_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1290,7 +1290,7 @@ pub(crate) async fn get_alerts(
     }
 
     let lev = portfolio.leverage();
-    let lev_pct = utilization(lev, limits.max_leverage);
+    let lev_pct = utilization(lev, limits.max_leverage).unwrap_or(0.0);
     if lev_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if lev_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1302,8 +1302,8 @@ pub(crate) async fn get_alerts(
         });
     }
 
-    let dd = portfolio.drawdown_pct();
-    let dd_pct = utilization(dd, limits.max_drawdown_pct);
+    let dd = portfolio.drawdown_pct().unwrap_or(0.0);
+    let dd_pct = utilization(dd, limits.max_drawdown_pct).unwrap_or(0.0);
     if dd_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if dd_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1316,7 +1316,7 @@ pub(crate) async fn get_alerts(
     }
 
     let loss = portfolio.daily_loss();
-    let loss_pct = utilization(loss, limits.max_daily_loss);
+    let loss_pct = utilization(loss, limits.max_daily_loss).unwrap_or(0.0);
     if loss_pct >= 0.80 {
         alerts.push(RiskAlertView {
             severity: if loss_pct >= 1.0 { "breach".into() } else { "warning".into() },
@@ -1525,12 +1525,19 @@ pub(crate) async fn get_metrics(
             Ok(v) => v,
             Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
         };
-        (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), var)
+        let dd = match p.drawdown_pct() {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
+        };
+        (p.gross_exposure(), p.net_exposure(), p.leverage(), dd, p.daily_loss(), var)
     } else {
         (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     };
 
-    let u = LimitUtilization::new(gross, net, lev, dd, loss, var_pct, &limits);
+    let u = match LimitUtilization::new(gross, net, lev, dd, loss, var_pct, &limits) {
+        Ok(u) => u,
+        Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+    };
     let gross_pct = u.gross_exposure * 100.0;
     let net_pct = u.net_exposure * 100.0;
     let lev_pct = u.leverage * 100.0;

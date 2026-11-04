@@ -2600,6 +2600,8 @@ export interface components {
             text: string;
         };
         CreatePaperOrderRequest: {
+            /** Format: uuid */
+            dataset_version_id?: string | null;
             fill_now?: boolean | null;
             /** Format: double */
             fill_price?: number | null;
@@ -3687,6 +3689,8 @@ export interface components {
             volatility?: number | null;
         };
         PreTradeCheckRequest: {
+            /** Format: uuid */
+            dataset_version_id?: string | null;
             portfolio?: null | components["schemas"]["PortfolioSnapshotDto"];
             /** Format: double */
             price: number;

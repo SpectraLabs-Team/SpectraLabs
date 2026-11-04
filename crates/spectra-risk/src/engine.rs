@@ -307,7 +307,7 @@ impl RiskReport {
     ) -> Result<Self> {
         let (evt_var, evt_cvar) = if losses.len() >= 50 {
             let e = EvtTailModel::fit(losses, 0.95)?;
-            (Some(e.var(config.confidence)), Some(e.cvar(config.confidence)?))
+            (Some(e.var(config.confidence)?), Some(e.cvar(config.confidence)?))
         } else {
             (None, None)
         };

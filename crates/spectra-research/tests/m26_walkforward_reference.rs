@@ -61,7 +61,7 @@ fn a_zero_step_advances_by_the_test_length() {
 #[test]
 fn too_short_a_series_gives_no_folds() {
     // The first fold needs train 4 + embargo 1 + test 2 = 7 timestamps.
-    assert!(make_folds(6, &cfg(WalkForwardMode::Rolling, 2)).unwrap().is_empty());
+    assert!(make_folds(6, &cfg(WalkForwardMode::Rolling, 2)).is_err(), "cannot fit one fold");
     assert_eq!(make_folds(7, &cfg(WalkForwardMode::Rolling, 2)).unwrap().len(), 1);
 }
 
@@ -71,12 +71,22 @@ fn zero_train_or_test_windows_are_refused() {
     let no_test = WalkForwardConfig { test: 0, ..cfg(WalkForwardMode::Rolling, 2) };
     assert!(make_folds(12, &no_train).is_err(), "zero train window");
     assert!(make_folds(12, &no_test).is_err(), "zero test window");
+    assert!(make_folds(0, &cfg(WalkForwardMode::Rolling, 2)).is_err(), "empty timestamp series");
 }
 
 #[test]
 fn efficiency_is_the_out_of_sample_mean_over_the_in_sample_mean() {
-    close(walk_forward_efficiency(0.02, 0.01), 0.5, "efficiency 0.5");
-    close(walk_forward_efficiency(0.02, 0.03), 1.5, "efficiency above one");
+    close(walk_forward_efficiency(0.02, 0.01).unwrap(), 0.5, "efficiency 0.5");
+    close(walk_forward_efficiency(0.02, 0.03).unwrap(), 1.5, "efficiency above one");
     // A negative in-sample mean gives a negative ratio when the out-of-sample mean is positive.
-    close(walk_forward_efficiency(-0.04, 0.01), -0.25, "efficiency with a negative in-sample mean");
+    close(walk_forward_efficiency(-0.04, 0.01).unwrap(), -0.25, "efficiency with a negative in-sample mean");
+}
+
+#[test]
+fn efficiency_undefined_or_nan_returns_error() {
+    assert!(walk_forward_efficiency(0.0, 0.01).is_err(), "zero in-sample objective");
+    assert!(walk_forward_efficiency(1e-10, 0.01).is_err(), "flat in-sample objective");
+    assert!(walk_forward_efficiency(-1e-10, 0.01).is_err(), "flat negative in-sample objective");
+    assert!(walk_forward_efficiency(f64::NAN, 0.01).is_err(), "NaN in-sample objective");
+    assert!(walk_forward_efficiency(0.02, f64::NAN).is_err(), "NaN out-of-sample objective");
 }

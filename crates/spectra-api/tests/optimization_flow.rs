@@ -246,6 +246,62 @@ async fn walk_forward_flow() {
 }
 
 #[tokio::test]
+async fn walk_forward_missing_window_field_returns_400() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // Missing train_size
+    let (status, resp) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/walkforward",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "sma_cross",
+                "mode": "rolling",
+                "test_size": 50,
+                "param_grid": {
+                    "fast": [5.0, 10.0],
+                    "slow": [20.0, 30.0]
+                },
+                "objective": "sharpe"
+            }),
+        )
+        .await;
+    assert_eq!(status, 400, "status: {status}, body: {resp}");
+    assert!(
+        resp["error"].as_str().unwrap_or("").contains("train_size"),
+        "expected error to name missing train_size, got: {resp}"
+    );
+
+    // Missing test_size
+    let (status, resp) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/walkforward",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "sma_cross",
+                "mode": "rolling",
+                "train_size": 200,
+                "param_grid": {
+                    "fast": [5.0, 10.0],
+                    "slow": [20.0, 30.0]
+                },
+                "objective": "sharpe"
+            }),
+        )
+        .await;
+    assert_eq!(status, 400, "status: {status}, body: {resp}");
+    assert!(
+        resp["error"].as_str().unwrap_or("").contains("test_size"),
+        "expected error to name missing test_size, got: {resp}"
+    );
+    f.clean_up().await;
+}
+
+#[tokio::test]
 async fn holdout_vault_budget_lockout_flow() {
     let Some(pool) = pool().await else { return };
     let f = Fixture::new(pool);

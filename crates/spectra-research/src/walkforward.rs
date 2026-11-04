@@ -59,7 +59,7 @@ pub struct Fold {
 /// The folds for `n` timestamps.
 ///
 /// # Errors
-/// If `train` or `test` is zero.
+/// If `train` or `test` is zero, or if `n` cannot fit at least one fold.
 pub fn make_folds(n: usize, cfg: &WalkForwardConfig) -> Result<Vec<Fold>> {
     if cfg.train == 0 || cfg.test == 0 {
         return Err(Error::InvalidArgument("walk-forward: train and test must be > 0".into()));
@@ -81,6 +81,12 @@ pub fn make_folds(n: usize, cfg: &WalkForwardConfig) -> Result<Vec<Fold>> {
             test_end,
         });
         s += step;
+    }
+    if folds.is_empty() {
+        return Err(Error::InvalidArgument(format!(
+            "walk-forward: timestamps ({n}) cannot fit one fold (need at least {})",
+            cfg.train + cfg.embargo + cfg.test
+        )));
     }
     Ok(folds)
 }
@@ -123,19 +129,29 @@ pub struct WalkForwardResult {
     pub total_trials: usize,
 }
 
-/// Walk-forward efficiency: mean out-of-sample objective / mean in-sample objective. 0 when the
-/// in-sample mean is effectively zero (`|mean_is| <= 1e-9`), where the ratio is meaningless.
-pub fn walk_forward_efficiency(mean_in_sample: f64, mean_out_of_sample: f64) -> f64 {
-    if mean_in_sample.abs() > 1e-9 {
-        mean_out_of_sample / mean_in_sample
-    } else {
-        0.0
+/// Walk-forward efficiency: mean out-of-sample objective / mean in-sample objective.
+///
+/// # Errors
+/// If either objective is NaN, or if in-sample objective is flat (`|mean_is| <= 1e-9`)
+/// where the ratio is undefined.
+pub fn walk_forward_efficiency(mean_in_sample: f64, mean_out_of_sample: f64) -> Result<f64> {
+    if mean_in_sample.is_nan() || mean_out_of_sample.is_nan() {
+        return Err(Error::InvalidArgument("walk-forward: NaN objective in efficiency calculation".into()));
     }
+    if mean_in_sample.abs() <= 1e-9 {
+        return Err(Error::InvalidArgument(
+            "walk-forward: undefined efficiency with zero or flat in-sample objective".into(),
+        ));
+    }
+    Ok(mean_out_of_sample / mean_in_sample)
 }
 
 impl WalkForwardResult {
     /// [`walk_forward_efficiency`] of this run.
-    pub fn efficiency(&self) -> f64 {
+    ///
+    /// # Errors
+    /// If in-sample or out-of-sample objective is NaN, or if in-sample objective is flat (`|mean_is| <= 1e-9`).
+    pub fn efficiency(&self) -> Result<f64> {
         walk_forward_efficiency(self.mean_in_sample_objective, self.mean_out_of_sample_objective)
     }
 }
@@ -225,5 +241,25 @@ mod tests {
         let g = make_folds(10, &anchored).unwrap();
         assert!(g.iter().all(|x| x.train_begin == 0 && x.test_begin == x.train_end + 1));
         assert!(make_folds(10, &WalkForwardConfig::default()).is_err());
+        assert!(make_folds(4, &cfg).is_err(), "cannot fit one fold (needs 5)");
+    }
+
+    #[test]
+    fn efficiency() {
+        assert_eq!(walk_forward_efficiency(0.5, 0.25).unwrap(), 0.5);
+        assert_eq!(walk_forward_efficiency(-0.5, 0.25).unwrap(), -0.5);
+        assert!(walk_forward_efficiency(0.0, 0.25).is_err(), "flat IS objective must error");
+        assert!(walk_forward_efficiency(1e-10, 0.25).is_err(), "near-zero IS objective must error");
+        assert!(walk_forward_efficiency(f64::NAN, 0.25).is_err(), "NaN IS objective must error");
+        assert!(walk_forward_efficiency(0.5, f64::NAN).is_err(), "NaN OOS objective must error");
+    }
+
+    #[test]
+    fn result_efficiency() {
+        let mut r = WalkForwardResult::default();
+        assert!(r.efficiency().is_err(), "default result has 0 IS objective");
+        r.mean_in_sample_objective = 1.0;
+        r.mean_out_of_sample_objective = 0.8;
+        assert_eq!(r.efficiency().unwrap(), 0.8);
     }
 }

@@ -321,21 +321,15 @@ pub struct CreateWalkForwardRequest {
     pub strategy: Option<String>,
     #[serde(default)]
     pub dsl_code: Option<String>,
-    #[serde(default = "default_wf_mode")]
     pub mode: String,
     pub train_size: usize,
     pub test_size: usize,
     #[serde(default)]
     pub step_size: Option<usize>,
     #[serde(default)]
-    pub embargo: Option<usize>,
+    pub embargo: usize,
     pub param_grid: serde_json::Value,
-    #[serde(default = "default_objective")]
     pub objective: String,
-}
-
-fn default_wf_mode() -> String {
-    "rolling".to_string()
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -998,8 +992,21 @@ pub(crate) async fn queue_walk_forward(
     let Ok(bytes) = body else { return error_response(400, "Could not read the request body.") };
     let req: CreateWalkForwardRequest = match serde_json::from_slice(&bytes) {
         Ok(r) => r,
-        Err(e) => return error_response(422, format!("Invalid walk-forward request: {e}")),
+        Err(e) => return error_response(400, format!("Invalid walk-forward request: {e}")),
     };
+
+    if req.train_size == 0 {
+        return error_response(400, "Invalid walk-forward request: train_size must be > 0.");
+    }
+    if req.test_size == 0 {
+        return error_response(400, "Invalid walk-forward request: test_size must be > 0.");
+    }
+    if req.mode != "rolling" && req.mode != "anchored" {
+        return error_response(400, "Invalid walk-forward request: mode must be 'rolling' or 'anchored'.");
+    }
+    if req.strategy.is_none() && req.dsl_code.is_none() {
+        return error_response(400, "Invalid walk-forward request: strategy or dsl_code is required.");
+    }
 
     // The database refuses (and logs) a sealed holdout: only an evaluation may read it.
     match datasets::resolve_version(
@@ -1027,8 +1034,11 @@ pub(crate) async fn queue_walk_forward(
         "mode": req.mode,
         "train_size": req.train_size,
         "test_size": req.test_size,
-        "step_size": req.step_size.unwrap_or(req.test_size),
-        "embargo": req.embargo.unwrap_or(0),
+        "step_size": match req.step_size {
+            Some(s) => s,
+            None => req.test_size,
+        },
+        "embargo": req.embargo,
         "param_grid": req.param_grid,
         "objective": req.objective,
     });
@@ -1058,8 +1068,11 @@ pub(crate) async fn queue_walk_forward(
         &req.mode,
         req.train_size as i32,
         req.test_size as i32,
-        req.step_size.unwrap_or(req.test_size) as i32,
-        req.embargo.unwrap_or(0) as i32,
+        match req.step_size {
+            Some(s) => s as i32,
+            None => req.test_size as i32,
+        },
+        req.embargo as i32,
         &req.objective,
         &req.param_grid,
         user_of(&id),

@@ -2299,12 +2299,12 @@ fn run_inner<'s>(
             bars_by_inst.entry(b.instrument).or_default().push(*b);
         }
         let mut map = HashMap::new();
+        // Risk limits need volatility for every instrument; fewer than 60 bars is an error,
+        // not a silently missing volatility.
         for (&inst, ibars) in &bars_by_inst {
-            if let Ok(vol) =
-                spectra_risk::volatility_from_bars(&format!("INST_{inst}"), ibars, cfg.periods_per_year)
-            {
-                map.insert(inst, vol);
-            }
+            let vol =
+                spectra_risk::volatility_from_bars(&format!("INST_{inst}"), ibars, cfg.periods_per_year)?;
+            map.insert(inst, vol);
         }
         map
     } else {

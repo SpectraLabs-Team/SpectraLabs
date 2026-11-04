@@ -259,6 +259,61 @@ pub struct PositionSnapshotDto {
     pub volatility: Option<f64>,
 }
 
+/// The portfolio a pre-trade decision was evaluated against, stored in the decision's metrics
+/// under `portfolio_snapshot` so the decision can be replayed against the same inputs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct StoredPortfolioSnapshot {
+    pub cash: f64,
+    pub equity: f64,
+    pub peak_equity: f64,
+    pub daily_start_equity: f64,
+    pub positions: HashMap<String, PositionSnapshotDto>,
+}
+
+impl From<&PortfolioSnapshot> for StoredPortfolioSnapshot {
+    fn from(p: &PortfolioSnapshot) -> Self {
+        Self {
+            cash: p.cash,
+            equity: p.equity,
+            peak_equity: p.peak_equity,
+            daily_start_equity: p.daily_start_equity,
+            positions: p
+                .positions
+                .iter()
+                .map(|(sym, pos)| {
+                    (
+                        sym.clone(),
+                        PositionSnapshotDto { qty: pos.qty, price: pos.price, volatility: pos.volatility },
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<StoredPortfolioSnapshot> for PortfolioSnapshot {
+    fn from(s: StoredPortfolioSnapshot) -> Self {
+        Self {
+            cash: s.cash,
+            equity: s.equity,
+            peak_equity: s.peak_equity,
+            daily_start_equity: s.daily_start_equity,
+            positions: s
+                .positions
+                .into_iter()
+                .map(|(sym, p)| {
+                    (sym, PositionSnapshot { qty: p.qty, price: p.price, volatility: p.volatility })
+                })
+                .collect(),
+        }
+    }
+}
+
+/// `portfolio` as JSON for the `portfolio_snapshot` field of a decision's metrics.
+pub(crate) fn portfolio_snapshot_json(portfolio: &PortfolioSnapshot) -> serde_json::Value {
+    serde_json::to_value(StoredPortfolioSnapshot::from(portfolio)).unwrap_or(serde_json::Value::Null)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PortfolioSnapshotDto {
     pub cash: f64,
@@ -299,7 +354,8 @@ pub struct ProjectedMetricsView {
     pub concentration_pct: f64,
     pub drawdown_pct: f64,
     pub daily_loss: f64,
-    pub var_pct: f64,
+    /// `null` when VaR cannot be computed because a position has no volatility.
+    pub var_pct: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -550,7 +606,7 @@ pub(crate) async fn fail_closed_response(
                 concentration_pct: 0.0,
                 drawdown_pct: 0.0,
                 daily_loss: 0.0,
-                var_pct: 0.0,
+                var_pct: None,
             },
             decision_id,
         })
@@ -861,8 +917,18 @@ pub(crate) async fn pre_trade_check(
         } else if let Some(ref req_p) = req.portfolio {
             (req_p.cash, req_p.equity, req_p.peak_equity, req_p.daily_start_equity)
         } else {
-            let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
-            (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
+            return fail_closed_response(
+                &pool,
+                ws,
+                req.strategy_id,
+                &req.symbol,
+                side,
+                req.qty,
+                req.price,
+                "Risk check failed: no portfolio balance in database and no portfolio supplied.",
+                user_id,
+            )
+            .await;
         };
         PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions }
     };
@@ -905,6 +971,7 @@ pub(crate) async fn pre_trade_check(
         "drawdown_pct": result.projected_metrics.drawdown_pct,
         "daily_loss": result.projected_metrics.daily_loss,
         "var_pct": result.projected_metrics.var_pct,
+        "portfolio_snapshot": portfolio_snapshot_json(&portfolio),
     });
 
     // 5. Record decision in audit trail
@@ -1388,25 +1455,20 @@ pub(crate) async fn replay_decision(
         price: decision.price,
     };
 
-    // Reconstruct portfolio from decision metrics
-    let gross = decision.metrics.get("gross_exposure").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    let _net = decision.metrics.get("net_exposure").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    let lev = decision.metrics.get("leverage").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
-    let dd = decision.metrics.get("drawdown_pct").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    let loss = decision.metrics.get("daily_loss").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    let equity = if lev > 0.0 && gross > 0.0 { gross / lev } else { 100_000.0 };
-
-    let mut positions = HashMap::new();
-    if gross > 0.0 {
-        positions.insert("AAPL".into(), PositionSnapshot { qty: 10.0, price: 150.0, volatility: Some(0.20) });
-    }
-    let portfolio = PortfolioSnapshot {
-        cash: 50_000.0,
-        equity,
-        peak_equity: equity * (1.0 + dd),
-        daily_start_equity: equity + loss,
-        positions,
+    // Replay against the portfolio stored with the decision. Decisions recorded without a
+    // snapshot (before snapshots were stored, or fail-closed decisions) cannot be replayed.
+    let Some(stored) = decision
+        .metrics
+        .get("portfolio_snapshot")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<StoredPortfolioSnapshot>(v).ok())
+    else {
+        return error_response(
+            422,
+            "Decision has no stored portfolio snapshot, so it cannot be replayed exactly.",
+        );
     };
+    let portfolio = PortfolioSnapshot::from(stored);
 
     let replay_res = match PreTradeChecker::evaluate(&limits, &portfolio, &candidate, ks_active) {
         Ok(r) => r,

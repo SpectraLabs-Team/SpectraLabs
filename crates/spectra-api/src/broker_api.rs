@@ -486,12 +486,14 @@ async fn handle_create_order(
         price: symbol_price * mult(&order_req.symbol),
         volatility: cand_vol,
     });
-    let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
-        (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
-    } else {
-        let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
-        (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
+    let Some(b) = db_balance else {
+        return error_response(
+            422,
+            "Broker risk check failed: no portfolio balance initialized in database.",
+        );
     };
+    let (cash, equity, peak_equity, daily_start_equity) =
+        (b.cash, b.equity, b.peak_equity, b.daily_start_equity);
     let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
 
     // 4. Run pre-trade check
@@ -529,6 +531,7 @@ async fn handle_create_order(
         "drawdown_pct": eval_res.projected_metrics.drawdown_pct,
         "daily_loss": eval_res.projected_metrics.daily_loss,
         "var_pct": eval_res.projected_metrics.var_pct,
+        "portfolio_snapshot": crate::risk_center_api::portfolio_snapshot_json(&portfolio),
     });
 
     if eval_res.verdict == PreTradeVerdict::Rejected {

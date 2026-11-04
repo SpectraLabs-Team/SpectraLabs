@@ -7822,6 +7822,13 @@
           "qty"
         ],
         "properties": {
+          "dataset_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
           "fill_now": {
             "type": [
               "boolean",
@@ -10506,6 +10513,13 @@
           "qty": {
             "type": "number",
             "format": "double"
+          },
+          "volatility": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
           }
         }
       },
@@ -10518,6 +10532,13 @@
           "price"
         ],
         "properties": {
+          "dataset_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
           "portfolio": {
             "oneOf": [
               {

@@ -163,28 +163,31 @@ pub fn simulate_correlated(
             )));
         }
         cholesky(corr)?
+    } else if n_assets > 1 {
+        return Err(Error::Data("missing correlation matrix for multi-asset copula simulation".into()));
     } else {
-        let mut id = vec![vec![0.0; n_assets]; n_assets];
-        for i in 0..n_assets {
-            id[i][i] = 1.0;
-        }
-        id
+        vec![vec![1.0]]
     };
 
     let mut rng = Mt19937_64::new(seed);
     let mut normal = PolarNormal::new();
 
-    let n_paths = usize::try_from(simulations).unwrap_or(usize::MAX);
+    let n_paths = usize::try_from(simulations).map_err(|_| Error::Overflow)?;
     let mut portfolio_losses = vec![0.0; n_paths];
     let mut asset_losses = vec![vec![0.0; n_paths]; n_assets];
 
-    let default_vol = crate::engine::DEFAULT_VOLATILITY;
     let mut drift_terms = Vec::with_capacity(n_assets);
     let mut diffusions = Vec::with_capacity(n_assets);
     let mut initial_values = Vec::with_capacity(n_assets);
 
     for asset in assets {
-        let vol = if asset.volatility > 0.0 { asset.volatility } else { default_vol };
+        if asset.volatility <= 0.0 || !asset.volatility.is_finite() {
+            return Err(Error::Data(format!(
+                "asset {} has non-positive or non-finite volatility ({})",
+                asset.symbol, asset.volatility
+            )));
+        }
+        let vol = asset.volatility;
         let drift = 0.0;
         let drift_term = (drift - 0.5 * vol * vol) * horizon_years;
         let diffusion = vol * horizon_years.sqrt();

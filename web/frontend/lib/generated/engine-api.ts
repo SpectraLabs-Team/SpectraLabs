@@ -656,6 +656,143 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_my_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/runs/{id}/hide": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["hide_my_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/sandbox/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /api/v1/me/sandbox/orders`: sandbox orders, oldest first. */
+        get: operations["list_sandbox_orders"];
+        put?: never;
+        /** `POST /api/v1/me/sandbox/orders`: append one sandbox order (a JSON object). */
+        post: operations["append_sandbox_order"];
+        /** `DELETE /api/v1/me/sandbox/orders`: delete all of the user's sandbox orders (sandbox reset). */
+        delete: operations["clear_sandbox_orders"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/sandbox/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** `PATCH /api/v1/me/sandbox/orders/{id}` body: the order's new JSON object (e.g. a status change). */
+        patch: operations["update_sandbox_order"];
+        trace?: never;
+    };
+    "/api/v1/me/sandbox/transact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record a sandbox trade (order, cash and positions) in one transaction. A stale version returns 409
+         *     and writes nothing. */
+        post: operations["transact_sandbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /api/v1/me/state`: every per-user key for the signed-in user in the active workspace. */
+        get: operations["get_all"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/state/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** One-time import of browser-stored state. Server data wins; a repeat key is a no-op. */
+        post: operations["import"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/state/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Write one key. A stale `expected_version` returns 409 with the current value. */
+        put: operations["put_state"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/metrics": {
         parameters: {
             query?: never;
@@ -2395,6 +2532,11 @@ export interface components {
              */
             received: number;
         };
+        /** @description `DELETE /api/v1/me/sandbox/orders` response body. */
+        ClearOrdersResponse: {
+            /** Format: int64 */
+            cleared: number;
+        };
         ComputeOverfittingRequest: {
             /** Format: double */
             benchmark_sharpe?: number | null;
@@ -3148,6 +3290,17 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        /** @description `POST /api/v1/me/state/import` response body. */
+        ImportOutcomeResponse: {
+            imported: string[];
+            noop: boolean;
+            skipped: string[];
+        };
+        /** @description `POST /api/v1/me/state/import` body: `{"import_key": "...", "data": {"portfolio": ..., ...}}`. */
+        ImportRequest: {
+            data: Record<string, never>;
+            import_key: string;
+        };
         /** @description Header names (matched without regard to case). */
         IngestColumns: {
             /** @description Close price column. */
@@ -3803,6 +3956,21 @@ export interface components {
              */
             updated_at: string;
         };
+        /** @description `PUT /api/v1/me/state/{key}` request body: `{"expected_version": n, "value": ...}`. */
+        PutState: {
+            /** Format: int32 */
+            expected_version: number;
+            value: Record<string, never>;
+        };
+        /** @description `PUT /api/v1/me/state/{key}` success response. */
+        PutStateResponse: {
+            key: string;
+            saved: boolean;
+            updated_at?: string | null;
+            value: Record<string, never>;
+            /** Format: int32 */
+            version: number;
+        };
         /** @description A dataset's quality report (also what a dataset version stores). */
         QualityReport: {
             /** @description Fingerprint of the bars (recorded in backtest results). */
@@ -4229,6 +4397,17 @@ export interface components {
             /** @description What was wrong. */
             message: string;
         };
+        /** @description Sandbox order view. */
+        SandboxOrderView: {
+            created_at: string;
+            /** Format: uuid */
+            id: string;
+            payload: Record<string, never>;
+        };
+        /** @description `GET /api/v1/me/sandbox/orders` response body. */
+        SandboxOrdersResponse: {
+            orders: components["schemas"]["SandboxOrderView"][];
+        };
         SavePreset: {
             config: unknown;
             name: string;
@@ -4319,6 +4498,13 @@ export interface components {
             config?: unknown;
             /** Format: uuid */
             preset_id?: string | null;
+        };
+        /** @description Optimistic locking conflict response returned when state was modified elsewhere (HTTP 409). */
+        StateConflictResponse: {
+            code: string;
+            current: components["schemas"]["UserStateItem"];
+            details: Record<string, never>;
+            message: string;
         };
         StepPaperRequest: {
             bars: components["schemas"]["PaperBarInput"][];
@@ -4585,6 +4771,24 @@ export interface components {
             source: string;
             synced: boolean;
         };
+        /** @description `POST /api/v1/me/sandbox/transact` body: one trade, applied atomically. */
+        TransactRequest: {
+            /** Format: double */
+            cash: number;
+            /** Format: int32 */
+            expected_version: number;
+            order: Record<string, never>;
+            positions: Record<string, never>[];
+        };
+        /** @description `POST /api/v1/me/sandbox/transact` response body. */
+        TransactResponse: {
+            order: components["schemas"]["SandboxOrderView"];
+            saved: boolean;
+            updated_at?: string | null;
+            value: Record<string, never>;
+            /** Format: int32 */
+            version: number;
+        };
         /** @description Request to trigger a manual refresh. */
         TriggerRefreshRequest: {
             /**
@@ -4823,6 +5027,28 @@ export interface components {
             provider_config_id: string;
             /** @description Symbols to refresh. */
             symbols: string[];
+        };
+        /** @description `GET /api/v1/me/state` response body containing all per-user saved state. */
+        UserStateAllResponse: {
+            /** @description Per-user saved state keyed by state name (`portfolio`, `paper-account`, `risk-params`, `sandbox`, `watchlist`). */
+            state: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description Workspace ID.
+             */
+            workspace_id: string;
+        };
+        /** @description Single saved state item representation. */
+        UserStateItem: {
+            /** @description ISO-8601 timestamp of last update, or null if empty. */
+            updated_at?: string | null;
+            /** @description Saved value (JSON object or array depending on key). */
+            value: Record<string, never>;
+            /**
+             * Format: int32
+             * @description Optimistic concurrency version (starts at 0 when empty).
+             */
+            version: number;
         };
         /** @description A dataset version in full. */
         VersionDetailView: {
@@ -6717,6 +6943,514 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_my_runs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
+                status: string | null;
+                /** @description `next_cursor` from the previous page. */
+                cursor: string | null;
+                /** @description Page size, 1 through 200 (default 50). */
+                limit: number | null;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current user's runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    hide_my_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Run hidden from user's list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Run not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_sandbox_orders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sandbox orders, oldest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxOrdersResponse"];
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not a workspace member */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    append_sandbox_order: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            /** @description Sandbox order created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxOrderView"];
+                };
+            };
+            /** @description Could not read the request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not a member or viewer read-only */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid order object */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    clear_sandbox_orders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared sandbox orders count */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClearOrdersResponse"];
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not a member or viewer read-only */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    update_sandbox_order: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Sandbox order ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            /** @description Sandbox order updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SandboxOrderView"];
+                };
+            };
+            /** @description Could not read the request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not a member or viewer read-only */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description No such sandbox order */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid order object */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    transact_sandbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransactRequest"];
+            };
+        };
+        responses: {
+            /** @description Sandbox trade recorded atomically */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransactResponse"];
+                };
+            };
+            /** @description Could not read the request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not a member or viewer read-only */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Version conflict (sandbox changed on another device) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StateConflictResponse"];
+                };
+            };
+            /** @description Invalid trade data or non-finite cash */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_all: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every per-user key for the signed-in user in the active workspace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserStateAllResponse"];
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not a workspace member */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    import: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Browser state imported successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportOutcomeResponse"];
+                };
+            };
+            /** @description Could not read the request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not a member or viewer read-only */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid import key or body */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    put_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Saved state key name ('portfolio', 'paper-account', 'risk-params', 'sandbox', 'watchlist') */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutState"];
+            };
+        };
+        responses: {
+            /** @description State written successfully */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PutStateResponse"];
+                };
+            };
+            /** @description Could not read request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not a member or viewer read-only */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description No such saved state key */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Version conflict (state modified on another device) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StateConflictResponse"];
+                };
+            };
+            /** @description Invalid request shape or expected_version < 0 */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

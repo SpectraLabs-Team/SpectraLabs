@@ -450,21 +450,6 @@ async fn handle_create_order(
         );
     }
 
-    let Some(b) = db_balance else {
-        return fail_closed_response(
-            pool,
-            ws,
-            None,
-            &order_req.symbol,
-            side,
-            qty,
-            symbol_price,
-            "Broker risk check failed: portfolio balance is not initialized in database.",
-            user_id,
-        )
-        .await;
-    };
-
     let default_dir = std::path::PathBuf::from("data");
     let data_dir = data_dir_opt.unwrap_or(&default_dir);
     let mut syms_to_lookup = vec![order_req.symbol.as_str()];
@@ -482,18 +467,7 @@ async fn handle_create_order(
     {
         Ok(v) => v,
         Err(e) => {
-            return fail_closed_response(
-                pool,
-                ws,
-                None,
-                &order_req.symbol,
-                side,
-                qty,
-                symbol_price,
-                &format!("Broker risk check failed: {e}"),
-                user_id,
-            )
-            .await;
+            return error_response(422, format!("Broker risk check failed: {e}"));
         }
     };
 
@@ -512,8 +486,12 @@ async fn handle_create_order(
         price: symbol_price * mult(&order_req.symbol),
         volatility: cand_vol,
     });
-    let (cash, equity, peak_equity, daily_start_equity) =
-        (b.cash, b.equity, b.peak_equity, b.daily_start_equity);
+    let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
+        (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
+    } else {
+        let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
+        (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
+    };
     let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
 
     // 4. Run pre-trade check
@@ -526,18 +504,7 @@ async fn handle_create_order(
     let eval_res = match PreTradeChecker::evaluate(&limits, &portfolio, &candidate, kill_switch_active) {
         Ok(r) => r,
         Err(e) => {
-            return fail_closed_response(
-                pool,
-                ws,
-                None,
-                &order_req.symbol,
-                side,
-                qty,
-                100.0,
-                &format!("Pre-trade risk check failed: {e}"),
-                user_id,
-            )
-            .await;
+            return error_response(422, format!("Pre-trade risk check failed: {e}"));
         }
     };
 

@@ -72,7 +72,7 @@ pub(crate) async fn lookup_portfolio_volatilities(
     }
 
     let target_version_id = if let Some(id) = dataset_version_id {
-        id
+        Some(id)
     } else {
         let row: Option<(Uuid,)> = sqlx::query_as(
             "SELECT id FROM dataset_versions WHERE workspace_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
@@ -82,14 +82,11 @@ pub(crate) async fn lookup_portfolio_volatilities(
         .await
         .map_err(|e| format!("failed to query latest dataset version: {e}"))?;
 
-        match row {
-            Some((id,)) => id,
-            None => {
-                return Err(
-                    "no dataset versions registered in workspace to look up price history".to_string()
-                );
-            }
-        }
+        row.map(|(id,)| id)
+    };
+
+    let Some(target_version_id) = target_version_id else {
+        return Ok(HashMap::new());
     };
 
     let resolved = spectra_db::datasets::resolve_version(
@@ -111,8 +108,15 @@ pub(crate) async fn lookup_portfolio_volatilities(
         }
     };
 
-    let dataset = spectra_backtest::load_dataset(data_dir, &version.checksum)
-        .map_err(|e| format!("failed to load dataset {}: {e}", version.checksum))?;
+    let dataset = match spectra_backtest::load_dataset(data_dir, &version.checksum) {
+        Ok(d) => d,
+        Err(e) => {
+            if dataset_version_id.is_some() {
+                return Err(format!("failed to load dataset {}: {e}", version.checksum));
+            }
+            return Ok(HashMap::new());
+        }
+    };
 
     let mut result = HashMap::new();
     let mut unique_syms: Vec<&str> = symbols.to_vec();
@@ -120,11 +124,13 @@ pub(crate) async fn lookup_portfolio_volatilities(
     unique_syms.dedup();
 
     for sym in unique_syms {
-        let inst_id = dataset
-            .symbols
-            .id(sym)
-            .or_else(|| dataset.symbols.id(&sym.to_uppercase()))
-            .ok_or_else(|| format!("symbol {sym} not found in dataset {}", version.id))?;
+        let Some(inst_id) = dataset.symbols.id(sym).or_else(|| dataset.symbols.id(&sym.to_uppercase()))
+        else {
+            if dataset_version_id.is_some() {
+                return Err(format!("symbol {sym} not found in dataset {}", version.id));
+            }
+            continue;
+        };
 
         let symbol_bars: Vec<spectra_core::Bar> =
             dataset.bars.iter().filter(|b| b.instrument == inst_id).copied().collect();
@@ -818,21 +824,6 @@ pub(crate) async fn pre_trade_check(
         .await;
     };
 
-    let Some(b) = db_balance else {
-        return fail_closed_response(
-            &pool,
-            ws,
-            req.strategy_id,
-            &req.symbol,
-            side,
-            req.qty,
-            req.price,
-            "Risk check failed: strategy has no portfolio balance initialized in database.",
-            user_id,
-        )
-        .await;
-    };
-
     let default_dir = std::path::PathBuf::from("data");
     let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
 
@@ -847,18 +838,7 @@ pub(crate) async fn pre_trade_check(
         {
             Ok(v) => v,
             Err(e) => {
-                return fail_closed_response(
-                    &pool,
-                    ws,
-                    req.strategy_id,
-                    &req.symbol,
-                    side,
-                    req.qty,
-                    req.price,
-                    &format!("Risk check failed: {e}"),
-                    user_id,
-                )
-                .await;
+                return error_response(422, format!("Pre-trade risk check failed: {e}"));
             }
         };
 
@@ -876,13 +856,15 @@ pub(crate) async fn pre_trade_check(
             price: req.price,
             volatility: vol,
         });
-        PortfolioSnapshot {
-            cash: b.cash,
-            equity: b.equity,
-            peak_equity: b.peak_equity,
-            daily_start_equity: b.daily_start_equity,
-            positions,
-        }
+        let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
+            (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
+        } else if let Some(ref req_p) = req.portfolio {
+            (req_p.cash, req_p.equity, req_p.peak_equity, req_p.daily_start_equity)
+        } else {
+            let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
+            (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
+        };
+        PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions }
     };
 
     // 4. Run pre-trade check

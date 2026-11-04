@@ -600,6 +600,66 @@ pub(crate) async fn create_order(
         }
     }
 
+    // Load kill switch
+    let kill_switch_active = match spectra_db::risk_center::get_kill_switch(&pool, ws, Some(strat_id)).await {
+        Ok(Some(ks)) => ks.active,
+        Ok(None) => match spectra_db::risk_center::get_kill_switch(&pool, ws, None).await {
+            Ok(Some(ks)) => ks.active,
+            Ok(None) => false,
+            Err(_) => true, // fail closed
+        },
+        Err(_) => true, // fail closed
+    };
+
+    if kill_switch_active {
+        let reason = "Kill switch is active; all trading halted.";
+        let fallback_price = req.fill_price.or(req.limit_price).or(current_sym_price).unwrap_or(0.0);
+        let _ = spectra_db::risk_center::record_decision(
+            &pool,
+            ws,
+            Some(strat_id),
+            &symbol,
+            &side_str,
+            req.qty,
+            fallback_price,
+            0.0,
+            "rejected",
+            &json!([{
+                "code": "KILL_SWITCH",
+                "limit": 0.0,
+                "projected": 0.0,
+                "message": reason
+            }]),
+            &["KILL_SWITCH".to_string()],
+            &json!({}),
+            user_id,
+        )
+        .await;
+
+        let order = match spectra_db::paper::insert_paper_order(
+            &pool,
+            ws,
+            strat_id,
+            &symbol,
+            &side_str,
+            &order_type_str,
+            req.qty,
+            req.limit_price,
+            req.stop_price,
+            &tif,
+            "rejected",
+            Some(reason),
+            user_id,
+        )
+        .await
+        {
+            Ok(o) => o,
+            Err(e) => return db_error(&e),
+        };
+
+        return json_response(422, json!(PaperOrderView::from(order)).to_string());
+    }
+
     let Some(eval_price) = req.fill_price.or(req.limit_price).or(current_sym_price) else {
         return error_response(422, "Order price could not be determined.");
     };

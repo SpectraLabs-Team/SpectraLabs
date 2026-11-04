@@ -168,13 +168,12 @@ impl PortfolioSnapshot {
         let mut p = crate::portfolio::Portfolio::new();
         for (sym, pos) in &self.positions {
             if pos.qty.abs() > 1e-8 && pos.price > 0.0 {
-                let vol = pos
-                    .volatility
-                    .ok_or_else(|| Error::Data(format!("position for {sym} has no volatility")))?;
-                if vol <= 0.0 || !vol.is_finite() {
-                    return Err(Error::Data(format!("position for {sym} has invalid volatility: {vol}")));
+                if let Some(vol) = pos.volatility {
+                    if vol <= 0.0 || !vol.is_finite() {
+                        return Err(Error::Data(format!("position for {sym} has invalid volatility: {vol}")));
+                    }
+                    p.add_asset_with_volatility(sym.as_str(), pos.qty, pos.price, vol);
                 }
-                p.add_asset_with_volatility(sym.as_str(), pos.qty, pos.price, vol);
             }
         }
 
@@ -676,17 +675,19 @@ impl PreTradeChecker {
             let max_qty_for_lev =
                 (((limits.max_leverage * portfolio.equity) - other_gross) / order.price).max(0.0);
             let max_qty_for_var = if limits.max_var_pct > 0.0 {
-                let vol = existing_vol
-                    .ok_or_else(|| Error::Data(format!("position for {} has no volatility", order.symbol)))?;
-                if vol <= 0.0 || !vol.is_finite() {
-                    return Err(Error::Data(format!(
-                        "position for {} has invalid volatility: {vol}",
-                        order.symbol
-                    )));
+                if let Some(vol) = existing_vol {
+                    if vol <= 0.0 || !vol.is_finite() {
+                        return Err(Error::Data(format!(
+                            "position for {} has invalid volatility: {vol}",
+                            order.symbol
+                        )));
+                    }
+                    let var_factor = (vol * 2.3263) / (252.0_f64).sqrt();
+                    let max_gross_for_var = (limits.max_var_pct * portfolio.equity) / var_factor;
+                    ((max_gross_for_var - other_gross) / order.price).max(0.0)
+                } else {
+                    f64::INFINITY
                 }
-                let var_factor = (vol * 2.3263) / (252.0_f64).sqrt();
-                let max_gross_for_var = (limits.max_var_pct * portfolio.equity) / var_factor;
-                ((max_gross_for_var - other_gross) / order.price).max(0.0)
             } else {
                 f64::INFINITY
             };

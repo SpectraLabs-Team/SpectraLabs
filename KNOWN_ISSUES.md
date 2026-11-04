@@ -53,10 +53,11 @@
   application role (`spectra_app`) can still `SELECT checksum FROM dataset_versions`, because that
   role reads the table directly. Closing that needs column privileges on `checksum` and
   `blob_sha256`, with the remaining queries moved behind `SECURITY DEFINER` functions (follow-up).
-- **Holdout evaluation does not yet evaluate the requested strategy.** `evaluate_holdout` always runs
-  the built-in `buy_and_hold` with default parameters, whatever strategy is sent, and if the sealed
-  bars cannot be loaded it runs on two synthetic bars and records the result as real. Fix before
-  relying on holdout results.
+- **Holdout evaluation strategy resolution:** `evaluate_holdout` resolves the requested strategy
+  (built-in, saved version via `strategy_version_id`, custom UUID, or inline `dsl_code`) and its
+  configured parameters. Invalid strategies or missing versions fail validation before spending the
+  holdout's non-refundable evaluation budget. If the sealed dataset bars cannot be loaded, the
+  evaluation fails cleanly without synthetic fallback bars (M26 task 5).
 
 ## API deployment boundary
 

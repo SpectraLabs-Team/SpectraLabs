@@ -86,6 +86,23 @@ pub(crate) struct PaperAccountView {
     pub cvar_dollar: f64,
 }
 
+/// Slippage applied to every paper fill, in basis points.
+pub(crate) const PAPER_SLIPPAGE_BPS: f64 = 5.0;
+/// Minimum commission charged on each paper fill.
+pub(crate) const PAPER_MIN_FEE: f64 = 1.0;
+
+/// The cost model applied to paper fills.
+///
+/// # Errors
+/// The named cost values do not convert to fixed point.
+fn paper_cost_model() -> Result<CostModel, spectra_core::ArithmeticError> {
+    Ok(CostModel {
+        slippage: spectra_core::Bps::from_f64(PAPER_SLIPPAGE_BPS)?,
+        commission: CommissionModel { min_fee: Money::from_f64(PAPER_MIN_FEE)?, ..Default::default() },
+        ..Default::default()
+    })
+}
+
 impl PaperAccountView {
     /// The view, with each position valued at its price times its contract
     /// multiplier (`records`: the workspace's instrument records).
@@ -850,13 +867,9 @@ pub(crate) async fn create_order(
 
     // Tasks 4 & 5: Fills and Positions/Equity update
     // Cost model: routed through spectra_engine::costs (CostModel, slipped_price, commission_fee)
-    let cost_model = CostModel {
-        slippage: spectra_core::Bps::from_f64(5.0).unwrap_or_default(),
-        commission: CommissionModel {
-            min_fee: Money::from_f64(1.0).unwrap_or_default(),
-            ..Default::default()
-        },
-        ..Default::default()
+    let cost_model = match paper_cost_model() {
+        Ok(m) => m,
+        Err(e) => return error_response(500, format!("Paper cost model is invalid: {e}")),
     };
     let base_price_f64 = eval_price;
     let Ok(base_price_val) = Price::from_f64(base_price_f64) else {
@@ -866,15 +879,24 @@ pub(crate) async fn create_order(
         OrderSide::Buy => Side::Buy,
         OrderSide::Sell => Side::Sell,
     };
-    let fill_price = slipped_price(base_price_val, engine_side, cost_model.slippage)
-        .map_or(base_price_f64, spectra_core::Fixed::to_f64);
+    let fill_price = match slipped_price(base_price_val, engine_side, cost_model.slippage) {
+        Ok(p) => spectra_core::Fixed::to_f64(p),
+        Err(e) => return error_response(422, format!("Failed to compute slipped fill price: {e}")),
+    };
     let fill_qty =
         if pre_trade.verdict == PreTradeVerdict::Reduced { pre_trade.approved_qty } else { req.qty };
     let mult_val = mult(&symbol);
-    let notional_val = Money::from_f64(fill_qty * fill_price * mult_val).unwrap_or_default();
-    let fee =
-        commission_fee(&cost_model.commission, Qty::from_f64(fill_qty).unwrap_or_default(), notional_val)
-            .map_or(1.0, spectra_core::Fixed::to_f64);
+    let notional_f64 = fill_qty * fill_price * mult_val;
+    let Ok(notional_val) = Money::from_f64(notional_f64) else {
+        return error_response(422, format!("Invalid fill notional: {notional_f64}"));
+    };
+    let Ok(fill_qty_fixed) = Qty::from_f64(fill_qty) else {
+        return error_response(422, format!("Invalid fill quantity: {fill_qty}"));
+    };
+    let fee = match commission_fee(&cost_model.commission, fill_qty_fixed, notional_val) {
+        Ok(f) => spectra_core::Fixed::to_f64(f),
+        Err(e) => return error_response(422, format!("Failed to compute commission: {e}")),
+    };
 
     // Record fill
     let fill_row = match spectra_db::paper::insert_paper_fill(

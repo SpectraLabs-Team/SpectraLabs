@@ -101,6 +101,7 @@ volume > 0.
 **Resolved in task 6:**
 1. **Zero bar volume with active volume slippage** returns `ArithmeticError::DivisionByZero` instead of silently ignoring the volume term.
 2. **Paper order fills** in `paper_api.rs` are routed through `spectra_engine::costs` (`CostModel`, `slipped_price`, and `commission_fee`), aligning paper execution with engine costs.
+3. **Paper cost values are named** (`PAPER_SLIPPAGE_BPS = 5.0`, `PAPER_MIN_FEE = 1.0`, built by `paper_cost_model()` in `paper_api.rs`). Values are unchanged, so valid fills and fees are identical. Divergence: invalid or overflowing fill inputs now return an error (422, or 500 for an invalid built-in cost model) instead of filling at the unslipped price, a zero notional, or a hardcoded $1.00 fee.
 
 ## Rebalancing (`rebalance.rs`)
 

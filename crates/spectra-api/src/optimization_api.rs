@@ -1384,6 +1384,168 @@ pub(crate) async fn evaluate_holdout(
         Err(e) => return db_error(&e),
     };
 
+    // Validate and resolve the requested strategy before spending non-refundable evaluation budget.
+    enum StrategySource {
+        Builtin { builtin: &'static spectra_backtest::BuiltinStrategy, params: spectra_research::ParamSet },
+        Dsl { program: spectra_engine::dsl::Program, overrides: std::collections::HashMap<String, f64> },
+    }
+
+    macro_rules! parse_core_json {
+        ($val:expr) => {
+            match $val {
+                Some(v) if !v.is_null() => {
+                    let text = v.to_string();
+                    match spectra_core::Json::parse(&text) {
+                        Ok(j) => Some(j),
+                        Err(e) => return error_response(422, format!("Failed to parse parameters: {e}")),
+                    }
+                }
+                _ => None,
+            }
+        };
+    }
+
+    let mut resolved_version_id = req.strategy_version_id;
+    let strategy_source = if let Some(vid) = req.strategy_version_id {
+        let version = match spectra_db::strategies::get_version(&pool, ws, vid).await {
+            Ok(Some(v)) => v,
+            Ok(None) => return error_response(404, "Strategy version not found in this workspace."),
+            Err(e) => return db_error(&e),
+        };
+        if version.builtin == "dsl" || version.code.is_some() {
+            let code = version.code.as_deref().unwrap_or("");
+            let program = match spectra_engine::dsl::parse_and_validate(code) {
+                Ok(p) => p,
+                Err(e) => return error_response(422, format!("Invalid DSL strategy: {e}")),
+            };
+            let mut overrides = std::collections::HashMap::new();
+            let params_val = req.parameters.as_ref().unwrap_or(&version.parameters);
+            if let Some(obj) = params_val.as_object() {
+                for (k, v) in obj {
+                    if let Some(num) = v.as_f64() {
+                        overrides.insert(k.clone(), num);
+                    } else if let Some(b) = v.as_bool() {
+                        overrides.insert(k.clone(), if b { 1.0 } else { 0.0 });
+                    }
+                }
+            }
+            StrategySource::Dsl { program, overrides }
+        } else {
+            let Ok(builtin) = spectra_backtest::builtin(&version.builtin) else {
+                return error_response(422, format!("Unknown built-in strategy '{}'", version.builtin));
+            };
+            let params_val = req.parameters.as_ref().unwrap_or(&version.parameters);
+            let parsed_params = parse_core_json!(Some(params_val));
+            let params = match builtin.resolve_params_json(parsed_params.as_ref()) {
+                Ok(p) => p,
+                Err(e) => return error_response(422, format!("Invalid strategy parameters: {e}")),
+            };
+            StrategySource::Builtin { builtin, params }
+        }
+    } else if let Some(code) =
+        req.dsl_code.as_deref().or(if req.strategy.as_deref() == Some("dsl") { Some("") } else { None })
+    {
+        let program = match spectra_engine::dsl::parse_and_validate(code) {
+            Ok(p) => p,
+            Err(e) => return error_response(422, format!("Invalid DSL strategy: {e}")),
+        };
+        let mut overrides = std::collections::HashMap::new();
+        if let Some(obj) = req.parameters.as_ref().and_then(|p| p.as_object()) {
+            for (k, v) in obj {
+                if let Some(num) = v.as_f64() {
+                    overrides.insert(k.clone(), num);
+                } else if let Some(b) = v.as_bool() {
+                    overrides.insert(k.clone(), if b { 1.0 } else { 0.0 });
+                }
+            }
+        }
+        StrategySource::Dsl { program, overrides }
+    } else if let Some(strat_str) = req.strategy.as_deref() {
+        if strat_str.starts_with("custom:") || strat_str.starts_with("Custom:") {
+            let id_str = strat_str.trim_start_matches("custom:").trim_start_matches("Custom:").trim();
+            let Ok(uuid) = Uuid::parse_str(id_str) else {
+                return error_response(422, format!("Invalid custom strategy ID '{id_str}'."));
+            };
+            let version = match spectra_db::strategies::get_version(&pool, ws, uuid).await {
+                Ok(Some(v)) => Some(v),
+                Ok(None) => match spectra_db::strategies::get(&pool, ws, uuid).await {
+                    Ok(Some(s)) => {
+                        if let Some(lvid) = s.latest_version_id {
+                            match spectra_db::strategies::get_version(&pool, ws, lvid).await {
+                                Ok(v) => v,
+                                Err(e) => return db_error(&e),
+                            }
+                        } else {
+                            None
+                        }
+                    }
+                    Ok(None) => return error_response(404, "Custom strategy not found in this workspace."),
+                    Err(e) => return db_error(&e),
+                },
+                Err(e) => return db_error(&e),
+            };
+            let Some(version) = version else {
+                return error_response(404, "Custom strategy has no saved versions.");
+            };
+            resolved_version_id = Some(version.id);
+            if version.builtin == "dsl" || version.code.is_some() {
+                let code = version.code.as_deref().unwrap_or("");
+                let program = match spectra_engine::dsl::parse_and_validate(code) {
+                    Ok(p) => p,
+                    Err(e) => return error_response(422, format!("Invalid DSL strategy: {e}")),
+                };
+                let mut overrides = std::collections::HashMap::new();
+                let params_val = req.parameters.as_ref().unwrap_or(&version.parameters);
+                if let Some(obj) = params_val.as_object() {
+                    for (k, v) in obj {
+                        if let Some(num) = v.as_f64() {
+                            overrides.insert(k.clone(), num);
+                        } else if let Some(b) = v.as_bool() {
+                            overrides.insert(k.clone(), if b { 1.0 } else { 0.0 });
+                        }
+                    }
+                }
+                StrategySource::Dsl { program, overrides }
+            } else {
+                let Ok(builtin) = spectra_backtest::builtin(&version.builtin) else {
+                    return error_response(422, format!("Unknown built-in strategy '{}'", version.builtin));
+                };
+                let params_val = req.parameters.as_ref().unwrap_or(&version.parameters);
+                let parsed_params = parse_core_json!(Some(params_val));
+                let params = match builtin.resolve_params_json(parsed_params.as_ref()) {
+                    Ok(p) => p,
+                    Err(e) => return error_response(422, format!("Invalid strategy parameters: {e}")),
+                };
+                StrategySource::Builtin { builtin, params }
+            }
+        } else {
+            let clean_name = if strat_str.starts_with("Custom: ") {
+                strat_str.trim_start_matches("Custom: ").trim()
+            } else {
+                strat_str
+            };
+            let Ok(builtin) = spectra_backtest::builtin(clean_name) else {
+                return error_response(422, format!("Unknown strategy '{strat_str}'."));
+            };
+            let parsed_params = parse_core_json!(req.parameters.as_ref());
+            let params = match builtin.resolve_params_json(parsed_params.as_ref()) {
+                Ok(p) => p,
+                Err(e) => return error_response(422, format!("Invalid strategy parameters: {e}")),
+            };
+            StrategySource::Builtin { builtin, params }
+        }
+    } else {
+        let Ok(builtin) = spectra_backtest::builtin("buy_and_hold") else {
+            return error_response(500, "Default strategy error");
+        };
+        let parsed_params = parse_core_json!(req.parameters.as_ref());
+        let params = match builtin.resolve_params_json(parsed_params.as_ref()) {
+            Ok(p) => p,
+            Err(e) => return error_response(422, format!("Invalid strategy parameters: {e}")),
+        };
+        StrategySource::Builtin { builtin, params }
+    };
+
     // The database spends one evaluation and logs the grant before it hands out the sealed data,
     // under the holdout's row lock: no read without a logged evaluation, and no overspending.
     let grant =
@@ -1418,10 +1580,15 @@ pub(crate) async fn evaluate_holdout(
     // The DSR needs the variance of the trials in the experiment, which is not wired into holdout
     // evaluation yet, so it is reported as not defined (None), not as a fixed 0.05 (M26 task 5).
     let (metrics_json, dsr_val): (serde_json::Value, Option<f64>) = {
-        let mut strat = spectra_backtest::builtin("buy_and_hold")
-            .unwrap()
-            .build(&spectra_research::ParamSet::default())
-            .unwrap();
+        let mut strat: Box<dyn spectra_engine::Strategy> = match strategy_source {
+            StrategySource::Builtin { builtin, params } => match builtin.build(&params) {
+                Ok(s) => s,
+                Err(e) => return error_response(422, format!("Could not build strategy: {e}")),
+            },
+            StrategySource::Dsl { program, overrides } => {
+                Box::new(spectra_engine::dsl::DslStrategy::new(program, &overrides))
+            }
+        };
         match spectra_engine::run_backtest(&bars, strat.as_mut(), &cfg) {
             Ok(r) => (metrics_to_json(&r.metrics), None),
             Err(_) => {
@@ -1443,7 +1610,7 @@ pub(crate) async fn evaluate_holdout(
         &pool,
         holdout_id,
         ws,
-        req.strategy_version_id,
+        resolved_version_id,
         eval_num,
         &metrics_json,
         dsr_val,

@@ -140,7 +140,7 @@ pub(crate) async fn alpaca_proxy(
         }
         (Method::POST, "orders" | "v2/orders") => {
             let pool_ws = db_ctx.as_ref().map(|(p, w)| (p, *w));
-            handle_create_order(pool_ws, user_id, creds.as_ref(), body).await
+            handle_create_order(pool_ws, user_id, creds.as_ref(), st.cfg.data_dir.as_deref(), body).await
         }
         (Method::POST, "sync" | "v2/sync") => {
             if let Some((ref pool, ws)) = db_ctx {
@@ -269,6 +269,7 @@ async fn handle_create_order(
     db_ctx: Option<(&sqlx::PgPool, Uuid)>,
     user_id: Option<Uuid>,
     creds: Option<&(String, String)>,
+    data_dir_opt: Option<&std::path::Path>,
     body: Result<Bytes, BytesRejection>,
 ) -> Response {
     let order_req: AlpacaOrderRequest = match parse_body(body) {
@@ -429,24 +430,90 @@ async fn handle_create_order(
         .await;
     };
 
-    let mut positions = HashMap::new();
-    let mut symbol_price = order_req.parse_limit_price().unwrap_or(100.0);
+    let limit_px = order_req.parse_limit_price();
+    let mut resolved_price = limit_px;
     for p in &db_positions {
-        if p.symbol == order_req.symbol && order_req.parse_limit_price().is_none() && p.price > 0.0 {
-            symbol_price = p.price;
+        if p.symbol == order_req.symbol && resolved_price.is_none() && p.price > 0.0 {
+            resolved_price = Some(p.price);
         }
+    }
+    let Some(symbol_price) = resolved_price else {
+        return error_response(
+            422,
+            format!("Price could not be determined for symbol: {}", order_req.symbol),
+        );
+    };
+    if symbol_price <= 0.0 || !symbol_price.is_finite() {
+        return error_response(
+            422,
+            format!("Non-positive or non-finite price for symbol {}: {symbol_price}", order_req.symbol),
+        );
+    }
+
+    let Some(b) = db_balance else {
+        return fail_closed_response(
+            pool,
+            ws,
+            None,
+            &order_req.symbol,
+            side,
+            qty,
+            symbol_price,
+            "Broker risk check failed: portfolio balance is not initialized in database.",
+            user_id,
+        )
+        .await;
+    };
+
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = data_dir_opt.unwrap_or(&default_dir);
+    let mut syms_to_lookup = vec![order_req.symbol.as_str()];
+    for p in &db_positions {
+        syms_to_lookup.push(&p.symbol);
+    }
+    let vols = match crate::risk_center_api::lookup_portfolio_volatilities(
+        pool,
+        ws,
+        data_dir,
+        None,
+        &syms_to_lookup,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return fail_closed_response(
+                pool,
+                ws,
+                None,
+                &order_req.symbol,
+                side,
+                qty,
+                symbol_price,
+                &format!("Broker risk check failed: {e}"),
+                user_id,
+            )
+            .await;
+        }
+    };
+
+    let mut positions = HashMap::new();
+    for p in &db_positions {
+        let vol = vols.get(&p.symbol).copied();
         // Risk sees value per unit: price times the contract multiplier.
         positions.insert(
             p.symbol.clone(),
-            PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol), volatility: None },
+            PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol), volatility: vol },
         );
     }
-    let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
-        (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
-    } else {
-        let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
-        (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
-    };
+    let cand_vol = vols.get(&order_req.symbol).copied();
+    positions.entry(order_req.symbol.clone()).or_insert_with(|| PositionSnapshot {
+        qty: 0.0,
+        price: symbol_price * mult(&order_req.symbol),
+        volatility: cand_vol,
+    });
+    let (cash, equity, peak_equity, daily_start_equity) =
+        (b.cash, b.equity, b.peak_equity, b.daily_start_equity);
     let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
 
     // 4. Run pre-trade check
@@ -1001,21 +1068,60 @@ pub(crate) async fn handle_venue_order(
         let db_positions = risk_center::get_positions(pool, ws, None).await.unwrap_or_default();
         let db_balance = risk_center::get_balance(pool, ws, None).await.unwrap_or(None);
 
-        let mut positions = HashMap::new();
-        for p in &db_positions {
-            positions
-                .insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price, volatility: None });
-        }
-
-        let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
-            (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
-        } else {
-            (100_000.0, 100_000.0, 100_000.0, 100_000.0)
+        let Some(b) = db_balance else {
+            return error_response(422, "Account balance is not initialized in database.");
         };
 
-        let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
+        let Some(px) = payload.price else {
+            return error_response(422, "Order price is required.");
+        };
+        if px <= 0.0 || !px.is_finite() {
+            return error_response(422, format!("Non-positive or non-finite price: {px}"));
+        }
+        let candidate_price = px * inst.multiplier.to_f64();
 
-        let candidate_price = payload.price.unwrap_or(100.0) * inst.multiplier.to_f64();
+        let default_dir = std::path::PathBuf::from("data");
+        let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+        let mut syms_to_lookup = vec![payload.symbol.as_str()];
+        for p in &db_positions {
+            syms_to_lookup.push(&p.symbol);
+        }
+
+        let vols = match crate::risk_center_api::lookup_portfolio_volatilities(
+            pool,
+            ws,
+            data_dir,
+            None,
+            &syms_to_lookup,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Pre-trade risk check failed: {e}")),
+        };
+
+        let mut positions = HashMap::new();
+        for p in &db_positions {
+            let vol = vols.get(&p.symbol).copied();
+            positions
+                .insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price, volatility: vol });
+        }
+        let cand_vol = vols.get(&payload.symbol).copied();
+        positions.entry(payload.symbol.clone()).or_insert_with(|| PositionSnapshot {
+            qty: 0.0,
+            price: candidate_price,
+            volatility: cand_vol,
+        });
+
+        let portfolio = PortfolioSnapshot {
+            cash: b.cash,
+            equity: b.equity,
+            peak_equity: b.peak_equity,
+            daily_start_equity: b.daily_start_equity,
+            positions,
+        };
+
         let candidate =
             OrderCandidate { symbol: payload.symbol.clone(), side, qty: payload.qty, price: candidate_price };
 
@@ -1103,18 +1209,62 @@ pub struct ReconcilePayload {
     pub venue_positions: Vec<VenuePosition>,
     pub local_equity: f64,
     pub venue_equity: f64,
+    #[serde(default)]
+    pub volatilities: Option<HashMap<String, f64>>,
 }
 
 /// Reconciles paper/simulated portfolio against venue reports.
-pub(crate) async fn handle_venue_reconcile(body: Result<Bytes, BytesRejection>) -> Response {
+pub(crate) async fn handle_venue_reconcile(
+    State(st): State<AppState>,
+    identity: Option<Extension<Identity>>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
     let payload: ReconcilePayload = match parse_body(body) {
         Ok(p) => p,
         Err(r) => return r,
     };
 
+    let venue_map: HashMap<String, &VenuePosition> =
+        payload.venue_positions.iter().map(|vp| (vp.symbol.clone(), vp)).collect();
+
+    let mut local_syms = Vec::new();
+    for sym in payload.local_positions.keys() {
+        local_syms.push(sym.as_str());
+    }
+
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+    let vols = if let Some(ref m) = payload.volatilities {
+        m.clone()
+    } else if let Some(Extension(ref id)) = identity {
+        if let Ok((ref pool, ws)) = context(&st, id) {
+            match crate::risk_center_api::lookup_portfolio_volatilities(pool, ws, data_dir, None, &local_syms)
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => return error_response(422, format!("Reconciliation failed: {e}")),
+            }
+        } else {
+            HashMap::new()
+        }
+    } else {
+        HashMap::new()
+    };
+
     let mut local_map = HashMap::new();
     for (sym, qty) in payload.local_positions {
-        local_map.insert(sym, PositionSnapshot { qty, price: 100.0, volatility: None });
+        let Some(venue_pos) = venue_map.get(&sym) else {
+            return error_response(422, format!("Reconciliation missing venue position for symbol: {sym}"));
+        };
+        if venue_pos.mark_price <= 0.0 || !venue_pos.mark_price.is_finite() {
+            return error_response(
+                422,
+                format!("Non-positive or non-finite mark price for symbol {sym}: {}", venue_pos.mark_price),
+            );
+        }
+        let vol = vols.get(&sym).copied();
+        local_map.insert(sym, PositionSnapshot { qty, price: venue_pos.mark_price, volatility: vol });
     }
 
     let report = reconcile_positions_and_fills(

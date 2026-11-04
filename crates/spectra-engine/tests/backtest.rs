@@ -674,19 +674,24 @@ fn property_books_always_reconcile_and_runs_reproduce() {
 #[test]
 fn backtest_enforces_daily_loss_limit() {
     let hour_ns = 3_600_000_000_000_i64;
-    // Hour 1: strategy submits Order 1
-    // Hour 2: Order 1 fills at 100.0, marks at 100.0
-    // Hour 3: price drops to 80.0 (daily loss is $20, exceeding $1 limit); strategy submits Order 2
-    // Hour 4: Order 2 evaluates to fill, but daily loss of $20 exceeds $1 limit -> Rejected!
-    let bars = vec![
-        mk1(hour_ns, A, 100.0, 101.0, 99.0, 100.0),
-        mk1(hour_ns * 2, A, 100.0, 101.0, 99.0, 100.0),
-        mk1(hour_ns * 3, A, 80.0, 81.0, 79.0, 80.0),
-        mk1(hour_ns * 4, A, 80.0, 81.0, 79.0, 80.0),
-    ];
+    // 60 warmup bars with price variation so volatility > 0 and n >= 60
+    let mut bars = Vec::with_capacity(64);
+    for i in 1..=60 {
+        let p = if i % 2 == 0 { 101.0 } else { 100.0 };
+        bars.push(mk1(hour_ns * i, A, p, p + 1.0, p - 1.0, p));
+    }
+    // Bar 61: price 100.0, strategy submits Order 1
+    bars.push(mk1(hour_ns * 61, A, 100.0, 101.0, 99.0, 100.0));
+    // Bar 62: price 100.0, Order 1 fills at 100.0
+    bars.push(mk1(hour_ns * 62, A, 100.0, 101.0, 99.0, 100.0));
+    // Bar 63: price drops to 80.0 (daily loss is $20, exceeding $1 limit); strategy submits Order 2
+    bars.push(mk1(hour_ns * 63, A, 80.0, 81.0, 79.0, 80.0));
+    // Bar 64: Order 2 evaluates to fill, but daily loss of $20 exceeds $1 limit -> Rejected!
+    bars.push(mk1(hour_ns * 64, A, 80.0, 81.0, 79.0, 80.0));
+
     let mut s = FnStrategy {
-        bar_fn: Some(Box::new(|c, bars| {
-            if bars[0].ts_ns <= 3_600_000_000_000_i64 * 3 {
+        bar_fn: Some(Box::new(move |c, b| {
+            if b[0].ts_ns == hour_ns * 61 || b[0].ts_ns == hour_ns * 63 {
                 c.market(A, Side::Buy, q(1.0));
             }
         })),
@@ -695,7 +700,6 @@ fn backtest_enforces_daily_loss_limit() {
     let mut cfg = base_config();
     cfg.risk_limits = Some(spectra_risk::enforcement::RiskLimits {
         max_daily_loss: 1.0, // Strict $1 daily loss limit
-        max_var_pct: 0.0,
         ..spectra_risk::enforcement::RiskLimits::default()
     });
 

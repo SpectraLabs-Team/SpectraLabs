@@ -34,7 +34,7 @@
 //! records the strategy that placed it, and the account is the sum of the
 //! strategies' books.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -2293,6 +2293,24 @@ fn run_inner<'s>(
     let mut exposure: Vec<Money> = Vec::with_capacity(bars.len());
     let mut fill_orders: Vec<OrderId> = Vec::new();
 
+    let inst_vols: HashMap<InstrumentId, f64> = if cfg.risk_limits.is_some() {
+        let mut bars_by_inst: HashMap<InstrumentId, Vec<Bar>> = HashMap::new();
+        for b in bars {
+            bars_by_inst.entry(b.instrument).or_default().push(*b);
+        }
+        let mut map = HashMap::new();
+        for (&inst, ibars) in &bars_by_inst {
+            if let Ok(vol) =
+                spectra_risk::volatility_from_bars(&format!("INST_{inst}"), ibars, cfg.periods_per_year)
+            {
+                map.insert(inst, vol);
+            }
+        }
+        map
+    } else {
+        HashMap::new()
+    };
+
     let first_ts = bars.first().map_or(0, |b| b.ts_ns);
     if cfg.initial_cash.raw() > 0 && ledger.deposit(cfg.initial_cash, first_ts).is_err() {
         return Err(Error::InvalidArgument("initial deposit rejected".into()).into());
@@ -2494,11 +2512,19 @@ fn run_inner<'s>(
                                 spectra_risk::enforcement::PositionSnapshot {
                                     qty: pos.qty.to_f64(),
                                     price: unit(inst, mark_price),
-                                    volatility: None,
+                                    volatility: inst_vols.get(&inst).copied(),
                                 },
                             );
                         }
                     }
+                    let cand_sym = format!("INST_{}", o.instrument);
+                    positions.entry(cand_sym).or_insert_with(|| {
+                        spectra_risk::enforcement::PositionSnapshot {
+                            qty: 0.0,
+                            price: unit(o.instrument, fill_px),
+                            volatility: inst_vols.get(&o.instrument).copied(),
+                        }
+                    });
                     let snap = spectra_risk::enforcement::PortfolioSnapshot {
                         cash: ledger.cash().to_f64(),
                         equity: current_equity_val,

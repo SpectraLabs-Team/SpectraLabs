@@ -676,7 +676,15 @@ impl PreTradeChecker {
             let max_qty_for_lev =
                 (((limits.max_leverage * portfolio.equity) - other_gross) / order.price).max(0.0);
             let max_qty_for_var = if limits.max_var_pct > 0.0 {
-                let var_factor = (0.20 * 2.3263) / (252.0_f64).sqrt();
+                let vol = existing_vol
+                    .ok_or_else(|| Error::Data(format!("position for {} has no volatility", order.symbol)))?;
+                if vol <= 0.0 || !vol.is_finite() {
+                    return Err(Error::Data(format!(
+                        "position for {} has invalid volatility: {vol}",
+                        order.symbol
+                    )));
+                }
+                let var_factor = (vol * 2.3263) / (252.0_f64).sqrt();
                 let max_gross_for_var = (limits.max_var_pct * portfolio.equity) / var_factor;
                 ((max_gross_for_var - other_gross) / order.price).max(0.0)
             } else {

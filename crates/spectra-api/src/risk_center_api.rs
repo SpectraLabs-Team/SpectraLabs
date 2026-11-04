@@ -59,6 +59,85 @@ async fn ensure_can_edit(pool: &spectra_db::PgPool, ws: Uuid, user_id: Option<Uu
     Ok(())
 }
 
+/// Look up bars by dataset_version_id (or latest in workspace) and compute annualized volatility per symbol.
+pub(crate) async fn lookup_portfolio_volatilities(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    data_dir: &std::path::Path,
+    dataset_version_id: Option<Uuid>,
+    symbols: &[&str],
+) -> Result<HashMap<String, f64>, String> {
+    if symbols.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let target_version_id = if let Some(id) = dataset_version_id {
+        id
+    } else {
+        let row: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT id FROM dataset_versions WHERE workspace_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+        )
+        .bind(ws)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("failed to query latest dataset version: {e}"))?;
+
+        match row {
+            Some((id,)) => id,
+            None => {
+                return Err(
+                    "no dataset versions registered in workspace to look up price history".to_string()
+                );
+            }
+        }
+    };
+
+    let resolved = spectra_db::datasets::resolve_version(
+        pool,
+        ws,
+        target_version_id,
+        spectra_db::datasets::Access::engine("risk_volatility_lookup"),
+    )
+    .await
+    .map_err(|e| format!("failed to resolve dataset version: {e}"))?;
+
+    let version = match resolved {
+        spectra_db::datasets::Resolved::Found(v) => v,
+        spectra_db::datasets::Resolved::Sealed { holdout } => {
+            return Err(format!("dataset version {target_version_id} is sealed in holdout vault: {holdout}"));
+        }
+        spectra_db::datasets::Resolved::Missing => {
+            return Err(format!("dataset version {target_version_id} not found in workspace"));
+        }
+    };
+
+    let dataset = spectra_backtest::load_dataset(data_dir, &version.checksum)
+        .map_err(|e| format!("failed to load dataset {}: {e}", version.checksum))?;
+
+    let mut result = HashMap::new();
+    let mut unique_syms: Vec<&str> = symbols.to_vec();
+    unique_syms.sort_unstable();
+    unique_syms.dedup();
+
+    for sym in unique_syms {
+        let inst_id = dataset
+            .symbols
+            .id(sym)
+            .or_else(|| dataset.symbols.id(&sym.to_uppercase()))
+            .ok_or_else(|| format!("symbol {sym} not found in dataset {}", version.id))?;
+
+        let symbol_bars: Vec<spectra_core::Bar> =
+            dataset.bars.iter().filter(|b| b.instrument == inst_id).copied().collect();
+
+        let vol = spectra_risk::volatility_from_bars(sym, &symbol_bars, 252.0)
+            .map_err(|e| format!("volatility calculation failed for {sym}: {e}"))?;
+
+        result.insert(sym.to_string(), vol);
+    }
+
+    Ok(result)
+}
+
 // ---------------------------------------------------------------- Data Transfer Objects
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -193,6 +272,8 @@ pub struct PreTradeCheckRequest {
     /// Caller-supplied portfolio snapshot (deprecated & ignored: per Decision 1, portfolio is strictly server-built from DB).
     #[serde(default)]
     pub portfolio: Option<PortfolioSnapshotDto>,
+    #[serde(default)]
+    pub dataset_version_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -737,20 +818,71 @@ pub(crate) async fn pre_trade_check(
         .await;
     };
 
+    let Some(b) = db_balance else {
+        return fail_closed_response(
+            &pool,
+            ws,
+            req.strategy_id,
+            &req.symbol,
+            side,
+            req.qty,
+            req.price,
+            "Risk check failed: strategy has no portfolio balance initialized in database.",
+            user_id,
+        )
+        .await;
+    };
+
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+    let mut syms_to_lookup = vec![req.symbol.as_str()];
+    for p in &db_positions {
+        syms_to_lookup.push(&p.symbol);
+    }
+
+    let vols =
+        match lookup_portfolio_volatilities(&pool, ws, data_dir, req.dataset_version_id, &syms_to_lookup)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return fail_closed_response(
+                    &pool,
+                    ws,
+                    req.strategy_id,
+                    &req.symbol,
+                    side,
+                    req.qty,
+                    req.price,
+                    &format!("Risk check failed: {e}"),
+                    user_id,
+                )
+                .await;
+            }
+        };
+
     // 3. Task 1 & Decision 1: The server strictly builds the portfolio snapshot from the database.
     // The caller's portfolio field is completely ignored to prevent any client-side bypass.
     let portfolio = {
         let mut positions = HashMap::new();
         for p in db_positions {
-            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: None });
+            let vol = vols.get(&p.symbol).copied();
+            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: vol });
         }
-        let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
-            (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
-        } else {
-            let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
-            (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
-        };
-        PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions }
+        let vol = vols.get(&req.symbol).copied();
+        positions.entry(req.symbol.clone()).or_insert_with(|| PositionSnapshot {
+            qty: 0.0,
+            price: req.price,
+            volatility: vol,
+        });
+        PortfolioSnapshot {
+            cash: b.cash,
+            equity: b.equity,
+            peak_equity: b.peak_equity,
+            daily_start_equity: b.daily_start_equity,
+            positions,
+        }
     };
 
     // 4. Run pre-trade check
@@ -1132,15 +1264,32 @@ pub(crate) async fn get_alerts(
     let db_positions = risk_center::get_positions(&pool, ws, q.strategy_id).await.unwrap_or_default();
     let db_balance = risk_center::get_balance(&pool, ws, q.strategy_id).await.unwrap_or(None);
 
+    if !db_positions.is_empty() && db_balance.is_none() {
+        return error_response(422, "Strategy has no portfolio balance initialized in database.");
+    }
+
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+    let pos_syms: Vec<&str> = db_positions.iter().map(|p| p.symbol.as_str()).collect();
+    let vols = if pos_syms.is_empty() {
+        HashMap::new()
+    } else {
+        match lookup_portfolio_volatilities(&pool, ws, data_dir, None, &pos_syms).await {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute volatility for alerts: {e}")),
+        }
+    };
+
     let mut positions = HashMap::new();
     for p in db_positions {
-        positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: None });
+        let vol = vols.get(&p.symbol).copied();
+        positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: vol });
     }
     let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
         (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
     } else {
-        let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
-        (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
+        (0.0, 0.0, 0.0, 0.0)
     };
     let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
 
@@ -1359,29 +1508,44 @@ pub(crate) async fn get_metrics(
     let db_balance = risk_center::get_balance(&pool, ws, q.strategy_id).await.unwrap_or(None);
 
     let (gross, net, lev, dd, loss, var_pct) = if !db_positions.is_empty() || db_balance.is_some() {
+        let Some(b) = db_balance else {
+            return error_response(422, "Strategy has no portfolio balance initialized in database.");
+        };
+
+        let default_dir = std::path::PathBuf::from("data");
+        let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+        let pos_syms: Vec<&str> = db_positions.iter().map(|p| p.symbol.as_str()).collect();
+        let vols = if pos_syms.is_empty() {
+            HashMap::new()
+        } else {
+            match lookup_portfolio_volatilities(&pool, ws, data_dir, None, &pos_syms).await {
+                Ok(v) => v,
+                Err(e) => {
+                    return error_response(422, format!("Failed to compute portfolio risk metrics: {e}"))
+                }
+            }
+        };
+
         let mut positions = HashMap::new();
         for p in db_positions {
-            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: None });
+            let vol = vols.get(&p.symbol).copied();
+            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: vol });
         }
-        let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
-            (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
-        } else {
-            let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
-            (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
+        let p = PortfolioSnapshot {
+            cash: b.cash,
+            equity: b.equity,
+            peak_equity: b.peak_equity,
+            daily_start_equity: b.daily_start_equity,
+            positions,
         };
-        let p = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
         let var = match p.var_pct() {
             Ok(v) => v,
             Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
         };
         (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), var)
     } else {
-        let p = PortfolioSnapshot::default();
-        let var = match p.var_pct() {
-            Ok(v) => v,
-            Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
-        };
-        (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), var)
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     };
 
     let u = LimitUtilization::new(gross, net, lev, dd, loss, var_pct, &limits);

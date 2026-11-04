@@ -2237,6 +2237,618 @@
         }
       }
     },
+    "/api/v1/me/runs": {
+      "get": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "list_my_runs",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "path",
+            "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "path",
+            "description": "`next_cursor` from the previous page.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "path",
+            "description": "Page size, 1 through 200 (default 50).",
+            "required": true,
+            "schema": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current user's runs"
+          }
+        }
+      }
+    },
+    "/api/v1/me/runs/{id}/hide": {
+      "post": {
+        "tags": [
+          "registry"
+        ],
+        "operationId": "hide_my_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run hidden from user's list"
+          },
+          "404": {
+            "description": "Run not found"
+          }
+        }
+      }
+    },
+    "/api/v1/me/sandbox/orders": {
+      "get": {
+        "tags": [
+          "user-state"
+        ],
+        "summary": "`GET /api/v1/me/sandbox/orders`: sandbox orders, oldest first.",
+        "operationId": "list_sandbox_orders",
+        "responses": {
+          "200": {
+            "description": "Sandbox orders, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxOrdersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a workspace member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "user-state"
+        ],
+        "summary": "`POST /api/v1/me/sandbox/orders`: append one sandbox order (a JSON object).",
+        "operationId": "append_sandbox_order",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Sandbox order created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxOrderView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not read the request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member or viewer read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid order object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "user-state"
+        ],
+        "summary": "`DELETE /api/v1/me/sandbox/orders`: delete all of the user's sandbox orders (sandbox reset).",
+        "operationId": "clear_sandbox_orders",
+        "responses": {
+          "200": {
+            "description": "Cleared sandbox orders count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearOrdersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member or viewer read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/sandbox/orders/{id}": {
+      "patch": {
+        "tags": [
+          "user-state"
+        ],
+        "summary": "`PATCH /api/v1/me/sandbox/orders/{id}` body: the order's new JSON object (e.g. a status change).",
+        "operationId": "update_sandbox_order",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Sandbox order ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Sandbox order updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SandboxOrderView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not read the request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member or viewer read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such sandbox order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid order object",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/sandbox/transact": {
+      "post": {
+        "tags": [
+          "user-state"
+        ],
+        "summary": "Record a sandbox trade (order, cash and positions) in one transaction. A stale version returns 409\nand writes nothing.",
+        "operationId": "transact_sandbox",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Sandbox trade recorded atomically",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not read the request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member or viewer read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Version conflict (sandbox changed on another device)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateConflictResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid trade data or non-finite cash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/state": {
+      "get": {
+        "tags": [
+          "user-state"
+        ],
+        "summary": "`GET /api/v1/me/state`: every per-user key for the signed-in user in the active workspace.",
+        "operationId": "get_all",
+        "responses": {
+          "200": {
+            "description": "Every per-user key for the signed-in user in the active workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStateAllResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a workspace member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/state/import": {
+      "post": {
+        "tags": [
+          "user-state"
+        ],
+        "summary": "One-time import of browser-stored state. Server data wins; a repeat key is a no-op.",
+        "operationId": "import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Browser state imported successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportOutcomeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not read the request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member or viewer read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid import key or body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/me/state/{key}": {
+      "put": {
+        "tags": [
+          "user-state"
+        ],
+        "summary": "Write one key. A stale `expected_version` returns 409 with the current value.",
+        "operationId": "put_state",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "Saved state key name ('portfolio', 'paper-account', 'risk-params', 'sandbox', 'watchlist')",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "State written successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PutStateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Could not read request body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not a member or viewer read-only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such saved state key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Version conflict (state modified on another device)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StateConflictResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request shape or expected_version < 0",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/metrics": {
       "get": {
         "tags": [
@@ -6729,6 +7341,20 @@
           }
         }
       },
+      "ClearOrdersResponse": {
+        "type": "object",
+        "description": "`DELETE /api/v1/me/sandbox/orders` response body.",
+        "required": [
+          "cleared"
+        ],
+        "properties": {
+          "cleared": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "ComputeOverfittingRequest": {
         "type": "object",
         "required": [
@@ -8554,6 +9180,48 @@
           }
         }
       },
+      "ImportOutcomeResponse": {
+        "type": "object",
+        "description": "`POST /api/v1/me/state/import` response body.",
+        "required": [
+          "noop",
+          "imported",
+          "skipped"
+        ],
+        "properties": {
+          "imported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "noop": {
+            "type": "boolean"
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ImportRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/me/state/import` body: `{\"import_key\": \"...\", \"data\": {\"portfolio\": ..., ...}}`.",
+        "required": [
+          "import_key",
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "object"
+          },
+          "import_key": {
+            "type": "string"
+          }
+        }
+      },
       "IngestColumns": {
         "type": "object",
         "description": "Header names (matched without regard to case).",
@@ -10170,6 +10838,54 @@
           }
         }
       },
+      "PutState": {
+        "type": "object",
+        "description": "`PUT /api/v1/me/state/{key}` request body: `{\"expected_version\": n, \"value\": ...}`.",
+        "required": [
+          "expected_version",
+          "value"
+        ],
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "value": {
+            "type": "object"
+          }
+        }
+      },
+      "PutStateResponse": {
+        "type": "object",
+        "description": "`PUT /api/v1/me/state/{key}` success response.",
+        "required": [
+          "saved",
+          "key",
+          "value",
+          "version"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "object"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "QualityReport": {
         "type": "object",
         "description": "A dataset's quality report (also what a dataset version stores).",
@@ -11204,6 +11920,42 @@
         },
         "additionalProperties": false
       },
+      "SandboxOrderView": {
+        "type": "object",
+        "description": "Sandbox order view.",
+        "required": [
+          "id",
+          "payload",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "payload": {
+            "type": "object"
+          }
+        }
+      },
+      "SandboxOrdersResponse": {
+        "type": "object",
+        "description": "`GET /api/v1/me/sandbox/orders` response body.",
+        "required": [
+          "orders"
+        ],
+        "properties": {
+          "orders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SandboxOrderView"
+            }
+          }
+        }
+      },
       "SavePreset": {
         "type": "object",
         "required": [
@@ -11444,6 +12196,30 @@
               "null"
             ],
             "format": "uuid"
+          }
+        }
+      },
+      "StateConflictResponse": {
+        "type": "object",
+        "description": "Optimistic locking conflict response returned when state was modified elsewhere (HTTP 409).",
+        "required": [
+          "message",
+          "code",
+          "current",
+          "details"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "current": {
+            "$ref": "#/components/schemas/UserStateItem"
+          },
+          "details": {
+            "type": "object"
+          },
+          "message": {
+            "type": "string"
           }
         }
       },
@@ -12114,6 +12890,66 @@
           }
         }
       },
+      "TransactRequest": {
+        "type": "object",
+        "description": "`POST /api/v1/me/sandbox/transact` body: one trade, applied atomically.",
+        "required": [
+          "expected_version",
+          "cash",
+          "positions",
+          "order"
+        ],
+        "properties": {
+          "cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "expected_version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "order": {
+            "type": "object"
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "TransactResponse": {
+        "type": "object",
+        "description": "`POST /api/v1/me/sandbox/transact` response body.",
+        "required": [
+          "saved",
+          "version",
+          "value",
+          "order"
+        ],
+        "properties": {
+          "order": {
+            "$ref": "#/components/schemas/SandboxOrderView"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "value": {
+            "type": "object"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "TriggerRefreshRequest": {
         "type": "object",
         "description": "Request to trigger a manual refresh.",
@@ -12603,6 +13439,51 @@
           }
         },
         "additionalProperties": false
+      },
+      "UserStateAllResponse": {
+        "type": "object",
+        "description": "`GET /api/v1/me/state` response body containing all per-user saved state.",
+        "required": [
+          "workspace_id",
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "type": "object",
+            "description": "Per-user saved state keyed by state name (`portfolio`, `paper-account`, `risk-params`, `sandbox`, `watchlist`)."
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Workspace ID."
+          }
+        }
+      },
+      "UserStateItem": {
+        "type": "object",
+        "description": "Single saved state item representation.",
+        "required": [
+          "value",
+          "version"
+        ],
+        "properties": {
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ISO-8601 timestamp of last update, or null if empty."
+          },
+          "value": {
+            "type": "object",
+            "description": "Saved value (JSON object or array depending on key)."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Optimistic concurrency version (starts at 0 when empty)."
+          }
+        }
       },
       "VersionDetailView": {
         "type": "object",
@@ -13094,6 +13975,10 @@
     {
       "name": "reports",
       "description": "Versioned, run-linked reports (M16)"
+    },
+    {
+      "name": "user-state",
+      "description": "Per-user saved state, sandbox orders and run history (M25)"
     }
   ]
 }

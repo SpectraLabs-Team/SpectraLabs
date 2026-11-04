@@ -9,10 +9,11 @@ use axum::extract::rejection::{BytesRejection, PathRejection};
 use axum::extract::{Path, State};
 use axum::response::Response;
 use axum::Extension;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value as JsonValue};
 use spectra_db::user_state::{self, PutOutcome, StateKey, StateValue};
 use spectra_db::PgPool;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::jobs_api::{context, db_error, to_json};
@@ -52,7 +53,127 @@ fn state_view(key: StateKey, row: Option<StateValue>) -> JsonValue {
     }
 }
 
+/// Single saved state item representation.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UserStateItem {
+    /// Saved value (JSON object or array depending on key).
+    #[schema(value_type = Object)]
+    pub value: JsonValue,
+    /// Optimistic concurrency version (starts at 0 when empty).
+    pub version: i32,
+    /// ISO-8601 timestamp of last update, or null if empty.
+    pub updated_at: Option<String>,
+}
+
+/// `GET /api/v1/me/state` response body containing all per-user saved state.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UserStateAllResponse {
+    /// Workspace ID.
+    pub workspace_id: Uuid,
+    /// Per-user saved state keyed by state name (`portfolio`, `paper-account`, `risk-params`, `sandbox`, `watchlist`).
+    #[schema(value_type = Object)]
+    pub state: std::collections::HashMap<String, UserStateItem>,
+}
+
+/// `PUT /api/v1/me/state/{key}` request body: `{"expected_version": n, "value": ...}`.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct PutState {
+    pub expected_version: i32,
+    #[schema(value_type = Object)]
+    pub value: JsonValue,
+}
+
+/// `PUT /api/v1/me/state/{key}` success response.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PutStateResponse {
+    pub saved: bool,
+    pub key: String,
+    #[schema(value_type = Object)]
+    pub value: JsonValue,
+    pub version: i32,
+    pub updated_at: Option<String>,
+}
+
+/// Optimistic locking conflict response returned when state was modified elsewhere (HTTP 409).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct StateConflictResponse {
+    pub message: String,
+    pub code: String,
+    pub current: UserStateItem,
+    #[schema(value_type = Object)]
+    pub details: JsonValue,
+}
+
+/// Sandbox order view.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SandboxOrderView {
+    pub id: Uuid,
+    #[schema(value_type = Object)]
+    pub payload: JsonValue,
+    pub created_at: String,
+}
+
+/// `GET /api/v1/me/sandbox/orders` response body.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SandboxOrdersResponse {
+    pub orders: Vec<SandboxOrderView>,
+}
+
+/// `DELETE /api/v1/me/sandbox/orders` response body.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ClearOrdersResponse {
+    pub cleared: u64,
+}
+
+/// `POST /api/v1/me/sandbox/transact` body: one trade, applied atomically.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct TransactRequest {
+    pub expected_version: i32,
+    pub cash: f64,
+    #[schema(value_type = Vec<Object>)]
+    pub positions: JsonValue,
+    #[schema(value_type = Object)]
+    pub order: JsonValue,
+}
+
+/// `POST /api/v1/me/sandbox/transact` response body.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TransactResponse {
+    pub saved: bool,
+    pub version: i32,
+    pub updated_at: Option<String>,
+    #[schema(value_type = Object)]
+    pub value: JsonValue,
+    pub order: SandboxOrderView,
+}
+
+/// `POST /api/v1/me/state/import` body: `{"import_key": "...", "data": {"portfolio": ..., ...}}`.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct ImportRequest {
+    pub import_key: String,
+    #[schema(value_type = Object)]
+    pub data: Map<String, JsonValue>,
+}
+
+/// `POST /api/v1/me/state/import` response body.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ImportOutcomeResponse {
+    pub noop: bool,
+    pub imported: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
 /// `GET /api/v1/me/state`: every per-user key for the signed-in user in the active workspace.
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/state",
+    tag = "user-state",
+    responses(
+        (status = 200, description = "Every per-user key for the signed-in user in the active workspace", body = UserStateAllResponse),
+        (status = 401, description = "Unauthenticated", body = crate::openapi::ErrorDoc),
+        (status = 403, description = "Not a workspace member", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn get_all(State(st): State<AppState>, Extension(id): Extension<Identity>) -> Response {
     let (pool, user, ws) = match scope(&st, &id, false).await {
         Ok(s) => s,
@@ -70,14 +191,25 @@ pub(crate) async fn get_all(State(st): State<AppState>, Extension(id): Extension
     to_json(200, &json!({"workspace_id": ws, "state": out}))
 }
 
-/// `PUT /api/v1/me/state/{key}` body: `{"expected_version": n, "value": ...}`.
-#[derive(Deserialize)]
-pub(crate) struct PutState {
-    expected_version: i32,
-    value: JsonValue,
-}
-
 /// Write one key. A stale `expected_version` returns 409 with the current value.
+#[utoipa::path(
+    put,
+    path = "/api/v1/me/state/{key}",
+    tag = "user-state",
+    params(
+        ("key" = String, Path, description = "Saved state key name ('portfolio', 'paper-account', 'risk-params', 'sandbox', 'watchlist')")
+    ),
+    request_body = PutState,
+    responses(
+        (status = 200, description = "State written successfully", body = PutStateResponse),
+        (status = 400, description = "Could not read request body", body = crate::openapi::ErrorDoc),
+        (status = 401, description = "Unauthenticated", body = crate::openapi::ErrorDoc),
+        (status = 403, description = "Not a member or viewer read-only", body = crate::openapi::ErrorDoc),
+        (status = 404, description = "No such saved state key", body = crate::openapi::ErrorDoc),
+        (status = 409, description = "Version conflict (state modified on another device)", body = StateConflictResponse),
+        (status = 422, description = "Invalid request shape or expected_version < 0", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn put_state(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
@@ -134,6 +266,16 @@ pub(crate) async fn put_state(
 }
 
 /// `GET /api/v1/me/sandbox/orders`: sandbox orders, oldest first.
+#[utoipa::path(
+    get,
+    path = "/api/v1/me/sandbox/orders",
+    tag = "user-state",
+    responses(
+        (status = 200, description = "Sandbox orders, oldest first", body = SandboxOrdersResponse),
+        (status = 401, description = "Unauthenticated", body = crate::openapi::ErrorDoc),
+        (status = 403, description = "Not a workspace member", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn list_sandbox_orders(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
@@ -156,6 +298,19 @@ pub(crate) async fn list_sandbox_orders(
 }
 
 /// `POST /api/v1/me/sandbox/orders`: append one sandbox order (a JSON object).
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/sandbox/orders",
+    tag = "user-state",
+    request_body = Value,
+    responses(
+        (status = 201, description = "Sandbox order created", body = SandboxOrderView),
+        (status = 400, description = "Could not read the request body", body = crate::openapi::ErrorDoc),
+        (status = 401, description = "Unauthenticated", body = crate::openapi::ErrorDoc),
+        (status = 403, description = "Not a member or viewer read-only", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "Invalid order object", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn append_sandbox_order(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
@@ -180,6 +335,23 @@ pub(crate) async fn append_sandbox_order(
 }
 
 /// `PATCH /api/v1/me/sandbox/orders/{id}` body: the order's new JSON object (e.g. a status change).
+#[utoipa::path(
+    patch,
+    path = "/api/v1/me/sandbox/orders/{id}",
+    tag = "user-state",
+    params(
+        ("id" = Uuid, Path, description = "Sandbox order ID")
+    ),
+    request_body = Value,
+    responses(
+        (status = 200, description = "Sandbox order updated", body = SandboxOrderView),
+        (status = 400, description = "Could not read the request body", body = crate::openapi::ErrorDoc),
+        (status = 401, description = "Unauthenticated", body = crate::openapi::ErrorDoc),
+        (status = 403, description = "Not a member or viewer read-only", body = crate::openapi::ErrorDoc),
+        (status = 404, description = "No such sandbox order", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "Invalid order object", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn update_sandbox_order(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
@@ -207,6 +379,16 @@ pub(crate) async fn update_sandbox_order(
 }
 
 /// `DELETE /api/v1/me/sandbox/orders`: delete all of the user's sandbox orders (sandbox reset).
+#[utoipa::path(
+    delete,
+    path = "/api/v1/me/sandbox/orders",
+    tag = "user-state",
+    responses(
+        (status = 200, description = "Cleared sandbox orders count", body = ClearOrdersResponse),
+        (status = 401, description = "Unauthenticated", body = crate::openapi::ErrorDoc),
+        (status = 403, description = "Not a member or viewer read-only", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn clear_sandbox_orders(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
@@ -221,17 +403,22 @@ pub(crate) async fn clear_sandbox_orders(
     }
 }
 
-/// `POST /api/v1/me/sandbox/transact` body: one trade, applied atomically.
-#[derive(Deserialize)]
-pub(crate) struct TransactRequest {
-    expected_version: i32,
-    cash: f64,
-    positions: JsonValue,
-    order: JsonValue,
-}
-
 /// Record a sandbox trade (order, cash and positions) in one transaction. A stale version returns 409
 /// and writes nothing.
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/sandbox/transact",
+    tag = "user-state",
+    request_body = TransactRequest,
+    responses(
+        (status = 200, description = "Sandbox trade recorded atomically", body = TransactResponse),
+        (status = 400, description = "Could not read the request body", body = crate::openapi::ErrorDoc),
+        (status = 401, description = "Unauthenticated", body = crate::openapi::ErrorDoc),
+        (status = 403, description = "Not a member or viewer read-only", body = crate::openapi::ErrorDoc),
+        (status = 409, description = "Version conflict (sandbox changed on another device)", body = StateConflictResponse),
+        (status = 422, description = "Invalid trade data or non-finite cash", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn transact_sandbox(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
@@ -296,14 +483,20 @@ pub(crate) async fn transact_sandbox(
     }
 }
 
-/// `POST /api/v1/me/state/import` body: `{"import_key": "...", "data": {"portfolio": ..., ...}}`.
-#[derive(Deserialize)]
-pub(crate) struct ImportRequest {
-    import_key: String,
-    data: Map<String, JsonValue>,
-}
-
 /// One-time import of browser-stored state. Server data wins; a repeat key is a no-op.
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/state/import",
+    tag = "user-state",
+    request_body = ImportRequest,
+    responses(
+        (status = 200, description = "Browser state imported successfully", body = ImportOutcomeResponse),
+        (status = 400, description = "Could not read the request body", body = crate::openapi::ErrorDoc),
+        (status = 401, description = "Unauthenticated", body = crate::openapi::ErrorDoc),
+        (status = 403, description = "Not a member or viewer read-only", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "Invalid import key or body", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn import(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,

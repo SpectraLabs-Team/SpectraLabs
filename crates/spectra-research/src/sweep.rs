@@ -142,6 +142,9 @@ pub type StrategyFactory<'a> = dyn Fn(&ParamSet) -> Result<Box<dyn Strategy>> + 
 /// Scores a backtest; higher is better.
 pub type Objective<'a> = dyn Fn(&BacktestResult) -> f64 + Sync + 'a;
 
+/// Valid objective function names supported by the engine.
+pub const VALID_OBJECTIVES: &[&str] = &["sharpe", "total_return"];
+
 /// Annualized Sharpe from the equity curve; -inf when metrics are not valid.
 pub fn objective_sharpe(r: &BacktestResult) -> f64 {
     if r.metrics.valid {

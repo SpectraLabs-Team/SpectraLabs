@@ -2030,19 +2030,52 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
         .execute(&ctx.pool)
         .await;
 
-    let param_grid_val = job.payload.get("param_grid").cloned().unwrap_or_else(|| serde_json::json!({}));
-    let mode_str = job.payload.get("mode").and_then(serde_json::Value::as_str).unwrap_or("rolling");
-    let train_size =
-        job.payload.get("train_size").and_then(serde_json::Value::as_u64).unwrap_or(200) as usize;
-    let test_size = job.payload.get("test_size").and_then(serde_json::Value::as_u64).unwrap_or(50) as usize;
-    let step_size =
-        job.payload.get("step_size").and_then(serde_json::Value::as_u64).unwrap_or(test_size as u64) as usize;
-    let embargo = job.payload.get("embargo").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
-    let objective =
-        job.payload.get("objective").and_then(serde_json::Value::as_str).unwrap_or("sharpe").to_string();
+    // Jobs queued before this deploy missing required fields (param_grid, mode, train_size, test_size, objective)
+    // will fail here with a clear message naming the missing field instead of proceeding under silent defaults.
+    let Some(param_grid_val) = job.payload.get("param_grid").cloned() else {
+        fail_job(&ctx, &job, started, "Walk-forward job missing param_grid.", false).await;
+        drop(permit);
+        return;
+    };
+    let Some(mode_str) = job.payload.get("mode").and_then(serde_json::Value::as_str) else {
+        fail_job(&ctx, &job, started, "Walk-forward job missing mode.", false).await;
+        drop(permit);
+        return;
+    };
+    let Some(train_size) =
+        job.payload.get("train_size").and_then(serde_json::Value::as_u64).map(|v| v as usize)
+    else {
+        fail_job(&ctx, &job, started, "Walk-forward job missing train_size.", false).await;
+        drop(permit);
+        return;
+    };
+    let Some(test_size) =
+        job.payload.get("test_size").and_then(serde_json::Value::as_u64).map(|v| v as usize)
+    else {
+        fail_job(&ctx, &job, started, "Walk-forward job missing test_size.", false).await;
+        drop(permit);
+        return;
+    };
+    // When step_size is omitted or zero, walk-forward advances by test_size; this is the defined convention.
+    let step_size = match job.payload.get("step_size").and_then(serde_json::Value::as_u64) {
+        Some(s) if s > 0 => s as usize,
+        _ => test_size,
+    };
+    let embargo = job.payload.get("embargo").and_then(serde_json::Value::as_u64).map_or(0, |e| e as usize);
+    let Some(objective) =
+        job.payload.get("objective").and_then(serde_json::Value::as_str).map(ToOwned::to_owned)
+    else {
+        fail_job(&ctx, &job, started, "Walk-forward job missing objective.", false).await;
+        drop(permit);
+        return;
+    };
     let dsl_code = job.payload.get("dsl_code").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
-    let strategy =
-        job.payload.get("strategy").and_then(serde_json::Value::as_str).unwrap_or("sma_cross").to_string();
+    let strategy = job.payload.get("strategy").and_then(serde_json::Value::as_str).map(ToOwned::to_owned);
+    if dsl_code.is_none() && strategy.is_none() {
+        fail_job(&ctx, &job, started, "Walk-forward job missing strategy or dsl_code.", false).await;
+        drop(permit);
+        return;
+    }
 
     let grid = match parse_grid_from_json(&param_grid_val) {
         Ok(g) => g,
@@ -2054,11 +2087,26 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
     };
     let param_sets = grid.all();
 
-    let wf_mode = if mode_str == "anchored" {
-        spectra_research::WalkForwardMode::Anchored
-    } else {
-        spectra_research::WalkForwardMode::Rolling
+    let wf_mode = match mode_str.parse::<spectra_research::WalkForwardMode>() {
+        Ok(m) => m,
+        Err(e) => {
+            fail_job(&ctx, &job, started, &format!("Invalid walk-forward mode: {e}"), false).await;
+            drop(permit);
+            return;
+        }
     };
+    if !spectra_research::VALID_OBJECTIVES.contains(&objective.as_str()) {
+        fail_job(
+            &ctx,
+            &job,
+            started,
+            &format!("Invalid walk-forward objective '{objective}': expected 'sharpe' or 'total_return'"),
+            false,
+        )
+        .await;
+        drop(permit);
+        return;
+    }
     let wf_config = spectra_research::WalkForwardConfig {
         train: train_size,
         test: test_size,
@@ -2107,7 +2155,10 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
                 )
                 .map_err(|e| e.to_string())?
             } else {
-                let factory = spectra_backtest::builtin_factory(&strategy).map_err(|e| e.to_string())?;
+                let Some(ref strat_name) = strategy else {
+                    return Err("Walk-forward missing strategy name".to_string());
+                };
+                let factory = spectra_backtest::builtin_factory(strat_name).map_err(|e| e.to_string())?;
                 let obj_fn: Box<spectra_research::Objective<'_>> = if objective == "total_return" {
                     Box::new(spectra_research::objective_total_return)
                 } else {
@@ -2161,7 +2212,29 @@ async fn run_walk_forward_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::Owne
 
     match outcome {
         Ok(wf_res) => {
-            let eff_ratio = wf_res.efficiency();
+            if wf_res.folds.is_empty() {
+                let _ = sqlx::query("UPDATE walk_forward_reports SET status='failed', finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                    .bind(job.workspace_id)
+                    .bind(report_id)
+                    .execute(&ctx.pool)
+                    .await;
+                fail_job(&ctx, &job, started, "Walk-forward produced no folds.", false).await;
+                return;
+            }
+
+            let eff_ratio = match wf_res.efficiency() {
+                Ok(eff) => eff,
+                Err(e) => {
+                    let _ = sqlx::query("UPDATE walk_forward_reports SET status='failed', finished_at=now() WHERE workspace_id=$1 AND id=$2")
+                        .bind(job.workspace_id)
+                        .bind(report_id)
+                        .execute(&ctx.pool)
+                        .await;
+                    fail_job(&ctx, &job, started, &format!("Walk-forward efficiency error: {e}"), false)
+                        .await;
+                    return;
+                }
+            };
 
             let folds_vec: Vec<serde_json::Value> = wf_res
                 .folds

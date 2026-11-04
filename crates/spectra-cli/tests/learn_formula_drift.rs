@@ -226,7 +226,7 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
         mean_out_of_sample_objective: mean_oos,
         ..WalkForwardResult::default()
     };
-    assert_eq!(wf.efficiency(), walk_forward_efficiency(mean_is, mean_oos));
+    assert_eq!(wf.efficiency().unwrap(), walk_forward_efficiency(mean_is, mean_oos).unwrap());
 
     // Trial ledger for the Sharpe variance across trials.
     let srs = [0.031, 0.044, 0.012, 0.058, 0.027, 0.039];
@@ -382,7 +382,7 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
         ("var_utilization", ("1-day 99% VaR (% of equity) ÷ max VaR", var_pct / 0.05, util.var)),
         (
             "walk_forward_efficiency",
-            ("mean OOS objective / mean IS objective", mean_oos / mean_is, wf.efficiency()),
+            ("mean OOS objective / mean IS objective", mean_oos / mean_is, wf.efficiency().unwrap()),
         ),
         (
             "market_value",

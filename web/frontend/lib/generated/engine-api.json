@@ -7484,9 +7484,11 @@
         "type": "object",
         "required": [
           "dataset_version_id",
+          "mode",
           "train_size",
           "test_size",
-          "param_grid"
+          "param_grid",
+          "objective"
         ],
         "properties": {
           "dataset_version_id": {

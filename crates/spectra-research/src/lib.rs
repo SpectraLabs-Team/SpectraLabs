@@ -34,7 +34,7 @@ pub use survival::{
 };
 pub use sweep::{
     objective_sharpe, objective_total_return, run_one, run_sweep, Objective, ParamGrid, ParamSet,
-    StrategyFactory, SweepOptions, SweepResult, Trial, TrialLedger, TrialSummary,
+    StrategyFactory, SweepOptions, SweepResult, Trial, TrialLedger, TrialSummary, VALID_OBJECTIVES,
 };
 pub use trades::{
     block_bootstrap_returns, compute_trade_stats, extract_trades, resample_trades, DistributionBin,

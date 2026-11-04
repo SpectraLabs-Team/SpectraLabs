@@ -246,6 +246,180 @@ async fn walk_forward_flow() {
 }
 
 #[tokio::test]
+async fn walk_forward_request_without_embargo_succeeds() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // Request without embargo field succeeds with 202 and defines embargo as 0
+    let (status, resp) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/walkforward",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "sma_cross",
+                "mode": "rolling",
+                "train_size": 200,
+                "test_size": 50,
+                "param_grid": {
+                    "fast": [5.0, 10.0],
+                    "slow": [20.0, 30.0]
+                },
+                "objective": "sharpe"
+            }),
+        )
+        .await;
+    assert_eq!(status, 202, "status: {status}, body: {resp}");
+    assert_eq!(resp["embargo"], 0);
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn walk_forward_missing_train_size_returns_422() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // Missing train_size fails at serde deserialization, returning 422
+    let (status, resp) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/walkforward",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "sma_cross",
+                "mode": "rolling",
+                "test_size": 50,
+                "param_grid": {
+                    "fast": [5.0, 10.0],
+                    "slow": [20.0, 30.0]
+                },
+                "objective": "sharpe"
+            }),
+        )
+        .await;
+    assert_eq!(status, 422, "status: {status}, body: {resp}");
+    let err_msg = resp["message"]
+        .as_str()
+        .or_else(|| resp["detail"].as_str())
+        .or_else(|| resp["error"].as_str())
+        .unwrap_or("");
+    assert!(err_msg.contains("train_size"), "expected error to name missing train_size, got: {resp}");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn walk_forward_invalid_mode_returns_400() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // Invalid mode fails explicit validation returning 400
+    let (status, resp) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/walkforward",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "sma_cross",
+                "mode": "diagonal",
+                "train_size": 200,
+                "test_size": 50,
+                "param_grid": {
+                    "fast": [5.0, 10.0],
+                    "slow": [20.0, 30.0]
+                },
+                "objective": "sharpe"
+            }),
+        )
+        .await;
+    assert_eq!(status, 400, "status: {status}, body: {resp}");
+    let err_msg = resp["message"]
+        .as_str()
+        .or_else(|| resp["detail"].as_str())
+        .or_else(|| resp["error"].as_str())
+        .unwrap_or("");
+    assert!(err_msg.contains("mode"), "expected error to name invalid mode, got: {resp}");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn walk_forward_invalid_objective_returns_400() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // Invalid objective fails explicit validation returning 400
+    let (status, resp) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/walkforward",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "sma_cross",
+                "mode": "rolling",
+                "train_size": 200,
+                "test_size": 50,
+                "param_grid": {
+                    "fast": [5.0, 10.0],
+                    "slow": [20.0, 30.0]
+                },
+                "objective": "calmar"
+            }),
+        )
+        .await;
+    assert_eq!(status, 400, "status: {status}, body: {resp}");
+    let err_msg = resp["message"]
+        .as_str()
+        .or_else(|| resp["detail"].as_str())
+        .or_else(|| resp["error"].as_str())
+        .unwrap_or("");
+    assert!(err_msg.contains("objective"), "expected error to name invalid objective, got: {resp}");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn walk_forward_zero_train_or_test_size_returns_400() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::new(pool);
+    let ds_ver = f.dataset_version().await;
+
+    // train_size = 0 fails explicit validation returning 400
+    let (status, resp) = f
+        .call(
+            "POST",
+            "/api/v1/optimization/walkforward",
+            &json!({
+                "dataset_version_id": ds_ver,
+                "strategy": "sma_cross",
+                "mode": "rolling",
+                "train_size": 0,
+                "test_size": 50,
+                "param_grid": {
+                    "fast": [5.0, 10.0],
+                    "slow": [20.0, 30.0]
+                },
+                "objective": "sharpe"
+            }),
+        )
+        .await;
+    assert_eq!(status, 400, "status: {status}, body: {resp}");
+    let err_msg = resp["message"]
+        .as_str()
+        .or_else(|| resp["detail"].as_str())
+        .or_else(|| resp["error"].as_str())
+        .unwrap_or("");
+    assert!(err_msg.contains("train_size"), "expected error to name train_size > 0 requirement, got: {resp}");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
 async fn holdout_vault_budget_lockout_flow() {
     let Some(pool) = pool().await else { return };
     let f = Fixture::new(pool);
@@ -385,9 +559,11 @@ async fn holdout_sealed_direct_read_refused() {
             &json!({
                 "dataset_version_id": ds_ver,
                 "strategy": "buy_and_hold",
+                "mode": "rolling",
                 "train_size": 100,
                 "test_size": 20,
-                "param_grid": { "p": [1.0] }
+                "param_grid": { "p": [1.0] },
+                "objective": "sharpe"
             }),
         )
         .await;

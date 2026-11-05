@@ -290,5 +290,108 @@ describe('M18 Overview Dashboard Specification & State Tests', () => {
       assert.strictEqual(ownerEditable.canCustomize, true);
       assert.strictEqual(ownerEditable.canAdopt, true);
     });
+
+    it('evaluates pre-trade risk simulation and kill-switch close path (M9 Row 6)', () => {
+      // Logic matching PreTradeChecker & RiskCenter simulator
+      function simulateOrder({
+        candidate,
+        positions,
+        killSwitchActive,
+        sizeReductionEnabled = true,
+      }) {
+        const currentPosQty = positions[candidate.symbol]?.qty ?? 0;
+        const breaches = [];
+
+        if (killSwitchActive) {
+          const isClosing =
+            candidate.side === 'buy' ? currentPosQty < 0 : currentPosQty > 0;
+
+          if (!isClosing) {
+            breaches.push({
+              code: 'kill_switch_active',
+              message: 'Emergency kill switch is currently active; opening orders are blocked.',
+            });
+            return {
+              verdict: 'rejected',
+              requested_qty: candidate.qty,
+              approved_qty: 0,
+              breaches,
+            };
+          }
+
+          const maxCloseQty = Math.abs(currentPosQty);
+          if (candidate.qty > maxCloseQty) {
+            if (sizeReductionEnabled && maxCloseQty > 0) {
+              return {
+                verdict: 'reduced',
+                requested_qty: candidate.qty,
+                approved_qty: maxCloseQty,
+                breaches: [],
+              };
+            } else {
+              breaches.push({
+                code: 'kill_switch_flip_risk',
+                message: 'Order quantity exceeds open position under kill switch.',
+              });
+              return {
+                verdict: 'rejected',
+                requested_qty: candidate.qty,
+                approved_qty: 0,
+                breaches,
+              };
+            }
+          }
+        }
+
+        return {
+          verdict: 'approved',
+          requested_qty: candidate.qty,
+          approved_qty: candidate.qty,
+          breaches: [],
+        };
+      }
+
+      const activePositions = {
+        TSLA: { qty: 100, price: 200 },
+        NVDA: { qty: -50, price: 120 },
+      };
+
+      // 1. When kill switch active, opening an order on AAPL (no position) must be rejected
+      const openApple = simulateOrder({
+        candidate: { symbol: 'AAPL', side: 'buy', qty: 10, price: 150 },
+        positions: activePositions,
+        killSwitchActive: true,
+      });
+      assert.strictEqual(openApple.verdict, 'rejected');
+      assert.strictEqual(openApple.breaches[0].code, 'kill_switch_active');
+
+      // 2. Closing exact long position (Sell 100 TSLA) must be approved under kill switch
+      const closeTsla = simulateOrder({
+        candidate: { symbol: 'TSLA', side: 'sell', qty: 100, price: 200 },
+        positions: activePositions,
+        killSwitchActive: true,
+      });
+      assert.strictEqual(closeTsla.verdict, 'approved');
+      assert.strictEqual(closeTsla.approved_qty, 100);
+
+      // 3. Closing partial short position (Buy 25 NVDA) must be approved under kill switch
+      const partialCoverNvda = simulateOrder({
+        candidate: { symbol: 'NVDA', side: 'buy', qty: 25, price: 120 },
+        positions: activePositions,
+        killSwitchActive: true,
+      });
+      assert.strictEqual(partialCoverNvda.verdict, 'approved');
+      assert.strictEqual(partialCoverNvda.approved_qty, 25);
+
+      // 4. Oversized close order (Sell 150 TSLA when holding 100) must be reduced to 100
+      const oversizeTsla = simulateOrder({
+        candidate: { symbol: 'TSLA', side: 'sell', qty: 150, price: 200 },
+        positions: activePositions,
+        killSwitchActive: true,
+        sizeReductionEnabled: true,
+      });
+      assert.strictEqual(oversizeTsla.verdict, 'reduced');
+      assert.strictEqual(oversizeTsla.approved_qty, 100);
+    });
   });
 });

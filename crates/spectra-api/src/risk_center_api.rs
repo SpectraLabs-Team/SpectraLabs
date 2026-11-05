@@ -321,6 +321,58 @@ pub(crate) fn portfolio_snapshot_json(portfolio: &PortfolioSnapshot) -> serde_js
     serde_json::to_value(StoredPortfolioSnapshot::from(portfolio)).unwrap_or(serde_json::Value::Null)
 }
 
+/// The limits a pre-trade decision was evaluated with, stored in the decision's metrics under
+/// `risk_limits`, so replay uses the limits the decision saw rather than the ones configured later.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct StoredRiskLimits {
+    pub max_gross_exposure: f64,
+    pub max_net_exposure: f64,
+    pub max_position_size: f64,
+    pub max_concentration_pct: f64,
+    pub max_leverage: f64,
+    pub max_drawdown_pct: f64,
+    pub max_daily_loss: f64,
+    pub max_var_pct: f64,
+    pub size_reduction_enabled: bool,
+}
+
+impl From<&RiskLimits> for StoredRiskLimits {
+    fn from(l: &RiskLimits) -> Self {
+        Self {
+            max_gross_exposure: l.max_gross_exposure,
+            max_net_exposure: l.max_net_exposure,
+            max_position_size: l.max_position_size,
+            max_concentration_pct: l.max_concentration_pct,
+            max_leverage: l.max_leverage,
+            max_drawdown_pct: l.max_drawdown_pct,
+            max_daily_loss: l.max_daily_loss,
+            max_var_pct: l.max_var_pct,
+            size_reduction_enabled: l.size_reduction_enabled,
+        }
+    }
+}
+
+impl From<StoredRiskLimits> for RiskLimits {
+    fn from(s: StoredRiskLimits) -> Self {
+        Self {
+            max_gross_exposure: s.max_gross_exposure,
+            max_net_exposure: s.max_net_exposure,
+            max_position_size: s.max_position_size,
+            max_concentration_pct: s.max_concentration_pct,
+            max_leverage: s.max_leverage,
+            max_drawdown_pct: s.max_drawdown_pct,
+            max_daily_loss: s.max_daily_loss,
+            max_var_pct: s.max_var_pct,
+            size_reduction_enabled: s.size_reduction_enabled,
+        }
+    }
+}
+
+/// `limits` as JSON for the `risk_limits` field of a decision's metrics.
+pub(crate) fn risk_limits_json(limits: &RiskLimits) -> serde_json::Value {
+    serde_json::to_value(StoredRiskLimits::from(limits)).unwrap_or(serde_json::Value::Null)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PortfolioSnapshotDto {
     pub cash: f64,
@@ -980,6 +1032,7 @@ pub(crate) async fn pre_trade_check(
         "daily_loss": result.projected_metrics.daily_loss,
         "var_pct": result.projected_metrics.var_pct,
         "portfolio_snapshot": portfolio_snapshot_json(&portfolio),
+        "risk_limits": risk_limits_json(&limits),
     });
 
     // 5. Record decision in audit trail
@@ -1442,14 +1495,23 @@ pub(crate) async fn replay_decision(
         Err(e) => return db_error(&e),
     };
 
-    let limits = match risk_center::get_limits(&pool, ws, decision.strategy_id).await {
-        Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-        _ => RiskLimits::default(),
+    // Replay with the limits stored with the decision. Decisions recorded without them cannot be
+    // replayed exactly, so they return 422 instead of falling back to today's or default limits.
+    let Some(stored_limits) = decision
+        .metrics
+        .get("risk_limits")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<StoredRiskLimits>(v).ok())
+    else {
+        return error_response(422, "Decision has no stored risk limits, so it cannot be replayed exactly.");
     };
+    let limits = RiskLimits::from(stored_limits);
 
+    // The kill switch is read as it is now; its state at decision time is not stored.
     let ks_active = match risk_center::get_kill_switch(&pool, ws, decision.strategy_id).await {
         Ok(Some(ks)) => ks.active,
-        _ => false,
+        Ok(None) => false,
+        Err(e) => return db_error(&e),
     };
 
     let side = match decision.side.to_lowercase().as_str() {

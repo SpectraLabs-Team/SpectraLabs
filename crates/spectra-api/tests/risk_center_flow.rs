@@ -531,6 +531,62 @@ async fn decision_replay_and_exposure_history() {
 }
 
 #[tokio::test]
+async fn replay_uses_limits_stored_with_the_decision() {
+    let Some(pool) = pool().await else { return };
+    let fx = Fixture::new(pool);
+
+    let _ = sqlx::query("INSERT INTO workspaces (id, slug, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+        .bind(fx.ws)
+        .bind(format!("ws-{}", fx.ws.simple()))
+        .bind("Risk Replay Limits Workspace")
+        .execute(&fx.pool)
+        .await;
+    fx.seed_volatility(&["NVDA"]).await;
+    fx.seed_balance().await;
+
+    // 1. Approved under the default limits; keep the decision id
+    let order_req = json!({
+        "strategy_id": null,
+        "symbol": "NVDA",
+        "side": "buy",
+        "qty": 10.0,
+        "price": 180.0,
+        "portfolio": null
+    });
+    let (code, res) = fx.call("POST", "/api/v1/risk/check", &order_req).await;
+    assert_eq!(code, 200);
+    assert_eq!(res["verdict"], "approved", "{res}");
+    let decision_id = res["decision_id"].as_str().unwrap().to_string();
+
+    // 2. Tighten the position limit so the same order is rejected today
+    let limits_payload = json!({
+        "strategy_id": null,
+        "max_gross_exposure": 200_000.0,
+        "max_net_exposure": 100_000.0,
+        "max_leverage": 2.0,
+        "max_position_size": 1_000.0,
+        "max_concentration_pct": 0.50,
+        "max_drawdown_pct": 0.15,
+        "max_daily_loss": 5_000.0,
+        "max_var_pct": 0.10,
+        "size_reduction_enabled": false
+    });
+    let (code, _) = fx.call("PUT", "/api/v1/risk/limits", &limits_payload).await;
+    assert_eq!(code, 200);
+    let (code, now_res) = fx.call("POST", "/api/v1/risk/check", &order_req).await;
+    assert_eq!(code, 200);
+    assert_eq!(now_res["verdict"], "rejected", "{now_res}");
+
+    // 3. Replaying the first decision uses the limits it was made with, not today's
+    let (code, replay) = fx.call("POST", &format!("/api/v1/risk/replay/{decision_id}"), &Value::Null).await;
+    assert_eq!(code, 200);
+    assert_eq!(replay["replay_verdict"], "approved", "{replay}");
+    assert_eq!(replay["matches"], true);
+
+    fx.clean_up().await;
+}
+
+#[tokio::test]
 async fn paper_broker_order_pre_trade_enforcement() {
     let Some(pool) = pool().await else { return };
     let fx = Fixture::new(pool);

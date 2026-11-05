@@ -877,6 +877,7 @@ pub(crate) async fn create_order(
         "daily_loss": pre_trade.projected_metrics.daily_loss,
         "var_pct": pre_trade.projected_metrics.var_pct,
         "portfolio_snapshot": crate::risk_center_api::portfolio_snapshot_json(&snapshot),
+        "risk_limits": crate::risk_center_api::risk_limits_json(&limits),
     });
 
     if let Err(e) = spectra_db::risk_center::record_decision(

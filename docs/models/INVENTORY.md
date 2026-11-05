@@ -94,3 +94,55 @@ sign, limit). "None" = no test found. Counts are `#[test]` functions in the modu
     `volatility-regime-copula.md`.
 11. **Excess vs raw kurtosis**: `moments().kurt` is raw; `performance::excess_kurtosis` is excess.
     Keep the names explicit.
+
+## Silent defaults check (M26 task 9)
+
+`scripts/check_silent_defaults.py` runs in the CI lint job and in `scripts/ci-local.sh`. It
+scans the non-test code (it stops at `#[cfg(test)]` and skips `tests/`) of spectra-core,
+spectra-data, spectra-engine, spectra-research, spectra-risk and spectra-backtest for:
+
+- `.unwrap_or(<number>)`, `.unwrap_or(f64::…)`, `.unwrap_or(<Type>::ZERO|ONE|MAX|MIN|INFINITY|NAN…)`
+  (including `i64::MAX` and other integer types)
+- `.unwrap_or_default()`
+- `.map_or(<number>, …)`
+- `.ok().unwrap_or…`
+
+and spectra-api for literal costs: `Bps::from_f64(<number>)` or `Money::from_f64(<number>)`
+outside a named `const`.
+
+Every hit must be in `scripts/silent_defaults_allowlist.txt`, and every entry there must still
+match a hit, so the list cannot go stale. `--self-test` checks the script on a small fixture
+(CI runs it first).
+
+**Adding an entry.** First ask whether the default should be an error instead. If it is
+approved, add one line:
+
+```
+crates/<crate>/src/<file>.rs | <category> | <code text> | <reason>
+```
+
+The code text is a substring of the flagged line (matched with the file, not the line number,
+so edits elsewhere do not break it). Keep it specific enough to name one site. The reason may
+not contain ` | `. Categories:
+
+| Category | Meaning | The reason says |
+|---|---|---|
+| `defined` | The value is defined by the formula or data structure (no position = quantity 0, an empty list) | why that value is the right one |
+| `parity` | An approved divergence from the C++ golden | what was approved and when |
+| `unreachable` | The input is validated before this line | where it is validated |
+| `follow-up` | A known silent default left for a later PR | what the fix is |
+
+**Baseline (task 9):** 45 hits allowed: 28 defined, 9 follow-up, 1 parity, 7 unreachable; 0
+literal costs in spectra-api. The follow-ups are the strategy `Context` money accessors
+(`equity`, `account_equity`, `position_value`, `position_exposure`, 0 on overflow), DSL numbers
+that do not convert to a quantity or price (0), and `pbo: 0.0` in the validation report when PBO
+is unavailable. Not caught by the patterns and also a follow-up: research attribution reports a
+win rate of 0 when there are no trades.
+
+**Fixed in task 9** (no longer in the allowlist):
+
+| Site | Old behaviour | New behaviour | Test |
+|---|---|---|---|
+| `spectra-backtest/src/output.rs` `fills_csv` | A multi-strategy fill with no recorded order id was written as order 0 (the engine's own fills) with no strategy | `fills_csv` and `artifacts` return `Error::InvalidArgument` ("fill n … has no order id") | `multi_strategy.rs`: `a_fill_without_an_order_id_is_an_error` |
+| `spectra-risk/src/garch.rs` `forecast_variance` (GARCH, GJR, EGARCH) | A horizon with `k − 1 > i32::MAX` used exponent 1, so it returned the two-step forecast | `forecast_variance` returns `Result`; such a horizon is `Error::InvalidArgument`. Valid horizons give identical values | `m26_volatility_reference.rs`: `a_horizon_past_the_i32_exponent_is_an_error` |
+| `spectra-data/src/settings.rs` `utc_offset_minutes` | Converted with `i32::try_from(m).unwrap_or(0)` (an offset that did not fit became UTC; unreachable behind the range check, but silent) | Range-checked, then converted; anything else is the `utc_offset_minutes` settings error | `settings.rs`: `an_offset_outside_the_range_is_an_error_not_utc` |

@@ -10249,6 +10249,13 @@
           "created_at"
         ],
         "properties": {
+          "cost_config": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The cost configuration that priced the fill (`name`, `version`, `slippage_bps`,\n`min_fee`, and for a strategy run the preset's other costs); `null` for fills recorded\nbefore it was stored."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"

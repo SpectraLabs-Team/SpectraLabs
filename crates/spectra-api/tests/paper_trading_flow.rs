@@ -458,6 +458,14 @@ async fn test_paper_backtest_parity() {
     for (i, paper_fill) in fills.iter().enumerate() {
         let bt_fill = backtest_fills[i];
         assert_eq!(paper_fill["symbol"], "AAPL");
+        // Priced by the run's preset, and the fill says so (M26 task 9).
+        let costs = &paper_fill["cost_config"];
+        assert_eq!(costs["name"], "preset:default", "{paper_fill}");
+        assert_eq!(costs["slippage_bps"].as_f64().unwrap(), backtest_cfg.costs.slippage.to_f64());
+        assert_eq!(
+            costs["commission_bps"].as_f64().unwrap(),
+            backtest_cfg.costs.commission.bps_of_notional.to_f64()
+        );
         assert_eq!(paper_fill["qty"].as_f64().unwrap(), bt_fill.qty.to_f64());
         assert_eq!(paper_fill["price"].as_f64().unwrap(), bt_fill.price.to_f64());
         assert_eq!(paper_fill["fee"].as_f64().unwrap(), bt_fill.fee.to_f64());
@@ -639,6 +647,93 @@ async fn kill_switch_rejection_without_price_is_audited() {
         .unwrap_or_else(|| panic!("kill-switch rejection must be audited: {audit}"));
     assert_eq!(entry["verdict"], "rejected", "{entry}");
     assert!(entry["price"].is_null(), "{entry}");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn a_paper_fill_records_its_cost_config() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["AAPL"]).await;
+
+    let order = json!({
+        "strategy_id": f.strategy, "symbol": "AAPL", "side": "buy", "order_type": "market",
+        "qty": 10.0, "fill_price": 100.0, "fill_now": true
+    });
+    let (status, body) = call(&f, "POST", "/api/v1/paper/orders", &order).await;
+    assert_eq!(status, 201, "{body}");
+    let want = json!({ "name": "paper-default", "version": 1, "slippage_bps": 5.0, "min_fee": 1.0 });
+    assert_eq!(body["fills"][0]["cost_config"], want, "{body}");
+
+    // Stored, and returned when the order is read back.
+    let order_id = body["id"].as_str().unwrap();
+    let (status, read) = call(&f, "GET", &format!("/api/v1/paper/orders/{order_id}"), &Value::Null).await;
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(read["fills"][0]["cost_config"], want, "{read}");
+
+    f.clean_up().await;
+}
+
+/// Audit inserts fail closed: when the pre-trade decision cannot be recorded, the order is not
+/// placed and the API returns 500. A trigger scoped to this test's workspace makes the insert
+/// fail without touching other tests.
+#[tokio::test]
+async fn an_order_whose_decision_cannot_be_recorded_is_not_placed() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["AAPL"]).await;
+
+    let name = format!("fail_audit_{}", f.ws.simple());
+    let ddl = [
+        format!(
+            "CREATE FUNCTION {name}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN \
+             IF NEW.workspace_id = '{}' THEN RAISE EXCEPTION 'audit insert failed (test)'; END IF; \
+             RETURN NEW; END $$",
+            f.ws
+        ),
+        format!(
+            "CREATE TRIGGER {name} BEFORE INSERT ON risk_decisions FOR EACH ROW EXECUTE FUNCTION {name}()"
+        ),
+    ];
+    for sql in &ddl {
+        sqlx::query(sql).execute(&f.pool).await.unwrap();
+    }
+
+    // The checked path and the kill-switch path.
+    let order = json!({
+        "strategy_id": f.strategy, "symbol": "AAPL", "side": "buy", "order_type": "market",
+        "qty": 10.0, "fill_price": 100.0, "fill_now": true
+    });
+    let (status, body) = call(&f, "POST", "/api/v1/paper/orders", &order).await;
+    // The broker path (no Alpaca credentials stored: a simulated order), with a workspace-level
+    // position for the price and a balance.
+    spectra_db::risk_center::upsert_position(&f.pool, f.ws, None, "AAPL", 1.0, 100.0).await.unwrap();
+    spectra_db::risk_center::upsert_balance(&f.pool, f.ws, None, 100_000.0, 100_100.0, 100_100.0, 100_100.0)
+        .await
+        .unwrap();
+    let broker_order = json!({ "symbol": "AAPL", "qty": "1", "side": "buy", "type": "market" });
+    let (broker_status, broker_body) = call(&f, "POST", "/api/v1/alpaca/v2/orders", &broker_order).await;
+
+    let ks = json!({ "strategy_id": f.strategy, "active": true, "reason": "Audit failure test" });
+    let (ks_status, _) = call(&f, "POST", "/api/v1/risk/kill-switch", &ks).await;
+    let (ks_order_status, ks_body) = call(&f, "POST", "/api/v1/paper/orders", &order).await;
+
+    let orders: i64 = sqlx::query_scalar("SELECT count(*) FROM paper_orders WHERE workspace_id = $1")
+        .bind(f.ws)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    let _ = sqlx::query(&format!("DROP TRIGGER {name} ON risk_decisions")).execute(&f.pool).await;
+    let _ = sqlx::query(&format!("DROP FUNCTION {name}()")).execute(&f.pool).await;
+
+    assert_eq!(status, 500, "{body}");
+    assert!(body["message"].as_str().unwrap().contains("not placed"), "{body}");
+    assert_eq!(broker_status, 500, "{broker_body}");
+    assert!(broker_body["message"].as_str().unwrap().contains("not placed"), "{broker_body}");
+    assert_eq!(ks_status, 200);
+    assert_eq!(ks_order_status, 500, "{ks_body}");
+    assert_eq!(orders, 0, "no order is stored when its decision is not recorded");
 
     f.clean_up().await;
 }

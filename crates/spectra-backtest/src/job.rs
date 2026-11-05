@@ -202,7 +202,7 @@ pub fn run_job(
         ),
         json_file("request", "request.json", &params),
     ];
-    for a in artifacts(&out.result) {
+    for a in artifacts(&out.result)? {
         let kind = match a.name {
             "equity.csv" => "equity_csv",
             "orders.csv" => "orders_csv",

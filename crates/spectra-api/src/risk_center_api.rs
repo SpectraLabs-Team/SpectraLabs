@@ -309,6 +309,13 @@ impl From<StoredPortfolioSnapshot> for PortfolioSnapshot {
     }
 }
 
+/// The response when a paper or broker order's pre-trade decision cannot be written to the
+/// audit trail. Fails closed: the caller returns this before placing (or storing) the order.
+pub(crate) fn decision_not_recorded(e: &spectra_db::Error) -> Response {
+    tracing::error!(error = %e, "pre-trade decision audit insert failed; order not placed");
+    error_response(500, "The pre-trade risk decision could not be recorded, so the order was not placed.")
+}
+
 /// `portfolio` as JSON for the `portfolio_snapshot` field of a decision's metrics.
 pub(crate) fn portfolio_snapshot_json(portfolio: &PortfolioSnapshot) -> serde_json::Value {
     serde_json::to_value(StoredPortfolioSnapshot::from(portfolio)).unwrap_or(serde_json::Value::Null)

@@ -104,6 +104,22 @@ equity. **0 when equity ≤ 0 or there are no positions.**
 4. **Kill-switch rejection reports `concentration_pct: 0.0`** and other projected metrics as zero
    placeholders, not as computed values. Callers that display them show false zeros.
 
+**Divergence (M26 task 9): pre-trade audit inserts fail closed.**
+- **Old behaviour:** the paper order paths (the checked order, the kill-switch rejection and
+  each order of a paper strategy run) and the broker order path (rejected, and approved or
+  reduced) called `record_decision` as `let _ = …`: when the audit insert failed, the order was
+  still placed (or the rejection still returned) with no decision in `risk_decisions`.
+- **New behaviour:** if the decision cannot be recorded, the order is not placed or stored and
+  the API returns 500 ("The pre-trade risk decision could not be recorded, so the order was not
+  placed."), logged as an error. In a paper strategy run the decision is now recorded before
+  the order row, so a failed insert stores no order for it (orders earlier in the same run are
+  already stored, as with any other database error mid-run).
+- **Test:** `crates/spectra-api/tests/paper_trading_flow.rs`,
+  `an_order_whose_decision_cannot_be_recorded_is_not_placed` (a trigger scoped to the test's
+  workspace makes the insert fail: the checked paper order, the kill-switch paper order and the
+  broker order all return 500, and no paper order is stored).
+- The pre-trade check endpoint (`POST /api/v1/risk/check`) places no order and is unchanged.
+
 ## Test requirements for task 3
 
 - Covariance and correlation against hand-computed values on a fixed pair of series; correlation

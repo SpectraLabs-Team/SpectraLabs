@@ -167,7 +167,7 @@ fn a_multi_request_runs_like_the_engine_and_reports_each_strategy() {
     }
 
     // CSVs: tagged orders and fills, and each strategy's own curve.
-    let arts = artifacts(r);
+    let arts = artifacts(r).unwrap();
     let names: Vec<&str> = arts.iter().map(|a| a.name).collect();
     assert_eq!(names, ["equity.csv", "orders.csv", "fills.csv", "returns.csv", "strategies.csv"]);
     let text =
@@ -197,13 +197,26 @@ fn a_multi_request_runs_like_the_engine_and_reports_each_strategy() {
     assert_eq!(curves.lines().count(), 1 + 2 * r.equity_curve.len());
 }
 
+/// Task 9: a fill without a recorded order id is an error, not order 0 (the engine's own fills)
+/// with no strategy.
+#[test]
+fn a_fill_without_an_order_id_is_an_error() {
+    let data = bars(300, 11);
+    let req = BacktestRequest::from_json(&json(TWO)).unwrap();
+    let mut out = run_request(&data, &req, &mut RunControl::default()).unwrap();
+    assert!(artifacts(&out.result).is_ok());
+    out.result.fill_orders.pop().expect("the run has fills");
+    let err = artifacts(&out.result).unwrap_err().to_string();
+    assert!(err.contains("has no order id"), "{err}");
+}
+
 #[test]
 fn single_strategy_output_has_no_strategy_columns() {
     let data = bars(120, 3);
     let req = BacktestRequest::from_json(&json(r#"{"strategy":"zscore_reversion"}"#)).unwrap();
     let out = run_request(&data, &req, &mut RunControl::default()).unwrap();
     assert!(summary_json(&out).unwrap().find("strategies").is_none());
-    let arts = artifacts(&out.result);
+    let arts = artifacts(&out.result).unwrap();
     assert_eq!(arts.len(), 4);
     let orders = String::from_utf8(arts[1].bytes.clone()).unwrap();
     assert!(orders.lines().next().unwrap().ends_with(",reject_reason"));

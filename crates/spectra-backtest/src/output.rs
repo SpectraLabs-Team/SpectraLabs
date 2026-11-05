@@ -102,7 +102,11 @@ pub fn orders_csv(r: &BacktestResult) -> String {
 
 /// Every fill from the ledger journal, with its effect on cash; a
 /// multi-strategy run adds `order_id,strategy` columns.
-pub fn fills_csv(r: &BacktestResult) -> String {
+///
+/// # Errors
+/// [`Error::InvalidArgument`] in a multi-strategy run if a fill has no order id recorded (it used
+/// to be written as order 0, the engine's own fills, and lose its strategy).
+pub fn fills_csv(r: &BacktestResult) -> Result<String> {
     let multi = !r.strategies.is_empty();
     let mut s = String::from("seq,ts_ns,instrument,side,qty,price,fee,realized,cash_after");
     s.push_str(if multi { ",order_id,strategy\n" } else { "\n" });
@@ -122,13 +126,20 @@ pub fn fills_csv(r: &BacktestResult) -> String {
             e.cash_after
         );
         if multi {
-            let id = r.fill_orders.get(n).copied().unwrap_or(0);
+            let id = r.fill_orders.get(n).copied().ok_or_else(|| {
+                Error::InvalidArgument(format!(
+                    "fill {n} (journal seq {}) has no order id: {} fills, {} order ids",
+                    e.seq,
+                    r.ledger.journal().iter().filter(|e| e.kind == EntryType::Fill).count(),
+                    r.fill_orders.len()
+                ))
+            })?;
             let strategy = id.checked_sub(1).and_then(|k| r.orders.get(k as usize)).map(|o| o.strategy);
             s.pop();
             let _ = writeln!(s, ",{id},{}", strategy.map_or(String::new(), |x| x.to_string()));
         }
     }
-    s
+    Ok(s)
 }
 
 /// `ts_ns,strategy,equity,cash,gross_exposure`: each strategy's own books at
@@ -157,12 +168,15 @@ pub fn returns_csv(r: &BacktestResult) -> String {
 }
 
 /// The CSV artifacts of a run: four, plus `strategies.csv` for a multi-strategy run.
-pub fn artifacts(r: &BacktestResult) -> Vec<Artifact> {
+///
+/// # Errors
+/// See [`fills_csv`].
+pub fn artifacts(r: &BacktestResult) -> Result<Vec<Artifact>> {
     let csv = |name, text: String| Artifact { name, media_type: "text/csv", bytes: text.into_bytes() };
     let mut out = vec![
         csv("equity.csv", equity_csv(r)),
         csv("orders.csv", orders_csv(r)),
-        csv("fills.csv", fills_csv(r)),
+        csv("fills.csv", fills_csv(r)?),
         csv("returns.csv", returns_csv(r)),
     ];
     if !r.strategies.is_empty() {
@@ -172,7 +186,7 @@ pub fn artifacts(r: &BacktestResult) -> Vec<Artifact> {
         out.push(csv("rolls.csv", rolls_csv(r)));
         out.push(csv("continuous.csv", continuous_csv(r)));
     }
-    out
+    Ok(out)
 }
 
 /// Every futures roll, close and settlement the engine made (instrument ids;

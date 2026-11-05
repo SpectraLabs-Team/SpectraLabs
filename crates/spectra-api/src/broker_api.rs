@@ -532,6 +532,7 @@ async fn handle_create_order(
         "daily_loss": eval_res.projected_metrics.daily_loss,
         "var_pct": eval_res.projected_metrics.var_pct,
         "portfolio_snapshot": crate::risk_center_api::portfolio_snapshot_json(&portfolio),
+        "risk_limits": crate::risk_center_api::risk_limits_json(&limits),
     });
 
     if eval_res.verdict == PreTradeVerdict::Rejected {

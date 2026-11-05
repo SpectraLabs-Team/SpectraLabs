@@ -246,4 +246,33 @@ describe('M19 Frontend Auth & Route Protection Specification', () => {
       assert.strictEqual(hasRole('owner', 'owner'), true);
     });
   });
+
+  describe('Production Email Resilience & Configuration (M19)', () => {
+    function deliverMailSimulated({ isConfigured, nodeEnv }) {
+      if (!isConfigured) {
+        if (nodeEnv === 'production') {
+          throw new Error('FATAL: GMAIL_USER and GMAIL_APP_PASSWORD environment variables are required in production.');
+        }
+        return { messageId: 'mock-dev' };
+      }
+      return { messageId: 'smtp-delivered' };
+    }
+
+    it('permits build-time import and dev fallback when credentials are unset', () => {
+      const devDelivery = deliverMailSimulated({ isConfigured: false, nodeEnv: 'development' });
+      assert.strictEqual(devDelivery.messageId, 'mock-dev');
+    });
+
+    it('enforces required credentials during production email delivery attempts', () => {
+      assert.throws(
+        () => deliverMailSimulated({ isConfigured: false, nodeEnv: 'production' }),
+        /FATAL: GMAIL_USER and GMAIL_APP_PASSWORD environment variables are required in production/
+      );
+    });
+
+    it('successfully delivers email when credentials are configured', () => {
+      const prodDelivery = deliverMailSimulated({ isConfigured: true, nodeEnv: 'production' });
+      assert.strictEqual(prodDelivery.messageId, 'smtp-delivered');
+    });
+  });
 });

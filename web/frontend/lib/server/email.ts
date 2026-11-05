@@ -8,7 +8,7 @@ export function isEmailConfigured(): boolean {
 }
 
 if (process.env.NODE_ENV === 'production' && !isEmailConfigured()) {
-  throw new Error('FATAL: GMAIL_USER and GMAIL_APP_PASSWORD environment variables are required in production.');
+  console.warn('[AUTH SMTP WARNING] GMAIL_USER and GMAIL_APP_PASSWORD are not configured; email delivery will fail at runtime.');
 }
 
 const transporter = isEmailConfigured()
@@ -23,6 +23,9 @@ const transporter = isEmailConfigured()
 
 async function deliverMail(opts: { from?: string; to: string; subject: string; text: string; html: string }) {
   if (!transporter) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('FATAL: GMAIL_USER and GMAIL_APP_PASSWORD environment variables are required in production.');
+    }
     console.log(`\n=======================================================`);
     console.log(`📧 [MOCK EMAIL DELIVERY - SMTP NOT CONFIGURED]`);
     console.log(`To:      ${opts.to}`);

@@ -19,6 +19,8 @@ use spectra_db::{connect, migrate, PgPool, PoolConfig};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+mod common;
+
 const SECRET: &str = "test-secret-test-secret-test-secret!";
 
 async fn pool() -> Option<PgPool> {
@@ -321,6 +323,8 @@ async fn options_are_priced_and_trade_on_paper_with_their_multiplier() {
         .await;
     assert_eq!(status, 201, "{created}");
     assert_eq!(created["right"], "call");
+    // Paper orders that add exposure need volatility from a loaded dataset.
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["SPY301220C00600000"]).await;
     let strategy = spectra_db::new_id();
     let (status, order) = f
         .call(

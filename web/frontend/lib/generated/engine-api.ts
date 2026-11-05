@@ -2742,6 +2742,8 @@ export interface components {
             text: string;
         };
         CreatePaperOrderRequest: {
+            /** Format: uuid */
+            dataset_version_id?: string | null;
             fill_now?: boolean | null;
             /** Format: double */
             fill_price?: number | null;
@@ -3686,8 +3688,12 @@ export interface components {
         PaperAccountView: {
             /** Format: double */
             cash: number;
-            /** Format: double */
-            cvar_dollar: number;
+            /**
+             * Format: double
+             * @description 1-day 99% CVaR (mean loss at or beyond VaR) in currency, from the same simulation as
+             *     VaR; `null` with `var_pct`.
+             */
+            cvar_dollar?: number | null;
             /** Format: double */
             daily_start_equity: number;
             /** Format: double */
@@ -3699,10 +3705,19 @@ export interface components {
             strategy_id: string;
             /** Format: date-time */
             updated_at: string;
-            /** Format: double */
-            var_dollar: number;
-            /** Format: double */
-            var_pct: number;
+            /**
+             * Format: double
+             * @description VaR in currency; `null` with `var_pct`.
+             */
+            var_dollar?: number | null;
+            /**
+             * Format: double
+             * @description 1-day 99% VaR as a fraction of equity; `null` when it cannot be computed (see
+             *     `var_unavailable_reason`).
+             */
+            var_pct?: number | null;
+            /** @description Why VaR and CVaR are `null`, for example a position with no volatility. */
+            var_unavailable_reason?: string | null;
             /** Format: uuid */
             workspace_id: string;
         };
@@ -3738,6 +3753,10 @@ export interface components {
             timestamp_ns: number;
         };
         PaperFillView: {
+            /** @description The cost configuration that priced the fill (`name`, `version`, `slippage_bps`,
+             *     `min_fee`, and for a strategy run the preset's other costs); `null` for fills recorded
+             *     before it was stored. */
+            cost_config?: Record<string, never> | null;
             /** Format: date-time */
             created_at: string;
             /** Format: double */
@@ -3836,8 +3855,12 @@ export interface components {
             price: number;
             /** Format: double */
             qty: number;
+            /** Format: double */
+            volatility?: number | null;
         };
         PreTradeCheckRequest: {
+            /** Format: uuid */
+            dataset_version_id?: string | null;
             portfolio?: null | components["schemas"]["PortfolioSnapshotDto"];
             /** Format: double */
             price: number;
@@ -3919,8 +3942,11 @@ export interface components {
             net_exposure: number;
             /** Format: double */
             position_size: number;
-            /** Format: double */
-            var_pct: number;
+            /**
+             * Format: double
+             * @description `null` when VaR cannot be computed because a position has no volatility.
+             */
+            var_pct?: number | null;
         };
         /** @description List of provider configurations. */
         ProviderConfigListView: {
@@ -4209,8 +4235,11 @@ export interface components {
             /** Format: uuid */
             id: string;
             metrics: unknown;
-            /** Format: double */
-            price: number;
+            /**
+             * Format: double
+             * @description `null` when no price was known (a kill-switch rejection of a market order).
+             */
+            price?: number | null;
             reasons: string[];
             /** Format: double */
             requested_qty: number;

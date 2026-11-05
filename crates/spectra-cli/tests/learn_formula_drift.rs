@@ -174,7 +174,7 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
     let mut positions = HashMap::new();
     for (sym, q, p) in pos {
         portfolio.add_asset(sym, q, p);
-        positions.insert(sym.to_string(), PositionSnapshot { qty: q, price: p });
+        positions.insert(sym.to_string(), PositionSnapshot { qty: q, price: p, volatility: None });
     }
     let equity = 40_000.0;
     let snap = PortfolioSnapshot { equity, positions, ..PortfolioSnapshot::default() };
@@ -195,7 +195,9 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
         daily_start_equity: day_start,
         positions: risk_pos
             .iter()
-            .map(|(sym, q, p)| ((*sym).to_string(), PositionSnapshot { qty: *q, price: *p }))
+            .map(|(sym, q, p)| {
+                ((*sym).to_string(), PositionSnapshot { qty: *q, price: *p, volatility: None })
+            })
             .collect(),
         ..PortfolioSnapshot::default()
     };
@@ -213,11 +215,12 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
         risk.gross_exposure(),
         risk.net_exposure(),
         risk.leverage(),
-        risk.drawdown_pct(),
+        risk.drawdown_pct().unwrap(),
         risk.daily_loss(),
         var_pct,
         &limits,
-    );
+    )
+    .unwrap();
 
     // Walk-forward efficiency.
     let (mean_is, mean_oos) = (0.84, 0.51);
@@ -386,7 +389,11 @@ fn pinned() -> BTreeMap<&'static str, (&'static str, f64, f64)> {
         ),
         (
             "market_value",
-            ("quantity × price", -40.0 * 210.0, PositionSnapshot { qty: -40.0, price: 210.0 }.value()),
+            (
+                "quantity × price",
+                -40.0 * 210.0,
+                PositionSnapshot { qty: -40.0, price: 210.0, volatility: None }.value(),
+            ),
         ),
         ("sharpe_variance", ("V = Σ (SRᵢ − mean SR)² / (N − 1)", v, ledger.sharpe_variance())),
         (

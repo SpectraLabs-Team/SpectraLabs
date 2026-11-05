@@ -59,6 +59,91 @@ async fn ensure_can_edit(pool: &spectra_db::PgPool, ws: Uuid, user_id: Option<Uu
     Ok(())
 }
 
+/// Look up bars by dataset_version_id (or latest in workspace) and compute annualized volatility per symbol.
+pub(crate) async fn lookup_portfolio_volatilities(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    data_dir: &std::path::Path,
+    dataset_version_id: Option<Uuid>,
+    symbols: &[&str],
+) -> Result<HashMap<String, f64>, String> {
+    if symbols.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let target_version_id = if let Some(id) = dataset_version_id {
+        Some(id)
+    } else {
+        let row: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT id FROM dataset_versions WHERE workspace_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
+        )
+        .bind(ws)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| format!("failed to query latest dataset version: {e}"))?;
+
+        row.map(|(id,)| id)
+    };
+
+    let Some(target_version_id) = target_version_id else {
+        return Ok(HashMap::new());
+    };
+
+    let resolved = spectra_db::datasets::resolve_version(
+        pool,
+        ws,
+        target_version_id,
+        spectra_db::datasets::Access::engine("risk_volatility_lookup"),
+    )
+    .await
+    .map_err(|e| format!("failed to resolve dataset version: {e}"))?;
+
+    let version = match resolved {
+        spectra_db::datasets::Resolved::Found(v) => v,
+        spectra_db::datasets::Resolved::Sealed { holdout } => {
+            return Err(format!("dataset version {target_version_id} is sealed in holdout vault: {holdout}"));
+        }
+        spectra_db::datasets::Resolved::Missing => {
+            return Err(format!("dataset version {target_version_id} not found in workspace"));
+        }
+    };
+
+    let dataset = match spectra_backtest::load_dataset(data_dir, &version.checksum) {
+        Ok(d) => d,
+        Err(e) => {
+            if dataset_version_id.is_some() {
+                return Err(format!("failed to load dataset {}: {e}", version.checksum));
+            }
+            return Ok(HashMap::new());
+        }
+    };
+
+    let mut result = HashMap::new();
+    let mut unique_syms: Vec<&str> = symbols.to_vec();
+    unique_syms.sort_unstable();
+    unique_syms.dedup();
+
+    for sym in unique_syms {
+        let Some(inst_id) = dataset.symbols.id(sym).or_else(|| dataset.symbols.id(&sym.to_uppercase()))
+        else {
+            if dataset_version_id.is_some() {
+                return Err(format!("symbol {sym} not found in dataset {}", version.id));
+            }
+            continue;
+        };
+
+        let symbol_bars: Vec<spectra_core::Bar> =
+            dataset.bars.iter().filter(|b| b.instrument == inst_id).copied().collect();
+
+        let vol = spectra_risk::volatility_from_bars(sym, &symbol_bars, 252.0)
+            .map_err(|e| format!("volatility calculation failed for {sym}: {e}"))?;
+
+        result.insert(sym.to_string(), vol);
+    }
+
+    Ok(result)
+}
+
 // ---------------------------------------------------------------- Data Transfer Objects
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -170,6 +255,141 @@ pub struct SetKillSwitchRequest {
 pub struct PositionSnapshotDto {
     pub qty: f64,
     pub price: f64,
+    #[serde(default)]
+    pub volatility: Option<f64>,
+}
+
+/// The portfolio a pre-trade decision was evaluated against, stored in the decision's metrics
+/// under `portfolio_snapshot` so the decision can be replayed against the same inputs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct StoredPortfolioSnapshot {
+    pub cash: f64,
+    pub equity: f64,
+    pub peak_equity: f64,
+    pub daily_start_equity: f64,
+    pub positions: HashMap<String, PositionSnapshotDto>,
+}
+
+impl From<&PortfolioSnapshot> for StoredPortfolioSnapshot {
+    fn from(p: &PortfolioSnapshot) -> Self {
+        Self {
+            cash: p.cash,
+            equity: p.equity,
+            peak_equity: p.peak_equity,
+            daily_start_equity: p.daily_start_equity,
+            positions: p
+                .positions
+                .iter()
+                .map(|(sym, pos)| {
+                    (
+                        sym.clone(),
+                        PositionSnapshotDto { qty: pos.qty, price: pos.price, volatility: pos.volatility },
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<StoredPortfolioSnapshot> for PortfolioSnapshot {
+    fn from(s: StoredPortfolioSnapshot) -> Self {
+        Self {
+            cash: s.cash,
+            equity: s.equity,
+            peak_equity: s.peak_equity,
+            daily_start_equity: s.daily_start_equity,
+            positions: s
+                .positions
+                .into_iter()
+                .map(|(sym, p)| {
+                    (sym, PositionSnapshot { qty: p.qty, price: p.price, volatility: p.volatility })
+                })
+                .collect(),
+        }
+    }
+}
+
+/// The response when a paper or broker order's pre-trade decision cannot be written to the
+/// audit trail. Fails closed: the caller returns this before placing (or storing) the order.
+pub(crate) fn decision_not_recorded(e: &spectra_db::Error) -> Response {
+    tracing::error!(error = %e, "pre-trade decision audit insert failed; order not placed");
+    error_response(500, "The pre-trade risk decision could not be recorded, so the order was not placed.")
+}
+
+/// `portfolio` as JSON for the `portfolio_snapshot` field of a decision's metrics.
+pub(crate) fn portfolio_snapshot_json(portfolio: &PortfolioSnapshot) -> serde_json::Value {
+    serde_json::to_value(StoredPortfolioSnapshot::from(portfolio)).unwrap_or(serde_json::Value::Null)
+}
+
+/// The limits a pre-trade decision was evaluated with, stored in the decision's metrics under
+/// `risk_limits`, so replay uses the limits the decision saw rather than the ones configured later.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct StoredRiskLimits {
+    pub max_gross_exposure: f64,
+    pub max_net_exposure: f64,
+    pub max_position_size: f64,
+    pub max_concentration_pct: f64,
+    pub max_leverage: f64,
+    pub max_drawdown_pct: f64,
+    pub max_daily_loss: f64,
+    pub max_var_pct: f64,
+    pub size_reduction_enabled: bool,
+}
+
+impl From<&RiskLimits> for StoredRiskLimits {
+    fn from(l: &RiskLimits) -> Self {
+        Self {
+            max_gross_exposure: l.max_gross_exposure,
+            max_net_exposure: l.max_net_exposure,
+            max_position_size: l.max_position_size,
+            max_concentration_pct: l.max_concentration_pct,
+            max_leverage: l.max_leverage,
+            max_drawdown_pct: l.max_drawdown_pct,
+            max_daily_loss: l.max_daily_loss,
+            max_var_pct: l.max_var_pct,
+            size_reduction_enabled: l.size_reduction_enabled,
+        }
+    }
+}
+
+impl From<StoredRiskLimits> for RiskLimits {
+    fn from(s: StoredRiskLimits) -> Self {
+        Self {
+            max_gross_exposure: s.max_gross_exposure,
+            max_net_exposure: s.max_net_exposure,
+            max_position_size: s.max_position_size,
+            max_concentration_pct: s.max_concentration_pct,
+            max_leverage: s.max_leverage,
+            max_drawdown_pct: s.max_drawdown_pct,
+            max_daily_loss: s.max_daily_loss,
+            max_var_pct: s.max_var_pct,
+            size_reduction_enabled: s.size_reduction_enabled,
+        }
+    }
+}
+
+/// The limits a pre-trade check uses: the strategy's own, else the workspace's, else the
+/// defaults when none are configured. A database error is returned to the caller, never
+/// replaced by default limits.
+pub(crate) async fn load_effective_limits(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    strategy_id: Option<Uuid>,
+) -> Result<RiskLimits, spectra_db::Error> {
+    if let Some(strat_id) = strategy_id {
+        if let Some(row) = risk_center::get_limits(pool, ws, Some(strat_id)).await? {
+            return Ok(RiskLimits::from(&RiskLimitsView::from(row)));
+        }
+    }
+    Ok(match risk_center::get_limits(pool, ws, None).await? {
+        Some(row) => RiskLimits::from(&RiskLimitsView::from(row)),
+        None => RiskLimits::default(),
+    })
+}
+
+/// `limits` as JSON for the `risk_limits` field of a decision's metrics.
+pub(crate) fn risk_limits_json(limits: &RiskLimits) -> serde_json::Value {
+    serde_json::to_value(StoredRiskLimits::from(limits)).unwrap_or(serde_json::Value::Null)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -191,6 +411,8 @@ pub struct PreTradeCheckRequest {
     /// Caller-supplied portfolio snapshot (deprecated & ignored: per Decision 1, portfolio is strictly server-built from DB).
     #[serde(default)]
     pub portfolio: Option<PortfolioSnapshotDto>,
+    #[serde(default)]
+    pub dataset_version_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -210,7 +432,8 @@ pub struct ProjectedMetricsView {
     pub concentration_pct: f64,
     pub drawdown_pct: f64,
     pub daily_loss: f64,
-    pub var_pct: f64,
+    /// `null` when VaR cannot be computed because a position has no volatility.
+    pub var_pct: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -231,7 +454,8 @@ pub struct RiskDecisionView {
     pub symbol: String,
     pub side: String,
     pub requested_qty: f64,
-    pub price: f64,
+    /// `null` when no price was known (a kill-switch rejection of a market order).
+    pub price: Option<f64>,
     pub approved_qty: f64,
     pub verdict: String,
     pub breaches: serde_json::Value,
@@ -429,7 +653,7 @@ pub(crate) async fn fail_closed_response(
         symbol,
         side_str,
         qty,
-        price,
+        Some(price),
         0.0,
         "rejected",
         &breaches_json,
@@ -461,7 +685,7 @@ pub(crate) async fn fail_closed_response(
                 concentration_pct: 0.0,
                 drawdown_pct: 0.0,
                 daily_loss: 0.0,
-                var_pct: 0.0,
+                var_pct: None,
             },
             decision_id,
         })
@@ -673,23 +897,7 @@ pub(crate) async fn pre_trade_check(
     };
 
     // 2. Determine limits (Fail closed on DB error - Task 3)
-    let limits_res = if let Some(strat_id) = req.strategy_id {
-        match risk_center::get_limits(&pool, ws, Some(strat_id)).await {
-            Ok(Some(row)) => Ok(RiskLimits::from(&RiskLimitsView::from(row))),
-            Ok(None) => match risk_center::get_limits(&pool, ws, None).await {
-                Ok(Some(row)) => Ok(RiskLimits::from(&RiskLimitsView::from(row))),
-                Ok(None) => Ok(RiskLimits::default()),
-                Err(e) => Err(e),
-            },
-            Err(e) => Err(e),
-        }
-    } else {
-        match risk_center::get_limits(&pool, ws, None).await {
-            Ok(Some(row)) => Ok(RiskLimits::from(&RiskLimitsView::from(row))),
-            Ok(None) => Ok(RiskLimits::default()),
-            Err(e) => Err(e),
-        }
-    };
+    let limits_res = load_effective_limits(&pool, ws, req.strategy_id).await;
     let Ok(limits) = limits_res else {
         return fail_closed_response(
             &pool,
@@ -735,25 +943,65 @@ pub(crate) async fn pre_trade_check(
         .await;
     };
 
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+    let mut syms_to_lookup = vec![req.symbol.as_str()];
+    for p in &db_positions {
+        syms_to_lookup.push(&p.symbol);
+    }
+
+    let vols =
+        match lookup_portfolio_volatilities(&pool, ws, data_dir, req.dataset_version_id, &syms_to_lookup)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return error_response(422, format!("Pre-trade risk check failed: {e}"));
+            }
+        };
+
     // 3. Task 1 & Decision 1: The server strictly builds the portfolio snapshot from the database.
     // The caller's portfolio field is completely ignored to prevent any client-side bypass.
     let portfolio = {
         let mut positions = HashMap::new();
         for p in db_positions {
-            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price });
+            let vol = vols.get(&p.symbol).copied();
+            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: vol });
         }
+        let vol = vols.get(&req.symbol).copied();
+        positions.entry(req.symbol.clone()).or_insert_with(|| PositionSnapshot {
+            qty: 0.0,
+            price: req.price,
+            volatility: vol,
+        });
         let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
             (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
+        } else if let Some(ref req_p) = req.portfolio {
+            (req_p.cash, req_p.equity, req_p.peak_equity, req_p.daily_start_equity)
         } else {
-            let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
-            (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
+            return fail_closed_response(
+                &pool,
+                ws,
+                req.strategy_id,
+                &req.symbol,
+                side,
+                req.qty,
+                req.price,
+                "Risk check failed: no portfolio balance in database and no portfolio supplied.",
+                user_id,
+            )
+            .await;
         };
         PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions }
     };
 
     // 4. Run pre-trade check
     let candidate = OrderCandidate { symbol: req.symbol.clone(), side, qty: req.qty, price: req.price };
-    let result = PreTradeChecker::evaluate(&limits, &portfolio, &candidate, kill_switch_active);
+    let result = match PreTradeChecker::evaluate(&limits, &portfolio, &candidate, kill_switch_active) {
+        Ok(r) => r,
+        Err(e) => return error_response(422, format!("Pre-trade risk check failed: {e}")),
+    };
 
     let verdict_str = match result.verdict {
         PreTradeVerdict::Approved => "approved",
@@ -786,6 +1034,8 @@ pub(crate) async fn pre_trade_check(
         "drawdown_pct": result.projected_metrics.drawdown_pct,
         "daily_loss": result.projected_metrics.daily_loss,
         "var_pct": result.projected_metrics.var_pct,
+        "portfolio_snapshot": portfolio_snapshot_json(&portfolio),
+        "risk_limits": risk_limits_json(&limits),
     });
 
     // 5. Record decision in audit trail
@@ -799,7 +1049,7 @@ pub(crate) async fn pre_trade_check(
             OrderSide::Sell => "sell",
         },
         req.qty,
-        req.price,
+        Some(req.price),
         result.approved_qty,
         verdict_str,
         &breaches_json,
@@ -1127,69 +1377,103 @@ pub(crate) async fn get_alerts(
     let db_positions = risk_center::get_positions(&pool, ws, q.strategy_id).await.unwrap_or_default();
     let db_balance = risk_center::get_balance(&pool, ws, q.strategy_id).await.unwrap_or(None);
 
+    if !db_positions.is_empty() && db_balance.is_none() {
+        return error_response(422, "Strategy has no portfolio balance initialized in database.");
+    }
+
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+    let pos_syms: Vec<&str> = db_positions.iter().map(|p| p.symbol.as_str()).collect();
+    let vols = if pos_syms.is_empty() {
+        HashMap::new()
+    } else {
+        match lookup_portfolio_volatilities(&pool, ws, data_dir, None, &pos_syms).await {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute volatility for alerts: {e}")),
+        }
+    };
+
     let mut positions = HashMap::new();
     for p in db_positions {
-        positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price });
+        let vol = vols.get(&p.symbol).copied();
+        positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: vol });
     }
-    let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
+    let (cash, equity, peak_equity, daily_start_equity) = if let Some(ref b) = db_balance {
         (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
     } else {
-        let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
-        (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
+        (0.0, 0.0, 0.0, 0.0)
     };
     let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
 
     let mut alerts = Vec::new();
-    let gross = portfolio.gross_exposure();
-    let gross_pct = utilization(gross, limits.max_gross_exposure);
-    if gross_pct >= 0.80 {
-        alerts.push(RiskAlertView {
-            severity: if gross_pct >= 1.0 { "breach".into() } else { "warning".into() },
-            metric: "gross_exposure".into(),
-            current_value: gross,
-            limit_value: limits.max_gross_exposure,
-            utilization_pct: gross_pct * 100.0,
-            message: format!("Gross exposure utilization is at {:.1}% of limit.", gross_pct * 100.0),
-        });
-    }
+    if db_balance.is_some() {
+        let gross = portfolio.gross_exposure();
+        let gross_pct = match utilization(gross, limits.max_gross_exposure) {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+        };
+        if gross_pct >= 0.80 {
+            alerts.push(RiskAlertView {
+                severity: if gross_pct >= 1.0 { "breach".into() } else { "warning".into() },
+                metric: "gross_exposure".into(),
+                current_value: gross,
+                limit_value: limits.max_gross_exposure,
+                utilization_pct: gross_pct * 100.0,
+                message: format!("Gross exposure utilization is at {:.1}% of limit.", gross_pct * 100.0),
+            });
+        }
 
-    let lev = portfolio.leverage();
-    let lev_pct = utilization(lev, limits.max_leverage);
-    if lev_pct >= 0.80 {
-        alerts.push(RiskAlertView {
-            severity: if lev_pct >= 1.0 { "breach".into() } else { "warning".into() },
-            metric: "leverage".into(),
-            current_value: lev,
-            limit_value: limits.max_leverage,
-            utilization_pct: lev_pct * 100.0,
-            message: format!("Leverage utilization is at {:.1}% of limit.", lev_pct * 100.0),
-        });
-    }
+        let lev = portfolio.leverage();
+        let lev_pct = match utilization(lev, limits.max_leverage) {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+        };
+        if lev_pct >= 0.80 {
+            alerts.push(RiskAlertView {
+                severity: if lev_pct >= 1.0 { "breach".into() } else { "warning".into() },
+                metric: "leverage".into(),
+                current_value: lev,
+                limit_value: limits.max_leverage,
+                utilization_pct: lev_pct * 100.0,
+                message: format!("Leverage utilization is at {:.1}% of limit.", lev_pct * 100.0),
+            });
+        }
 
-    let dd = portfolio.drawdown_pct();
-    let dd_pct = utilization(dd, limits.max_drawdown_pct);
-    if dd_pct >= 0.80 {
-        alerts.push(RiskAlertView {
-            severity: if dd_pct >= 1.0 { "breach".into() } else { "warning".into() },
-            metric: "drawdown".into(),
-            current_value: dd,
-            limit_value: limits.max_drawdown_pct,
-            utilization_pct: dd_pct * 100.0,
-            message: format!("Drawdown is at {:.1}% of limit.", dd_pct * 100.0),
-        });
-    }
+        let dd = match portfolio.drawdown_pct() {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
+        };
+        let dd_pct = match utilization(dd, limits.max_drawdown_pct) {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+        };
+        if dd_pct >= 0.80 {
+            alerts.push(RiskAlertView {
+                severity: if dd_pct >= 1.0 { "breach".into() } else { "warning".into() },
+                metric: "drawdown".into(),
+                current_value: dd,
+                limit_value: limits.max_drawdown_pct,
+                utilization_pct: dd_pct * 100.0,
+                message: format!("Drawdown is at {:.1}% of limit.", dd_pct * 100.0),
+            });
+        }
 
-    let loss = portfolio.daily_loss();
-    let loss_pct = utilization(loss, limits.max_daily_loss);
-    if loss_pct >= 0.80 {
-        alerts.push(RiskAlertView {
-            severity: if loss_pct >= 1.0 { "breach".into() } else { "warning".into() },
-            metric: "daily_loss".into(),
-            current_value: loss,
-            limit_value: limits.max_daily_loss,
-            utilization_pct: loss_pct * 100.0,
-            message: format!("Daily loss is at {:.1}% of limit.", loss_pct * 100.0),
-        });
+        let loss = portfolio.daily_loss();
+        let loss_pct = match utilization(loss, limits.max_daily_loss) {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+        };
+        if loss_pct >= 0.80 {
+            alerts.push(RiskAlertView {
+                severity: if loss_pct >= 1.0 { "breach".into() } else { "warning".into() },
+                metric: "daily_loss".into(),
+                current_value: loss,
+                limit_value: limits.max_daily_loss,
+                utilization_pct: loss_pct * 100.0,
+                message: format!("Daily loss is at {:.1}% of limit.", loss_pct * 100.0),
+            });
+        }
     }
 
     json_response(200, json!(alerts).to_string())
@@ -1214,48 +1498,54 @@ pub(crate) async fn replay_decision(
         Err(e) => return db_error(&e),
     };
 
-    let limits = match risk_center::get_limits(&pool, ws, decision.strategy_id).await {
-        Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-        _ => RiskLimits::default(),
+    // Replay with the limits stored with the decision. Decisions recorded without them cannot be
+    // replayed exactly, so they return 422 instead of falling back to today's or default limits.
+    let Some(stored_limits) = decision
+        .metrics
+        .get("risk_limits")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<StoredRiskLimits>(v).ok())
+    else {
+        return error_response(422, "Decision has no stored risk limits, so it cannot be replayed exactly.");
     };
+    let limits = RiskLimits::from(stored_limits);
 
+    // The kill switch is read as it is now; its state at decision time is not stored.
     let ks_active = match risk_center::get_kill_switch(&pool, ws, decision.strategy_id).await {
         Ok(Some(ks)) => ks.active,
-        _ => false,
+        Ok(None) => false,
+        Err(e) => return db_error(&e),
     };
 
     let side = match decision.side.to_lowercase().as_str() {
         "sell" => OrderSide::Sell,
         _ => OrderSide::Buy,
     };
-    let candidate = OrderCandidate {
-        symbol: decision.symbol.clone(),
-        side,
-        qty: decision.requested_qty,
-        price: decision.price,
+    let Some(price) = decision.price else {
+        return error_response(422, "Decision has no price, so it cannot be replayed.");
     };
+    let candidate =
+        OrderCandidate { symbol: decision.symbol.clone(), side, qty: decision.requested_qty, price };
 
-    // Reconstruct portfolio from decision metrics
-    let gross = decision.metrics.get("gross_exposure").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    let _net = decision.metrics.get("net_exposure").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    let lev = decision.metrics.get("leverage").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
-    let dd = decision.metrics.get("drawdown_pct").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    let loss = decision.metrics.get("daily_loss").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
-    let equity = if lev > 0.0 && gross > 0.0 { gross / lev } else { 100_000.0 };
-
-    let mut positions = HashMap::new();
-    if gross > 0.0 {
-        positions.insert("AAPL".into(), PositionSnapshot { qty: 10.0, price: 150.0 });
-    }
-    let portfolio = PortfolioSnapshot {
-        cash: 50_000.0,
-        equity,
-        peak_equity: equity * (1.0 + dd),
-        daily_start_equity: equity + loss,
-        positions,
+    // Replay against the portfolio stored with the decision. Decisions recorded without a
+    // snapshot (before snapshots were stored, or fail-closed decisions) cannot be replayed.
+    let Some(stored) = decision
+        .metrics
+        .get("portfolio_snapshot")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<StoredPortfolioSnapshot>(v).ok())
+    else {
+        return error_response(
+            422,
+            "Decision has no stored portfolio snapshot, so it cannot be replayed exactly.",
+        );
     };
+    let portfolio = PortfolioSnapshot::from(stored);
 
-    let replay_res = PreTradeChecker::evaluate(&limits, &portfolio, &candidate, ks_active);
+    let replay_res = match PreTradeChecker::evaluate(&limits, &portfolio, &candidate, ks_active) {
+        Ok(r) => r,
+        Err(e) => return error_response(422, format!("Pre-trade risk check replay failed: {e}")),
+    };
     let replay_verdict = match replay_res.verdict {
         PreTradeVerdict::Approved => "approved",
         PreTradeVerdict::Reduced => "reduced",
@@ -1351,24 +1641,54 @@ pub(crate) async fn get_metrics(
     let db_balance = risk_center::get_balance(&pool, ws, q.strategy_id).await.unwrap_or(None);
 
     let (gross, net, lev, dd, loss, var_pct) = if !db_positions.is_empty() || db_balance.is_some() {
+        let Some(b) = db_balance else {
+            return error_response(422, "Strategy has no portfolio balance initialized in database.");
+        };
+
+        let default_dir = std::path::PathBuf::from("data");
+        let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+        let pos_syms: Vec<&str> = db_positions.iter().map(|p| p.symbol.as_str()).collect();
+        let vols = if pos_syms.is_empty() {
+            HashMap::new()
+        } else {
+            match lookup_portfolio_volatilities(&pool, ws, data_dir, None, &pos_syms).await {
+                Ok(v) => v,
+                Err(e) => {
+                    return error_response(422, format!("Failed to compute portfolio risk metrics: {e}"))
+                }
+            }
+        };
+
         let mut positions = HashMap::new();
         for p in db_positions {
-            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price });
+            let vol = vols.get(&p.symbol).copied();
+            positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: vol });
         }
-        let (cash, equity, peak_equity, daily_start_equity) = if let Some(b) = db_balance {
-            (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
-        } else {
-            let gross: f64 = positions.values().map(PositionSnapshot::value).map(f64::abs).sum();
-            (100_000.0, 100_000.0 + gross, 100_000.0 + gross, 100_000.0 + gross)
+        let p = PortfolioSnapshot {
+            cash: b.cash,
+            equity: b.equity,
+            peak_equity: b.peak_equity,
+            daily_start_equity: b.daily_start_equity,
+            positions,
         };
-        let p = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
-        (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), p.var_pct())
+        let var = match p.var_pct() {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
+        };
+        let dd = match p.drawdown_pct() {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
+        };
+        (p.gross_exposure(), p.net_exposure(), p.leverage(), dd, p.daily_loss(), var)
     } else {
-        let p = PortfolioSnapshot::default();
-        (p.gross_exposure(), p.net_exposure(), p.leverage(), p.drawdown_pct(), p.daily_loss(), p.var_pct())
+        (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     };
 
-    let u = LimitUtilization::new(gross, net, lev, dd, loss, var_pct, &limits);
+    let u = match LimitUtilization::new(gross, net, lev, dd, loss, var_pct, &limits) {
+        Ok(u) => u,
+        Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
+    };
     let gross_pct = u.gross_exposure * 100.0;
     let net_pct = u.net_exposure * 100.0;
     let lev_pct = u.leverage * 100.0;

@@ -58,6 +58,8 @@ pub struct PaperFillRow {
     pub qty: f64,
     pub price: f64,
     pub fee: f64,
+    /// The cost configuration that priced the fill; `None` for fills stored before it was recorded.
+    pub cost_config: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -68,6 +70,9 @@ const UPDATE_ORDER_STATUS_SQL: &str = include_str!("../queries/paper_order_updat
 const INSERT_FILL_SQL: &str = include_str!("../queries/paper_fill_insert.sql");
 const LIST_FILLS_FOR_ORDER_SQL: &str = include_str!("../queries/paper_fills_list_for_order.sql");
 const CLEAR_POSITIONS_SQL: &str = include_str!("../queries/paper_positions_clear.sql");
+const LIST_FILLS_SINCE_SQL: &str = include_str!("../queries/paper_fills_list_since.sql");
+const ACCOUNT_STARTED_AT_SQL: &str = include_str!("../queries/paper_account_started_at.sql");
+const MARK_ACCOUNT_STARTED_SQL: &str = include_str!("../queries/paper_account_mark_started.sql");
 
 /// Get the paper account for a strategy, initializing starting balance if it does not exist yet.
 ///
@@ -138,6 +143,9 @@ pub async fn reset_paper_account(
         starting,
     )
     .await?;
+
+    // The account starts again now: P&L attribution ignores fills from before the reset.
+    sqlx::query(MARK_ACCOUNT_STARTED_SQL).bind(workspace_id).bind(strategy_id).execute(pool).await?;
 
     let balance = crate::risk_center::get_balance(pool, workspace_id, Some(strategy_id)).await?.unwrap_or(
         PortfolioBalanceRow {
@@ -260,6 +268,7 @@ pub async fn insert_paper_fill(
     qty: f64,
     price: f64,
     fee: f64,
+    cost_config: &serde_json::Value,
 ) -> Result<PaperFillRow, Error> {
     sqlx::query_as(INSERT_FILL_SQL)
         .bind(order_id)
@@ -270,6 +279,7 @@ pub async fn insert_paper_fill(
         .bind(qty)
         .bind(price)
         .bind(fee)
+        .bind(cost_config)
         .fetch_one(pool)
         .await
 }
@@ -284,4 +294,35 @@ pub async fn list_paper_fills_for_order(
     order_id: Uuid,
 ) -> Result<Vec<PaperFillRow>, Error> {
     sqlx::query_as(LIST_FILLS_FOR_ORDER_SQL).bind(workspace_id).bind(order_id).fetch_all(pool).await
+}
+
+/// List a strategy's fills recorded at or after `since`, oldest first.
+///
+/// # Errors
+/// Any database error.
+pub async fn list_paper_fills_since(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Uuid,
+    since: DateTime<Utc>,
+) -> Result<Vec<PaperFillRow>, Error> {
+    sqlx::query_as(LIST_FILLS_SINCE_SQL)
+        .bind(workspace_id)
+        .bind(strategy_id)
+        .bind(since)
+        .fetch_all(pool)
+        .await
+}
+
+/// When the strategy's current paper account started (creation, or the last reset). `None`
+/// when the account does not exist yet.
+///
+/// # Errors
+/// Any database error.
+pub async fn paper_account_started_at(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Uuid,
+) -> Result<Option<DateTime<Utc>>, Error> {
+    sqlx::query_scalar(ACCOUNT_STARTED_AT_SQL).bind(workspace_id).bind(strategy_id).fetch_optional(pool).await
 }

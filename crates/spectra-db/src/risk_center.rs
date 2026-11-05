@@ -51,7 +51,8 @@ pub struct RiskDecisionRow {
     pub symbol: String,
     pub side: String,
     pub requested_qty: f64,
-    pub price: f64,
+    /// `None` when no price was known (a kill-switch rejection of a market order).
+    pub price: Option<f64>,
     pub approved_qty: f64,
     pub verdict: String,
     pub breaches: serde_json::Value,
@@ -197,7 +198,7 @@ pub async fn record_decision(
     symbol: &str,
     side: &str,
     requested_qty: f64,
-    price: f64,
+    price: Option<f64>,
     approved_qty: f64,
     verdict: &str,
     breaches: &serde_json::Value,

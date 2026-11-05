@@ -16,6 +16,8 @@ use spectra_db::{connect, migrate, PgPool, PoolConfig};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+mod common;
+
 const SECRET: &str = "test-secret-test-secret-test-secret!";
 
 async fn pool() -> Option<PgPool> {
@@ -102,6 +104,29 @@ impl Fixture {
         let text = if body.is_null() { String::new() } else { body.to_string() };
         self.call_in(self.ws, method, path, &text).await
     }
+
+    /// Stores a 100,000 workspace balance; risk checks fail closed without one.
+    async fn seed_balance(&self) {
+        let (code, body) = self
+            .call(
+                "PUT",
+                "/api/v1/risk/balance",
+                &json!({
+                    "strategy_id": null,
+                    "cash": 100_000.0,
+                    "equity": 100_000.0,
+                    "peak_equity": 100_000.0,
+                    "daily_start_equity": 100_000.0
+                }),
+            )
+            .await;
+        assert_eq!(code, 200, "seed balance: {body}");
+    }
+
+    /// Loads a dataset for `symbols` so risk checks can estimate their volatility.
+    async fn seed_volatility(&self, symbols: &[&str]) {
+        common::seed_volatility_dataset(&self.pool, self.ws, &self.dir.join("data"), symbols).await;
+    }
 }
 
 #[tokio::test]
@@ -147,6 +172,7 @@ async fn limits_crud_and_fallbacks() {
 async fn pre_trade_approvals_reductions_and_rejections() {
     let Some(pool) = pool().await else { return };
     let fx = Fixture::new(pool);
+    fx.seed_volatility(&["AAPL", "MSFT", "GOOG"]).await;
 
     // Configure limits: max position size $20,000, reduction enabled
     let payload = json!({
@@ -204,7 +230,7 @@ async fn pre_trade_approvals_reductions_and_rejections() {
     });
     let (code, res) = fx.call("POST", "/api/v1/risk/check", &order_exceeds).await;
     assert_eq!(code, 200);
-    assert_eq!(res["verdict"], "reduced");
+    assert_eq!(res["verdict"], "reduced", "{res}");
     assert_eq!(res["requested_qty"], 300.0);
     assert_eq!(res["approved_qty"], 200.0);
     assert_eq!(res["breaches"][0]["code"], "position_size_exceeded");
@@ -255,6 +281,8 @@ async fn pre_trade_approvals_reductions_and_rejections() {
 async fn emergency_kill_switch_lifecycle() {
     let Some(pool) = pool().await else { return };
     let fx = Fixture::new(pool);
+    fx.seed_volatility(&["NVDA"]).await;
+    fx.seed_balance().await;
 
     // 1. Initially no kill switch active
     let (code, res) = fx.call("GET", "/api/v1/risk/kill-switch", &Value::Null).await;
@@ -403,6 +431,7 @@ async fn kill_switch_allows_flattening_and_blocks_opening() {
         .bind("Risk Test Workspace")
         .execute(&fx.pool)
         .await;
+    fx.seed_balance().await;
 
     // 1. Arm emergency kill switch
     let ks_req = json!({
@@ -464,6 +493,8 @@ async fn decision_replay_and_exposure_history() {
         .bind("Risk Test Workspace")
         .execute(&fx.pool)
         .await;
+    fx.seed_volatility(&["AMZN"]).await;
+    fx.seed_balance().await;
 
     // 1. Submit order check to record decision
     let order_req = json!({
@@ -476,6 +507,7 @@ async fn decision_replay_and_exposure_history() {
     });
     let (code, res) = fx.call("POST", "/api/v1/risk/check", &order_req).await;
     assert_eq!(code, 200);
+    assert_eq!(res["verdict"], "approved", "{res}");
     let decision_id = res["decision_id"].as_str().unwrap();
 
     // 2. Replay decision via Task 12 endpoint
@@ -499,6 +531,62 @@ async fn decision_replay_and_exposure_history() {
 }
 
 #[tokio::test]
+async fn replay_uses_limits_stored_with_the_decision() {
+    let Some(pool) = pool().await else { return };
+    let fx = Fixture::new(pool);
+
+    let _ = sqlx::query("INSERT INTO workspaces (id, slug, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+        .bind(fx.ws)
+        .bind(format!("ws-{}", fx.ws.simple()))
+        .bind("Risk Replay Limits Workspace")
+        .execute(&fx.pool)
+        .await;
+    fx.seed_volatility(&["NVDA"]).await;
+    fx.seed_balance().await;
+
+    // 1. Approved under the default limits; keep the decision id
+    let order_req = json!({
+        "strategy_id": null,
+        "symbol": "NVDA",
+        "side": "buy",
+        "qty": 10.0,
+        "price": 180.0,
+        "portfolio": null
+    });
+    let (code, res) = fx.call("POST", "/api/v1/risk/check", &order_req).await;
+    assert_eq!(code, 200);
+    assert_eq!(res["verdict"], "approved", "{res}");
+    let decision_id = res["decision_id"].as_str().unwrap().to_string();
+
+    // 2. Tighten the position limit so the same order is rejected today
+    let limits_payload = json!({
+        "strategy_id": null,
+        "max_gross_exposure": 200_000.0,
+        "max_net_exposure": 100_000.0,
+        "max_leverage": 2.0,
+        "max_position_size": 1_000.0,
+        "max_concentration_pct": 0.50,
+        "max_drawdown_pct": 0.15,
+        "max_daily_loss": 5_000.0,
+        "max_var_pct": 0.10,
+        "size_reduction_enabled": false
+    });
+    let (code, _) = fx.call("PUT", "/api/v1/risk/limits", &limits_payload).await;
+    assert_eq!(code, 200);
+    let (code, now_res) = fx.call("POST", "/api/v1/risk/check", &order_req).await;
+    assert_eq!(code, 200);
+    assert_eq!(now_res["verdict"], "rejected", "{now_res}");
+
+    // 3. Replaying the first decision uses the limits it was made with, not today's
+    let (code, replay) = fx.call("POST", &format!("/api/v1/risk/replay/{decision_id}"), &Value::Null).await;
+    assert_eq!(code, 200);
+    assert_eq!(replay["replay_verdict"], "approved", "{replay}");
+    assert_eq!(replay["matches"], true);
+
+    fx.clean_up().await;
+}
+
+#[tokio::test]
 async fn paper_broker_order_pre_trade_enforcement() {
     let Some(pool) = pool().await else { return };
     let fx = Fixture::new(pool);
@@ -509,6 +597,8 @@ async fn paper_broker_order_pre_trade_enforcement() {
         .bind("Paper Broker Test Workspace")
         .execute(&fx.pool)
         .await;
+    fx.seed_volatility(&["TSLA"]).await;
+    fx.seed_balance().await;
 
     // 1. Account probe answers 501 when no live broker credentials are configured
     let (code, _) = fx.call("GET", "/api/alpaca/account", &Value::Null).await;
@@ -568,6 +658,63 @@ async fn paper_broker_order_pre_trade_enforcement() {
     let positions = pos_res.as_array().unwrap();
     let tsla_pos = positions.iter().find(|p| p["symbol"] == "TSLA").expect("TSLA position updated in DB");
     assert_eq!(tsla_pos["qty"], "20");
+
+    fx.clean_up().await;
+}
+
+#[tokio::test]
+async fn missing_volatility_rejects_opening_orders_but_allows_closing() {
+    let Some(pool) = pool().await else { return };
+    let fx = Fixture::new(pool);
+
+    let _ = sqlx::query("INSERT INTO workspaces (id, slug, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+        .bind(fx.ws)
+        .bind(format!("ws-{}", fx.ws.simple()))
+        .bind("Risk Test Workspace")
+        .execute(&fx.pool)
+        .await;
+    fx.seed_balance().await;
+
+    // No dataset is loaded, so no volatility is known for META.
+    let pos_payload = json!({ "strategy_id": null, "symbol": "META", "qty": 10.0, "price": 300.0 });
+    let (code, _) = fx.call("PUT", "/api/v1/risk/positions", &pos_payload).await;
+    assert_eq!(code, 200);
+
+    // Adding exposure: VaR cannot be computed, so the order is rejected.
+    let buy_req = json!({
+        "strategy_id": null, "symbol": "META", "side": "buy", "qty": 5.0, "price": 300.0, "portfolio": null
+    });
+    let (code, res) = fx.call("POST", "/api/v1/risk/check", &buy_req).await;
+    assert_eq!(code, 200, "{res}");
+    assert_eq!(res["verdict"], "rejected", "{res}");
+    assert!(res["breaches"].as_array().unwrap().iter().any(|b| b["code"] == "var_unavailable"), "{res}");
+    assert!(res["projected_metrics"]["var_pct"].is_null(), "{res}");
+
+    // Reducing the position is still allowed.
+    let sell_req = json!({
+        "strategy_id": null, "symbol": "META", "side": "sell", "qty": 5.0, "price": 300.0, "portfolio": null
+    });
+    let (code, res) = fx.call("POST", "/api/v1/risk/check", &sell_req).await;
+    assert_eq!(code, 200, "{res}");
+    assert_eq!(res["verdict"], "approved", "{res}");
+
+    fx.clean_up().await;
+}
+
+#[tokio::test]
+async fn risk_check_without_balance_fails_closed() {
+    let Some(pool) = pool().await else { return };
+    let fx = Fixture::new(pool);
+    fx.seed_volatility(&["AAPL"]).await;
+
+    // No balance row and no portfolio in the request: no synthetic balance is invented.
+    let req = json!({
+        "strategy_id": null, "symbol": "AAPL", "side": "buy", "qty": 1.0, "price": 100.0, "portfolio": null
+    });
+    let (code, res) = fx.call("POST", "/api/v1/risk/check", &req).await;
+    assert_eq!(code, 200, "{res}");
+    assert_eq!(res["verdict"], "rejected", "{res}");
+    assert_eq!(res["breaches"][0]["code"], "system_fail_closed", "{res}");
 
     fx.clean_up().await;
 }

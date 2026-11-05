@@ -125,3 +125,145 @@ Every single one of the 10 PR #202 `PositionSnapshot` sites overlaps with the si
   - No existing test asserts the behavior of `utilization(val, 0.0)` or `utilization(val, -10.0)`.
   - No existing test asserts `var_pct()` when `equity <= 0.0` or when all positions have `price <= 0.0`.
   - No existing test asserts `PreTradeChecker::evaluate` when `limits.max_var_pct == 0.0` or `equity <= 0.0`.
+
+---
+
+## 5. Divergence Entries & Behavior Changes
+
+#### 1. `PreTradeChecker::evaluate` & `PortfolioSnapshot::var_pct_with_model` — Non-Positive Equity ($E \le 0$)
+- **Function:** `PreTradeChecker::evaluate` and `PortfolioSnapshot::var_pct_with_model`
+- **Input:** `portfolio.equity <= 0.0` (or non-finite)
+- **Old value / Old behavior:** `var_pct_with_model` silently returned `Ok(0.0)`. In `evaluate`, concentration was defaulted to `0.0`, allowing insolvent accounts to bypass VaR and concentration checks.
+- **New behavior:** `PreTradeChecker::evaluate` immediately rejects through `PreTradeChecker::fail_closed` with verdict `Rejected`, approved quantity `0.0`, and breach code `system_fail_closed` ("portfolio equity must be positive; VaR and concentration are undefined"). Direct calls to `var_pct_with_model` return `Err(Error::InvalidArgument("portfolio equity must be positive to compute VaR as a fraction of equity, got ..."))`.
+
+#### 2. `PortfolioSnapshot::drawdown_pct` — Non-Positive Peak Equity ($E_{\text{peak}} \le 0$)
+- **Function:** `PortfolioSnapshot::drawdown_pct`
+- **Input:** `self.peak_equity <= 0.0` (or non-finite)
+- **Old value:** `0.0` (indicated 0% drawdown when peak was uninitialized or account bankrupt)
+- **New behavior:** Returns `Err(Error::InvalidArgument("drawdown is undefined when peak_equity <= 0.0, got ..."))`. Propagated by `PreTradeChecker::evaluate` instead of masking bankruptcy.
+
+#### 3. `PortfolioSnapshot::var_pct_with_model` — Non-Positive Position Price ($P \le 0$)
+- **Function:** `PortfolioSnapshot::var_pct_with_model`
+- **Input:** Position with `pos.qty.abs() > 1e-8` and `pos.price <= 0.0` (or non-finite)
+- **Old value / Old behavior:** Positions with non-positive prices were silently filtered out and dropped from simulation; returned `Ok(0.0)` if all positions were filtered out.
+- **New behavior:** Returns `Err(Error::InvalidArgument("position for {sym} has non-positive or non-finite price: ..."))`.
+
+#### 4. `utilization` & `LimitUtilization::new` — Non-Positive Limit ($\text{limit} \le 0$)
+- **Function:** `utilization` and `LimitUtilization::new`
+- **Input:** `limit <= 0.0` (or non-finite limit)
+- **Old value:** `0.0` (reported 0% utilization, masking breaches of strict zero limits)
+- **New behavior:** `utilization` returns `Err(Error::InvalidArgument("limit must be positive and finite, got ..."))`. `LimitUtilization::new` propagates the error as `Result<LimitUtilization>`.
+
+#### 5. `PreTradeChecker::evaluate` — Non-Positive VaR Limit (`max_var_pct <= 0`)
+- **Function:** `PreTradeChecker::evaluate`
+- **Input:** `limits.max_var_pct <= 0.0` (or non-finite)
+- **Old value / Old behavior:** The condition `if limits.max_var_pct > 0.0` evaluated to `false`, silently disabling pre-trade VaR enforcement entirely.
+- **New behavior:** `PreTradeChecker::evaluate` rejects the configuration with `Err(Error::InvalidArgument("RiskLimits max_var_pct must be positive and finite, got ..."))`.
+
+#### 6. `PortfolioSnapshot::var_pct_with_model` — Copula Simulation and Quantile Failures
+- **Function:** `PortfolioSnapshot::var_pct_with_model`
+- **Input:** Simulation failure (e.g. non-finite quantities/losses) or quantile calculation error
+- **Old value / Old behavior:** Silently fell back to crude parametric heuristic `(self.leverage() * 0.0165 * 2.33).max(0.0)`.
+- **New behavior:** Parametric fallback eliminated; propagates `Err(Error::Data("var_pct simulation failed: ..."))` or `Err(Error::Data("var_pct quantile calculation failed: ..."))`.
+
+#### 7. `PortfolioSnapshot::var_pct_with_model` — Multi-Asset Portfolio without Correlation Matrix
+- **Function:** `PortfolioSnapshot::var_pct_with_model`
+- **Input:** $N > 1$ assets with correlation matrix `None`
+- **Old value / Old behavior:** Silently defaulted to identity matrix ($I$), assuming complete asset independence.
+- **New behavior:** Returns `Err(Error::InvalidArgument("multi-asset VaR requires a correlation matrix; none available for {n} assets"))`.
+
+#### 8. `PreTradeChecker::evaluate` — Placeholder Zeros in Reject and Reduce Branches
+- **Function:** `PreTradeChecker::evaluate`
+- **Input:** Orders evaluated during kill-switch activation (rejected or reduced), or rejected during drawdown/daily loss limit breaches
+- **Old value / Old behavior:** Reported placeholder `0.0` for `concentration_pct` and `var_pct` in `ProjectedMetrics`.
+- **New behavior:** Computes the actual portfolio state metrics: `concentration_pct` is computed from the actual position value divided by equity (`current_pos_val / portfolio.equity`), and `var_pct` is computed from the actual existing or post-reduction portfolio. Correction (Task 7b): the merged #221 code (commit 5a6d5f5, `eval_var_pct`) still reported `var_pct = 0.0` when a position had no volatility; see entry 10.
+
+#### 9. `PortfolioSnapshot::var_pct` — Degrees of Freedom Literal in Enforcement Path
+- **Function:** `PortfolioSnapshot::var_pct`
+- **Location:** `crates/spectra-risk/src/enforcement.rs`
+- **Old value:** Hardcoded integer literal `4` in `DependenceModel::TCopula { degrees_of_freedom: 4 }`.
+- **New behavior:** Extracted and referenced as named constant `pub const ENFORCEMENT_T_COPULA_DOF: u32 = 4;`.
+
+#### 10. `PreTradeChecker::evaluate` — Missing Volatility (Task 7b)
+- **Function:** `PreTradeChecker::evaluate`, `ProjectedMetrics::var_pct`
+- **Input:** A portfolio or projected portfolio with an open position whose volatility is `None` (the workspace has no dataset to estimate it from).
+- **Old value / Old behavior:** VaR was treated as `0.0`. On the approval path (earlier commit d548777) this passed any `max_var_pct`, so the VaR limit was never applied to positions without data. In size reduction, a missing volatility set the VaR quantity cap to `f64::INFINITY`. In kill-switch, reduce and drawdown branches (#221 commit 5a6d5f5) the reported VaR was `0.0`. Detection matched the error text "has no volatility".
+- **New behavior:** `ProjectedMetrics::var_pct` is `Option<f64>`; `None` means VaR could not be computed (API: `null`). An order that adds exposure gets breach `var_unavailable` and is rejected; it is never size-reduced. An order that only reduces an existing position (same side, smaller size) is still allowed, so positions can always be closed. Kill-switch and drawdown results report `var_pct: None` instead of `0.0`. Detection checks `PositionSnapshot::volatility` directly; no error-text matching. The `var_unavailable` breach reports `projected: 0.0` because there is no projected value; the code and message carry the meaning.
+
+#### 11. `pre_trade_check` — Synthetic Balance (risk_center_api.rs)
+- **Function:** `risk_center_api::pre_trade_check`
+- **Input:** No balance row in the database and no `portfolio` in the request.
+- **Old value / Old behavior:** Used a synthetic balance of cash 100,000 and equity 100,000 + gross exposure.
+- **New behavior:** Fails closed through `fail_closed_response` (verdict `rejected`, breach `system_fail_closed`, reason "no portfolio balance in database and no portfolio supplied"). Matches the paper and broker paths after #202.
+
+#### 12. `replay_decision` — Fabricated Replay Portfolio (risk_center_api.rs)
+- **Function:** `risk_center_api::replay_decision`
+- **Input:** Any recorded pre-trade decision.
+- **Old value / Old behavior:** Rebuilt a made-up portfolio from the stored metrics: a fixed position of 10 AAPL at 150 with 20% volatility, cash 50,000, equity 100,000 when gross or leverage was zero, and `unwrap_or` defaults for every missing metric. The replay verdict did not reflect the original inputs.
+- **New behavior:** Risk check, paper and broker decisions store the evaluated portfolio (balance and positions with volatility) in their metrics under `portfolio_snapshot`. Replay evaluates against that snapshot. A decision without a snapshot (recorded before this change, or a fail-closed decision) returns 422 "Decision has no stored portfolio snapshot, so it cannot be replayed exactly." Replay still uses the current limits and kill-switch state, not those at decision time.
+
+#### 13. Broker Order Pre-Trade — Synthetic Balance (broker_api.rs)
+- **Function:** `broker_api` order submission pre-trade check
+- **Input:** No balance row in the database.
+- **Old value / Old behavior:** Used a synthetic balance of cash 100,000 and equity 100,000 + gross exposure.
+- **New behavior:** Returns 422 "Broker risk check failed: no portfolio balance initialized in database."
+
+#### 14. `run_backtest` — Volatility Skipped for Short Histories (backtest.rs)
+- **Function:** `spectra_engine::run_backtest`, when `cfg.risk_limits` is set
+- **Input:** An instrument with fewer bars than `volatility_from_bars` needs (60).
+- **Old value / Old behavior:** The volatility error was discarded (`if let Ok(vol)`), so the instrument had no volatility and its VaR counted as 0.0 in the pre-trade check.
+- **New behavior:** The backtest returns the volatility error. A backtest or paper step with risk limits needs at least 60 bars per instrument. Note: volatility is still estimated from the whole input bar series, including bars after the decision time; that look-ahead is a known issue for a later task.
+
+
+### Paper path (Task 6b)
+
+#### 15. `PaperAccountView` — VaR Fallback (paper_api.rs)
+- **Function:** `PaperAccountView::new` (GET `/api/v1/paper/account`, account reset, paper step)
+- **Input:** A position with no volatility, or any other VaR failure (multi-asset without a correlation matrix, equity ≤ 0, invalid price).
+- **Old value / Old behavior:** `snap.var_pct().unwrap_or(0.0)`: VaR, VaR in currency and CVaR all showed 0.
+- **New behavior:** `var_pct`, `var_dollar` and `cvar_dollar` are `null`, with `var_unavailable_reason` naming the cause ("no volatility for SYM (no dataset with at least 60 bars)", or the VaR error text). The account itself still loads: this is a read-only view. The pre-trade check is unchanged and still rejects or errors as before.
+
+#### 16. `PaperAccountView` — Made-up CVaR (paper_api.rs)
+- **Function:** `PaperAccountView::new`
+- **Input:** Any account with VaR available.
+- **Old value / Old behavior:** `cvar_dollar = var_dollar * 1.25`, a fixed multiple not computed from anything.
+- **New behavior:** CVaR is the mean simulated loss at or beyond the 99% VaR, read from the same 2,000-run simulation as VaR (`PortfolioSnapshot::var_and_cvar_pct`, `metrics::conditional_var`). VaR values are unchanged (same simulation, same seed); a unit test checks they are identical.
+
+#### 17. `get_paper_attribution` — Synthetic Attribution Report (paper_api.rs)
+- **Function:** GET `/api/v1/paper/attribution`
+- **Input:** Any paper account.
+- **Old value / Old behavior:** Gross P&L was today's equity change (equity − start-of-day equity) split across open positions by market value; fees were 0 although every fill stores its fee; each open position counted as one trade; per-position win rate 1.0 or 0.0; overall win rate always 1.0 when any position existed; every position counted as long; the cost breakdown was all zeros.
+- **New behavior:** The account's fills since it started are replayed into a ledger and the backtest attribution (`spectra_research::compute_pnl_attribution`) runs over it with the paper slippage rate (`PAPER_SLIPPAGE_BPS`). Fees, trades, win rates, long/short split and costs are real. As for backtests, it covers closed trades; open positions are not in it. "Since the account started" means since creation or the last reset (`portfolio_balances.started_at`, new column; existing rows backfilled to the epoch). Any fill that cannot be replayed returns 422.
+
+#### 18. Paper Kill-Switch Rejection — Decision Not Recorded Without a Price (paper_api.rs)
+- **Function:** paper order submission while the kill switch is active
+- **Input:** A market order with no fill price, no limit price and no position in the symbol.
+- **Old value / Old behavior:** The decision was recorded with price `0.0`; `risk_decisions.price` has `CHECK (price > 0)`, so the insert failed and `let _ =` hid the error. The rejection never reached the audit trail.
+- **New behavior:** `risk_decisions.price` allows NULL (migration; the CHECK still rejects zero and negative prices). The rejection is recorded with `price: null`. Replay of a decision with no price returns 422 "Decision has no price, so it cannot be replayed." The audit table in the Risk Center shows "—".
+
+#### 19. Paper Step — Volatility Errors Dropped (paper_api.rs)
+- **Function:** POST `/api/v1/paper/step`, account view after the step
+- **Input:** A volatility error on the step's own bars, or a failed dataset lookup.
+- **Old value / Old behavior:** Both errors were discarded (`if let Ok`); the symbol simply had no volatility.
+- **New behavior:** With fewer than 60 step bars for a symbol, its volatility comes from the stored dataset, as before. Any other volatility error, and any dataset lookup error, returns 422.
+
+
+### Replay and limit loading (Task 9b, 9c)
+
+#### 20. `replay_decision` — Replay Used Today's or Default Limits (risk_center_api.rs)
+- **Function:** POST `/api/v1/risk/replay/{decision_id}`
+- **Input:** Any decision, after the limits changed or when the limits lookup failed.
+- **Old value / Old behavior:** Replay read the limits configured now; a lookup error or no row gave `RiskLimits::default()`. A kill-switch lookup error read as "off".
+- **New behavior:** Every decision that stores a portfolio snapshot (risk check, paper order, broker order) also stores the limits it used under `metrics.risk_limits`, and replay uses them. Decisions without stored limits (recorded before this change) return 422 "Decision has no stored risk limits, so it cannot be replayed exactly." A kill-switch lookup error returns a DB error. The kill switch is still read as it is now; its state at decision time is not stored.
+
+#### 21. Paper Order and Paper Step — Default Limits on DB Error (paper_api.rs)
+- **Function:** POST `/api/v1/paper/orders`, POST `/api/v1/paper/step`
+- **Input:** A database error while loading the strategy or workspace limits.
+- **Old value / Old behavior:** `Ok(None) | Err(_)` fell through to the workspace limits and then to `RiskLimits::default()`, so a DB error ran the pre-trade check against default limits.
+- **New behavior:** Limits come from `load_effective_limits` (strategy, else workspace, else defaults only when no limits are configured). A DB error returns 500 and the order or step is not run. The risk check route uses the same loader (no behaviour change there).
+
+#### 22. Venue Order — Unchecked Orders and Empty Data on DB Error (broker_api.rs)
+- **Function:** POST `{prefix}/broker/venues/order` (engine routes)
+- **Input:** No database or no workspace; or a DB error loading limits, positions or balance.
+- **Old value / Old behavior:** Without a database or workspace the pre-trade check was skipped and the order returned "filled". A limits error used default limits; a positions error used no positions; a balance error read as "balance not initialized".
+- **New behavior:** Without a database or workspace the order is refused (503 / 400 from `context`). DB errors return 500. Known follow-up: the derivatives margin still defaults to 10% of notional with maintenance at 75% when `initial_margin` is not given, and the venue path records no risk decision.

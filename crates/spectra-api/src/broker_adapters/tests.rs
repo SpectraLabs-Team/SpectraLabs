@@ -265,8 +265,8 @@ fn test_futures_roll_rule() {
 #[test]
 fn test_paper_position_reconciliation() {
     let mut local = HashMap::new();
-    local.insert("ESZ26".to_string(), PositionSnapshot { qty: 2.0, price: 5900.0 });
-    local.insert("BTCUSDT".to_string(), PositionSnapshot { qty: 1.5, price: 90000.0 });
+    local.insert("ESZ26".to_string(), PositionSnapshot { qty: 2.0, price: 5900.0, volatility: None });
+    local.insert("BTCUSDT".to_string(), PositionSnapshot { qty: 1.5, price: 90000.0, volatility: None });
 
     let venue = vec![
         VenuePosition {

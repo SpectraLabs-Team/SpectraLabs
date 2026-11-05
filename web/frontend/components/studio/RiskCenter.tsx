@@ -216,7 +216,12 @@ export function RiskCenter() {
     setSimEvaluating(true);
     setError(null);
     try {
+      const posRecord: Record<string, { qty: number; price: number }> = {};
+      for (const p of positions) {
+        posRecord[p.symbol] = { qty: p.qty, price: p.price };
+      }
       const res = await preTradeCheck({
+        strategy_id: null,
         symbol: simSymbol,
         side: simSide,
         qty: Number(simQty),
@@ -226,7 +231,7 @@ export function RiskCenter() {
           equity: Number(simEquity),
           peak_equity: Number(simEquity),
           daily_start_equity: Number(simEquity),
-          positions: {},
+          positions: posRecord,
         },
       });
       setSimResult(res);
@@ -748,6 +753,28 @@ export function RiskCenter() {
                 </div>
               </div>
 
+              {positions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="text-ink/60">Quick flatten held position:</span>
+                  {positions.map((p) => (
+                    <button
+                      key={p.symbol}
+                      type="button"
+                      onClick={() => {
+                        setSimSymbol(p.symbol);
+                        setSimSide(p.qty > 0 ? 'sell' : 'buy');
+                        setSimQty(Math.abs(p.qty));
+                        setSimPrice(p.price);
+                      }}
+                      className="rounded border border-ink/10 bg-surface px-2 py-0.5 font-mono text-[11px] text-ink hover:bg-ink/5 hover:border-ink/20 transition"
+                      title={`Autofill to flatten ${p.qty} ${p.symbol} position`}
+                    >
+                      Flatten {p.symbol} ({p.qty > 0 ? 'long' : 'short'} {Math.abs(p.qty)})
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label htmlFor={simQtyId} className="text-xs font-medium text-ink/70">Quantity (Shares)</label>
@@ -1110,7 +1137,9 @@ export function RiskCenter() {
                       <td className="px-3 py-2.5 uppercase text-ink/80">{log.side}</td>
                       <td className="px-3 py-2.5 text-ink">{log.requested_qty}</td>
                       <td className="px-3 py-2.5 text-ink">{log.approved_qty}</td>
-                      <td className="px-3 py-2.5 text-ink">${log.price.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 text-ink">
+                        {log.price == null ? '—' : `$${log.price.toFixed(2)}`}
+                      </td>
                       <td className="px-3 py-2.5">
                         <span
                           className={cn(

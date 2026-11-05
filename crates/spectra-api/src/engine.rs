@@ -335,7 +335,7 @@ pub fn garch(j: &Json) -> Reply {
     if model_type == "gjr_garch" || model_type == "gjr" {
         let model = spectra_risk::GjrGarch11::fit(&returns).map_err(|e| engine_error(&e))?;
         let last_r = *returns.last().unwrap_or(&0.0);
-        let forecast_1d_var = model.forecast_variance(last_r, None, 1);
+        let forecast_1d_var = model.forecast_variance(last_r, None, 1).map_err(|e| engine_error(&e))?;
         let forecast_1d_vol_ann = (forecast_1d_var.max(0.0) * 252.0).sqrt();
 
         return Ok(Json::object()
@@ -357,7 +357,7 @@ pub fn garch(j: &Json) -> Reply {
     if model_type == "egarch" {
         let model = spectra_risk::Egarch11::fit(&returns).map_err(|e| engine_error(&e))?;
         let last_r = *returns.last().unwrap_or(&0.0);
-        let forecast_1d_var = model.forecast_variance(last_r, None, 1);
+        let forecast_1d_var = model.forecast_variance(last_r, None, 1).map_err(|e| engine_error(&e))?;
         let forecast_1d_vol_ann = (forecast_1d_var.max(0.0) * 252.0).sqrt();
 
         return Ok(Json::object()
@@ -378,7 +378,7 @@ pub fn garch(j: &Json) -> Reply {
 
     let model = spectra_risk::Garch11::fit(&returns).map_err(|e| engine_error(&e))?;
     let last_r = *returns.last().unwrap_or(&0.0);
-    let forecast_1d_var = model.forecast_variance(last_r, None, 1);
+    let forecast_1d_var = model.forecast_variance(last_r, None, 1).map_err(|e| engine_error(&e))?;
     let forecast_1d_vol_ann = (forecast_1d_var.max(0.0) * 252.0).sqrt();
 
     Ok(Json::object()

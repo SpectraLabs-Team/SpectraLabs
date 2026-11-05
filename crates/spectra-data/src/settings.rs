@@ -170,11 +170,15 @@ pub fn parse_settings(doc: &Json) -> Result<CsvOptions, Vec<SettingsError>> {
     }
 
     if let Some(off_doc) = present("utc_offset_minutes") {
-        match off_doc.as_int() {
-            Ok(m) if (MIN_UTC_OFFSET_MINUTES..=MAX_UTC_OFFSET_MINUTES).contains(&m) => {
-                opt.time.naive_utc_offset_minutes = i32::try_from(m).unwrap_or(0);
-            }
-            _ => errors.push(SettingsError::new(
+        // Range-checked before the conversion, so an offset that does not fit is the same error.
+        let offset = off_doc
+            .as_int()
+            .ok()
+            .filter(|m| (MIN_UTC_OFFSET_MINUTES..=MAX_UTC_OFFSET_MINUTES).contains(m))
+            .and_then(|m| i32::try_from(m).ok());
+        match offset {
+            Some(m) => opt.time.naive_utc_offset_minutes = m,
+            None => errors.push(SettingsError::new(
                 "utc_offset_minutes",
                 format!("must be a whole number from {MIN_UTC_OFFSET_MINUTES} to {MAX_UTC_OFFSET_MINUTES}"),
             )),
@@ -548,6 +552,21 @@ mod tests {
         assert!((opt.gap_factor - 3.0).abs() < f64::EPSILON);
         assert!((opt.outlier_z - 10.0).abs() < f64::EPSILON, "default kept");
         assert_eq!(opt.stale_run, 4);
+    }
+
+    #[test]
+    fn an_offset_outside_the_range_is_an_error_not_utc() {
+        for bad in ["841", "-721", "5000000000", "-9223372036854775808"] {
+            let text = GOOD.replace(r#""utc_offset_minutes":330"#, &format!(r#""utc_offset_minutes":{bad}"#));
+            let errors = parse_settings(&doc(&text)).unwrap_err();
+            let fields: Vec<&str> = errors.iter().map(|e| e.field.as_str()).collect();
+            assert_eq!(fields, ["utc_offset_minutes"], "{bad}");
+        }
+        for (good, minutes) in [("840", 840), ("-720", -720)] {
+            let text =
+                GOOD.replace(r#""utc_offset_minutes":330"#, &format!(r#""utc_offset_minutes":{good}"#));
+            assert_eq!(parse_settings(&doc(&text)).unwrap().time.naive_utc_offset_minutes, minutes);
+        }
     }
 
     #[test]

@@ -85,7 +85,8 @@ export interface ProjectedMetrics {
   concentration_pct: number;
   drawdown_pct: number;
   daily_loss: number;
-  var_pct?: number;
+  /** null when VaR cannot be computed because a position has no volatility. */
+  var_pct?: number | null;
 }
 
 export interface PortfolioPositionView {
@@ -160,7 +161,8 @@ export interface RiskDecision {
   symbol: string;
   side: string;
   requested_qty: number;
-  price: number;
+  /** null when no price was known (a kill-switch rejection of a market order). */
+  price: number | null;
   approved_qty: number;
   verdict: string;
   breaches: RiskBreach[] | unknown;

@@ -101,6 +101,23 @@ volume > 0.
 **Resolved in task 6:**
 1. **Zero bar volume with active volume slippage** returns `ArithmeticError::DivisionByZero` instead of silently ignoring the volume term.
 2. **Paper order fills** in `paper_api.rs` are routed through `spectra_engine::costs` (`CostModel`, `slipped_price`, and `commission_fee`), aligning paper execution with engine costs.
+3. **Paper cost values are named** (`PAPER_SLIPPAGE_BPS = 5.0`, `PAPER_MIN_FEE = 1.0`, built into `PAPER_COST_CONFIG` in `paper_api.rs` since task 9). Values are unchanged, so valid fills and fees are identical. Divergence: invalid or overflowing fill inputs now return an error (422, or 500 for an invalid built-in cost model) instead of filling at the unslipped price, a zero notional, or a hardcoded $1.00 fee.
+
+**Resolved in task 9: every paper fill records its cost config.**
+- `paper_fills.cost_config` (jsonb, migration `20261105000003_paper_fill_cost_config.sql`) is
+  written on every new fill and returned as `cost_config` in fill views (order create, order read and strategy-run
+  responses).
+- Manual fills (`POST /api/v1/paper/orders`) store the named `PAPER_COST_CONFIG`, from which the
+  cost model is also built: `{"name": "paper-default", "version": 1, "slippage_bps": 5.0,
+  "min_fee": 1.0}`. Bump `version` when a value changes.
+- Fills from a paper strategy run are priced by the run's config preset, not the paper constants,
+  so they store `{"name": "preset:<preset>", "version": 1, "slippage_bps", "min_fee",
+  "commission_bps", "commission_per_unit", "spread_bps", "volume_slippage_bps"}` from the costs
+  actually used.
+- Backtests already record their costs: the summary's `run.config` carries every cost field
+  (`summary_records_the_cost_config_used` in `backtest_service.rs`).
+- **Divergence:** fills recorded before the migration have `cost_config: null`; their costs were
+  not stored and are not reconstructed.
 
 ## Rebalancing (`rebalance.rs`)
 

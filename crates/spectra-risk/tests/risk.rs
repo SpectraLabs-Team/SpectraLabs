@@ -323,15 +323,40 @@ fn correlated_copula_modes_produce_contributions_and_evt() {
             horizon_years: 1.0 / 252.0,
             ..RiskConfig::default()
         };
-        let rep = e.calculate(Metric::VaR, &p, &cfg).unwrap();
-        assert_eq!(rep.dependence_model, dep);
-        assert_eq!(rep.position_contributions.len(), 3);
-        assert!(rep.evt_var.is_some());
-        assert!(rep.evt_cvar.is_some());
+        // Multi-asset without correlation matrix returns Error::Data
+        assert!(matches!(e.calculate(Metric::VaR, &p, &cfg), Err(Error::Data(_))));
 
-        let j = rep.to_json_value();
+        // Single-asset copula simulation succeeds through engine
+        let mut p_single = Portfolio::new();
+        p_single.add_asset_with_volatility("AAPL", 1000.0, 190.0, 0.20);
+        let rep_single = e.calculate(Metric::VaR, &p_single, &cfg).unwrap();
+        assert_eq!(rep_single.dependence_model, dep);
+        assert_eq!(rep_single.position_contributions.len(), 1);
+        assert!(rep_single.evt_var.is_some());
+        assert!(rep_single.evt_cvar.is_some());
+
+        let j = rep_single.to_json_value();
         assert!(j.find("position_contributions").is_some());
         assert!(j.find("evt_var").is_some());
+
+        // Multi-asset with explicit correlation produces all position contributions
+        let mut p_multi = Portfolio::new();
+        p_multi
+            .add_asset_with_volatility("AAPL", 1000.0, 190.0, 0.20)
+            .add_asset_with_volatility("MSFT", 500.0, 420.0, 0.25)
+            .add_asset_with_volatility("GOOGL", 300.0, 175.0, 0.30);
+        let corr = vec![vec![1.0, 0.5, 0.3], vec![0.5, 1.0, 0.4], vec![0.3, 0.4, 1.0]];
+        let sim = spectra_risk::copula::simulate_correlated(
+            &p_multi,
+            Some(&corr),
+            dep,
+            10_000,
+            777,
+            1.0 / 252.0,
+            0.99,
+        )
+        .unwrap();
+        assert_eq!(sim.contributions.len(), 3);
     }
 }
 

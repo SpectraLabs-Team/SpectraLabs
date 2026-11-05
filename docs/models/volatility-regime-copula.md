@@ -28,8 +28,20 @@ persistence^(k−1) · (h_1 − unconditional). Annualized volatility = √(h ·
    local or early-stopped point. Task 3: compare against a reference fit (e.g. from `arch` in
    Python) on a fixed series, within a stated tolerance.
 2. **Silent defaults.** `last_variance.unwrap_or(unconditional)` assumes the last variance is the
-   unconditional one when the caller passes none. `persistence.powi(...).unwrap_or(1)` uses a
-   power of 1 for an absurdly large horizon.
+   unconditional one when the caller passes none. ~~`persistence.powi(...).unwrap_or(1)` uses a
+   power of 1 for an absurdly large horizon.~~ Fixed in task 9, see the divergence below.
+
+**Divergence (M26 task 9): forecast horizon past `i32`.**
+- **Old behaviour:** `forecast_variance(.., k)` converted the exponent with
+  `i32::try_from(k - 1).unwrap_or(1)`, so any `k - 1 > i32::MAX` silently used persistence¹ (the
+  two-step forecast) for GARCH, GJR-GARCH and EGARCH.
+- **New behaviour:** `forecast_variance` returns `Result<f64>`; such a horizon is
+  `Error::InvalidArgument("forecast horizon k is too long: k - 1 must fit an i32")`. Every
+  horizon that fits gives the same value as before (the reference tests are unchanged), and
+  `forecast_volatility_annualized` (one step) stays infallible.
+- **Test:** `crates/spectra-risk/tests/m26_volatility_reference.rs`,
+  `a_horizon_past_the_i32_exponent_is_an_error` (k = 2^31 + 1 is an error for all three models;
+  k = 2^31 is finite).
 3. **Penalty values.** Infeasible parameter points return 1e12 instead of an error. This is
    harmless for the search but hides infeasibility in any caller that reads the likelihood.
 

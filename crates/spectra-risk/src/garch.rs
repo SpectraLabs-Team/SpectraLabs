@@ -129,23 +129,29 @@ impl Garch11 {
     }
 
     /// Forecast daily variance $k$ steps ahead from the last observation.
-    pub fn forecast_variance(&self, last_return: f64, last_variance: Option<f64>, k: usize) -> f64 {
-        let last_h = last_variance.unwrap_or(self.unconditional_variance);
-        let eps = last_return - self.mu;
-        let h_1 = self.omega + self.alpha * eps * eps + self.beta * last_h;
-
+    ///
+    /// # Errors
+    /// [`Error::InvalidArgument`] if `k - 1` does not fit an `i32` exponent.
+    pub fn forecast_variance(&self, last_return: f64, last_variance: Option<f64>, k: usize) -> Result<f64> {
+        let h_1 = self.next_variance(last_return, last_variance);
         if k <= 1 {
-            return h_1;
+            return Ok(h_1);
         }
 
-        let term = self.persistence.powi(i32::try_from(k - 1).unwrap_or(1));
-        self.unconditional_variance + term * (h_1 - self.unconditional_variance)
+        let term = self.persistence.powi(horizon_exponent(k)?);
+        Ok(self.unconditional_variance + term * (h_1 - self.unconditional_variance))
     }
 
     /// Forecast annualized volatility for 1-step ahead.
     pub fn forecast_volatility_annualized(&self, last_return: f64, last_variance: Option<f64>) -> f64 {
-        let h = self.forecast_variance(last_return, last_variance, 1);
-        (h * TRADING_DAYS_PER_YEAR).sqrt()
+        (self.next_variance(last_return, last_variance) * TRADING_DAYS_PER_YEAR).sqrt()
+    }
+
+    /// One-step-ahead variance.
+    fn next_variance(&self, last_return: f64, last_variance: Option<f64>) -> f64 {
+        let last_h = last_variance.unwrap_or(self.unconditional_variance);
+        let eps = last_return - self.mu;
+        self.omega + self.alpha * eps * eps + self.beta * last_h
     }
 
     /// Unconditional annualized volatility.
@@ -293,24 +299,30 @@ impl GjrGarch11 {
     }
 
     /// Forecast daily variance $k$ steps ahead from the last observation.
-    pub fn forecast_variance(&self, last_return: f64, last_variance: Option<f64>, k: usize) -> f64 {
-        let last_h = last_variance.unwrap_or(self.unconditional_variance);
-        let eps = last_return - self.mu;
-        let lev = if eps < 0.0 { self.gamma } else { 0.0 };
-        let h_1 = self.omega + (self.alpha + lev) * eps * eps + self.beta * last_h;
-
+    ///
+    /// # Errors
+    /// [`Error::InvalidArgument`] if `k - 1` does not fit an `i32` exponent.
+    pub fn forecast_variance(&self, last_return: f64, last_variance: Option<f64>, k: usize) -> Result<f64> {
+        let h_1 = self.next_variance(last_return, last_variance);
         if k <= 1 {
-            return h_1;
+            return Ok(h_1);
         }
 
-        let term = self.persistence.powi(i32::try_from(k - 1).unwrap_or(1));
-        self.unconditional_variance + term * (h_1 - self.unconditional_variance)
+        let term = self.persistence.powi(horizon_exponent(k)?);
+        Ok(self.unconditional_variance + term * (h_1 - self.unconditional_variance))
     }
 
     /// Forecast annualized volatility for 1-step ahead.
     pub fn forecast_volatility_annualized(&self, last_return: f64, last_variance: Option<f64>) -> f64 {
-        let h = self.forecast_variance(last_return, last_variance, 1);
-        (h * TRADING_DAYS_PER_YEAR).sqrt()
+        (self.next_variance(last_return, last_variance) * TRADING_DAYS_PER_YEAR).sqrt()
+    }
+
+    /// One-step-ahead variance (the leverage term applies after a negative shock).
+    fn next_variance(&self, last_return: f64, last_variance: Option<f64>) -> f64 {
+        let last_h = last_variance.unwrap_or(self.unconditional_variance);
+        let eps = last_return - self.mu;
+        let lev = if eps < 0.0 { self.gamma } else { 0.0 };
+        self.omega + (self.alpha + lev) * eps * eps + self.beta * last_h
     }
 
     /// Unconditional annualized volatility.
@@ -455,38 +467,56 @@ impl Egarch11 {
     }
 
     /// Forecast daily variance $k$ steps ahead from the last observation.
-    pub fn forecast_variance(&self, last_return: f64, last_variance: Option<f64>, k: usize) -> f64 {
+    ///
+    /// # Errors
+    /// [`Error::InvalidArgument`] if `k - 1` does not fit an `i32` exponent.
+    pub fn forecast_variance(&self, last_return: f64, last_variance: Option<f64>, k: usize) -> Result<f64> {
+        let log_h1 = self.next_log_variance(last_return, last_variance);
+        let h1 = log_h1.exp();
+
+        if k <= 1 {
+            return Ok(h1);
+        }
+
+        let log_unconditional = self.unconditional_variance.ln();
+        let term = self.persistence.powi(horizon_exponent(k)?);
+        Ok((log_unconditional + term * (log_h1 - log_unconditional)).exp())
+    }
+
+    /// Forecast annualized volatility for 1-step ahead.
+    pub fn forecast_volatility_annualized(&self, last_return: f64, last_variance: Option<f64>) -> f64 {
+        (self.next_log_variance(last_return, last_variance).exp() * TRADING_DAYS_PER_YEAR).sqrt()
+    }
+
+    /// Log of the one-step-ahead variance.
+    fn next_log_variance(&self, last_return: f64, last_variance: Option<f64>) -> f64 {
         let last_h = last_variance.unwrap_or(self.unconditional_variance);
         let log_last_h = last_h.ln();
         let eps = last_return - self.mu;
         let std_res = eps / last_h.sqrt().max(1e-8);
         let sqrt_2_over_pi = (2.0 / std::f64::consts::PI).sqrt();
 
-        let log_h1 = self.omega
+        self.omega
             + self.alpha * (std_res.abs() - sqrt_2_over_pi)
             + self.gamma * std_res
-            + self.beta * log_last_h;
-        let h1 = log_h1.exp();
-
-        if k <= 1 {
-            return h1;
-        }
-
-        let log_unconditional = self.unconditional_variance.ln();
-        let term = self.persistence.powi(i32::try_from(k - 1).unwrap_or(1));
-        (log_unconditional + term * (log_h1 - log_unconditional)).exp()
-    }
-
-    /// Forecast annualized volatility for 1-step ahead.
-    pub fn forecast_volatility_annualized(&self, last_return: f64, last_variance: Option<f64>) -> f64 {
-        let h = self.forecast_variance(last_return, last_variance, 1);
-        (h * TRADING_DAYS_PER_YEAR).sqrt()
+            + self.beta * log_last_h
     }
 
     /// Unconditional annualized volatility.
     pub fn unconditional_volatility_annualized(&self) -> f64 {
         (self.unconditional_variance * TRADING_DAYS_PER_YEAR).sqrt()
     }
+}
+
+/// The exponent `k - 1` of a `k`-step forecast (`k >= 2`).
+///
+/// # Errors
+/// [`Error::InvalidArgument`] if it does not fit an `i32` (it used to fall back to 1, a one-step
+/// decay for any horizon past `i32::MAX`).
+fn horizon_exponent(k: usize) -> Result<i32> {
+    i32::try_from(k - 1).map_err(|_| {
+        Error::InvalidArgument(format!("forecast horizon {k} is too long: k - 1 must fit an i32"))
+    })
 }
 
 #[cfg(test)]
@@ -513,7 +543,7 @@ mod tests {
         assert!(model.persistence < 1.0);
         assert!(model.omega > 0.0);
 
-        let forecast_1d = model.forecast_variance(returns[returns.len() - 1], None, 1);
+        let forecast_1d = model.forecast_variance(returns[returns.len() - 1], None, 1).unwrap();
         assert!(forecast_1d > 0.0);
 
         let vol_ann = model.forecast_volatility_annualized(returns[returns.len() - 1], None);
@@ -562,7 +592,7 @@ mod tests {
         assert!(model.persistence < 1.0);
         assert!(model.gamma >= 0.0);
 
-        let f1 = model.forecast_variance(returns[returns.len() - 1], None, 1);
+        let f1 = model.forecast_variance(returns[returns.len() - 1], None, 1).unwrap();
         assert!(f1 > 0.0 && f1.is_finite());
     }
 
@@ -578,7 +608,7 @@ mod tests {
         assert!(model.unconditional_variance > 0.0);
 
         for k in 1..=21 {
-            let f = model.forecast_variance(returns[returns.len() - 1], None, k);
+            let f = model.forecast_variance(returns[returns.len() - 1], None, k).unwrap();
             assert!(f > 0.0 && f.is_finite());
         }
     }

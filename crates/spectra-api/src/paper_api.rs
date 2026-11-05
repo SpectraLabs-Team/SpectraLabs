@@ -21,12 +21,11 @@ use spectra_engine::{OrderState, Strategy};
 use spectra_risk::enforcement::{
     OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeVerdict,
 };
-use spectra_risk::RiskLimits;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::jobs_api::{context, db_error};
-use crate::risk_center_api::{PortfolioPositionView, RiskBreachView, RiskLimitsView};
+use crate::risk_center_api::{PortfolioPositionView, RiskBreachView};
 use crate::{error_response, json_response, AppState, Identity};
 
 #[allow(clippy::result_large_err)]
@@ -81,19 +80,97 @@ pub(crate) struct PaperAccountView {
     pub daily_start_equity: f64,
     pub positions: Vec<PortfolioPositionView>,
     pub updated_at: DateTime<Utc>,
-    pub var_pct: f64,
-    pub var_dollar: f64,
-    pub cvar_dollar: f64,
+    /// 1-day 99% VaR as a fraction of equity; `null` when it cannot be computed (see
+    /// `var_unavailable_reason`).
+    pub var_pct: Option<f64>,
+    /// VaR in currency; `null` with `var_pct`.
+    pub var_dollar: Option<f64>,
+    /// 1-day 99% CVaR (mean loss at or beyond VaR) in currency, from the same simulation as
+    /// VaR; `null` with `var_pct`.
+    pub cvar_dollar: Option<f64>,
+    /// Why VaR and CVaR are `null`, for example a position with no volatility.
+    pub var_unavailable_reason: Option<String>,
+}
+
+/// Slippage applied to every paper fill, in basis points.
+pub(crate) const PAPER_SLIPPAGE_BPS: f64 = 5.0;
+/// Minimum commission charged on each paper fill.
+pub(crate) const PAPER_MIN_FEE: f64 = 1.0;
+
+/// A named, versioned paper cost configuration. Each fill it prices stores it in
+/// `paper_fills.cost_config`, so a fill says which costs it was charged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PaperCostConfig {
+    pub name: &'static str,
+    /// Bumped whenever a value below changes.
+    pub version: u32,
+    pub slippage_bps: f64,
+    pub min_fee: f64,
+}
+
+/// The costs of manual paper fills (submitted orders): slippage and a minimum fee, no other
+/// commission, spread or volume slippage.
+pub(crate) const PAPER_COST_CONFIG: PaperCostConfig = PaperCostConfig {
+    name: "paper-default",
+    version: 1,
+    slippage_bps: PAPER_SLIPPAGE_BPS,
+    min_fee: PAPER_MIN_FEE,
+};
+
+impl PaperCostConfig {
+    /// The cost model applied to paper fills.
+    ///
+    /// # Errors
+    /// The named cost values do not convert to fixed point.
+    fn cost_model(self) -> Result<CostModel, spectra_core::ArithmeticError> {
+        Ok(CostModel {
+            slippage: spectra_core::Bps::from_f64(self.slippage_bps)?,
+            commission: CommissionModel { min_fee: Money::from_f64(self.min_fee)?, ..Default::default() },
+            ..Default::default()
+        })
+    }
+
+    /// The form stored with each fill and returned in fill views.
+    pub(crate) fn to_json(self) -> serde_json::Value {
+        json!({
+            "name": self.name,
+            "version": self.version,
+            "slippage_bps": self.slippage_bps,
+            "min_fee": self.min_fee,
+        })
+    }
+}
+
+/// The cost config of a fill from a paper strategy run, which is priced by the run's config
+/// preset (not [`PAPER_COST_CONFIG`]): the preset's name and every cost it charges.
+fn preset_cost_config_json(preset: Preset, costs: &CostModel) -> serde_json::Value {
+    json!({
+        "name": format!("preset:{}", preset.name()),
+        "version": 1,
+        "slippage_bps": costs.slippage.to_f64(),
+        "min_fee": costs.commission.min_fee.to_f64(),
+        "commission_bps": costs.commission.bps_of_notional.to_f64(),
+        "commission_per_unit": costs.commission.per_unit.to_f64(),
+        "spread_bps": costs.spread.to_f64(),
+        "volume_slippage_bps": costs.volume_slippage.to_f64(),
+    })
 }
 
 impl PaperAccountView {
     /// The view, with each position valued at its price times its contract
     /// multiplier (`records`: the workspace's instrument records).
-    fn new(acc: PaperAccount, records: &HashMap<String, spectra_core::Instrument>) -> Self {
+    #[allow(clippy::unnecessary_wraps)]
+    fn new(
+        acc: PaperAccount,
+        records: &HashMap<String, spectra_core::Instrument>,
+        volatilities: &HashMap<String, f64>,
+    ) -> spectra_core::Result<Self> {
         let mut positions_map = HashMap::new();
         for pos in &acc.positions {
             let price = pos.price * crate::instruments_api::multiplier_of(records, &pos.symbol);
-            positions_map.insert(pos.symbol.clone(), PositionSnapshot { qty: pos.qty, price });
+            let vol = volatilities.get(&pos.symbol).copied();
+            positions_map
+                .insert(pos.symbol.clone(), PositionSnapshot { qty: pos.qty, price, volatility: vol });
         }
         let snap = PortfolioSnapshot {
             cash: acc.balance.cash,
@@ -102,11 +179,29 @@ impl PaperAccountView {
             daily_start_equity: acc.balance.daily_start_equity,
             positions: positions_map,
         };
-        let var_pct = snap.var_pct();
-        let var_dollar = var_pct * snap.equity;
-        let cvar_dollar = var_dollar * 1.25;
+        // VaR and CVaR come from one simulation. This is a read-only view, so when they cannot
+        // be computed it reports why instead of failing the whole account.
+        let mut missing: Vec<&str> = snap
+            .positions
+            .iter()
+            .filter(|(_, p)| p.qty.abs() > 1e-8 && p.volatility.is_none())
+            .map(|(sym, _)| sym.as_str())
+            .collect();
+        missing.sort_unstable();
+        let (var_pct, cvar_pct, var_unavailable_reason) = if missing.is_empty() {
+            match snap.var_and_cvar_pct() {
+                Ok((var, cvar)) => (Some(var), Some(cvar), None),
+                Err(e) => (None, None, Some(e.to_string())),
+            }
+        } else {
+            let reason =
+                format!("no volatility for {} (no dataset with at least 60 bars)", missing.join(", "));
+            (None, None, Some(reason))
+        };
+        let var_dollar = var_pct.map(|v| v * snap.equity);
+        let cvar_dollar = cvar_pct.map(|c| c * snap.equity);
 
-        Self {
+        Ok(Self {
             workspace_id: acc.workspace_id,
             strategy_id: acc.strategy_id,
             cash: acc.balance.cash,
@@ -118,7 +213,8 @@ impl PaperAccountView {
             var_pct,
             var_dollar,
             cvar_dollar,
-        }
+            var_unavailable_reason,
+        })
     }
 }
 
@@ -141,6 +237,8 @@ pub(crate) struct CreatePaperOrderRequest {
     pub tif: Option<String>,
     pub fill_now: Option<bool>,
     pub fill_price: Option<f64>,
+    #[serde(default)]
+    pub dataset_version_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -201,6 +299,11 @@ pub(crate) struct PaperFillView {
     pub qty: f64,
     pub price: f64,
     pub fee: f64,
+    /// The cost configuration that priced the fill (`name`, `version`, `slippage_bps`,
+    /// `min_fee`, and for a strategy run the preset's other costs); `null` for fills recorded
+    /// before it was stored.
+    #[schema(value_type = Option<Object>)]
+    pub cost_config: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -216,6 +319,7 @@ impl From<PaperFillRow> for PaperFillView {
             qty: r.qty,
             price: r.price,
             fee: r.fee,
+            cost_config: r.cost_config,
             created_at: r.created_at,
         }
     }
@@ -301,7 +405,29 @@ pub(crate) async fn get_account(
         Err(r) => return r,
     };
     match spectra_db::paper::get_or_init_paper_account(&pool, ws, q.strategy_id, q.initial_cash).await {
-        Ok(acc) => json_response(200, json!(PaperAccountView::new(acc, &records)).to_string()),
+        Ok(acc) => {
+            let default_dir = std::path::PathBuf::from("data");
+            let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+            let pos_syms: Vec<&str> = acc.positions.iter().map(|p| p.symbol.as_str()).collect();
+            let vols = if pos_syms.is_empty() {
+                HashMap::new()
+            } else {
+                match crate::risk_center_api::lookup_portfolio_volatilities(
+                    &pool, ws, data_dir, None, &pos_syms,
+                )
+                .await
+                {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return error_response(422, format!("Failed to compute paper account metrics: {e}"))
+                    }
+                }
+            };
+            match PaperAccountView::new(acc, &records, &vols) {
+                Ok(v) => json_response(200, json!(v).to_string()),
+                Err(e) => error_response(422, format!("Failed to compute paper account metrics: {e}")),
+            }
+        }
         Err(e) => db_error(&e),
     }
 }
@@ -333,81 +459,85 @@ pub(crate) async fn get_paper_attribution(
         Ok(r) => r,
         Err(r) => return r,
     };
-    let mult = |sym: &str| crate::instruments_api::multiplier_of(&records, sym);
-    match spectra_db::paper::get_or_init_paper_account(&pool, ws, q.strategy_id, q.initial_cash).await {
-        Ok(acc) => {
-            let total_positions_val: f64 =
-                acc.positions.iter().map(|p| p.qty * p.price * mult(&p.symbol)).sum();
-            let total_gross: f64 = acc.balance.equity - acc.balance.daily_start_equity;
-            let total_fees: f64 = 0.0;
-            let net: f64 = total_gross - total_fees;
-
-            let insts: Vec<serde_json::Value> = acc
-                .positions
-                .into_iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    let mkt_val = p.qty * p.price * mult(&p.symbol);
-                    let pos_pnl = if total_positions_val.abs() > 0.0 {
-                        total_gross * (mkt_val.abs() / total_positions_val.abs())
-                    } else {
-                        0.0
-                    };
-                    json!({
-                        "instrument": i,
-                        "symbol": p.symbol,
-                        "gross_pnl": pos_pnl,
-                        "fees": 0.0,
-                        "net_pnl": pos_pnl,
-                        "trades_count": i32::from(p.qty.abs() > 0.0),
-                        "win_trades": i32::from(pos_pnl > 0.0),
-                        "loss_trades": i32::from(pos_pnl < 0.0),
-                        "win_rate": if pos_pnl > 0.0 { 1.0 } else { 0.0 },
-                        "long_pnl": if p.qty > 0.0 { pos_pnl } else { 0.0 },
-                        "short_pnl": if p.qty < 0.0 { pos_pnl } else { 0.0 },
-                        "pnl_share": if total_positions_val.abs() > 0.0 { mkt_val.abs() / total_positions_val.abs() } else { 0.0 }
-                    })
-                })
-                .collect();
-
-            let resp = json!({
-                "total_gross_pnl": total_gross,
-                "total_fees": total_fees,
-                "total_net_pnl": net,
-                "total_trades": insts.len(),
-                "overall_win_rate": if insts.is_empty() { 0.0 } else { 1.0 },
-                "costs": {
-                    "commission_fees": 0.0,
-                    "slippage_costs": 0.0,
-                    "borrow_fees": 0.0,
-                    "financing_interest": 0.0,
-                    "dividends": 0.0,
-                    "total_costs": 0.0
-                },
-                "direction": {
-                    "long_gross_pnl": total_gross,
-                    "long_fees": 0.0,
-                    "long_net_pnl": total_gross,
-                    "long_trades": insts.len(),
-                    "long_wins": insts.len(),
-                    "long_win_rate": 1.0,
-                    "short_gross_pnl": 0.0,
-                    "short_fees": 0.0,
-                    "short_net_pnl": 0.0,
-                    "short_trades": 0,
-                    "short_wins": 0,
-                    "short_win_rate": 0.0
-                },
-                "instruments": insts,
-                "waterfall": [
-                    { "name": "Gross Trading P&L", "amount": total_gross, "running_total": total_gross },
-                    { "name": "Net Strategy Realized P&L", "amount": net, "running_total": net }
-                ]
-            });
-            json_response(200, resp.to_string())
-        }
-        Err(e) => db_error(&e),
+    // The account must exist so the start of the current account is known: a reset keeps old
+    // fills, and only fills since the start count.
+    if let Err(e) =
+        spectra_db::paper::get_or_init_paper_account(&pool, ws, q.strategy_id, q.initial_cash).await
+    {
+        return db_error(&e);
     }
+    let started_at = match spectra_db::paper::paper_account_started_at(&pool, ws, q.strategy_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return error_response(422, "Paper account has no balance row, so its start is unknown."),
+        Err(e) => return db_error(&e),
+    };
+    let fills = match spectra_db::paper::list_paper_fills_since(&pool, ws, q.strategy_id, started_at).await {
+        Ok(f) => f,
+        Err(e) => return db_error(&e),
+    };
+    match paper_attribution(&fills, &records) {
+        Ok(attr) => json_response(200, attr.to_json().dump()),
+        Err(e) => error_response(422, format!("Failed to compute paper attribution: {e}")),
+    }
+}
+
+/// The P&L attribution of one paper account's fills (oldest first): the fills are replayed into
+/// a ledger and the backtest attribution runs over it, with the paper slippage rate. As for
+/// backtests, it covers closed trades; positions still open are not in it.
+///
+/// # Errors
+/// A fill with an unknown side, a value that does not convert to fixed point, a time out of
+/// range, or a ledger or attribution error.
+fn paper_attribution(
+    fills: &[PaperFillRow],
+    records: &HashMap<String, spectra_core::Instrument>,
+) -> Result<spectra_research::PnlAttribution, String> {
+    let mut symbols: Vec<String> = fills.iter().map(|f| f.symbol.clone()).collect();
+    symbols.sort_unstable();
+    symbols.dedup();
+    let id_of = |sym: &str| -> Result<spectra_core::InstrumentId, String> {
+        let i =
+            symbols.binary_search_by(|s| s.as_str().cmp(sym)).map_err(|_| format!("unknown symbol {sym}"))?;
+        u32::try_from(i).map_err(|_| format!("too many instruments ({i})"))
+    };
+    let ts_ns_of = |f: &PaperFillRow| -> Result<i64, String> {
+        f.created_at.timestamp_nanos_opt().ok_or_else(|| format!("fill {} time is out of range", f.id))
+    };
+
+    // Shorts and margin are allowed: attribution measures P&L, not admission.
+    let mut ledger = spectra_core::Ledger::new(spectra_core::LedgerConfig::reference(true, true));
+    let first_ts = match fills.first() {
+        Some(f) => ts_ns_of(f)?,
+        None => 0,
+    };
+    for sym in &symbols {
+        let record = crate::instruments_api::record_of(records, sym);
+        let multiplier = record.map_or(spectra_core::Ratio::ONE, |r| r.multiplier);
+        let marked_to_market = record.is_some_and(|r| r.kind == spectra_core::InstrumentType::Future);
+        ledger
+            .register_contract(id_of(sym)?, multiplier, marked_to_market, first_ts)
+            .map_err(|e| format!("instrument {sym}: {e}"))?;
+    }
+    for f in fills {
+        let side = match f.side.as_str() {
+            "buy" => Side::Buy,
+            "sell" => Side::Sell,
+            other => return Err(format!("fill {} has unknown side {other}", f.id)),
+        };
+        let fill = spectra_core::Fill {
+            instrument: id_of(&f.symbol)?,
+            side,
+            qty: Qty::from_f64(f.qty)
+                .map_err(|e| format!("fill {}: invalid quantity {}: {e}", f.id, f.qty))?,
+            price: Price::from_f64(f.price)
+                .map_err(|e| format!("fill {}: invalid price {}: {e}", f.id, f.price))?,
+            fee: Money::from_f64(f.fee).map_err(|e| format!("fill {}: invalid fee {}: {e}", f.id, f.fee))?,
+            ts_ns: ts_ns_of(f)?,
+        };
+        ledger.apply_fill(&fill).map_err(|e| format!("fill {}: {e}", f.id))?;
+    }
+    spectra_research::compute_pnl_attribution(&ledger, Some(&symbols), Some(PAPER_SLIPPAGE_BPS))
+        .map_err(|e| e.to_string())
 }
 
 /// Reset a strategy's paper account (clears positions, resets cash to initial capital).
@@ -434,7 +564,10 @@ pub(crate) async fn reset_account(
         Err(r) => return r,
     };
     match spectra_db::paper::reset_paper_account(&pool, ws, req.strategy_id, req.initial_cash).await {
-        Ok(acc) => json_response(200, json!(PaperAccountView::new(acc, &records)).to_string()),
+        Ok(acc) => match PaperAccountView::new(acc, &records, &HashMap::new()) {
+            Ok(v) => json_response(200, json!(v).to_string()),
+            Err(e) => error_response(422, format!("Failed to compute paper account metrics: {e}")),
+        },
         Err(e) => db_error(&e),
     }
 }
@@ -560,18 +693,121 @@ pub(crate) async fn create_order(
         Err(e) => return db_error(&e),
     };
 
-    let mut positions_map = HashMap::new();
     let mut current_sym_price = None;
     for p in &account.positions {
         if p.symbol == symbol {
             current_sym_price = Some(p.price);
         }
-        // Risk sees value per unit: price times the contract multiplier.
-        positions_map
-            .insert(p.symbol.clone(), PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol) });
     }
 
-    let eval_price = req.fill_price.or(req.limit_price).or(current_sym_price).unwrap_or(100.0);
+    // Load kill switch
+    let kill_switch_active = match spectra_db::risk_center::get_kill_switch(&pool, ws, Some(strat_id)).await {
+        Ok(Some(ks)) => ks.active,
+        Ok(None) => match spectra_db::risk_center::get_kill_switch(&pool, ws, None).await {
+            Ok(Some(ks)) => ks.active,
+            Ok(None) => false,
+            Err(_) => true, // fail closed
+        },
+        Err(_) => true, // fail closed
+    };
+
+    if kill_switch_active {
+        let reason = "Kill switch is active; all trading halted.";
+        // `None` when no price is known (a market order with no position): the decision is
+        // still recorded, with no price, instead of a 0.0 the audit table refuses.
+        let known_price = req.fill_price.or(req.limit_price).or(current_sym_price);
+        if let Err(e) = spectra_db::risk_center::record_decision(
+            &pool,
+            ws,
+            Some(strat_id),
+            &symbol,
+            &side_str,
+            req.qty,
+            known_price,
+            0.0,
+            "rejected",
+            &json!([{
+                "code": "KILL_SWITCH",
+                "limit": 0.0,
+                "projected": 0.0,
+                "message": reason
+            }]),
+            &["KILL_SWITCH".to_string()],
+            &json!({}),
+            user_id,
+        )
+        .await
+        {
+            return crate::risk_center_api::decision_not_recorded(&e);
+        }
+
+        let order = match spectra_db::paper::insert_paper_order(
+            &pool,
+            ws,
+            strat_id,
+            &symbol,
+            &side_str,
+            &order_type_str,
+            req.qty,
+            req.limit_price,
+            req.stop_price,
+            &tif,
+            "rejected",
+            Some(reason),
+            user_id,
+        )
+        .await
+        {
+            Ok(o) => o,
+            Err(e) => return db_error(&e),
+        };
+
+        return json_response(422, json!(PaperOrderView::from(order)).to_string());
+    }
+
+    let Some(eval_price) = req.fill_price.or(req.limit_price).or(current_sym_price) else {
+        return error_response(422, "Order price could not be determined.");
+    };
+    if eval_price <= 0.0 || !eval_price.is_finite() {
+        return error_response(422, format!("Non-positive or non-finite order price: {eval_price}"));
+    }
+
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+    let mut syms_to_lookup = vec![symbol.as_str()];
+    for p in &account.positions {
+        syms_to_lookup.push(&p.symbol);
+    }
+
+    let vols = match crate::risk_center_api::lookup_portfolio_volatilities(
+        &pool,
+        ws,
+        data_dir,
+        req.dataset_version_id,
+        &syms_to_lookup,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => return error_response(422, format!("Pre-trade risk check failed: {e}")),
+    };
+
+    let mut positions_map = HashMap::new();
+    for p in &account.positions {
+        let vol = vols.get(&p.symbol).copied();
+        // Risk sees value per unit: price times the contract multiplier.
+        positions_map.insert(
+            p.symbol.clone(),
+            PositionSnapshot { qty: p.qty, price: p.price * mult(&p.symbol), volatility: vol },
+        );
+    }
+    let cand_vol = vols.get(&symbol).copied();
+    positions_map.entry(symbol.clone()).or_insert_with(|| PositionSnapshot {
+        qty: 0.0,
+        price: eval_price * mult(&symbol),
+        volatility: cand_vol,
+    });
 
     let candidate =
         OrderCandidate { symbol: symbol.clone(), side, qty: req.qty, price: eval_price * mult(&symbol) };
@@ -595,17 +831,17 @@ pub(crate) async fn create_order(
         Err(_) => true, // fail closed
     };
 
-    // Load limits
-    let limits = match spectra_db::risk_center::get_limits(&pool, ws, Some(strat_id)).await {
-        Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-        Ok(None) | Err(_) => match spectra_db::risk_center::get_limits(&pool, ws, None).await {
-            Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-            Ok(None) | Err(_) => RiskLimits::default(),
-        },
+    // Load limits. A DB error stops the order; it never falls back to default limits.
+    let limits = match crate::risk_center_api::load_effective_limits(&pool, ws, Some(strat_id)).await {
+        Ok(l) => l,
+        Err(e) => return db_error(&e),
     };
 
     // Run M8 Pre-Trade Risk Check (Task 3)
-    let pre_trade = PreTradeChecker::evaluate(&limits, &snapshot, &candidate, kill_switch_active);
+    let pre_trade = match PreTradeChecker::evaluate(&limits, &snapshot, &candidate, kill_switch_active) {
+        Ok(r) => r,
+        Err(e) => return error_response(422, format!("Pre-trade risk check failed: {e}")),
+    };
 
     // Record decision in risk audit trail
     let breach_codes: Vec<String> = pre_trade.breaches.iter().map(|b| b.code.clone()).collect();
@@ -636,16 +872,18 @@ pub(crate) async fn create_order(
         "drawdown_pct": pre_trade.projected_metrics.drawdown_pct,
         "daily_loss": pre_trade.projected_metrics.daily_loss,
         "var_pct": pre_trade.projected_metrics.var_pct,
+        "portfolio_snapshot": crate::risk_center_api::portfolio_snapshot_json(&snapshot),
+        "risk_limits": crate::risk_center_api::risk_limits_json(&limits),
     });
 
-    let _ = spectra_db::risk_center::record_decision(
+    if let Err(e) = spectra_db::risk_center::record_decision(
         &pool,
         ws,
         Some(strat_id),
         &symbol,
         &side_str,
         req.qty,
-        eval_price,
+        Some(eval_price),
         pre_trade.approved_qty,
         verdict_str,
         &breaches_json,
@@ -653,7 +891,10 @@ pub(crate) async fn create_order(
         &metrics_json,
         user_id,
     )
-    .await;
+    .await
+    {
+        return crate::risk_center_api::decision_not_recorded(&e);
+    }
 
     // If rejected, store rejected order with reason (Task 3: "Done when a rejected order is stored with its reason")
     if pre_trade.verdict == PreTradeVerdict::Rejected {
@@ -686,7 +927,9 @@ pub(crate) async fn create_order(
         return json_response(422, json!(PaperOrderView::from(order)).to_string());
     }
 
-    // Order is accepted
+    // Order is accepted (with pre-trade size reduction if applicable)
+    let order_qty =
+        if pre_trade.verdict == PreTradeVerdict::Reduced { pre_trade.approved_qty } else { req.qty };
     let order = match spectra_db::paper::insert_paper_order(
         &pool,
         ws,
@@ -694,7 +937,7 @@ pub(crate) async fn create_order(
         &symbol,
         &side_str,
         &order_type_str,
-        req.qty,
+        order_qty,
         req.limit_price,
         req.stop_price,
         &tif,
@@ -715,15 +958,11 @@ pub(crate) async fn create_order(
 
     // Tasks 4 & 5: Fills and Positions/Equity update
     // Cost model: routed through spectra_engine::costs (CostModel, slipped_price, commission_fee)
-    let cost_model = CostModel {
-        slippage: spectra_core::Bps::from_f64(5.0).unwrap_or_default(),
-        commission: CommissionModel {
-            min_fee: Money::from_f64(1.0).unwrap_or_default(),
-            ..Default::default()
-        },
-        ..Default::default()
+    let cost_model = match PAPER_COST_CONFIG.cost_model() {
+        Ok(m) => m,
+        Err(e) => return error_response(500, format!("Paper cost model is invalid: {e}")),
     };
-    let base_price_f64 = req.fill_price.or(req.limit_price).or(current_sym_price).unwrap_or(100.0);
+    let base_price_f64 = eval_price;
     let Ok(base_price_val) = Price::from_f64(base_price_f64) else {
         return error_response(422, format!("Invalid base price: {base_price_f64}"));
     };
@@ -731,19 +970,37 @@ pub(crate) async fn create_order(
         OrderSide::Buy => Side::Buy,
         OrderSide::Sell => Side::Sell,
     };
-    let fill_price = slipped_price(base_price_val, engine_side, cost_model.slippage)
-        .map_or(base_price_f64, spectra_core::Fixed::to_f64);
+    let fill_price = match slipped_price(base_price_val, engine_side, cost_model.slippage) {
+        Ok(p) => spectra_core::Fixed::to_f64(p),
+        Err(e) => return error_response(422, format!("Failed to compute slipped fill price: {e}")),
+    };
     let fill_qty =
         if pre_trade.verdict == PreTradeVerdict::Reduced { pre_trade.approved_qty } else { req.qty };
     let mult_val = mult(&symbol);
-    let notional_val = Money::from_f64(fill_qty * fill_price * mult_val).unwrap_or_default();
-    let fee =
-        commission_fee(&cost_model.commission, Qty::from_f64(fill_qty).unwrap_or_default(), notional_val)
-            .map_or(1.0, spectra_core::Fixed::to_f64);
+    let notional_f64 = fill_qty * fill_price * mult_val;
+    let Ok(notional_val) = Money::from_f64(notional_f64) else {
+        return error_response(422, format!("Invalid fill notional: {notional_f64}"));
+    };
+    let Ok(fill_qty_fixed) = Qty::from_f64(fill_qty) else {
+        return error_response(422, format!("Invalid fill quantity: {fill_qty}"));
+    };
+    let fee = match commission_fee(&cost_model.commission, fill_qty_fixed, notional_val) {
+        Ok(f) => spectra_core::Fixed::to_f64(f),
+        Err(e) => return error_response(422, format!("Failed to compute commission: {e}")),
+    };
 
     // Record fill
     let fill_row = match spectra_db::paper::insert_paper_fill(
-        &pool, order.id, ws, strat_id, &symbol, &side_str, fill_qty, fill_price, fee,
+        &pool,
+        order.id,
+        ws,
+        strat_id,
+        &symbol,
+        &side_str,
+        fill_qty,
+        fill_price,
+        fee,
+        &PAPER_COST_CONFIG.to_json(),
     )
     .await
     {
@@ -892,12 +1149,10 @@ pub(crate) async fn step_strategy(
             Err(_) => true,
         };
 
-    let limits = match spectra_db::risk_center::get_limits(&pool, ws, Some(req.strategy_id)).await {
-        Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-        Ok(None) | Err(_) => match spectra_db::risk_center::get_limits(&pool, ws, None).await {
-            Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-            Ok(None) | Err(_) => RiskLimits::default(),
-        },
+    // A DB error stops the step; it never falls back to default limits.
+    let limits = match crate::risk_center_api::load_effective_limits(&pool, ws, Some(req.strategy_id)).await {
+        Ok(l) => l,
+        Err(e) => return db_error(&e),
     };
 
     // 4. Map symbols and construct bars
@@ -1041,6 +1296,45 @@ pub(crate) async fn step_strategy(
         };
         let reject_reason = o.reject_reason.map(|r| r.as_str().to_string());
 
+        // Record the risk decision first: if the audit insert fails, the order is not stored (fail closed).
+        let verdict_str = if o.state == OrderState::Rejected { "rejected" } else { "approved" };
+        let eval_price = match limit_px
+            .or(stop_px)
+            .or_else(|| engine_bars.iter().rfind(|b| b.instrument == o.instrument).map(|b| b.close.to_f64()))
+        {
+            Some(px) if px > 0.0 && px.is_finite() => px,
+            _ => {
+                return error_response(
+                    422,
+                    format!("Could not determine evaluation price for order on symbol {sym}"),
+                );
+            }
+        };
+        let breach_msgs = if o.state == OrderState::Rejected {
+            vec![reject_reason.clone().unwrap_or_else(|| "Rejected by risk check".to_string())]
+        } else {
+            vec![]
+        };
+        if let Err(e) = spectra_db::risk_center::record_decision(
+            &pool,
+            ws,
+            Some(req.strategy_id),
+            &sym,
+            side_str,
+            qty,
+            Some(eval_price),
+            if o.state == OrderState::Rejected { 0.0 } else { qty },
+            verdict_str,
+            &json!([]),
+            &breach_msgs,
+            &json!({}),
+            user_id,
+        )
+        .await
+        {
+            return crate::risk_center_api::decision_not_recorded(&e);
+        }
+
         let inserted = match spectra_db::paper::insert_paper_order(
             &pool,
             ws,
@@ -1062,35 +1356,11 @@ pub(crate) async fn step_strategy(
             Err(e) => return db_error(&e),
         };
 
-        // Record risk decision audit trail
-        let verdict_str = if o.state == OrderState::Rejected { "rejected" } else { "approved" };
-        let eval_price = limit_px.or(stop_px).unwrap_or(100.0);
-        let breach_msgs = if o.state == OrderState::Rejected {
-            vec![reject_reason.clone().unwrap_or_else(|| "Rejected by risk check".to_string())]
-        } else {
-            vec![]
-        };
-        let _ = spectra_db::risk_center::record_decision(
-            &pool,
-            ws,
-            Some(req.strategy_id),
-            &sym,
-            side_str,
-            qty,
-            eval_price,
-            if o.state == OrderState::Rejected { 0.0 } else { qty },
-            verdict_str,
-            &json!([]),
-            &breach_msgs,
-            &json!({}),
-            user_id,
-        )
-        .await;
-
         order_id_to_db.insert(o.id, inserted);
     }
 
     // Persist fills
+    let cost_config = preset_cost_config_json(preset, &cfg.costs);
     let mut fill_views = Vec::new();
     let mut fill_order_idx = 0usize;
     let mut order_fills_map: HashMap<Uuid, Vec<PaperFillView>> = HashMap::new();
@@ -1118,6 +1388,7 @@ pub(crate) async fn step_strategy(
                     f.qty.to_f64(),
                     f.price.to_f64(),
                     f.fee.to_f64(),
+                    &cost_config,
                 )
                 .await
                 {
@@ -1229,12 +1500,47 @@ pub(crate) async fn step_strategy(
             Err(e) => return db_error(&e),
         };
 
+    let pos_syms: Vec<&str> = updated_account.positions.iter().map(|p| p.symbol.as_str()).collect();
+    let mut vols = HashMap::new();
+    for sym in &pos_syms {
+        if let Some(&inst) = sym_map.get(*sym) {
+            let sbars: Vec<Bar> = engine_bars.iter().filter(|b| b.instrument == inst).copied().collect();
+            // Too few step bars: the stored dataset is used below. Any other error is reported.
+            if sbars.len() >= spectra_risk::MIN_VOLATILITY_BARS {
+                match spectra_risk::volatility_from_bars(sym, &sbars, 252.0) {
+                    Ok(vol) => {
+                        vols.insert(sym.to_string(), vol);
+                    }
+                    Err(e) => {
+                        return error_response(422, format!("Failed to compute volatility for {sym}: {e}"))
+                    }
+                }
+            }
+        }
+    }
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+    let missing_syms: Vec<&str> = pos_syms.into_iter().filter(|s| !vols.contains_key(*s)).collect();
+    if !missing_syms.is_empty() {
+        match crate::risk_center_api::lookup_portfolio_volatilities(&pool, ws, data_dir, None, &missing_syms)
+            .await
+        {
+            Ok(db_vols) => vols.extend(db_vols),
+            Err(e) => return error_response(422, format!("Failed to compute paper account metrics: {e}")),
+        }
+    }
+
+    let account = match PaperAccountView::new(updated_account, &step_records, &vols) {
+        Ok(v) => v,
+        Err(e) => return error_response(422, format!("Failed to compute paper account metrics: {e}")),
+    };
+
     let resp = StepPaperResponse {
         strategy_id: req.strategy_id,
         strategy_version_id: Some(version.id),
         orders: order_views,
         fills: fill_views,
-        account: PaperAccountView::new(updated_account, &step_records),
+        account,
     };
 
     json_response(200, json!(resp).to_string())

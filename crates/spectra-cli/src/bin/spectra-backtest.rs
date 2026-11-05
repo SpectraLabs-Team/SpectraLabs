@@ -133,7 +133,7 @@ fn run(a: &RunArgs) -> std::result::Result<(), String> {
         let s = series_json(&out.result.equity_curve, kind, a.points).map_err(|e| e.to_string())?;
         files.push((format!("{}_series.json", kind.as_str()), s.dump().into_bytes()));
     }
-    for art in artifacts(&out.result) {
+    for art in artifacts(&out.result).map_err(|e| e.to_string())? {
         files.push((art.name.to_string(), art.bytes));
     }
     for (name, bytes) in &files {

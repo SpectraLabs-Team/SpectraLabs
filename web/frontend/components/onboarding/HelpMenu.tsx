@@ -69,7 +69,7 @@ export function HelpMenu({ tab, className }: { tab: StudioTab; className?: strin
       </button>
       {open && (
         <div id={menuId} role="menu" aria-label="Help" onKeyDown={onMenuKey} className="absolute right-0 top-full z-40 mt-2 w-64 rounded-xl border border-ink/10 bg-panel p-1.5 shadow-2xl">
-          <button type="button" role="menuitem" className={item} onClick={run(startTour)}>
+          <button type="button" role="menuitem" className={item} onClick={run(() => startTour(true))}>
             <Compass className="h-4 w-4 text-accent" aria-hidden /> Take the tour
           </button>
           {hasPageTour(tab) && (

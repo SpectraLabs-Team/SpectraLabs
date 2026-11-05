@@ -12,8 +12,8 @@ import { MAIN_TOUR, PAGE_TOURS, type TourStep } from './tourSteps';
 import { useOnboardingState } from './useOnboardingState';
 
 type TourContext = {
-  /** Start the main tour from the beginning (Help menu, Learning Center). */
-  startTour: () => void;
+  /** Start the main tour (from the beginning if `fromBeginning` is true, or resuming from saved progress). */
+  startTour: (fromBeginning?: boolean) => void;
   /** Start the short tour of a page, if it has one. */
   startPageTour: (tab: StudioTab) => void;
   hasPageTour: (tab: StudioTab) => boolean;
@@ -116,7 +116,7 @@ export function OnboardingProvider({ tab, tabs, onTab, children }: { tab: Studio
   }, []);
 
   const run = useCallback(
-    async (kind: 'main' | 'page', all: TourStep[]) => {
+    async (kind: 'main' | 'page', all: TourStep[], fromBeginning = false) => {
       stop();
       setWelcome(null);
       setFinished(false);
@@ -220,12 +220,21 @@ export function OnboardingProvider({ tab, tabs, onTab, children }: { tab: Studio
       });
       driverRef.current = d;
       setActive(true);
-      await go(0);
+
+      const resumeIndex =
+        kind === 'main' && !fromBeginning && state?.lastCompletedStep
+          ? steps.findIndex((s) => s.id === state.lastCompletedStep)
+          : -1;
+      const startIndex = resumeIndex >= 0 ? resumeIndex : 0;
+      await go(startIndex);
     },
-    [onTab, stop, tabs, user?.role],
+    [onTab, state?.lastCompletedStep, stop, tabs, user?.role],
   );
 
-  const startTour = useCallback(() => void run('main', MAIN_TOUR), [run]);
+  const startTour = useCallback(
+    (fromBeginning = false) => void run('main', MAIN_TOUR, fromBeginning),
+    [run],
+  );
   const startPageTour = useCallback((t: StudioTab) => {
     const steps = PAGE_TOURS[t];
     if (steps) void run('page', steps);
@@ -244,7 +253,7 @@ export function OnboardingProvider({ tab, tabs, onTab, children }: { tab: Studio
     next.delete('tour');
     const qs = next.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-    window.setTimeout(startTour, 300);
+    window.setTimeout(() => startTour(true), 300);
   }, [ready, wantsTour, params, pathname, router, startTour]);
 
   // First visit: decide once the user's tour state is known and the Studio has rendered.
@@ -264,14 +273,14 @@ export function OnboardingProvider({ tab, tabs, onTab, children }: { tab: Studio
         if (state?.lastCompletedStep && state.lastCompletedStep !== 'welcome') {
           setWelcome('resume');
         } else {
-          startTour();
+          startTour(false);
         }
       }, 400);
     });
     return () => {
       cancelled = true;
     };
-  }, [ready, decided, wantsTour, state]);
+  }, [ready, decided, wantsTour, state, startTour]);
 
   // Leaving the Studio mid-tour: tidy up the overlay (the progress already saved stays).
   useEffect(() => () => stop(), [stop]);
@@ -308,8 +317,13 @@ export function OnboardingProvider({ tab, tabs, onTab, children }: { tab: Studio
             <button type="button" onClick={skipWelcome} className="btn-secondary">
               Skip for Now
             </button>
-            <button type="button" data-autofocus onClick={startTour} className="btn-primary">
-              {welcome === 'resume' ? 'Start the Tour' : 'Start Tour'}
+            <button
+              type="button"
+              data-autofocus
+              onClick={() => startTour(welcome !== 'resume')}
+              className="btn-primary"
+            >
+              {welcome === 'resume' ? 'Resume Tour' : 'Start Tour'}
             </button>
           </div>
           <p className="mt-4 text-[11.5px] text-ink/45">You can take the tour again any time from the Help menu.</p>

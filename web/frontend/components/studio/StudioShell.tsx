@@ -190,7 +190,7 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
             type="button"
             onClick={() => {
               onNavigate?.();
-              startTour();
+              startTour(true);
             }}
             data-tour="nav-tour"
             title={collapsed ? 'Guided Tour' : undefined}

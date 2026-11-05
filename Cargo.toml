@@ -64,5 +64,11 @@ doc_markdown = "allow"
 manual_midpoint = "allow"
 assert_is_empty = "allow"
 
+[profile.dev]
+debug = 1
+
+[profile.test]
+debug = 1
+
 [profile.release]
 debug = 1

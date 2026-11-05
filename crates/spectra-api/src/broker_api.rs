@@ -21,7 +21,7 @@ use spectra_risk::enforcement::{
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::jobs_api::context;
+use crate::jobs_api::{context, db_error};
 use crate::providers::vault::resolve_alpaca_credentials;
 use crate::risk_center_api::{fail_closed_response, user_of, RiskLimitsView};
 use crate::{error_response, error_with_code, json_response, AppState, Identity};
@@ -1034,16 +1034,27 @@ pub(crate) async fn handle_venue_order(
         Err(e) => return error_response(422, format!("Symbol mapping failed: {e}")),
     };
 
-    // Pre-trade risk enforcement
-    let db_ctx = context(&st, &identity).ok();
-    if let Some((ref pool, ws)) = db_ctx {
-        let limits = match risk_center::get_limits(pool, ws, None).await {
-            Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-            _ => RiskLimits::default(),
+    // Pre-trade risk enforcement. Without the database there is no risk check, so the order is
+    // refused rather than placed unchecked; database errors stop the order.
+    {
+        let (pool, ws) = match context(&st, &identity) {
+            Ok(c) => c,
+            Err(r) => return r,
+        };
+        let pool = &pool;
+        let limits = match crate::risk_center_api::load_effective_limits(pool, ws, None).await {
+            Ok(l) => l,
+            Err(e) => return db_error(&e),
         };
 
-        let db_positions = risk_center::get_positions(pool, ws, None).await.unwrap_or_default();
-        let db_balance = risk_center::get_balance(pool, ws, None).await.unwrap_or(None);
+        let db_positions = match risk_center::get_positions(pool, ws, None).await {
+            Ok(p) => p,
+            Err(e) => return db_error(&e),
+        };
+        let db_balance = match risk_center::get_balance(pool, ws, None).await {
+            Ok(b) => b,
+            Err(e) => return db_error(&e),
+        };
 
         let Some(b) = db_balance else {
             return error_response(422, "Account balance is not initialized in database.");

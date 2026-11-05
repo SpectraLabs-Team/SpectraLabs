@@ -368,6 +368,25 @@ impl From<StoredRiskLimits> for RiskLimits {
     }
 }
 
+/// The limits a pre-trade check uses: the strategy's own, else the workspace's, else the
+/// defaults when none are configured. A database error is returned to the caller, never
+/// replaced by default limits.
+pub(crate) async fn load_effective_limits(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    strategy_id: Option<Uuid>,
+) -> Result<RiskLimits, spectra_db::Error> {
+    if let Some(strat_id) = strategy_id {
+        if let Some(row) = risk_center::get_limits(pool, ws, Some(strat_id)).await? {
+            return Ok(RiskLimits::from(&RiskLimitsView::from(row)));
+        }
+    }
+    Ok(match risk_center::get_limits(pool, ws, None).await? {
+        Some(row) => RiskLimits::from(&RiskLimitsView::from(row)),
+        None => RiskLimits::default(),
+    })
+}
+
 /// `limits` as JSON for the `risk_limits` field of a decision's metrics.
 pub(crate) fn risk_limits_json(limits: &RiskLimits) -> serde_json::Value {
     serde_json::to_value(StoredRiskLimits::from(limits)).unwrap_or(serde_json::Value::Null)
@@ -878,23 +897,7 @@ pub(crate) async fn pre_trade_check(
     };
 
     // 2. Determine limits (Fail closed on DB error - Task 3)
-    let limits_res = if let Some(strat_id) = req.strategy_id {
-        match risk_center::get_limits(&pool, ws, Some(strat_id)).await {
-            Ok(Some(row)) => Ok(RiskLimits::from(&RiskLimitsView::from(row))),
-            Ok(None) => match risk_center::get_limits(&pool, ws, None).await {
-                Ok(Some(row)) => Ok(RiskLimits::from(&RiskLimitsView::from(row))),
-                Ok(None) => Ok(RiskLimits::default()),
-                Err(e) => Err(e),
-            },
-            Err(e) => Err(e),
-        }
-    } else {
-        match risk_center::get_limits(&pool, ws, None).await {
-            Ok(Some(row)) => Ok(RiskLimits::from(&RiskLimitsView::from(row))),
-            Ok(None) => Ok(RiskLimits::default()),
-            Err(e) => Err(e),
-        }
-    };
+    let limits_res = load_effective_limits(&pool, ws, req.strategy_id).await;
     let Ok(limits) = limits_res else {
         return fail_closed_response(
             &pool,

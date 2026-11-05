@@ -246,3 +246,24 @@ Every single one of the 10 PR #202 `PositionSnapshot` sites overlaps with the si
 - **Input:** A volatility error on the step's own bars, or a failed dataset lookup.
 - **Old value / Old behavior:** Both errors were discarded (`if let Ok`); the symbol simply had no volatility.
 - **New behavior:** With fewer than 60 step bars for a symbol, its volatility comes from the stored dataset, as before. Any other volatility error, and any dataset lookup error, returns 422.
+
+
+### Replay and limit loading (Task 9b, 9c)
+
+#### 20. `replay_decision` — Replay Used Today's or Default Limits (risk_center_api.rs)
+- **Function:** POST `/api/v1/risk/replay/{decision_id}`
+- **Input:** Any decision, after the limits changed or when the limits lookup failed.
+- **Old value / Old behavior:** Replay read the limits configured now; a lookup error or no row gave `RiskLimits::default()`. A kill-switch lookup error read as "off".
+- **New behavior:** Every decision that stores a portfolio snapshot (risk check, paper order, broker order) also stores the limits it used under `metrics.risk_limits`, and replay uses them. Decisions without stored limits (recorded before this change) return 422 "Decision has no stored risk limits, so it cannot be replayed exactly." A kill-switch lookup error returns a DB error. The kill switch is still read as it is now; its state at decision time is not stored.
+
+#### 21. Paper Order and Paper Step — Default Limits on DB Error (paper_api.rs)
+- **Function:** POST `/api/v1/paper/orders`, POST `/api/v1/paper/step`
+- **Input:** A database error while loading the strategy or workspace limits.
+- **Old value / Old behavior:** `Ok(None) | Err(_)` fell through to the workspace limits and then to `RiskLimits::default()`, so a DB error ran the pre-trade check against default limits.
+- **New behavior:** Limits come from `load_effective_limits` (strategy, else workspace, else defaults only when no limits are configured). A DB error returns 500 and the order or step is not run. The risk check route uses the same loader (no behaviour change there).
+
+#### 22. Venue Order — Unchecked Orders and Empty Data on DB Error (broker_api.rs)
+- **Function:** POST `{prefix}/broker/venues/order` (engine routes)
+- **Input:** No database or no workspace; or a DB error loading limits, positions or balance.
+- **Old value / Old behavior:** Without a database or workspace the pre-trade check was skipped and the order returned "filled". A limits error used default limits; a positions error used no positions; a balance error read as "balance not initialized".
+- **New behavior:** Without a database or workspace the order is refused (503 / 400 from `context`). DB errors return 500. Known follow-up: the derivatives margin still defaults to 10% of notional with maintenance at 75% when `initial_margin` is not given, and the venue path records no risk decision.

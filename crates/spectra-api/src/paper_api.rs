@@ -21,12 +21,11 @@ use spectra_engine::{OrderState, Strategy};
 use spectra_risk::enforcement::{
     OrderCandidate, OrderSide, PortfolioSnapshot, PositionSnapshot, PreTradeChecker, PreTradeVerdict,
 };
-use spectra_risk::RiskLimits;
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::jobs_api::{context, db_error};
-use crate::risk_center_api::{PortfolioPositionView, RiskBreachView, RiskLimitsView};
+use crate::risk_center_api::{PortfolioPositionView, RiskBreachView};
 use crate::{error_response, json_response, AppState, Identity};
 
 #[allow(clippy::result_large_err)]
@@ -832,13 +831,10 @@ pub(crate) async fn create_order(
         Err(_) => true, // fail closed
     };
 
-    // Load limits
-    let limits = match spectra_db::risk_center::get_limits(&pool, ws, Some(strat_id)).await {
-        Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-        Ok(None) | Err(_) => match spectra_db::risk_center::get_limits(&pool, ws, None).await {
-            Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-            Ok(None) | Err(_) => RiskLimits::default(),
-        },
+    // Load limits. A DB error stops the order; it never falls back to default limits.
+    let limits = match crate::risk_center_api::load_effective_limits(&pool, ws, Some(strat_id)).await {
+        Ok(l) => l,
+        Err(e) => return db_error(&e),
     };
 
     // Run M8 Pre-Trade Risk Check (Task 3)
@@ -1151,12 +1147,10 @@ pub(crate) async fn step_strategy(
             Err(_) => true,
         };
 
-    let limits = match spectra_db::risk_center::get_limits(&pool, ws, Some(req.strategy_id)).await {
-        Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-        Ok(None) | Err(_) => match spectra_db::risk_center::get_limits(&pool, ws, None).await {
-            Ok(Some(row)) => RiskLimits::from(&RiskLimitsView::from(row)),
-            Ok(None) | Err(_) => RiskLimits::default(),
-        },
+    // A DB error stops the step; it never falls back to default limits.
+    let limits = match crate::risk_center_api::load_effective_limits(&pool, ws, Some(req.strategy_id)).await {
+        Ok(l) => l,
+        Err(e) => return db_error(&e),
     };
 
     // 4. Map symbols and construct bars

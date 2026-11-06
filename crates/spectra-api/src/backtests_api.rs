@@ -541,6 +541,60 @@ pub(crate) async fn backtest_tear_sheet(
     }
 }
 
+/// The tear sheet as a PDF, stored as a version of the backtest's tear sheet report (M16 Task 6).
+pub(crate) async fn backtest_tear_sheet_export(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    job_id: Result<Path<Uuid>, PathRejection>,
+) -> Response {
+    let Ok(Path(job_id)) = job_id else { return error_response(404, NOT_FOUND) };
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let job = match backtest_job(&st, &id, job_id).await {
+        Ok(j) => j,
+        Err(r) => return r,
+    };
+    if job.status != "succeeded" {
+        return error_response(
+            409,
+            format!("The backtest is {}; the tear sheet exists once it has succeeded.", job.status),
+        );
+    }
+    let view = BacktestView::from(job);
+    let Some(summary) = view.summary else {
+        return error_response(404, "This backtest has no summary recorded.");
+    };
+    if !summary.is_object() {
+        return error_response(500, "Corrupted summary document.");
+    }
+    let sheet = crate::tear_sheet::build(&summary);
+    let generated = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
+    let body = crate::tear_sheet_pdf::render(
+        &sheet,
+        "Quantitative Strategy Tear-Sheet",
+        &format!("Backtest {job_id}"),
+        &generated,
+    );
+    let report = spectra_db::reports::NewReport {
+        report_type: spectra_db::reports::report_type::TEAR_SHEET,
+        run_kind: spectra_db::reports::run_kind::BACKTEST,
+        run_id: job_id,
+        format: "pdf",
+        content_type: "application/pdf",
+        content: &body,
+        created_by: Uuid::parse_str(&id.user).ok(),
+    };
+    match spectra_db::reports::create_version(&pool, ws, &report).await {
+        Ok(meta) => {
+            let filename = format!("backtest-{job_id}-tear-sheet.pdf");
+            crate::reports_api::report_response(&meta, &filename, body)
+        }
+        Err(e) => db_error(&e),
+    }
+}
+
 /// A monthly return point for the heatmap and dashboard.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct MonthlyReturn {

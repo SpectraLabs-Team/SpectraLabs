@@ -93,6 +93,27 @@ pub async fn create_version(
         .bind(report.run_id)
         .execute(&mut *tx)
         .await?;
+    // Tear sheets only: an export identical to the newest version reuses it. Sweep exports keep
+    // every version (see the M16 decisions).
+    if report.report_type == report_type::TEAR_SHEET {
+        let latest: Option<ReportVersion> = sqlx::query_as(include_str!("../queries/report_latest.sql"))
+            .bind(workspace_id)
+            .bind(report.report_type)
+            .bind(report.run_kind)
+            .bind(report.run_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if let Some(latest) = latest {
+            let candidate: String = sqlx::query_scalar("SELECT encode(sha256($1), 'hex')")
+                .bind(report.content)
+                .fetch_one(&mut *tx)
+                .await?;
+            if latest.sha256 == candidate {
+                tx.commit().await?;
+                return Ok(latest);
+            }
+        }
+    }
     let created: ReportVersion = sqlx::query_as(include_str!("../queries/report_version_insert.sql"))
         .bind(workspace_id)
         .bind(report.report_type)

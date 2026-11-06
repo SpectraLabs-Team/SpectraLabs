@@ -534,3 +534,37 @@ async fn report_versions_count_up_under_concurrent_exports() {
     };
     assert!(create_version(&pool, ws, &bad).await.is_err());
 }
+
+#[tokio::test]
+async fn tear_sheet_reuses_latest_version_for_identical_content() {
+    use spectra_db::reports::{create_version, NewReport};
+
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "reports-tear-sheet-test@example.com").await.unwrap();
+    let ws = seeded.workspace_id;
+    let run = spectra_db::new_id();
+
+    let report1 = NewReport {
+        report_type: spectra_db::reports::report_type::TEAR_SHEET,
+        run_kind: spectra_db::reports::run_kind::BACKTEST,
+        run_id: run,
+        format: "pdf",
+        content_type: "application/pdf",
+        content: b"%PDF-1.4 first content",
+        created_by: None,
+    };
+    let v1 = create_version(&pool, ws, &report1).await.unwrap();
+    assert_eq!(v1.version, 1);
+
+    // Identical content returns the same version (version 1, not 2).
+    let v1_duplicate = create_version(&pool, ws, &report1).await.unwrap();
+    assert_eq!(v1_duplicate.version, 1);
+    assert_eq!(v1_duplicate.id, v1.id);
+    assert_eq!(v1_duplicate.report_id, v1.report_id);
+
+    // Different content gives version 2.
+    let report2 = NewReport { content: b"%PDF-1.4 second content", ..report1 };
+    let v2 = create_version(&pool, ws, &report2).await.unwrap();
+    assert_eq!(v2.version, 2);
+    assert_eq!(v2.report_id, v1.report_id);
+}

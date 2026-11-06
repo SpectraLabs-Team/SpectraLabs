@@ -69,6 +69,7 @@ import { TradingChart } from './TradingChart';
 import { TradingViewWidget } from './TradingViewWidget';
 import { BacktestToPaperGap } from './BacktestToPaperGap';
 import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
+import { getKillSwitches } from '@/lib/riskCenter';
 import {
   CURATED_WATCHLIST_ITEMS,
   WATCHLIST_CATEGORY_LABELS,
@@ -225,6 +226,9 @@ export function PaperLab() {
 
   const [chartHeightMode, setChartHeightMode] = useState<'standard' | 'tall'>('standard');
   const [connectModalOpen, setConnectModalOpen] = useState(false);
+  const [killSwitchActive, setKillSwitchActive] = useState(false);
+  const [killSwitchReason, setKillSwitchReason] = useState('');
+  const [bottomCompressed, setBottomCompressed] = useState(false);
 
   // Connection state
   const [checkingConnection, setCheckingConnection] = useState(true);
@@ -551,7 +555,13 @@ export function PaperLab() {
   const checkStatus = useCallback(async () => {
     setCheckingConnection(true);
     try {
-      const status = await getAlpacaStatus();
+      const [status, ksList] = await Promise.all([
+        getAlpacaStatus(),
+        getKillSwitches().catch(() => []),
+      ]);
+      const activeKs = ksList.find((k) => k.active);
+      setKillSwitchActive(Boolean(activeKs));
+      if (activeKs?.reason) setKillSwitchReason(activeKs.reason);
       setIsConnected(status.connected);
       if (status.keyIdHint) setKeyHint(status.keyIdHint);
       return status.connected;
@@ -579,9 +589,8 @@ export function PaperLab() {
           setAccount(acc);
         }
       } else {
-        const err = accResult.reason;
-        const msg = err instanceof Error ? err.message : 'Failed to retrieve Alpaca account data.';
-        toastError('Alpaca Account Error', msg);
+        // If account load fails (keys unconfigured or 501), fallback gracefully to sandbox
+        setTradingMode('sandbox');
       }
 
       if (posResult.status === 'fulfilled') {
@@ -1034,6 +1043,18 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
       return;
     }
 
+    // Kill Switch Enforcement (M8 Pre-Trade Risk Control)
+    if (killSwitchActive) {
+      const isClosing = orderSide === 'buy' ? currentHeldQty < 0 : currentHeldQty > 0;
+      if (!isClosing) {
+        toastError(
+          'Trading Halted by Kill Switch',
+          'Emergency kill switch is currently active; opening orders are blocked. Only position-flattening orders are allowed.'
+        );
+        return;
+      }
+    }
+
     setSubmittingOrder(true);
     setConfirmModalOpen(false);
 
@@ -1390,6 +1411,19 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
           )}
         </div>
       </div>
+
+      {/* Emergency Kill Switch Active Banner */}
+      {killSwitchActive && (
+        <div className="flex items-center justify-between rounded-2xl border border-loss/30 bg-loss/10 p-3.5 text-xs text-loss">
+          <div className="flex items-center gap-2.5">
+            <ShieldAlert className="h-4 w-4 shrink-0" />
+            <div>
+              <span className="font-bold">TRADING HALTED BY EMERGENCY KILL SWITCH: </span>
+              <span>All opening orders are currently blocked by pre-trade risk controls.{killSwitchReason ? ` Reason: ${killSwitchReason}` : ''}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Top Portfolio Metric Cards */}
       <div data-tour="paper-account" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -1865,6 +1899,13 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
             </span>
           </div>
 
+          {killSwitchActive && (
+            <div className="mb-3 flex items-center gap-1.5 rounded-lg border border-loss/30 bg-loss/10 px-2.5 py-1.5 text-[11px] font-semibold text-loss">
+              <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+              <span>Kill Switch Active: opening orders blocked</span>
+            </div>
+          )}
+
           {/* Buy / Sell Toggle */}
           <div className="grid grid-cols-2 gap-2 rounded-xl bg-ink/[0.04] p-1 mb-3">
             <button
@@ -2150,7 +2191,11 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
                 setConfirmModalOpen(true);
               }
             }}
-            disabled={submittingOrder || estimatedOrderTotal <= 0}
+            disabled={
+              submittingOrder ||
+              estimatedOrderTotal <= 0 ||
+              Boolean(killSwitchActive && (orderSide === 'buy' ? currentHeldQty >= 0 : currentHeldQty <= 0))
+            }
             className={cn(
               'w-full rounded-xl py-3 text-xs font-bold uppercase tracking-wider transition shadow-lg disabled:opacity-50',
               orderSide === 'buy'
@@ -2163,6 +2208,8 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
                 <Spinner className="h-3.5 w-3.5 text-current" />
                 Executing Order...
               </span>
+            ) : killSwitchActive && (orderSide === 'buy' ? currentHeldQty >= 0 : currentHeldQty <= 0) ? (
+              'Orders Halted by Kill Switch'
             ) : (
               `${orderSide.toUpperCase()} ${effectiveShares} ${selectedSymbol} · ${formatCurrency(estimatedOrderTotal)}`
             )}
@@ -2347,69 +2394,105 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
       {/* BOTTOM PANEL: Positions, Open Orders, Order History, Performance */}
       <div data-tour="paper-positions" className="rounded-2xl border border-ink/10 bg-panel p-4 text-ink">
         {/* Tab Headers */}
-        <div className="flex items-center gap-2 border-b border-ink/10 pb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink/10 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { setBottomTab('positions'); setBottomCompressed(false); }}
+              className={cn(
+                'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+                bottomTab === 'positions'
+                  ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                  : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
+              )}
+            >
+              Current Positions ({effectivePositions.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setBottomTab('open-orders'); setBottomCompressed(false); }}
+              className={cn(
+                'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+                bottomTab === 'open-orders'
+                  ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                  : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
+              )}
+            >
+              Open Orders ({openOrders.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setBottomTab('history'); setBottomCompressed(false); }}
+              className={cn(
+                'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+                bottomTab === 'history'
+                  ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                  : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
+              )}
+            >
+              Order History ({effectiveOrders.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => { setBottomTab('performance'); setBottomCompressed(false); }}
+              className={cn(
+                'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+                bottomTab === 'performance'
+                  ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                  : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
+              )}
+            >
+              Portfolio Metrics
+            </button>
+            <button
+              type="button"
+              onClick={() => { setBottomTab('gap'); setBottomCompressed(false); }}
+              className={cn(
+                'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+                bottomTab === 'gap'
+                  ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                  : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
+              )}
+            >
+              Execution Gap
+            </button>
+          </div>
           <button
             type="button"
-            onClick={() => setBottomTab('positions')}
-            className={cn(
-              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
-              bottomTab === 'positions'
-                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
-                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
-            )}
+            onClick={() => setBottomCompressed((c) => !c)}
+            className="flex items-center gap-1 rounded-lg border border-ink/10 bg-ink/[0.04] px-2.5 py-1 text-[11px] font-semibold text-ink/70 hover:bg-ink/[0.08] hover:text-ink transition"
           >
-            Current Positions ({effectivePositions.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setBottomTab('open-orders')}
-            className={cn(
-              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
-              bottomTab === 'open-orders'
-                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
-                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
+            {bottomCompressed ? (
+              <>
+                <Maximize2 className="h-3 w-3" />
+                <span>Expand</span>
+              </>
+            ) : (
+              <>
+                <Minimize2 className="h-3 w-3" />
+                <span>Compress</span>
+              </>
             )}
-          >
-            Open Orders ({openOrders.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setBottomTab('history')}
-            className={cn(
-              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
-              bottomTab === 'history'
-                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
-                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
-            )}
-          >
-            Order History ({effectiveOrders.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setBottomTab('performance')}
-            className={cn(
-              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
-              bottomTab === 'performance'
-                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
-                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
-            )}
-          >
-            Portfolio Metrics
-          </button>
-          <button
-            type="button"
-            onClick={() => setBottomTab('gap')}
-            className={cn(
-              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
-              bottomTab === 'gap'
-                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
-                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
-            )}
-          >
-            Execution Gap
           </button>
         </div>
 
+        {bottomCompressed ? (
+          <div className="mt-3 flex items-center justify-between rounded-xl border border-ink/10 bg-ink/[0.02] px-3.5 py-2.5 text-xs text-ink/70">
+            <span>
+              <strong>{effectivePositions.length}</strong> active position{effectivePositions.length === 1 ? '' : 's'} ·{' '}
+              <strong>{openOrders.length}</strong> working order{openOrders.length === 1 ? '' : 's'} ·{' '}
+              <strong>{effectiveOrders.length}</strong> fills
+            </span>
+            <button
+              type="button"
+              onClick={() => setBottomCompressed(false)}
+              className="text-xs font-semibold text-accent hover:underline"
+            >
+              Expand Panel →
+            </button>
+          </div>
+        ) : (
+          <>
         {/* Tab 1: Current Positions */}
         {bottomTab === 'positions' && (
           <div className="mt-4 overflow-x-auto">
@@ -2729,6 +2812,8 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
           <div className="mt-4">
             <BacktestToPaperGap readOnly />
           </div>
+        )}
+          </>
         )}
       </div>
     </div>

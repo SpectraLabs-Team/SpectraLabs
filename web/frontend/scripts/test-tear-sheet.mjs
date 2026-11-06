@@ -45,8 +45,8 @@ test('tear-sheet and PDF/CSV report exports', async (t) => {
     assert.ok(content.includes('tearSheetOpen'), 'Manages tearSheetOpen modal state');
     assert.ok(content.includes('Tear-Sheet & PDF'), 'Renders Tear-Sheet & PDF button');
     assert.ok(content.includes('reportType="Quantitative Backtest"'), 'Passes Quantitative Backtest report type');
-    assert.ok(content.includes('Return & Capital Dynamics'), 'Contains return dynamics section');
-    assert.ok(content.includes('Risk-Adjusted Performance Ratios'), 'Contains risk ratios section');
+    assert.ok(content.includes('getTearSheet('), 'Fetches the server-built tear sheet sections');
+    assert.ok(content.includes('tearSheet?.sections'), 'Passes the server sections to TearSheetModal');
   });
 
   await t.test('CompareRuns integrates TearSheetModal for comparative strategy analysis', () => {

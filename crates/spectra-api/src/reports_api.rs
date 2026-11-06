@@ -17,6 +17,8 @@ use crate::jobs_api::{context, db_error, to_json};
 use crate::{error_response, AppState, Identity};
 
 const NOT_FOUND: &str = "Report not found.";
+const REPORT_TYPES: [&str; 3] =
+    [reports::report_type::VALIDATION, reports::report_type::TEAR_SHEET, reports::report_type::GAP];
 const RUN_KINDS: [&str; 3] =
     [reports::run_kind::SWEEP, reports::run_kind::BACKTEST, reports::run_kind::PAPER_GAP];
 
@@ -70,6 +72,8 @@ pub(crate) struct ListReportsQuery {
     pub run_kind: String,
     /// The run's id.
     pub run_id: Uuid,
+    /// Only reports of this type: `validation`, `tear_sheet` or `gap`.
+    pub report_type: Option<String>,
 }
 
 /// The reports of a run: every version, grouped by type and newest first.
@@ -93,8 +97,20 @@ pub(crate) async fn list_reports(
         Ok(c) => c,
         Err(r) => return r,
     };
+    if let Some(t) = q.report_type.as_deref() {
+        if !REPORT_TYPES.contains(&t) {
+            return error_response(422, "report_type must be validation, tear_sheet or gap.");
+        }
+    }
     match reports::for_run(&pool, ws, &q.run_kind, q.run_id).await {
-        Ok(list) => to_json(200, &list.into_iter().map(ReportVersionView::from).collect::<Vec<_>>()),
+        Ok(list) => {
+            let list: Vec<ReportVersionView> = list
+                .into_iter()
+                .filter(|v| q.report_type.as_deref().is_none_or(|t| v.report_type == t))
+                .map(ReportVersionView::from)
+                .collect();
+            to_json(200, &list)
+        }
         Err(e) => db_error(&e),
     }
 }

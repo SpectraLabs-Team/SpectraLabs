@@ -525,6 +525,37 @@ export const getSeries = (backtestId: string, kind: SeriesKind) =>
 export const getAttribution = (backtestId: string) =>
   request<Attribution>(`/api/v1/backtests/${id(backtestId)}/attribution`, { timeoutMs: 20_000 });
 
+/** M16 Task 6: the tear sheet sections and strategy table, built on the server from the stored summary. */
+export interface TearSheetResponse {
+  sections: {
+    category: string;
+    items: { label: string; value: string; sub?: string; tone?: 'profit' | 'loss' | 'neutral' }[];
+  }[];
+  table?: { title: string; headers: string[]; rows: string[][] };
+}
+
+/** M16 Task 6: downloads the stored server-rendered tear sheet PDF (a new version when the content changed). */
+export async function downloadTearSheetPdf(backtestId: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/v1/backtests/${id(backtestId)}/tear-sheet/export`, { credentials: 'same-origin' });
+  } catch {
+    throw new ApiError('Cannot reach the Spectra server. Check your connection and try again.', 0);
+  }
+  if (!response.ok) throw new ApiError(`Could not create the tear sheet PDF (${response.status}).`, response.status);
+  const url = URL.createObjectURL(await response.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `backtest-${backtestId.slice(0, 8)}-tear-sheet.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+export const getTearSheet = (backtestId: string) =>
+  request<TearSheetResponse>(`/api/v1/backtests/${id(backtestId)}/tear-sheet`, { timeoutMs: 20_000 });
+
 export const getMonthlyReturns = (backtestId: string) =>
   request<MonthlyReturnsResponse>(`/api/v1/backtests/${id(backtestId)}/monthly-returns`, { timeoutMs: 20_000 });
 

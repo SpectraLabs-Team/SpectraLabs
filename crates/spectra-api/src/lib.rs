@@ -68,6 +68,8 @@ pub mod risk_center_api;
 pub mod sessions_api;
 pub mod strategies_api;
 pub mod survival_api;
+pub(crate) mod tear_sheet;
+pub(crate) mod tear_sheet_pdf;
 pub mod telemetry;
 pub mod uploads_api;
 pub mod user_state_api;
@@ -816,6 +818,11 @@ fn backtest_routes() -> Router<AppState> {
         .route("/api/v1/backtests/{id}/cancel", only(post(backtests_api::cancel_backtest)))
         .route("/api/v1/backtests/{id}/series", only(get(backtests_api::backtest_series)))
         .route("/api/v1/backtests/{id}/attribution", only(get(backtests_api::backtest_attribution)))
+        .route("/api/v1/backtests/{id}/tear-sheet", only(get(backtests_api::backtest_tear_sheet)))
+        .route(
+            "/api/v1/backtests/{id}/tear-sheet/export",
+            only(get(backtests_api::backtest_tear_sheet_export)),
+        )
         .route("/api/v1/backtests/{id}/monthly-returns", only(get(backtests_api::backtest_monthly_returns)))
         .route("/api/v1/backtests/{id}/monthly_returns", only(get(backtests_api::backtest_monthly_returns)))
         .route("/api/v1/backtests/{id}/artifacts/{kind}", only(get(backtests_api::backtest_artifact)))

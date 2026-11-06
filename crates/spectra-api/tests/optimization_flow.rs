@@ -796,6 +796,32 @@ async fn sweep_exports_are_versioned_reports() {
     assert_eq!(list.iter().map(|v| v["version"].as_i64().unwrap()).collect::<Vec<_>>(), [3, 2, 1]);
     assert!(list.iter().all(|v| v["report_type"] == "validation" && v["run_id"] == sweep_id.as_str()));
     assert_eq!(list[2]["created_by"], f.user.to_string());
+    // The same list filtered by report type: validation keeps all three, tear sheets none.
+    let (_, typed) = f
+        .call(
+            "GET",
+            &format!("/api/v1/reports?run_kind=sweep&run_id={sweep_id}&report_type=validation"),
+            &Value::Null,
+        )
+        .await;
+    assert_eq!(typed.as_array().unwrap().len(), 3);
+    let (_, none) = f
+        .call(
+            "GET",
+            &format!("/api/v1/reports?run_kind=sweep&run_id={sweep_id}&report_type=tear_sheet"),
+            &Value::Null,
+        )
+        .await;
+    assert_eq!(none.as_array().unwrap().len(), 0);
+    let (bad, _) = f
+        .call(
+            "GET",
+            &format!("/api/v1/reports?run_kind=sweep&run_id={sweep_id}&report_type=bogus"),
+            &Value::Null,
+        )
+        .await;
+    assert_eq!(bad, 422);
+
     assert_eq!(list[1]["format"], "pdf");
     assert_eq!(list[2]["download_url"], format!("/api/v1/reports/{report_id}/versions/1"));
 

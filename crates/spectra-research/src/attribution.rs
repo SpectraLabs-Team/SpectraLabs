@@ -441,6 +441,138 @@ pub fn compute_pnl_attribution(
     })
 }
 
+/// Waterfall steps in display order, with whether each is a subtotal (a level drawn from zero).
+const WATERFALL_ORDER: [(&str, bool); 8] = [
+    ("Gross Trading P&L", true),
+    ("Fees on Closed Trades", false),
+    ("Trading Net P&L", true),
+    ("Open Positions (Realized So Far)", false),
+    ("Borrow Fees", false),
+    ("Financing Interest", false),
+    ("Interest Income", false),
+    ("Net Account P&L", true),
+];
+
+/// Combines per-account attributions into one portfolio view (M11 Task 7).
+///
+/// This is a pure sum, not a re-run of the engine: every total, cost, direction and waterfall
+/// amount is the sum of the inputs. Instruments merge by symbol (or by instrument id when no
+/// symbol is known); a merged instrument's `instrument` is the first input's id, since ids are
+/// per ledger. Win rates and `pnl_share` are recomputed from the merged counts and net P&L. The
+/// waterfall keeps its order and subtotal flags, and its running totals are rebuilt from the
+/// summed amounts, so the identities of each input carry over to the combined result.
+///
+/// Empty input returns `PnlAttribution::default()`.
+pub fn combine_attributions(parts: &[PnlAttribution]) -> PnlAttribution {
+    if parts.is_empty() {
+        return PnlAttribution::default();
+    }
+
+    let sum = |f: fn(&PnlAttribution) -> f64| parts.iter().map(f).sum::<f64>();
+    let sum_dir = |f: fn(&DirectionalAttribution) -> f64| parts.iter().map(|p| f(&p.direction)).sum::<f64>();
+    let sum_dir_n = |f: fn(&DirectionalAttribution) -> usize| -> usize {
+        parts.iter().map(|p| f(&p.direction)).sum::<usize>()
+    };
+
+    // Directional totals, with win rates recomputed from the merged counts.
+    let mut direction = DirectionalAttribution {
+        long_gross_pnl: sum_dir(|d| d.long_gross_pnl),
+        long_fees: sum_dir(|d| d.long_fees),
+        long_net_pnl: sum_dir(|d| d.long_net_pnl),
+        long_trades: sum_dir_n(|d| d.long_trades),
+        long_wins: sum_dir_n(|d| d.long_wins),
+        short_gross_pnl: sum_dir(|d| d.short_gross_pnl),
+        short_fees: sum_dir(|d| d.short_fees),
+        short_net_pnl: sum_dir(|d| d.short_net_pnl),
+        short_trades: sum_dir_n(|d| d.short_trades),
+        short_wins: sum_dir_n(|d| d.short_wins),
+        ..DirectionalAttribution::default()
+    };
+    if direction.long_trades > 0 {
+        direction.long_win_rate = direction.long_wins as f64 / direction.long_trades as f64;
+    }
+    if direction.short_trades > 0 {
+        direction.short_win_rate = direction.short_wins as f64 / direction.short_trades as f64;
+    }
+
+    let total_trades: usize = parts.iter().map(|p| p.total_trades).sum();
+    let total_wins = direction.long_wins + direction.short_wins;
+    let overall_win_rate = if total_trades > 0 { total_wins as f64 / total_trades as f64 } else { 0.0 };
+
+    let costs = CostDecomposition {
+        commission_fees: parts.iter().map(|p| p.costs.commission_fees).sum(),
+        slippage_costs: parts.iter().map(|p| p.costs.slippage_costs).sum(),
+        borrow_fees: parts.iter().map(|p| p.costs.borrow_fees).sum(),
+        financing_interest: parts.iter().map(|p| p.costs.financing_interest).sum(),
+        interest_income: parts.iter().map(|p| p.costs.interest_income).sum(),
+        dividends: parts.iter().map(|p| p.costs.dividends).sum(),
+        coupons: parts.iter().map(|p| p.costs.coupons).sum(),
+        total_costs: parts.iter().map(|p| p.costs.total_costs).sum(),
+    };
+
+    // Instruments: merge by symbol, falling back to the instrument id when no symbol is known.
+    let mut merged: BTreeMap<String, InstrumentAttribution> = BTreeMap::new();
+    for part in parts {
+        for inst in &part.instruments {
+            let key = inst.symbol.clone().unwrap_or_else(|| format!("#{}", inst.instrument));
+            let entry = merged.entry(key).or_insert_with(|| InstrumentAttribution {
+                instrument: inst.instrument,
+                symbol: inst.symbol.clone(),
+                ..InstrumentAttribution::default()
+            });
+            entry.gross_pnl += inst.gross_pnl;
+            entry.fees += inst.fees;
+            entry.net_pnl += inst.net_pnl;
+            entry.trades_count += inst.trades_count;
+            entry.win_trades += inst.win_trades;
+            entry.loss_trades += inst.loss_trades;
+            entry.long_pnl += inst.long_pnl;
+            entry.short_pnl += inst.short_pnl;
+        }
+    }
+    let total_abs_net: f64 = merged.values().map(|i| i.net_pnl.abs()).sum();
+    let mut instruments: Vec<InstrumentAttribution> = merged.into_values().collect();
+    for inst in &mut instruments {
+        inst.win_rate =
+            if inst.trades_count > 0 { inst.win_trades as f64 / inst.trades_count as f64 } else { 0.0 };
+        inst.pnl_share = if total_abs_net > 0.0 { inst.net_pnl / total_abs_net } else { 0.0 };
+    }
+
+    // Waterfall: sum each step by name, keep the canonical order and subtotal flags, and rebuild
+    // running totals. A change step appears when any input has it; levels always appear.
+    let mut waterfall = Vec::new();
+    let mut running = 0.0f64;
+    for (name, is_subtotal) in WATERFALL_ORDER {
+        let present = parts.iter().any(|p| p.waterfall.iter().any(|s| s.name == name));
+        if !is_subtotal && !present {
+            continue;
+        }
+        let amount: f64 =
+            parts.iter().flat_map(|p| p.waterfall.iter()).filter(|s| s.name == name).map(|s| s.amount).sum();
+        running = if is_subtotal { amount } else { running + amount };
+        waterfall.push(WaterfallStep {
+            name: name.into(),
+            amount,
+            running_total: running,
+            subtotal: is_subtotal,
+        });
+    }
+
+    PnlAttribution {
+        total_gross_pnl: sum(|p| p.total_gross_pnl),
+        total_fees: sum(|p| p.total_fees),
+        total_net_pnl: sum(|p| p.total_net_pnl),
+        open_position_pnl: sum(|p| p.open_position_pnl),
+        total_account_pnl: sum(|p| p.total_account_pnl),
+        total_trades,
+        overall_win_rate,
+        costs,
+        direction,
+        instruments,
+        waterfall,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -537,5 +669,98 @@ mod tests {
         let json = attr.to_json();
         assert!(json.dump().contains("waterfall"));
         assert!(json.dump().contains("direction"));
+    }
+
+    fn approx(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    /// Ledger with one open long AAPL position (no closed trade), so open P&L is non-zero.
+    fn make_open_ledger() -> Ledger {
+        let mut l = Ledger::new(LedgerConfig {
+            allow_short: true,
+            allow_negative_cash: true,
+            ..LedgerConfig::default()
+        });
+        l.deposit(Money::from_f64(100_000.0).unwrap(), 0).unwrap();
+        l.apply_fill(&Fill {
+            instrument: 0,
+            side: Side::Buy,
+            price: Price::from_f64(100.0).unwrap(),
+            qty: Qty::from_f64(10.0).unwrap(),
+            fee: Money::from_f64(1.0).unwrap(),
+            ts_ns: 1_000,
+        })
+        .unwrap();
+        l
+    }
+
+    fn attr_of(ledger: &Ledger, symbols: &[String]) -> PnlAttribution {
+        compute_pnl_attribution(ledger, Some(symbols), Some(5.0)).unwrap()
+    }
+
+    #[test]
+    fn combine_empty_returns_default() {
+        assert_eq!(combine_attributions(&[]), PnlAttribution::default());
+    }
+
+    #[test]
+    fn combine_sums_totals_and_keeps_identities() {
+        let syms = vec!["AAPL".to_string(), "MSFT".to_string()];
+        let a = attr_of(&make_test_ledger(), &syms);
+        let b = attr_of(&make_open_ledger(), &syms);
+        let c = combine_attributions(&[a.clone(), b.clone()]);
+
+        assert!(approx(c.total_gross_pnl, a.total_gross_pnl + b.total_gross_pnl));
+        assert!(approx(c.total_fees, a.total_fees + b.total_fees));
+        assert!(approx(c.total_net_pnl, a.total_net_pnl + b.total_net_pnl));
+        assert!(approx(c.open_position_pnl, a.open_position_pnl + b.open_position_pnl));
+        assert!(approx(c.total_account_pnl, a.total_account_pnl + b.total_account_pnl));
+        assert_eq!(c.total_trades, a.total_trades + b.total_trades);
+
+        // Identities on the combined result.
+        // Trading Net = Gross less closed-trade fees (total_fees also covers open positions).
+        let closed_fees =
+            c.waterfall.iter().find(|s| s.name == "Fees on Closed Trades").map_or(0.0, |s| s.amount);
+        assert!(approx(c.total_net_pnl, c.total_gross_pnl + closed_fees));
+        let account =
+            c.total_net_pnl + c.open_position_pnl - c.costs.borrow_fees - c.costs.financing_interest
+                + c.costs.interest_income;
+        assert!(approx(c.total_account_pnl, account));
+
+        // Waterfall: subtotal flags and running totals hold.
+        let names: Vec<&str> = c.waterfall.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names.first(), Some(&"Gross Trading P&L"));
+        assert_eq!(names.last(), Some(&"Net Account P&L"));
+        let last = c.waterfall.last().unwrap();
+        assert!(last.subtotal);
+        assert!(approx(last.running_total, c.total_account_pnl));
+        let trading = c.waterfall.iter().find(|s| s.name == "Trading Net P&L").unwrap();
+        assert!(trading.subtotal);
+        assert!(approx(trading.running_total, c.total_net_pnl));
+    }
+
+    #[test]
+    fn combine_merges_instruments_and_recomputes_shares() {
+        let syms = vec!["AAPL".to_string(), "MSFT".to_string()];
+        let a = attr_of(&make_test_ledger(), &syms);
+        let c = combine_attributions(&[a.clone(), a.clone()]);
+
+        assert_eq!(c.instruments.len(), 2);
+        let aapl = c.instruments.iter().find(|i| i.symbol.as_deref() == Some("AAPL")).unwrap();
+        let msft = c.instruments.iter().find(|i| i.symbol.as_deref() == Some("MSFT")).unwrap();
+        assert!(approx(aapl.net_pnl, 2.0 * 990.0));
+        assert!(approx(msft.net_pnl, 2.0 * -506.0));
+        assert_eq!(aapl.trades_count, 2);
+        assert_eq!(aapl.win_trades, 2);
+        assert!(approx(aapl.win_rate, 1.0));
+        assert!(approx(msft.win_rate, 0.0));
+
+        // Shares use the merged absolute net, so they sum to |net| / total |net| per instrument.
+        let total_abs = 2.0 * 990.0 + 2.0 * 506.0;
+        assert!(approx(aapl.pnl_share, 1980.0 / total_abs));
+        assert!(approx(msft.pnl_share, -1012.0 / total_abs));
+        let share_sum: f64 = c.instruments.iter().map(|i| i.pnl_share.abs()).sum();
+        assert!(approx(share_sum, 1.0));
     }
 }

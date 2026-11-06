@@ -268,6 +268,7 @@ pub struct StressRequest {
         crate::risk_center_api::replay_decision,
         crate::paper_api::get_account,
         crate::paper_api::get_paper_attribution,
+        crate::paper_api::get_workspace_paper_attribution,
         crate::paper_api::reset_account,
         crate::paper_api::list_orders,
         crate::paper_api::get_order,

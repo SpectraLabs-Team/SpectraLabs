@@ -1,3 +1,4 @@
+import type { WorkspaceAttribution } from './attribution';
 import type {
   BenchmarkResult,
   CpuTelemetry,
@@ -300,5 +301,9 @@ export const syncPaperOrders = (strategy_id?: string) =>
 
 export const reconcilePaperPositions = () =>
   get<ReconcilePositionsResponse>('/api/v1/paper/reconcile');
+
+/** P&L attribution summed across every paper strategy in the signed workspace (M11 Task 7). */
+export const getWorkspacePaperAttribution = () =>
+  get<WorkspaceAttribution>('/api/v1/paper/attribution/workspace');
 
 

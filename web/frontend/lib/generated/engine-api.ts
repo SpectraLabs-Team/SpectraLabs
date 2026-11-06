@@ -1083,6 +1083,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/attribution/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portfolio P&L attribution across every paper strategy in the signed workspace (M11 Task 7).
+         * @description Each account's fills since its current start are attributed as `get_paper_attribution` does,
+         *     then the results are summed. Read-only, like the per-strategy route: no account is created.
+         */
+        get: operations["get_workspace_paper_attribution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/paper/gap/analyze": {
         parameters: {
             query?: never;
@@ -7957,6 +7978,35 @@ export interface operations {
             };
             /** @description No such strategy in this workspace */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_workspace_paper_attribution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Combined P&L attribution of every paper strategy in the workspace; `strategy_count` is how many were combined */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description The account has no workspace (code `no_workspace`) */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

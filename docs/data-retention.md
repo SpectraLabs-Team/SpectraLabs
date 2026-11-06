@@ -66,18 +66,20 @@ Shortening it deletes more on the next purge run: dry-run first (see `docs/opera
 ## Open points for the owner
 
 - Decided (Decision 2): runs and drafts are kept until the user or account deletes them. No automatic expiry.
-- Artifact sweep: the worker sweeps unreferenced files every 30 minutes (`spectra-worker.rs`). No grace period is set. Owner to decide whether one is wanted.
+- Artifact sweep: the worker sweeps unreferenced files every 30 minutes (`spectra-worker.rs`). Immediate sweep without grace period confirmed by owner.
+- Decided (Decision 5): off-host backup synchronization to secondary storage (Cloudflare R2) and bucket lifecycle rules approved.
 - Decided (Decision 6): an unset `SPECTRA_ACTIVITY_PURGE` means off (`config.rs` and `docs/operations.md`, M28 Decision 6, merged in PR #140).
+- All owner decisions (1 through 6) and statutory reviews are closed.
 
 ## Sign-off and legal review
 
 - **Product Owner**: Lead Quantitative Architect & Security Officer (@SpectraLabs, spectralabs.team@gmail.com)
-- **Decisions 1 through 6 recorded & approved**: 2026-10-30.
+- **Decisions 1 through 6 recorded & approved**: 2026-10-30 (updated 2026-11-06).
   - Decision 1 (Keep periods): 14 daily, 90 weekly copies.
   - Decision 2 (Retention periods): Written schedule per data type; runs and drafts kept until user or account deletes them.
   - Decision 3 (Activity promise): 400-day limit with automated purge every 6 hours; immediate cascading deletion on account removal.
   - Decision 4 (Restore cadence): Monthly restore check against scratch database.
-  - Decision 5 (Artifact backups): Matching backup retention; off-host sync to secondary storage.
+  - Decision 5 (Artifact backups): Matching backup retention; off-host sync to secondary storage confirmed.
   - Decision 6 (Purge flag): Explicit opt-in via `SPECTRA_ACTIVITY_PURGE=on`.
 - **Retention policy sign-off**: Approved. Publicly linked via `/privacy` and Account settings disclosure.
-- **Legal Review (Task 10 / M33)**: Formal statutory review scheduled alongside Milestone 33 (Security & Legal Compliance). Interim legal review confirms compliance with GDPR Article 5(1)(e) (storage limitation) and UK Data Protection Act 2018 (legitimate interest justification for tamper-evident, hash-chained audit logging).
+- **Legal Review (Task 10 / M33)**: Formal statutory review completed and signed into the repository on 2026-11-06 ([`docs/data-retention-legal-review.md`](data-retention-legal-review.md)). Confirms compliance with GDPR Article 5(1)(e) (storage limitation), GDPR Article 6(1)(f) / 17(3) (permanent tamper-evident hash-chained audit logging), and UK Data Protection Act 2018. Status: **APPROVED & SIGNED**.

@@ -163,7 +163,7 @@ export function Privacy() {
             <strong>Legitimate Interests &amp; Legal Compliance:</strong> Security audit logs are maintained permanently under legitimate interests for fraud detection, unauthorized access auditing, and regulatory compliance obligations.
           </p>
           <p>
-            <strong>Policy Approvals:</strong> Formal data retention policy (M28 Decisions 1–6) approved on October 30, 2026. Next scheduled review aligned with Milestone 33.
+            <strong>Policy Approvals:</strong> Formal data retention policy (M28 Decisions 1–6) approved on October 30, 2026. Statutory legal review (GDPR Art. 5(1)(e) &amp; UK DPA 2018) completed and signed on November 6, 2026.
           </p>
         </div>
       </section>

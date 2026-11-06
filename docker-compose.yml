@@ -88,6 +88,7 @@ services:
     image: spectralabs/engine:dev
     command: ["spectra-worker"]
     # Scale out with: docker compose up -d --scale worker=3 (each claims jobs with SKIP LOCKED).
+    mem_limit: ${SPECTRA_WORKER_MEM_LIMIT:-4g} # per worker container; a parquet load can use a lot of memory
     environment:
       DATABASE_URL: postgres://${POSTGRES_APP_USER:-${POSTGRES_USER:-spectra}}:${POSTGRES_APP_PASSWORD:-${POSTGRES_PASSWORD}}@postgres:5432/${POSTGRES_DB:-spectra}
       SENTRY_DSN: ${SENTRY_DSN:-}

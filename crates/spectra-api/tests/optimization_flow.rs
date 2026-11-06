@@ -804,7 +804,7 @@ async fn sweep_exports_are_versioned_reports() {
             &Value::Null,
         )
         .await;
-    assert_eq!(typed.as_array().unwrap().len(), 3,);
+    assert_eq!(typed.as_array().unwrap().len(), 3);
     let (_, none) = f
         .call(
             "GET",
@@ -812,7 +812,7 @@ async fn sweep_exports_are_versioned_reports() {
             &Value::Null,
         )
         .await;
-    assert_eq!(none.as_array().unwrap().len(), 0,);
+    assert_eq!(none.as_array().unwrap().len(), 0);
     let (bad, _) = f
         .call(
             "GET",
@@ -820,7 +820,7 @@ async fn sweep_exports_are_versioned_reports() {
             &Value::Null,
         )
         .await;
-    assert_eq!(bad, 422,);
+    assert_eq!(bad, 422);
 
     assert_eq!(list[1]["format"], "pdf");
     assert_eq!(list[2]["download_url"], format!("/api/v1/reports/{report_id}/versions/1"));

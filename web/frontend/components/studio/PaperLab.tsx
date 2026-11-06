@@ -1038,11 +1038,6 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     setConfirmModalOpen(false);
 
     if (tradingMode === 'sandbox' && email) {
-      if (orderType === 'stop_limit') {
-        toastError('Not on the engine yet', 'Stop-limit orders are not available in Paper Lab yet. Use a market, limit, or stop order.');
-        setSubmittingOrder(false);
-        return;
-      }
       let request: CreatePaperOrderRequest;
       try {
         request = orderRequest({

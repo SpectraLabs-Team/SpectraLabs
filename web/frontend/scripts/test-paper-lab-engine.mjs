@@ -55,6 +55,22 @@ test('market orders fill now, limit and stop orders wait', () => {
   assert.equal(orderRequest({ ...common, type: 'stop', stopPrice: 140 }).stop_price, 140);
 });
 
+test('stop-limit orders carry both prices and wait', () => {
+  const common = { strategyId: 's', symbol: 'AAPL', side: 'buy', qty: 5 };
+  const sl = orderRequest({ ...common, type: 'stop_limit', stopPrice: 140, limitPrice: 141 });
+  assert.equal(sl.order_type, 'stop_limit');
+  assert.equal(sl.stop_price, 140);
+  assert.equal(sl.limit_price, 141);
+  assert.equal(sl.fill_now, false);
+});
+
+test('stop-limit orders without a positive stop or limit price are refused', () => {
+  const common = { strategyId: 's', symbol: 'AAPL', side: 'buy', qty: 5, type: 'stop_limit' };
+  assert.throws(() => orderRequest({ ...common, stopPrice: 140 }), /Limit price/);
+  assert.throws(() => orderRequest({ ...common, limitPrice: 141 }), /Stop price/);
+  assert.throws(() => orderRequest({ ...common, stopPrice: 0, limitPrice: 141 }), /Stop price/);
+});
+
 test('orders for zero or non-numeric quantity are refused before they are sent', () => {
   assert.throws(() => orderRequest({ strategyId: 's', symbol: 'AAPL', side: 'buy', type: 'market', qty: 0 }), /positive/);
   assert.throws(() => orderRequest({ strategyId: 's', symbol: 'AAPL', side: 'buy', type: 'market', qty: NaN }), /positive/);

@@ -70,7 +70,7 @@ export interface TradeInput {
   strategyId: string;
   symbol: string;
   side: 'buy' | 'sell';
-  type: 'market' | 'limit' | 'stop';
+  type: 'market' | 'limit' | 'stop' | 'stop_limit';
   qty: number;
   limitPrice?: number;
   stopPrice?: number;
@@ -79,14 +79,22 @@ export interface TradeInput {
 /** The engine request for a trade. Market orders fill now at the dataset close; others wait. */
 export function orderRequest(t: TradeInput): CreatePaperOrderRequest {
   if (!(t.qty > 0) || !Number.isFinite(t.qty)) throw new Error('Quantity must be a positive number.');
+  const needsLimit = t.type === 'limit' || t.type === 'stop_limit';
+  const needsStop = t.type === 'stop' || t.type === 'stop_limit';
+  if (needsLimit && !(t.limitPrice !== undefined && t.limitPrice > 0 && Number.isFinite(t.limitPrice))) {
+    throw new Error('Limit price must be a positive number.');
+  }
+  if (needsStop && !(t.stopPrice !== undefined && t.stopPrice > 0 && Number.isFinite(t.stopPrice))) {
+    throw new Error('Stop price must be a positive number.');
+  }
   return {
     strategy_id: t.strategyId,
     symbol: t.symbol,
     side: t.side,
     order_type: t.type,
     qty: t.qty,
-    limit_price: t.type === 'limit' ? t.limitPrice : undefined,
-    stop_price: t.type === 'stop' ? t.stopPrice : undefined,
+    limit_price: needsLimit ? t.limitPrice : undefined,
+    stop_price: needsStop ? t.stopPrice : undefined,
     fill_now: t.type === 'market',
   };
 }

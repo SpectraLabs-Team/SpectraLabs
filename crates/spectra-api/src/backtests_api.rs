@@ -499,6 +499,48 @@ pub(crate) async fn backtest_attribution(
     }
 }
 
+/// The tear sheet sections for a finished backtest, built from its stored summary (M16 Task 6).
+#[utoipa::path(
+    get,
+    path = "/api/v1/backtests/{id}/tear-sheet",
+    tag = "backtests",
+    params(("id" = Uuid, Path, description = "Backtest job id")),
+    responses(
+        (status = 200, description = "The tear sheet sections and strategy table"),
+        (status = 404, description = "No such backtest, or no summary recorded", body = crate::openapi::ErrorDoc),
+        (status = 409, description = "The backtest has not succeeded yet", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn backtest_tear_sheet(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    job_id: Result<Path<Uuid>, PathRejection>,
+) -> Response {
+    let Ok(Path(job_id)) = job_id else { return error_response(404, NOT_FOUND) };
+    let job = match backtest_job(&st, &id, job_id).await {
+        Ok(j) => j,
+        Err(r) => return r,
+    };
+    if job.status != "succeeded" {
+        return error_response(
+            409,
+            format!("The backtest is {}; the tear sheet exists once it has succeeded.", job.status),
+        );
+    }
+    let view = BacktestView::from(job);
+    let Some(summary) = view.summary else {
+        return error_response(404, "This backtest has no summary recorded.");
+    };
+    if !summary.is_object() {
+        return error_response(500, "Corrupted summary document.");
+    }
+    let sheet = crate::tear_sheet::build(&summary);
+    match serde_json::to_string(&sheet) {
+        Ok(text) => json_response(200, text),
+        Err(_) => error_response(500, "The tear sheet could not be encoded."),
+    }
+}
+
 /// A monthly return point for the heatmap and dashboard.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct MonthlyReturn {

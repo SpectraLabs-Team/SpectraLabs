@@ -465,6 +465,7 @@ pub struct UniverseMemberListView {
 
 /// Query parameters for point-in-time universe resolution.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct UniverseAsOfQuery {
     /// Point-in-time snapshot timestamp or date (RFC 3339 or YYYY-MM-DD). Defaults to now.
     pub as_of: Option<String>,

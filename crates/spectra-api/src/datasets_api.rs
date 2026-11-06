@@ -1004,6 +1004,7 @@ pub(crate) async fn delete_version(
 
 /// `GET /api/v1/datasets/versions/{id}/bars` query.
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct BarsQuery {
     /// Symbol; default: the version's first.
     pub symbol: Option<String>,
@@ -1520,6 +1521,7 @@ pub(crate) async fn derive_version(
 
 /// `GET /api/v1/datasets/versions/{id}/export` query.
 #[derive(Debug, Deserialize, utoipa::IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 pub struct ExportQuery {
     /// Format to export: currently only `parquet` is supported (default: `parquet`).

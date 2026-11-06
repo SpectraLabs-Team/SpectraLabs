@@ -706,14 +706,11 @@
         "parameters": [
           {
             "name": "curve",
-            "in": "path",
+            "in": "query",
             "description": "Only this curve.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -812,14 +809,11 @@
         "parameters": [
           {
             "name": "view",
-            "in": "path",
+            "in": "query",
             "description": "`grouped` adds `datasets` (one entry per dataset). Without it the\nresponse is exactly the version list the backtest form reads.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -1063,63 +1057,48 @@
           },
           {
             "name": "symbol",
-            "in": "path",
+            "in": "query",
             "description": "Symbol; default: the version's first.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "from",
-            "in": "path",
+            "in": "query",
             "description": "From (inclusive), RFC 3339 or a date (`2024-01-02`).",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "to",
-            "in": "path",
+            "in": "query",
             "description": "To (inclusive), RFC 3339 or a date.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "points",
-            "in": "path",
+            "in": "query",
             "description": "Most points to return, 10 to 5000 (default 1000).",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "minimum": 0
             }
           },
           {
             "name": "as_of",
-            "in": "path",
+            "in": "query",
             "description": "Point-in-time date or RFC 3339 timestamp (e.g. `2024-01-05`). Revisions after this date are ignored.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -1250,14 +1229,11 @@
           },
           {
             "name": "format",
-            "in": "path",
+            "in": "query",
             "description": "Format to export: currently only `parquet` is supported (default: `parquet`).",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -1883,14 +1859,11 @@
         "parameters": [
           {
             "name": "currency",
-            "in": "path",
+            "in": "query",
             "description": "Only this currency.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -2246,38 +2219,29 @@
         "parameters": [
           {
             "name": "status",
-            "in": "path",
+            "in": "query",
             "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "cursor",
-            "in": "path",
+            "in": "query",
             "description": "`next_cursor` from the previous page.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Page size, 1 through 200 (default 50).",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -3213,13 +3177,10 @@
           },
           {
             "name": "format",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -3380,7 +3341,7 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
+            "in": "query",
             "required": true,
             "schema": {
               "type": "string",
@@ -3389,13 +3350,10 @@
           },
           {
             "name": "initial_cash",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "number",
-                "null"
-              ],
+              "type": "number",
               "format": "double"
             }
           }
@@ -3455,7 +3413,7 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
+            "in": "query",
             "required": true,
             "schema": {
               "type": "string",
@@ -3464,27 +3422,21 @@
           },
           {
             "name": "from",
-            "in": "path",
+            "in": "query",
             "description": "Only fills at or after this time (RFC 3339). Earlier than the account's start has no effect.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "date-time"
             }
           },
           {
             "name": "to",
-            "in": "path",
+            "in": "query",
             "description": "Only fills before this time (RFC 3339). Must be after `from`.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "date-time"
             }
           }
@@ -3608,13 +3560,10 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -3688,36 +3637,27 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "status",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "limit",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -4271,7 +4211,7 @@
         "parameters": [
           {
             "name": "run_kind",
-            "in": "path",
+            "in": "query",
             "description": "`sweep`, `backtest` or `paper_gap`.",
             "required": true,
             "schema": {
@@ -4280,7 +4220,7 @@
           },
           {
             "name": "run_id",
-            "in": "path",
+            "in": "query",
             "description": "The run's id.",
             "required": true,
             "schema": {
@@ -4452,13 +4392,10 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -4490,13 +4427,10 @@
         "parameters": [
           {
             "name": "limit",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -4562,13 +4496,10 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -4691,25 +4622,19 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           },
           {
             "name": "limit",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int64"
             }
           }
@@ -4775,13 +4700,10 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -4842,13 +4764,10 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -4906,13 +4825,10 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -4941,13 +4857,10 @@
         "parameters": [
           {
             "name": "strategy_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "format": "uuid"
             }
           }
@@ -5055,102 +4968,78 @@
         "parameters": [
           {
             "name": "experiment_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "dataset_id",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "strategy",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "kind",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "min_sharpe",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
-              "type": [
-                "number",
-                "null"
-              ],
+              "type": "number",
               "format": "double"
             }
           },
           {
             "name": "only_trials",
-            "in": "path",
-            "required": true,
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "boolean"
             }
           },
           {
             "name": "status",
-            "in": "path",
+            "in": "query",
             "description": "`queued`, `running`, `succeeded`, `failed` or `cancelled`.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "cursor",
-            "in": "path",
+            "in": "query",
             "description": "`next_cursor` from the previous page.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "limit",
-            "in": "path",
+            "in": "query",
             "description": "Page size, 1 through 200 (default 50).",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "integer",
-                "null"
-              ],
+              "type": "integer",
               "format": "int32",
               "minimum": 0
             }
@@ -6174,14 +6063,11 @@
           },
           {
             "name": "as_of",
-            "in": "path",
+            "in": "query",
             "description": "Point-in-time snapshot timestamp or date (RFC 3339 or YYYY-MM-DD). Defaults to now.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -6333,14 +6219,11 @@
         "parameters": [
           {
             "name": "filename",
-            "in": "path",
+            "in": "query",
             "description": "The file's name as the person chose it (for display; at most 255 characters kept).",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -6600,7 +6483,7 @@
           },
           {
             "name": "offset",
-            "in": "path",
+            "in": "query",
             "description": "Where this chunk starts: the bytes received so far.",
             "required": true,
             "schema": {

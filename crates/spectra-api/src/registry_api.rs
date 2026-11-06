@@ -66,6 +66,7 @@ fn default_slow() -> u16 {
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListRuns {
     pub experiment_id: Option<String>,
     pub dataset_id: Option<String>,
@@ -83,6 +84,7 @@ pub struct ListRuns {
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct MyRuns {
     /// `queued`, `running`, `succeeded`, `failed` or `cancelled`.
     pub status: Option<String>,

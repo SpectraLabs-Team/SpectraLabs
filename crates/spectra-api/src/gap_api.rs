@@ -78,6 +78,7 @@ pub struct BacktestFillInput {
 
 /// Query parameters for listing gap reports.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListGapReportsQuery {
     pub strategy_id: Option<Uuid>,
 }

@@ -265,6 +265,7 @@ pub struct FxRateListView {
 
 /// `GET /api/v1/fx-rates` query.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct FxQuery {
     /// Only this currency.
     pub currency: Option<String>,
@@ -515,6 +516,7 @@ pub struct CurveListView {
 
 /// `GET /api/v1/curves` query.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct CurveQuery {
     /// Only this curve.
     pub curve: Option<String>,

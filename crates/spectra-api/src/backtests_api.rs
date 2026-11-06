@@ -246,6 +246,7 @@ pub struct DatasetList {
 
 /// `GET /api/v1/datasets` query.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct DatasetListQuery {
     /// `grouped` adds `datasets` (one entry per dataset). Without it the
     /// response is exactly the version list the backtest form reads.

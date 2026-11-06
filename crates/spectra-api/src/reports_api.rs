@@ -65,6 +65,7 @@ impl From<ReportVersion> for ReportVersionView {
 
 /// Which run's reports to list.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct ListReportsQuery {
     /// `sweep`, `backtest` or `paper_gap`.
     pub run_kind: String,

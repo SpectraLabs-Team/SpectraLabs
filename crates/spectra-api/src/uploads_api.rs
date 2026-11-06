@@ -30,6 +30,7 @@ pub const MAX_UPLOAD_BYTES: u64 = 100 * 1024 * 1024;
 
 /// `POST /api/v1/uploads` query.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct UploadQuery {
     /// The file's name as the person chose it (for display; at most 255 characters kept).
     pub filename: Option<String>,

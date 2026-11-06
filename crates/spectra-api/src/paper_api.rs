@@ -72,6 +72,7 @@ async fn strategy_in_workspace(
 // ---------------------------------------------------------------- DTOs
 
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct PaperAccountQuery {
     pub strategy_id: Uuid,
     pub initial_cash: Option<f64>,
@@ -79,6 +80,7 @@ pub(crate) struct PaperAccountQuery {
 
 /// Query for the paper attribution: the strategy, and an optional time window over its fills.
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct PaperAttributionQuery {
     pub strategy_id: Uuid,
     /// Only fills at or after this time (RFC 3339). Earlier than the account's start has no effect.
@@ -271,6 +273,7 @@ impl PaperAccountView {
 }
 
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct ListPaperOrdersQuery {
     pub strategy_id: Option<Uuid>,
     pub status: Option<String>,

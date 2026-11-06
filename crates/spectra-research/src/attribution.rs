@@ -1,10 +1,18 @@
 //! P&L Attribution analysis (Module 11).
 //!
-//! Decomposes realized and unrealized strategy returns by:
+//! Decomposes a ledger's realized P&L by:
 //! - Instrument: per-symbol gross, fees, net, trade count, win rate, and return share.
 //! - Direction: long vs. short gross and net P&L, trade counts and win ratios.
-//! - Execution Costs: commissions, slippage, financing interest, and borrow fees.
-//! - Attribution Waterfall: step-by-step Bridge from gross trading performance to bottom-line net return.
+//! - Costs: commissions, borrow fees and financing interest charged, interest income earned,
+//!   and dividends and coupons (memo lines; they are part of trade gross). Slippage is an
+//!   estimate of what is already in the fill prices, never charged a second time.
+//! - Waterfall: a two-stage bridge (M11 Task 3, 6 Nov 2026). Gross P&L of closed trades, less
+//!   their fees, gives Trading Net P&L, which equals `total_net_pnl`. Adding what positions still
+//!   open have realized so far (net of their fees), less borrow fees and financing interest, plus
+//!   interest income, gives Net Account P&L, which equals `total_account_pnl`. Both identities are
+//!   exact: every amount is summed in fixed point and converted once.
+//!
+//! Unrealized P&L (mark-to-market of open positions) is not in either total.
 
 use std::collections::BTreeMap;
 
@@ -12,7 +20,7 @@ use spectra_core::{EntryType, Error, InstrumentId, Json, Ledger, Money, Result};
 
 use crate::trades::extract_trades;
 
-/// Instrument-level P&L attribution record.
+/// Instrument-level P&L attribution record (closed trades).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct InstrumentAttribution {
     pub instrument: InstrumentId,
@@ -29,7 +37,7 @@ pub struct InstrumentAttribution {
     pub pnl_share: f64,
 }
 
-/// Long vs. short directional attribution.
+/// Long vs. short directional attribution (closed trades).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DirectionalAttribution {
     pub long_gross_pnl: f64,
@@ -46,34 +54,54 @@ pub struct DirectionalAttribution {
     pub short_win_rate: f64,
 }
 
-/// Detailed breakdown of trading, market impact, and financing costs.
+/// Costs and income from the ledger journal.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CostDecomposition {
+    /// Fees on every fill, closed trades and open positions alike.
     pub commission_fees: f64,
+    /// Estimated slippage: total fill notional times the slippage rate. Fill prices already
+    /// include it, so it is a memo line: it is not in `total_costs` or the waterfall.
     pub slippage_costs: f64,
+    /// Borrow fees charged on short positions (positive).
     pub borrow_fees: f64,
+    /// Financing interest paid on margin debit (positive).
     pub financing_interest: f64,
+    /// Interest earned on cash (positive).
     pub interest_income: f64,
+    /// Dividends received (paid when negative, on shorts). A memo line: part of trade gross.
     pub dividends: f64,
-    /// Bond coupons received (paid when negative, on shorts).
+    /// Bond coupons received (paid when negative, on shorts). A memo line: part of trade gross.
     pub coupons: f64,
+    /// Costs charged: commissions, borrow fees and financing interest.
     pub total_costs: f64,
 }
 
-/// A single step in the waterfall bridge from gross trading profit to net P&L.
+/// A single step in the waterfall bridge.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct WaterfallStep {
     pub name: String,
+    /// The step's change; for a subtotal, the subtotal itself.
     pub amount: f64,
     pub running_total: f64,
+    /// `true` for a level drawn from zero (the starting gross and the two subtotals), `false`
+    /// for a change from the previous running total.
+    pub subtotal: bool,
 }
 
 /// Full strategy P&L attribution result.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PnlAttribution {
+    /// Gross P&L of closed trades (price P&L plus dividends and coupons while held).
     pub total_gross_pnl: f64,
+    /// Fees on every fill (the same as `costs.commission_fees`).
     pub total_fees: f64,
+    /// Net P&L of closed trades: their gross less their fees.
     pub total_net_pnl: f64,
+    /// Realized P&L so far on positions still open, net of their fees.
+    pub open_position_pnl: f64,
+    /// Net account P&L: `total_net_pnl` + `open_position_pnl` - borrow fees - financing
+    /// interest + interest income. Excludes unrealized P&L.
+    pub total_account_pnl: f64,
     pub total_trades: usize,
     pub overall_win_rate: f64,
     pub costs: CostDecomposition,
@@ -126,6 +154,7 @@ impl PnlAttribution {
         let costs_obj = Json::object()
             .with("commission_fees", num(self.costs.commission_fees))
             .with("slippage_costs", num(self.costs.slippage_costs))
+            .with("slippage_included_in_fill_prices", Json::Bool(true))
             .with("borrow_fees", num(self.costs.borrow_fees))
             .with("financing_interest", num(self.costs.financing_interest))
             .with("interest_income", num(self.costs.interest_income))
@@ -139,7 +168,8 @@ impl PnlAttribution {
                 Json::object()
                     .with("name", Json::string(&step.name))
                     .with("amount", num(step.amount))
-                    .with("running_total", num(step.running_total)),
+                    .with("running_total", num(step.running_total))
+                    .with("subtotal", Json::Bool(step.subtotal)),
             );
         }
 
@@ -147,6 +177,8 @@ impl PnlAttribution {
             .with("total_gross_pnl", num(self.total_gross_pnl))
             .with("total_fees", num(self.total_fees))
             .with("total_net_pnl", num(self.total_net_pnl))
+            .with("open_position_pnl", num(self.open_position_pnl))
+            .with("total_account_pnl", num(self.total_account_pnl))
             .with("total_trades", Json::integer(self.total_trades as i64))
             .with("overall_win_rate", num(self.overall_win_rate))
             .with("direction", direction_obj)
@@ -156,15 +188,61 @@ impl PnlAttribution {
     }
 }
 
+/// Pushes a change step onto the waterfall, unless it is zero.
+fn push_change(steps: &mut Vec<WaterfallStep>, running: &mut Money, name: &str, amount: Money) -> Result<()> {
+    if !amount.is_zero() {
+        *running = running.checked_add(amount)?;
+        steps.push(WaterfallStep {
+            name: name.into(),
+            amount: amount.to_f64(),
+            running_total: running.to_f64(),
+            subtotal: false,
+        });
+    }
+    Ok(())
+}
+
+/// A level step: the start or a subtotal, drawn from zero.
+fn level(name: &str, total: Money) -> WaterfallStep {
+    WaterfallStep { name: name.into(), amount: total.to_f64(), running_total: total.to_f64(), subtotal: true }
+}
+
+/// Builds the waterfall: closed-trade gross, less their fees, to Trading Net P&L; then open
+/// positions' realized P&L, borrow fees, financing interest and interest income, to Net Account
+/// P&L. Returns the steps and the two subtotals. Zero changes are left out; the start and both
+/// subtotals are always there. `borrow` and `financing` are amounts paid (positive).
+fn waterfall(
+    gross: Money,
+    closed_fees: Money,
+    open_pnl: Money,
+    borrow: Money,
+    financing: Money,
+    income: Money,
+) -> Result<(Vec<WaterfallStep>, Money, Money)> {
+    let mut steps = vec![level("Gross Trading P&L", gross)];
+    let mut running = gross;
+    push_change(&mut steps, &mut running, "Fees on Closed Trades", closed_fees.checked_neg()?)?;
+    let trading_net = running;
+    steps.push(level("Trading Net P&L", trading_net));
+    push_change(&mut steps, &mut running, "Open Positions (Realized So Far)", open_pnl)?;
+    push_change(&mut steps, &mut running, "Borrow Fees", borrow.checked_neg()?)?;
+    push_change(&mut steps, &mut running, "Financing Interest", financing.checked_neg()?)?;
+    push_change(&mut steps, &mut running, "Interest Income", income)?;
+    let account = running;
+    steps.push(level("Net Account P&L", account));
+    Ok((steps, trading_net, account))
+}
+
 /// Computes comprehensive P&L attribution from a ledger's journal and closed trade lifecycle.
 ///
 /// # Arguments
 /// - `ledger`: executed ledger containing journal and positions.
 /// - `symbols`: optional symbol lookup slice matching instrument IDs by index.
-/// - `slippage_bps`: optional slippage rate in basis points for execution cost estimation (e.g. 5.0).
+/// - `slippage_bps`: slippage rate in basis points for the slippage estimate (e.g. 5.0). Required
+///   when the ledger has fills.
 ///
 /// # Errors
-/// Returns an error if monetary calculations or trade extraction encounter numeric overflow.
+/// Missing slippage with fills, or numeric overflow.
 pub fn compute_pnl_attribution(
     ledger: &Ledger,
     symbols: Option<&[String]>,
@@ -173,10 +251,10 @@ pub fn compute_pnl_attribution(
     let extraction = extract_trades(ledger)?;
     let trades = &extraction.trades;
 
-    // 1. Costs and Journal Accounting
+    // 1. Costs and income from the journal.
     let mut commission_fees = Money::ZERO;
     let mut borrow_fees = Money::ZERO;
-    let mut financing_interest = Money::ZERO;
+    let mut financing_interest = Money::ZERO; // negative entries, summed as signed
     let mut interest_income = Money::ZERO;
     let mut dividends = Money::ZERO;
     let mut coupons = Money::ZERO;
@@ -228,33 +306,32 @@ pub fn compute_pnl_attribution(
     };
     let slippage_cost_f64 = total_notional * (bps / 10_000.0);
 
-    // 2. Instrument & Direction Aggregation
+    // 2. Instrument and direction aggregation over closed trades. Money sums stay exact, so the
+    //    instruments' net adds up to `total_net_pnl` exactly in fixed point.
     #[derive(Default)]
     struct InstAgg {
-        gross: f64,
-        fees: f64,
-        net: f64,
+        gross: Money,
+        fees: Money,
+        net: Money,
         trades: usize,
         wins: usize,
         losses: usize,
-        long_pnl: f64,
-        short_pnl: f64,
+        long_pnl: Money,
+        short_pnl: Money,
     }
 
     let mut inst_map: BTreeMap<InstrumentId, InstAgg> = BTreeMap::new();
     let mut direction = DirectionalAttribution::default();
-    let mut total_gross_pnl = 0.0f64;
-    let mut total_net_pnl = 0.0f64;
+    let mut gross_m = Money::ZERO;
+    let mut closed_fees_m = Money::ZERO;
     let mut total_wins = 0usize;
 
     for t in trades {
-        let gross = t.gross.to_f64();
-        let fees = t.fees.to_f64();
-        let net = t.net.to_f64();
-
-        total_gross_pnl += gross;
-        total_net_pnl += net;
-        if net > 0.0 {
+        gross_m = gross_m.checked_add(t.gross)?;
+        closed_fees_m = closed_fees_m.checked_add(t.fees)?;
+        let (gross, fees, net) = (t.gross.to_f64(), t.fees.to_f64(), t.net.to_f64());
+        let won = t.net.raw() > 0;
+        if won {
             total_wins += 1;
         }
 
@@ -264,7 +341,7 @@ pub fn compute_pnl_attribution(
             direction.long_fees += fees;
             direction.long_net_pnl += net;
             direction.long_trades += 1;
-            if net > 0.0 {
+            if won {
                 direction.long_wins += 1;
             }
         } else {
@@ -272,25 +349,25 @@ pub fn compute_pnl_attribution(
             direction.short_fees += fees;
             direction.short_net_pnl += net;
             direction.short_trades += 1;
-            if net > 0.0 {
+            if won {
                 direction.short_wins += 1;
             }
         }
 
         let entry = inst_map.entry(t.instrument).or_default();
-        entry.gross += gross;
-        entry.fees += fees;
-        entry.net += net;
+        entry.gross = entry.gross.checked_add(t.gross)?;
+        entry.fees = entry.fees.checked_add(t.fees)?;
+        entry.net = entry.net.checked_add(t.net)?;
         entry.trades += 1;
-        if net > 0.0 {
+        if won {
             entry.wins += 1;
-        } else if net < 0.0 {
+        } else if t.net.raw() < 0 {
             entry.losses += 1;
         }
         if is_long {
-            entry.long_pnl += net;
+            entry.long_pnl = entry.long_pnl.checked_add(t.net)?;
         } else {
-            entry.short_pnl += net;
+            entry.short_pnl = entry.short_pnl.checked_add(t.net)?;
         }
     }
 
@@ -304,115 +381,57 @@ pub fn compute_pnl_attribution(
     let total_trades = trades.len();
     let overall_win_rate = if total_trades > 0 { total_wins as f64 / total_trades as f64 } else { 0.0 };
 
-    let total_abs_net = inst_map.values().map(|v| v.net.abs()).sum::<f64>();
+    let total_abs_net = inst_map.values().map(|v| v.net.to_f64().abs()).sum::<f64>();
 
     let mut instruments = Vec::new();
     for (inst_id, agg) in inst_map {
         let sym = symbols.and_then(|s| s.get(inst_id as usize)).cloned();
         let wr = if agg.trades > 0 { agg.wins as f64 / agg.trades as f64 } else { 0.0 };
-        let pnl_share = if total_abs_net > 0.0 { agg.net / total_abs_net } else { 0.0 };
+        let net = agg.net.to_f64();
+        let pnl_share = if total_abs_net > 0.0 { net / total_abs_net } else { 0.0 };
 
         instruments.push(InstrumentAttribution {
             instrument: inst_id,
             symbol: sym,
-            gross_pnl: agg.gross,
-            fees: agg.fees,
-            net_pnl: agg.net,
+            gross_pnl: agg.gross.to_f64(),
+            fees: agg.fees.to_f64(),
+            net_pnl: net,
             trades_count: agg.trades,
             win_trades: agg.wins,
             loss_trades: agg.losses,
             win_rate: wr,
-            long_pnl: agg.long_pnl,
-            short_pnl: agg.short_pnl,
+            long_pnl: agg.long_pnl.to_f64(),
+            short_pnl: agg.short_pnl.to_f64(),
             pnl_share,
         });
     }
 
-    // 3. Cost Decomposition
-    let comm_f64 = commission_fees.to_f64();
-    let borrow_f64 = borrow_fees.to_f64();
-    let int_f64 = financing_interest.to_f64().abs();
-    let int_income_f64 = interest_income.to_f64().abs();
-    let div_f64 = dividends.to_f64();
-    let total_costs = comm_f64 + slippage_cost_f64 + borrow_f64 + int_f64;
-
+    // 3. Costs. Slippage is a memo line (already in fill prices); dividends and coupons are memo
+    //    lines (already in trade gross).
+    let financing_paid = financing_interest.checked_neg()?;
+    let charged = commission_fees.checked_add(borrow_fees)?.checked_add(financing_paid)?;
     let costs = CostDecomposition {
-        commission_fees: comm_f64,
+        commission_fees: commission_fees.to_f64(),
         slippage_costs: slippage_cost_f64,
-        borrow_fees: borrow_f64,
-        financing_interest: int_f64,
-        interest_income: int_income_f64,
-        dividends: div_f64,
+        borrow_fees: borrow_fees.to_f64(),
+        financing_interest: financing_paid.to_f64(),
+        interest_income: interest_income.to_f64(),
+        dividends: dividends.to_f64(),
         coupons: coupons.to_f64(),
-        total_costs,
+        total_costs: charged.to_f64(),
     };
 
-    // 4. Waterfall Bridge
-    let mut waterfall = Vec::new();
-    let mut running = total_gross_pnl;
-    waterfall.push(WaterfallStep {
-        name: "Gross Trading P&L".into(),
-        amount: total_gross_pnl,
-        running_total: running,
-    });
-
-    if comm_f64 > 0.0 {
-        running -= comm_f64;
-        waterfall.push(WaterfallStep {
-            name: "Commissions & Fees".into(),
-            amount: -comm_f64,
-            running_total: running,
-        });
-    }
-
-    if slippage_cost_f64 > 0.0 {
-        running -= slippage_cost_f64;
-        waterfall.push(WaterfallStep {
-            name: "Slippage & Market Impact".into(),
-            amount: -slippage_cost_f64,
-            running_total: running,
-        });
-    }
-
-    let borrow_and_financing = borrow_f64 + int_f64;
-    if borrow_and_financing > 0.0 {
-        running -= borrow_and_financing;
-        waterfall.push(WaterfallStep {
-            name: "Financing & Borrow Costs".into(),
-            amount: -borrow_and_financing,
-            running_total: running,
-        });
-    }
-
-    if div_f64 != 0.0 {
-        running += div_f64;
-        waterfall.push(WaterfallStep {
-            name: "Dividends Received".into(),
-            amount: div_f64,
-            running_total: running,
-        });
-    }
-
-    let coupon_f64 = coupons.to_f64();
-    if coupon_f64 != 0.0 {
-        running += coupon_f64;
-        waterfall.push(WaterfallStep {
-            name: "Coupons Received".into(),
-            amount: coupon_f64,
-            running_total: running,
-        });
-    }
-
-    waterfall.push(WaterfallStep {
-        name: "Net Strategy Realized P&L".into(),
-        amount: running,
-        running_total: running,
-    });
+    // 4. Waterfall bridge.
+    let open_pnl = extraction.open_gross.checked_sub(extraction.open_fees)?;
+    let (waterfall, trading_net, account) =
+        waterfall(gross_m, closed_fees_m, open_pnl, borrow_fees, financing_paid, interest_income)?;
 
     Ok(PnlAttribution {
-        total_gross_pnl,
-        total_fees: comm_f64,
-        total_net_pnl,
+        total_gross_pnl: gross_m.to_f64(),
+        total_fees: commission_fees.to_f64(),
+        total_net_pnl: trading_net.to_f64(),
+        open_position_pnl: open_pnl.to_f64(),
+        total_account_pnl: account.to_f64(),
         total_trades,
         overall_win_rate,
         costs,

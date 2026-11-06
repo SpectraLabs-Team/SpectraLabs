@@ -605,6 +605,13 @@ async fn paper_attribution_comes_from_fills_and_restarts_after_reset() {
     assert_eq!(attr["overall_win_rate"].as_f64().unwrap(), 1.0, "{attr}");
     assert_eq!(attr["direction"]["long_trades"], 1, "{attr}");
     assert_eq!(attr["direction"]["short_trades"], 0, "{attr}");
+    // M11 Task 3: the bridge reconciles. Nothing is open and there is no financing, so the
+    // account total is the trading total.
+    let steps = attr["waterfall"].as_array().unwrap();
+    let trading = steps.iter().find(|s| s["name"] == "Trading Net P&L").expect("trading subtotal");
+    assert_eq!(trading["running_total"], attr["total_net_pnl"], "{attr}");
+    assert_eq!(steps.last().unwrap()["running_total"], attr["total_account_pnl"], "{attr}");
+    assert_eq!(attr["total_account_pnl"], attr["total_net_pnl"], "{attr}");
 
     // After a reset, fills from before it no longer count.
     let reset = json!({ "strategy_id": f.strategy });

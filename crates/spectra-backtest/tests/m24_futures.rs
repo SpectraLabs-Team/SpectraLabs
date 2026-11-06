@@ -1,6 +1,8 @@
 //! M24.2 futures: the roll rule, rolls on real contracts, the continuous
 //! series, settlement at expiry, and what the run records.
 
+mod attribution_check;
+
 use spectra_backtest::{artifacts, run_request_on, summary_json, BacktestRequest};
 use spectra_core::{Bar, EntryType, Instrument, InstrumentType, Json, Money, Price, Qty, Ratio, Side};
 use spectra_engine::{
@@ -287,6 +289,7 @@ fn summary_and_artifacts_record_the_rolls() {
     let req = request(&doc);
     let out = run_request_on(&bars, &syms, &req, &mut RunControl::default()).unwrap();
     let s = summary_json(&out).unwrap();
+    attribution_check::assert_attribution_reconciles(&out, &s);
     let f = s.at("futures").unwrap();
     assert_eq!(f.at("roll_rule").unwrap().at("business_days_before_expiry").unwrap().as_int().unwrap(), 2);
     assert_eq!(f.at("roll_rule").unwrap().at("adjust").unwrap().as_str().unwrap(), "difference");

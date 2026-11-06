@@ -1,6 +1,8 @@
 //! M24.4 options: cash settlement at expiry against the underlying, expiry
 //! at zero, and the implied volatility and Greeks in the summary.
 
+mod attribution_check;
+
 use spectra_backtest::{run_request_on, summary_json, BacktestRequest};
 use spectra_core::{
     Bar, EntryType, Instrument, InstrumentType, Json, Money, OptionRight, Price, Qty, Ratio, Side,
@@ -210,6 +212,7 @@ fn the_summary_reports_implied_volatility_and_greeks() {
     let out = run_request_on(&b, &["UND".into(), "OPT".into()], &request(&doc), &mut RunControl::default())
         .unwrap();
     let s = summary_json(&out).unwrap();
+    attribution_check::assert_attribution_reconciles(&out, &s);
     let o = &s.at("options").unwrap().at("options").unwrap().items().unwrap()[0];
     let iv = o.at("implied_volatility").unwrap().as_double().unwrap();
     assert!((iv - 0.25).abs() < 1e-4, "{iv}");

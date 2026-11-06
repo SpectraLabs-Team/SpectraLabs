@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Layers, HelpCircle, BookOpen, X } from 'lucide-react';
-import { ApiError, getWorkspacePaperAttribution } from '@/lib/api';
+import { ApiError, getPaperAttribution, getWorkspacePaperAttribution } from '@/lib/api';
 import { getAttribution } from '@/lib/backtests';
 import { hasNoFills, sharePct, sortByShare, waterfallBars, type Attribution, type AttributionDirection, type WorkspaceAttribution } from '@/lib/attribution';
 import { buildWaterfallCsv, buildInstrumentsCsv } from '@/lib/csvExport';
@@ -603,4 +603,34 @@ export function WorkspacePaperAttributionPanel({ currency }: { currency?: string
       <AttributionCard a={a} source="workspace" currency={currency} />
     </div>
   );
+}
+
+/** One paper strategy's attribution on Paper Lab (M11 Task 2). Replays its fills since the account started. */
+export function PaperAttributionPanel({ strategyId, currency }: { strategyId: string; currency?: string }) {
+  const [state, setState] = useState<{ status: 'loading' } | { status: 'ready'; a: Attribution; asOf: string } | { status: 'error'; message: string }>({ status: 'loading' });
+
+  useEffect(() => {
+    const ctl = new AbortController();
+    setState({ status: 'loading' });
+    getPaperAttribution(strategyId)
+      .then((a) => {
+        if (!ctl.signal.aborted) setState({ status: 'ready', a, asOf: new Date().toLocaleString() });
+      })
+      .catch((e) => {
+        if (ctl.signal.aborted) return;
+        const message = e instanceof ApiError && e.status === 404 ? 'This account has no fills to attribute yet.' : e instanceof Error ? e.message : 'Could not load the attribution.';
+        setState({ status: 'error', message });
+      });
+    return () => ctl.abort();
+  }, [strategyId]);
+
+  if (state.status === 'loading') {
+    return (
+      <GlassCard as="section" role="status" className="flex items-center gap-2 p-5 text-[12px] text-ink/55">
+        <Spinner className="h-3.5 w-3.5" /> Loading P&amp;L attribution…
+      </GlassCard>
+    );
+  }
+  if (state.status === 'error') return <ErrorNote>{state.message}</ErrorNote>;
+  return <AttributionCard a={state.a} source="paper" currency={currency} asOf={state.asOf} />;
 }

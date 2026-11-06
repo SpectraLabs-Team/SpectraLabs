@@ -11312,6 +11312,14 @@
           "download_url"
         ],
         "properties": {
+          "backtest_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Gap reports only: the backtest run (`runs.id`) the paper trading was compared against."
+          },
           "content_type": {
             "type": "string"
           },
@@ -11333,6 +11341,14 @@
           "format": {
             "type": "string",
             "description": "`pdf` or `csv`."
+          },
+          "paper_strategy_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Gap reports only: the paper strategy (`strategies.id`) the gap report covers."
           },
           "report_id": {
             "type": "string",

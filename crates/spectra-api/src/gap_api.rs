@@ -487,3 +487,242 @@ pub(crate) async fn handle_get_gap_report(
         Err(e) => db_error(&e),
     }
 }
+
+/// Query parameters for exporting a gap report.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct ExportGapReportQuery {
+    /// `csv` (default) or `pdf`.
+    pub format: Option<String>,
+}
+
+/// GET /api/v1/paper/gap/reports/{id}/export: the gap report as CSV or PDF, stored as the next
+/// version of its `gap` report (M16 Task 7). Every export is kept, as for sweeps.
+pub(crate) async fn handle_export_gap_report(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    path: Result<Path<Uuid>, PathRejection>,
+    query: Result<Query<ExportGapReportQuery>, QueryRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let Ok(Path(id)) = path else {
+        return error_response(422, "Invalid gap report id.");
+    };
+    let Ok(Query(q)) = query else {
+        return error_response(422, "Invalid query parameters.");
+    };
+    let format = q.format.unwrap_or_else(|| "csv".to_string()).to_lowercase();
+    if format != "csv" && format != "pdf" {
+        return error_response(422, "format must be csv or pdf.");
+    }
+
+    let rec = match spectra_db::gap::get_gap_report(&pool, ws, id).await {
+        Ok(Some(rec)) => rec,
+        Ok(None) => return error_response(404, "Gap report not found"),
+        Err(e) => return db_error(&e),
+    };
+    let (content_type, body) = if format == "pdf" {
+        let body = crate::tear_sheet_pdf::render(
+            &gap_sheet(&rec),
+            "Backtest-to-Paper Gap Report",
+            &format!("Gap report {}", rec.id),
+        );
+        ("application/pdf", body)
+    } else {
+        ("text/csv; charset=utf-8", gap_csv(&rec).into_bytes())
+    };
+
+    let report = spectra_db::reports::NewReport {
+        report_type: spectra_db::reports::report_type::GAP,
+        run_kind: spectra_db::reports::run_kind::PAPER_GAP,
+        run_id: rec.id,
+        format: &format,
+        content_type,
+        content: &body,
+        created_by: Uuid::parse_str(&identity.user).ok(),
+    };
+    match spectra_db::reports::create_version(&pool, ws, &report).await {
+        Ok(meta) => {
+            let filename = format!("gap-report-{}.{format}", rec.id);
+            crate::reports_api::report_response(&meta, &filename, body)
+        }
+        Err(e) => db_error(&e),
+    }
+}
+
+/// The matched trades stored in the report, as JSON objects.
+fn matched_trades(rec: &spectra_db::gap::GapReportRecord) -> &[serde_json::Value] {
+    rec.report_json.get("matched_trades").and_then(serde_json::Value::as_array).map_or(&[], Vec::as_slice)
+}
+
+/// The alerts stored in the report, as JSON objects.
+fn alerts(rec: &spectra_db::gap::GapReportRecord) -> &[serde_json::Value] {
+    rec.report_json.get("alerts").and_then(serde_json::Value::as_array).map_or(&[], Vec::as_slice)
+}
+
+fn field_f64(v: &serde_json::Value, key: &str) -> Option<f64> {
+    v.get(key).and_then(serde_json::Value::as_f64)
+}
+
+fn field_str<'a>(v: &'a serde_json::Value, key: &str) -> &'a str {
+    v.get(key).and_then(serde_json::Value::as_str).unwrap_or("")
+}
+
+fn opt_id(id: Option<Uuid>) -> String {
+    id.map_or_else(|| "-".to_string(), |i| i.to_string())
+}
+
+fn opt_time(t: Option<chrono::DateTime<Utc>>) -> String {
+    t.map_or_else(|| "-".to_string(), |t| t.to_rfc3339())
+}
+
+/// The gap report as CSV: the summary as `#` comment lines, then one row per matched trade.
+/// There is no generation time, so the same report gives the same bytes.
+fn gap_csv(rec: &spectra_db::gap::GapReportRecord) -> String {
+    let mut csv = String::new();
+    csv.push_str("# SpectraLabs M10 Backtest-to-Paper Gap Report\n");
+    csv.push_str(&format!("# Gap Report ID: {}\n", rec.id));
+    csv.push_str(&format!("# Strategy ID: {}\n", rec.strategy_id));
+    csv.push_str(&format!("# Backtest Run ID: {}\n", opt_id(rec.backtest_run_id)));
+    csv.push_str(&format!("# Paper Account ID: {}\n", opt_id(rec.paper_account_id)));
+    csv.push_str(&format!("# Period: {} to {}\n", opt_time(rec.period_start), opt_time(rec.period_end)));
+    csv.push_str(&format!("# Analyzed At: {}\n", rec.created_at.to_rfc3339()));
+    csv.push_str(&format!("# Alert Status: {}\n", rec.alert_status));
+    csv.push_str(&format!("# Total P&L Gap: {}\n", rec.total_pnl_gap));
+    csv.push_str(&format!("# Cost Gap: {}\n", rec.cost_gap));
+    csv.push_str(&format!("# Slippage Gap: {}\n", rec.slippage_gap));
+    csv.push_str(&format!("# Timing Delay Gap: {}\n", rec.timing_delay_gap));
+    csv.push_str(&format!("# Missed Fills Gap: {}\n", rec.missed_fills_gap));
+    csv.push_str(&format!("# Tracking Error (%): {}\n", rec.tracking_error_pct));
+    csv.push_str(&format!("# Mean Slippage Drift (bps): {}\n", rec.mean_slippage_drift_bps));
+    csv.push_str(&format!("# Mean Timing Latency (ms): {}\n", rec.mean_timing_latency_ms));
+    csv.push_str(&format!("# Fill Ratio: {}\n", rec.fill_ratio));
+    for a in alerts(rec) {
+        csv.push_str(&format!(
+            "# Alert: {} ({}): {}\n",
+            field_str(a, "code"),
+            field_str(a, "severity"),
+            field_str(a, "message")
+        ));
+    }
+    csv.push_str(
+        "\nsymbol,side,qty,paper_price,backtest_price,price_delta,timing_latency_ms,slippage_delta_bps,fee_delta,pnl_gap\n",
+    );
+    let n = |t: &serde_json::Value, k: &str| field_f64(t, k).map_or(String::new(), |v| v.to_string());
+    for t in matched_trades(rec) {
+        csv.push_str(&format!(
+            "\"{}\",{},{},{},{},{},{},{},{},{}\n",
+            field_str(t, "symbol").replace('"', "\"\""),
+            field_str(t, "side"),
+            n(t, "qty"),
+            n(t, "paper_price"),
+            n(t, "backtest_price"),
+            n(t, "price_delta"),
+            n(t, "timing_latency_ms"),
+            n(t, "slippage_delta_bps"),
+            n(t, "fee_delta"),
+            n(t, "pnl_gap"),
+        ));
+    }
+    csv
+}
+
+/// The gap report as sheet sections, for the shared PDF renderer.
+fn gap_sheet(rec: &spectra_db::gap::GapReportRecord) -> crate::tear_sheet::TearSheet {
+    use crate::tear_sheet::{
+        cash, pct, ratio, tone, TearSheet, TearSheetItem, TearSheetSection, TearSheetTable,
+    };
+    let item = |label: &str, value: String, sub: Option<String>, tone: Option<&'static str>| TearSheetItem {
+        label: label.to_string(),
+        value,
+        sub,
+        tone,
+    };
+    let money = |label: &str, v: f64| item(label, cash(Some(v), 2), None, tone(Some(v)));
+
+    let mut sections = vec![
+        TearSheetSection {
+            category: "Gap Attribution".into(),
+            items: vec![
+                money("Total P&L Gap", rec.total_pnl_gap),
+                money("Cost Gap", rec.cost_gap),
+                money("Slippage Gap", rec.slippage_gap),
+                money("Timing Delay Gap", rec.timing_delay_gap),
+                money("Missed Fills Gap", rec.missed_fills_gap),
+            ],
+        },
+        TearSheetSection {
+            category: "Execution Quality".into(),
+            items: vec![
+                item("Alert Status", rec.alert_status.clone(), None, None),
+                item("Tracking Error", format!("{}%", ratio(Some(rec.tracking_error_pct), 2)), None, None),
+                item(
+                    "Mean Slippage Drift",
+                    format!("{} bps", ratio(Some(rec.mean_slippage_drift_bps), 2)),
+                    None,
+                    None,
+                ),
+                item(
+                    "Mean Timing Latency",
+                    format!("{} ms", ratio(Some(rec.mean_timing_latency_ms), 1)),
+                    None,
+                    None,
+                ),
+                item("Fill Ratio", pct(Some(rec.fill_ratio), 1), None, None),
+            ],
+        },
+        TearSheetSection {
+            category: "Linked Runs".into(),
+            items: vec![
+                item("Paper Strategy", rec.strategy_id.to_string(), None, None),
+                item("Backtest Run", opt_id(rec.backtest_run_id), None, None),
+                item("Paper Account", opt_id(rec.paper_account_id), None, None),
+                item(
+                    "Period",
+                    opt_time(rec.period_end),
+                    Some(format!("from {}", opt_time(rec.period_start))),
+                    None,
+                ),
+            ],
+        },
+    ];
+    let alert_items: Vec<TearSheetItem> = alerts(rec)
+        .iter()
+        .map(|a| {
+            item(
+                field_str(a, "code"),
+                field_str(a, "severity").to_string(),
+                Some(field_str(a, "message").to_string()),
+                None,
+            )
+        })
+        .collect();
+    if !alert_items.is_empty() {
+        sections.push(TearSheetSection { category: "Alerts".into(), items: alert_items });
+    }
+
+    let trades = matched_trades(rec);
+    let table = (!trades.is_empty()).then(|| TearSheetTable {
+        title: "Matched Trades".into(),
+        headers: ["Symbol", "Side", "Qty", "Paper", "Backtest", "Latency ms", "P&L Gap"]
+            .map(String::from)
+            .to_vec(),
+        rows: trades
+            .iter()
+            .map(|t| {
+                vec![
+                    field_str(t, "symbol").to_string(),
+                    field_str(t, "side").to_string(),
+                    ratio(field_f64(t, "qty"), 2),
+                    cash(field_f64(t, "paper_price"), 2),
+                    cash(field_f64(t, "backtest_price"), 2),
+                    ratio(field_f64(t, "timing_latency_ms"), 1),
+                    cash(field_f64(t, "pnl_gap"), 2),
+                ]
+            })
+            .collect(),
+    });
+    TearSheet { sections, table }
+}

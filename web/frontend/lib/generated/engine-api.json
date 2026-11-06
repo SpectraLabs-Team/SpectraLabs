@@ -3483,6 +3483,26 @@
                 "schema": {}
               }
             }
+          },
+          "400": {
+            "description": "The account has no workspace (code `no_workspace`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such strategy in this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
           }
         }
       }

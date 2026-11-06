@@ -71,8 +71,10 @@ const INSERT_FILL_SQL: &str = include_str!("../queries/paper_fill_insert.sql");
 const LIST_FILLS_FOR_ORDER_SQL: &str = include_str!("../queries/paper_fills_list_for_order.sql");
 const CLEAR_POSITIONS_SQL: &str = include_str!("../queries/paper_positions_clear.sql");
 const LIST_FILLS_SINCE_SQL: &str = include_str!("../queries/paper_fills_list_since.sql");
+const LIST_FILLS_BETWEEN_SQL: &str = include_str!("../queries/paper_fills_list_between.sql");
 const ACCOUNT_STARTED_AT_SQL: &str = include_str!("../queries/paper_account_started_at.sql");
 const MARK_ACCOUNT_STARTED_SQL: &str = include_str!("../queries/paper_account_mark_started.sql");
+const ACCOUNTS_STARTED_AT_SQL: &str = include_str!("../queries/paper_accounts_started_at.sql");
 
 /// Get the paper account for a strategy, initializing starting balance if it does not exist yet.
 ///
@@ -310,6 +312,38 @@ pub async fn list_paper_fills_since(
         .bind(workspace_id)
         .bind(strategy_id)
         .bind(since)
+        .fetch_all(pool)
+        .await
+}
+
+/// Every paper account in the workspace: its strategy and when its current account started.
+///
+/// # Errors
+/// Any database error.
+pub async fn list_paper_accounts_started_at(
+    pool: &PgPool,
+    workspace_id: Uuid,
+) -> Result<Vec<(Uuid, DateTime<Utc>)>, Error> {
+    sqlx::query_as(ACCOUNTS_STARTED_AT_SQL).bind(workspace_id).fetch_all(pool).await
+}
+
+/// List a strategy's fills recorded at or after `since` and, when given, before `until`, oldest
+/// first.
+///
+/// # Errors
+/// Any database error.
+pub async fn list_paper_fills_between(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    strategy_id: Uuid,
+    since: DateTime<Utc>,
+    until: Option<DateTime<Utc>>,
+) -> Result<Vec<PaperFillRow>, Error> {
+    sqlx::query_as(LIST_FILLS_BETWEEN_SQL)
+        .bind(workspace_id)
+        .bind(strategy_id)
+        .bind(since)
+        .bind(until)
         .fetch_all(pool)
         .await
 }

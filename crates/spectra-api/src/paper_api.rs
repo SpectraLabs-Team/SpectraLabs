@@ -25,7 +25,7 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::jobs_api::{context, db_error};
-use crate::risk_center_api::{PortfolioPositionView, RiskBreachView};
+use crate::risk_center_api::RiskBreachView;
 use crate::{error_response, json_response, AppState, Identity};
 
 #[allow(clippy::result_large_err)]
@@ -77,10 +77,34 @@ pub(crate) struct PaperAccountQuery {
     pub initial_cash: Option<f64>,
 }
 
+/// Query for the paper attribution: the strategy, and an optional time window over its fills.
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+pub(crate) struct PaperAttributionQuery {
+    pub strategy_id: Uuid,
+    /// Only fills at or after this time (RFC 3339). Earlier than the account's start has no effect.
+    pub from: Option<DateTime<Utc>>,
+    /// Only fills before this time (RFC 3339). Must be after `from`.
+    pub to: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub(crate) struct ResetPaperAccountRequest {
     pub strategy_id: Uuid,
     pub initial_cash: Option<f64>,
+}
+
+/// One open position of a paper account, with its cost basis when the fills are known.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct PaperPositionView {
+    pub symbol: String,
+    pub qty: f64,
+    /// Latest price.
+    pub price: f64,
+    /// Average price paid for the open quantity; `null` when the fills were not replayed.
+    pub avg_entry_price: Option<f64>,
+    /// `qty` times `avg_entry_price`; `null` with it.
+    pub cost_basis: Option<f64>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -91,7 +115,7 @@ pub(crate) struct PaperAccountView {
     pub equity: f64,
     pub peak_equity: f64,
     pub daily_start_equity: f64,
-    pub positions: Vec<PortfolioPositionView>,
+    pub positions: Vec<PaperPositionView>,
     pub updated_at: DateTime<Utc>,
     /// 1-day 99% VaR as a fraction of equity; `null` when it cannot be computed (see
     /// `var_unavailable_reason`).
@@ -177,6 +201,7 @@ impl PaperAccountView {
         acc: PaperAccount,
         records: &HashMap<String, spectra_core::Instrument>,
         volatilities: &HashMap<String, f64>,
+        avg_entry: &HashMap<String, f64>,
     ) -> spectra_core::Result<Self> {
         let mut positions_map = HashMap::new();
         for pos in &acc.positions {
@@ -221,7 +246,21 @@ impl PaperAccountView {
             equity: acc.balance.equity,
             peak_equity: acc.balance.peak_equity,
             daily_start_equity: acc.balance.daily_start_equity,
-            positions: acc.positions.into_iter().map(PortfolioPositionView::from).collect(),
+            positions: acc
+                .positions
+                .into_iter()
+                .map(|p| {
+                    let avg = avg_entry.get(&p.symbol).copied();
+                    PaperPositionView {
+                        cost_basis: avg.map(|a| a * p.qty),
+                        avg_entry_price: avg,
+                        symbol: p.symbol,
+                        qty: p.qty,
+                        price: p.price,
+                        updated_at: p.updated_at,
+                    }
+                })
+                .collect(),
             updated_at: acc.balance.updated_at,
             var_pct,
             var_dollar,
@@ -436,7 +475,26 @@ pub(crate) async fn get_account(
                     }
                 }
             };
-            match PaperAccountView::new(acc, &records, &vols) {
+            let started_at = match spectra_db::paper::paper_account_started_at(&pool, ws, q.strategy_id).await
+            {
+                Ok(s) => s,
+                Err(e) => return db_error(&e),
+            };
+            let fills = match started_at {
+                Some(s) => match spectra_db::paper::list_paper_fills_since(&pool, ws, q.strategy_id, s).await
+                {
+                    Ok(f) => f,
+                    Err(e) => return db_error(&e),
+                },
+                None => Vec::new(),
+            };
+            let avg_entry = match average_entry_prices(&fills, &records) {
+                Ok(a) => a,
+                Err(e) => {
+                    return error_response(422, format!("Failed to compute paper account metrics: {e}"))
+                }
+            };
+            match PaperAccountView::new(acc, &records, &vols, &avg_entry) {
                 Ok(v) => json_response(200, json!(v).to_string()),
                 Err(e) => error_response(422, format!("Failed to compute paper account metrics: {e}")),
             }
@@ -450,17 +508,18 @@ pub(crate) async fn get_account(
     get,
     path = "/api/v1/paper/attribution",
     tag = "paper",
-    params(PaperAccountQuery),
+    params(PaperAttributionQuery),
     responses(
         (status = 200, description = "Paper trading P&L attribution", body = serde_json::Value),
         (status = 400, description = "The account has no workspace (code `no_workspace`)", body = crate::openapi::ErrorDoc),
         (status = 404, description = "No such strategy in this workspace", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "Invalid query: `from` must be before `to`", body = crate::openapi::ErrorDoc),
     )
 )]
 pub(crate) async fn get_paper_attribution(
     State(st): State<AppState>,
     Extension(identity): Extension<Identity>,
-    query: Result<Query<PaperAccountQuery>, QueryRejection>,
+    query: Result<Query<PaperAttributionQuery>, QueryRejection>,
 ) -> Response {
     let (pool, ws) = match context(&st, &identity) {
         Ok(c) => c,
@@ -469,6 +528,11 @@ pub(crate) async fn get_paper_attribution(
     let Ok(Query(q)) = query else {
         return error_response(422, "Invalid query parameters.");
     };
+    if let (Some(from), Some(to)) = (q.from, q.to) {
+        if from >= to {
+            return error_response(422, "`from` must be before `to`.");
+        }
+    }
 
     // A read: attribution never creates a strategy or an account. A strategy that is not in the
     // signed workspace is a 404, like any other workspace's data (M11 Decision 4).
@@ -484,9 +548,12 @@ pub(crate) async fn get_paper_attribution(
     };
     // Only fills since the start of the current account count: a reset keeps old fills. A
     // strategy with no account yet has no fills, so its breakdown is empty.
+    // The window opens at the later of the account's start and `from`. It replays only the fills
+    // inside it, so positions opened before `from` do not appear in its breakdown.
     let fills = match spectra_db::paper::paper_account_started_at(&pool, ws, q.strategy_id).await {
         Ok(Some(started_at)) => {
-            match spectra_db::paper::list_paper_fills_since(&pool, ws, q.strategy_id, started_at).await {
+            let since = q.from.map_or(started_at, |from| from.max(started_at));
+            match spectra_db::paper::list_paper_fills_between(&pool, ws, q.strategy_id, since, q.to).await {
                 Ok(f) => f,
                 Err(e) => return db_error(&e),
             }
@@ -500,6 +567,57 @@ pub(crate) async fn get_paper_attribution(
     }
 }
 
+/// Portfolio P&L attribution across every paper strategy in the signed workspace (M11 Task 7).
+///
+/// Each account's fills since its current start are attributed as `get_paper_attribution` does,
+/// then the results are summed. Read-only, like the per-strategy route: no account is created.
+#[utoipa::path(
+    get,
+    path = "/api/v1/paper/attribution/workspace",
+    tag = "paper",
+    responses(
+        (status = 200, description = "Combined P&L attribution of every paper strategy in the workspace; `strategy_count` is how many were combined", body = serde_json::Value),
+        (status = 400, description = "The account has no workspace (code `no_workspace`)", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn get_workspace_paper_attribution(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let records = match crate::instruments_api::order_instruments(&pool, ws).await {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let accounts = match spectra_db::paper::list_paper_accounts_started_at(&pool, ws).await {
+        Ok(a) => a,
+        Err(e) => return db_error(&e),
+    };
+    let mut parts = Vec::with_capacity(accounts.len());
+    for (strategy_id, started_at) in &accounts {
+        let fills =
+            match spectra_db::paper::list_paper_fills_since(&pool, ws, *strategy_id, *started_at).await {
+                Ok(f) => f,
+                Err(e) => return db_error(&e),
+            };
+        match paper_attribution(&fills, &records) {
+            Ok(attr) => parts.push(attr),
+            Err(e) => {
+                return error_response(
+                    422,
+                    format!("Failed to compute paper attribution for {strategy_id}: {e}"),
+                )
+            }
+        }
+    }
+    let combined = spectra_research::combine_attributions(&parts);
+    let body = combined.to_json().with("strategy_count", spectra_core::Json::integer(parts.len() as i64));
+    json_response(200, body.dump())
+}
+
 /// The P&L attribution of one paper account's fills (oldest first): the fills are replayed into
 /// a ledger and the backtest attribution runs over it, with the paper slippage rate. As for
 /// backtests, it covers closed trades; positions still open are not in it.
@@ -511,6 +629,35 @@ fn paper_attribution(
     fills: &[PaperFillRow],
     records: &HashMap<String, spectra_core::Instrument>,
 ) -> Result<spectra_research::PnlAttribution, String> {
+    let (ledger, symbols) = replay_fills(fills, records)?;
+    spectra_research::compute_pnl_attribution(&ledger, Some(&symbols), Some(PAPER_SLIPPAGE_BPS))
+        .map_err(|e| e.to_string())
+}
+
+/// Average entry price of each open position, from replaying the fills (oldest first). A symbol
+/// with no open quantity is left out.
+fn average_entry_prices(
+    fills: &[PaperFillRow],
+    records: &HashMap<String, spectra_core::Instrument>,
+) -> Result<HashMap<String, f64>, String> {
+    let (ledger, symbols) = replay_fills(fills, records)?;
+    let mut out = HashMap::new();
+    for (id, pos) in ledger.positions() {
+        let qty = pos.qty.to_f64();
+        if qty.abs() <= 1e-8 {
+            continue;
+        }
+        let symbol = symbols.get(*id as usize).ok_or_else(|| format!("no symbol for instrument {id}"))?;
+        out.insert(symbol.clone(), pos.cost.to_f64() / qty);
+    }
+    Ok(out)
+}
+
+/// Replay fills into a ledger. Returns the ledger and the symbols, indexed by instrument id.
+fn replay_fills(
+    fills: &[PaperFillRow],
+    records: &HashMap<String, spectra_core::Instrument>,
+) -> Result<(spectra_core::Ledger, Vec<String>), String> {
     let mut symbols: Vec<String> = fills.iter().map(|f| f.symbol.clone()).collect();
     symbols.sort_unstable();
     symbols.dedup();
@@ -555,8 +702,41 @@ fn paper_attribution(
         };
         ledger.apply_fill(&fill).map_err(|e| format!("fill {}: {e}", f.id))?;
     }
-    spectra_research::compute_pnl_attribution(&ledger, Some(&symbols), Some(PAPER_SLIPPAGE_BPS))
-        .map_err(|e| e.to_string())
+    Ok((ledger, symbols))
+}
+
+/// The strategy id that Paper Lab trades under: one per user per workspace (M11 Task 2). It is
+/// derived on the server, so a user cannot pick another strategy's account.
+pub(crate) fn paper_lab_strategy_id(user: &str, workspace: Uuid) -> Uuid {
+    let mac =
+        crate::auth::hmac_sha256(b"spectra-paper-lab-strategy", format!("{workspace}|{user}").as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&mac[..16]);
+    Uuid::from_bytes(bytes)
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub(crate) struct PaperLabStrategyView {
+    pub strategy_id: Uuid,
+}
+
+/// The signed-in user's Paper Lab strategy id in the active workspace.
+#[utoipa::path(get, path = "/api/v1/paper/strategy", tag = "paper",
+    responses(
+        (status = 200, description = "The Paper Lab strategy id", body = PaperLabStrategyView),
+        (status = 400, description = "The account has no workspace (code `no_workspace`)", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn get_paper_lab_strategy(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let (_pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let view = PaperLabStrategyView { strategy_id: paper_lab_strategy_id(&identity.user, ws) };
+    json_response(200, json!(view).to_string())
 }
 
 /// Reset a strategy's paper account (clears positions, resets cash to initial capital).
@@ -583,7 +763,7 @@ pub(crate) async fn reset_account(
         Err(r) => return r,
     };
     match spectra_db::paper::reset_paper_account(&pool, ws, req.strategy_id, req.initial_cash).await {
-        Ok(acc) => match PaperAccountView::new(acc, &records, &HashMap::new()) {
+        Ok(acc) => match PaperAccountView::new(acc, &records, &HashMap::new(), &HashMap::new()) {
             Ok(v) => json_response(200, json!(v).to_string()),
             Err(e) => error_response(422, format!("Failed to compute paper account metrics: {e}")),
         },
@@ -1562,7 +1742,7 @@ pub(crate) async fn step_strategy(
         }
     }
 
-    let account = match PaperAccountView::new(updated_account, &step_records, &vols) {
+    let account = match PaperAccountView::new(updated_account, &step_records, &vols, &HashMap::new()) {
         Ok(v) => v,
         Err(e) => return error_response(422, format!("Failed to compute paper account metrics: {e}")),
     };
@@ -1608,4 +1788,84 @@ pub(crate) async fn reconcile_paper_positions(
     let creds = crate::providers::vault::resolve_alpaca_credentials(&pool, ws, None, &json!({})).await.ok();
     crate::broker_api::handle_reconcile_positions(&pool, ws, creds.as_ref(), uri.query().unwrap_or_default())
         .await
+}
+
+#[cfg(test)]
+mod attribution_timing_tests {
+    use super::*;
+    use chrono::TimeZone;
+    use std::time::Instant;
+
+    /// `n` fills over `symbols` symbols: each symbol takes round trips (buy then sell), one fill a
+    /// second, oldest first. Prices move so that some trades win and some lose.
+    fn synthetic_fills(n: usize, symbols: &[&str]) -> Vec<PaperFillRow> {
+        let start = Utc.with_ymd_and_hms(2026, 1, 2, 14, 30, 0).unwrap();
+        let workspace_id = Uuid::from_u128(1);
+        let strategy_id = Uuid::from_u128(2);
+        (0..n)
+            .map(|i| {
+                let sym = symbols[(i / 2) % symbols.len()];
+                let side = if i % 2 == 0 { "buy" } else { "sell" };
+                let price = 100.0 + ((i * 37) % 17) as f64 - 8.0 + (i % 5) as f64 * 0.5;
+                PaperFillRow {
+                    id: Uuid::from_u128(1_000_000 + i as u128),
+                    order_id: Uuid::from_u128(2_000_000 + i as u128),
+                    workspace_id,
+                    strategy_id,
+                    symbol: sym.to_string(),
+                    side: side.to_string(),
+                    qty: 10.0,
+                    price,
+                    fee: 1.0,
+                    cost_config: None,
+                    created_at: start + chrono::Duration::seconds(i as i64),
+                }
+            })
+            .collect()
+    }
+
+    fn fill(sym: &str, side: &str, qty: f64, price: f64, i: i64) -> PaperFillRow {
+        PaperFillRow {
+            id: Uuid::from_u128(3_000_000 + i as u128),
+            order_id: Uuid::from_u128(4_000_000 + i as u128),
+            workspace_id: Uuid::from_u128(1),
+            strategy_id: Uuid::from_u128(2),
+            symbol: sym.to_string(),
+            side: side.to_string(),
+            qty,
+            price,
+            fee: 0.0,
+            cost_config: None,
+            created_at: Utc.with_ymd_and_hms(2026, 1, 2, 14, 30, 0).unwrap() + chrono::Duration::seconds(i),
+        }
+    }
+
+    #[test]
+    fn average_entry_is_the_cost_of_the_open_quantity() {
+        let fills = vec![
+            fill("AAPL", "buy", 10.0, 100.0, 0),
+            fill("AAPL", "buy", 10.0, 110.0, 1),
+            fill("AAPL", "sell", 5.0, 130.0, 2), // a partial close leaves the average where it was
+            fill("MSFT", "buy", 4.0, 50.0, 3),
+            fill("MSFT", "sell", 4.0, 60.0, 4), // closed: not in the map
+        ];
+        let avg = average_entry_prices(&fills, &HashMap::new()).expect("average");
+        assert_eq!(avg.len(), 1, "{avg:?}");
+        assert!((avg["AAPL"] - 105.0).abs() < 1e-6, "{avg:?}");
+    }
+
+    #[test]
+    fn replay_of_a_few_thousand_fills_is_fast() {
+        let symbols = ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA", "SPY"];
+        let fills = synthetic_fills(5_000, &symbols);
+        let records = HashMap::new();
+
+        let started = Instant::now();
+        let attr = paper_attribution(&fills, &records).expect("attribution");
+        let elapsed = started.elapsed();
+        eprintln!("replayed {} fills in {:?}", fills.len(), elapsed);
+
+        assert_eq!(attr.total_trades, 2_500, "every buy/sell pair closes one trade");
+        assert!(elapsed.as_secs_f64() < 5.0, "5,000 fills took {elapsed:?}; budget is 5 s");
+    }
 }

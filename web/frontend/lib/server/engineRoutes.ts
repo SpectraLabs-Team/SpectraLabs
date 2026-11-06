@@ -157,6 +157,8 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   // Module 9: Paper Trading & Live Ledger
   'api/v1/paper/account': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/paper/attribution': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/paper/attribution/workspace': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/paper/strategy': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/paper/account/reset': { method: 'POST', minRole: 'editor', timeoutMs: 15_000 },
   'api/v1/paper/orders': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/paper/orders/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },

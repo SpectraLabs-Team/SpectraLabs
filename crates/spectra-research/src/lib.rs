@@ -15,8 +15,8 @@ pub mod validation;
 pub mod walkforward;
 
 pub use attribution::{
-    compute_pnl_attribution, CostDecomposition, DirectionalAttribution, InstrumentAttribution,
-    PnlAttribution, WaterfallStep,
+    combine_attributions, compute_pnl_attribution, CostDecomposition, DirectionalAttribution,
+    InstrumentAttribution, PnlAttribution, WaterfallStep,
 };
 pub use benchmark::{aligned_returns, benchmark_returns, compute_benchmark_metrics, BenchmarkMetrics};
 pub use gap::{

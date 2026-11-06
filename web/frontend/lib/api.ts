@@ -1,3 +1,4 @@
+import type { Attribution, WorkspaceAttribution } from './attribution';
 import type {
   BenchmarkResult,
   CpuTelemetry,
@@ -182,13 +183,14 @@ export const fitEvt = (body: {
 
 // ---------------------------------------------------------------- Paper Trading & Gap Analysis (M9 & M10)
 
-export interface PaperPosition {
+/** One open position of a paper account. `avg_entry_price` and `cost_basis` are null when the fills were not replayed. */
+export interface PaperPositionView {
   symbol: string;
   qty: number;
   price: number;
-  market_value: number;
-  weight: number;
-  unrealized_pnl: number;
+  avg_entry_price?: number | null;
+  cost_basis?: number | null;
+  updated_at: string;
 }
 
 export interface PaperAccountView {
@@ -198,7 +200,7 @@ export interface PaperAccountView {
   equity: number;
   peak_equity: number;
   daily_start_equity: number;
-  positions: PaperPosition[];
+  positions: PaperPositionView[];
   updated_at: string;
   /** null when VaR cannot be computed; see var_unavailable_reason. */
   var_pct: number | null;
@@ -281,6 +283,13 @@ export const getPaperAccount = (strategy_id: string, initial_cash?: number) => {
   return get<PaperAccountView>(`/api/v1/paper/account${query}`);
 };
 
+/** P&L attribution of one paper strategy, replayed from its fills since the account started (M11 Task 2). */
+export const getPaperAttribution = (strategy_id: string) =>
+  get<Attribution>(`/api/v1/paper/attribution?strategy_id=${encodeURIComponent(strategy_id)}`);
+
+/** The signed-in user's Paper Lab strategy id in the active workspace (M11 Task 2). */
+export const getPaperLabStrategy = () => get<{ strategy_id: string }>('/api/v1/paper/strategy');
+
 export const resetPaperAccount = (strategy_id: string, initial_cash?: number) =>
   post<PaperAccountView>('/api/v1/paper/account/reset', { strategy_id, initial_cash });
 
@@ -300,5 +309,9 @@ export const syncPaperOrders = (strategy_id?: string) =>
 
 export const reconcilePaperPositions = () =>
   get<ReconcilePositionsResponse>('/api/v1/paper/reconcile');
+
+/** P&L attribution summed across every paper strategy in the signed workspace (M11 Task 7). */
+export const getWorkspacePaperAttribution = () =>
+  get<WorkspaceAttribution>('/api/v1/paper/attribution/workspace');
 
 

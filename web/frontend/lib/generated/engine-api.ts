@@ -1083,6 +1083,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/attribution/workspace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Portfolio P&L attribution across every paper strategy in the signed workspace (M11 Task 7).
+         * @description Each account's fills since its current start are attributed as `get_paper_attribution` does,
+         *     then the results are summed. Read-only, like the per-strategy route: no account is created.
+         */
+        get: operations["get_workspace_paper_attribution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/paper/gap/analyze": {
         parameters: {
             query?: never;
@@ -1197,6 +1218,23 @@ export interface paths {
         put?: never;
         /** Step a saved strategy version on incoming bars against the paper account. */
         post: operations["step_strategy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/strategy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The signed-in user's Paper Lab strategy id in the active workspace. */
+        get: operations["get_paper_lab_strategy"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3700,7 +3738,7 @@ export interface components {
             equity: number;
             /** Format: double */
             peak_equity: number;
-            positions: components["schemas"]["PortfolioPositionView"][];
+            positions: components["schemas"]["PaperPositionView"][];
             /** Format: uuid */
             strategy_id: string;
             /** Format: date-time */
@@ -3776,6 +3814,10 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        PaperLabStrategyView: {
+            /** Format: uuid */
+            strategy_id: string;
+        };
         PaperOrderView: {
             /** Format: date-time */
             created_at: string;
@@ -3806,6 +3848,29 @@ export interface components {
             updated_at: string;
             /** Format: uuid */
             workspace_id: string;
+        };
+        /** @description One open position of a paper account, with its cost basis when the fills are known. */
+        PaperPositionView: {
+            /**
+             * Format: double
+             * @description Average price paid for the open quantity; `null` when the fills were not replayed.
+             */
+            avg_entry_price?: number | null;
+            /**
+             * Format: double
+             * @description `qty` times `avg_entry_price`; `null` with it.
+             */
+            cost_basis?: number | null;
+            /**
+             * Format: double
+             * @description Latest price.
+             */
+            price: number;
+            /** Format: double */
+            qty: number;
+            symbol: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         PortfolioBalanceView: {
             /** Format: double */
@@ -7931,7 +7996,10 @@ export interface operations {
             header?: never;
             path: {
                 strategy_id: string;
-                initial_cash: number | null;
+                /** @description Only fills at or after this time (RFC 3339). Earlier than the account's start has no effect. */
+                from: string | null;
+                /** @description Only fills before this time (RFC 3339). Must be after `from`. */
+                to: string | null;
             };
             cookie?: never;
         };
@@ -7957,6 +8025,44 @@ export interface operations {
             };
             /** @description No such strategy in this workspace */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid query: `from` must be before `to` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_workspace_paper_attribution: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Combined P&L attribution of every paper strategy in the workspace; `strategy_count` is how many were combined */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description The account has no workspace (code `no_workspace`) */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8202,6 +8308,35 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_paper_lab_strategy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Paper Lab strategy id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaperLabStrategyView"];
+                };
+            };
+            /** @description The account has no workspace (code `no_workspace`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
             };
         };
     };

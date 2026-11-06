@@ -3463,15 +3463,29 @@
             }
           },
           {
-            "name": "initial_cash",
+            "name": "from",
             "in": "path",
+            "description": "Only fills at or after this time (RFC 3339). Earlier than the account's start has no effect.",
             "required": true,
             "schema": {
               "type": [
-                "number",
+                "string",
                 "null"
               ],
-              "format": "double"
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "path",
+            "description": "Only fills before this time (RFC 3339). Must be after `from`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
             }
           }
         ],
@@ -3496,6 +3510,46 @@
           },
           "404": {
             "description": "No such strategy in this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query: `from` must be before `to`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/paper/attribution/workspace": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Portfolio P&L attribution across every paper strategy in the signed workspace (M11 Task 7).",
+        "description": "Each account's fills since its current start are attributed as `get_paper_attribution` does,\nthen the results are summed. Read-only, like the per-strategy route: no account is created.",
+        "operationId": "get_workspace_paper_attribution",
+        "responses": {
+          "200": {
+            "description": "Combined P&L attribution of every paper strategy in the workspace; `strategy_count` is how many were combined",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "The account has no workspace (code `no_workspace`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -3799,6 +3853,37 @@
           },
           "422": {
             "description": "Invalid request or bar input"
+          }
+        }
+      }
+    },
+    "/api/v1/paper/strategy": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "The signed-in user's Paper Lab strategy id in the active workspace.",
+        "operationId": "get_paper_lab_strategy",
+        "responses": {
+          "200": {
+            "description": "The Paper Lab strategy id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaperLabStrategyView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The account has no workspace (code `no_workspace`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
           }
         }
       }
@@ -10126,7 +10211,7 @@
           "positions": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortfolioPositionView"
+              "$ref": "#/components/schemas/PaperPositionView"
             }
           },
           "strategy_id": {
@@ -10316,6 +10401,18 @@
           }
         }
       },
+      "PaperLabStrategyView": {
+        "type": "object",
+        "required": [
+          "strategy_id"
+        ],
+        "properties": {
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "PaperOrderView": {
         "type": "object",
         "required": [
@@ -10418,6 +10515,50 @@
           "workspace_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "PaperPositionView": {
+        "type": "object",
+        "description": "One open position of a paper account, with its cost basis when the fills are known.",
+        "required": [
+          "symbol",
+          "qty",
+          "price",
+          "updated_at"
+        ],
+        "properties": {
+          "avg_entry_price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Average price paid for the open quantity; `null` when the fills were not replayed."
+          },
+          "cost_basis": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "`qty` times `avg_entry_price`; `null` with it."
+          },
+          "price": {
+            "type": "number",
+            "format": "double",
+            "description": "Latest price."
+          },
+          "qty": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },

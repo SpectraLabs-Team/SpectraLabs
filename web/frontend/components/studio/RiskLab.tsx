@@ -152,7 +152,7 @@ function generateCalibratedReturns(annualizedVol: number, count: number = 252): 
 
 export function RiskLab() {
   const { csv, revision, engine, riskParams, setRiskParams, riskRun: results, setRiskRun: setResults, positions, loadPreset, loadSample } = usePortfolio();
-  const { success, error: toastError } = useToast();
+  const { success, warning, error: toastError } = useToast();
   const online = engine.status === 'online';
   // Inputs and the last run live in PortfolioContext, so they survive switching Studio tabs.
   // `auto` (Live mode) is off by default: the engine only runs on an explicit click.
@@ -220,6 +220,10 @@ export function RiskLab() {
     const id = ++reqId.current;
     setLoading(true);
     setError('');
+    const numPositions = positions.length;
+    const isMultiAssetCopula = dependence !== 'aggregate' && numPositions > 1;
+    const effectiveDependence = isMultiAssetCopula ? undefined : (dependence !== 'aggregate' ? dependence : undefined);
+
     try {
       const base = {
         portfolio_csv: csv,
@@ -227,7 +231,7 @@ export function RiskLab() {
         simulations,
         horizon_days: horizon,
         backend,
-        dependence: dependence !== 'aggregate' ? dependence : undefined,
+        dependence: effectiveDependence,
       };
       const [v, c, vol] = await Promise.all([
         calculateRisk({ ...base, metric: 'var' }),
@@ -236,7 +240,14 @@ export function RiskLab() {
       ]);
       if (id === reqId.current) {
         setResults({ var: v, cvar: c, vol, rev: revision, simulations, backend, at: Date.now(), csv });
-        success('Monte Carlo simulation completed', `${simulations.toLocaleString()} paths · ${formatCurrency(v.value)} VaR (${confidenceLabel(confidence)})`);
+        if (isMultiAssetCopula) {
+          warning(
+            'Multi-Asset Book: Aggregate Mode Used',
+            `Copula joint simulations across ${numPositions} assets require an empirical correlation matrix. Simulated using Aggregate GBM.`
+          );
+        } else {
+          success('Monte Carlo simulation completed', `${simulations.toLocaleString()} paths · ${formatCurrency(v.value)} VaR (${confidenceLabel(confidence)})`);
+        }
       }
     } catch (e) {
       if (id === reqId.current) {
@@ -247,7 +258,7 @@ export function RiskLab() {
     } finally {
       if (id === reqId.current) setLoading(false);
     }
-  }, [csv, confidence, simulations, horizon, backend, dependence, revision, setResults, success, toastError]);
+  }, [csv, confidence, simulations, horizon, backend, dependence, revision, setResults, success, warning, toastError]);
 
   // Live mode (opt-in): re-run (debounced) whenever an input or the portfolio changes.
   // Nothing runs on mount; the first run is always an explicit click or switching Live on.
@@ -383,6 +394,19 @@ export function RiskLab() {
                 </div>
               )}
             </div>
+
+            {/* Multi-Asset Correlation Advisory */}
+            {positions.length > 1 && dependence !== 'aggregate' && (
+              <div className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.04] p-2.5 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+                <div className="flex items-center gap-1.5 font-semibold text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  <span>Correlation Matrix Required for Multi-Asset Copula</span>
+                </div>
+                <p className="mt-1 text-ink/70">
+                  This portfolio contains {positions.length} distinct assets. Cross-asset copulas evaluate joint tail dependence via an empirical correlation matrix (&rho;<sub>ij</sub>). Because the CSV provides individual asset volatilities without a correlation matrix, simulation runs in Aggregate GBM mode.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Active Book Presets */}

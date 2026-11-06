@@ -10,6 +10,7 @@
  * lib/generated/engine-api.ts is the generated reference.
  */
 import { API_BASE, ApiError, request } from './api';
+import type { Attribution } from './attribution';
 import type { JobStatus } from './jobs';
 
 // ---------------------------------------------------------------- catalogue
@@ -519,6 +520,10 @@ export const listBacktests = (opts: { status?: JobStatus; cursor?: string; limit
 
 export const getSeries = (backtestId: string, kind: SeriesKind) =>
   request<Series>(`/api/v1/backtests/${id(backtestId)}/series?kind=${kind}`, { timeoutMs: 20_000 });
+
+/** M11: P&L attribution of a finished backtest (the same breakdown as its summary, from its own endpoint). */
+export const getAttribution = (backtestId: string) =>
+  request<Attribution>(`/api/v1/backtests/${id(backtestId)}/attribution`, { timeoutMs: 20_000 });
 
 export const getMonthlyReturns = (backtestId: string) =>
   request<MonthlyReturnsResponse>(`/api/v1/backtests/${id(backtestId)}/monthly-returns`, { timeoutMs: 20_000 });

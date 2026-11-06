@@ -45,6 +45,7 @@ pub mod broker_adapters;
 pub mod broker_api;
 pub mod config;
 pub mod corporate_actions_api;
+pub mod dataset_prices;
 pub mod datasets_api;
 pub mod engine;
 pub mod gap_api;

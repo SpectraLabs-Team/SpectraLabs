@@ -23,6 +23,8 @@ import {
   Globe,
   LineChart,
   Lock,
+  Maximize2,
+  Minimize2,
   Play,
   RotateCcw,
   Share2,
@@ -373,6 +375,8 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [isServerDefault, setIsServerDefault] = useState(false);
   const [publishingDefault, setPublishingDefault] = useState(false);
+  const [compressRuns, setCompressRuns] = useState(false);
+  const [compressVerdicts, setCompressVerdicts] = useState(false);
 
   // Load user session, M19 role, and sync server layout
   useEffect(() => {
@@ -826,13 +830,25 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
           <h2 className="text-sm font-semibold text-ink">Recent Backtests</h2>
           <p className="text-xs text-ink/50">Most recent runs across this workspace.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => onTab('backtests')}
-          className="text-xs font-medium text-accent hover:underline"
-        >
-          View all <ArrowRight className="inline h-3 w-3" />
-        </button>
+        <div className="flex items-center gap-2">
+          {runs.length > 2 && (
+            <button
+              type="button"
+              onClick={() => setCompressRuns((c) => !c)}
+              className="inline-flex items-center gap-1 rounded-lg border border-ink/10 bg-ink/[0.03] px-2 py-1 text-xs font-medium text-ink/70 hover:bg-ink/[0.07] hover:text-ink transition"
+            >
+              {compressRuns ? <Maximize2 className="h-3 w-3" /> : <Minimize2 className="h-3 w-3" />}
+              <span>{compressRuns ? 'Expand' : 'Compress (1-2)'}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onTab('backtests')}
+            className="text-xs font-medium text-accent hover:underline"
+          >
+            View all <ArrowRight className="inline h-3 w-3" />
+          </button>
+        </div>
       </div>
 
       {loading && runs.length === 0 ? (
@@ -855,7 +871,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
         </div>
       ) : (
         <div className="divide-y divide-ink/[0.04]">
-          {runs.map((r) => {
+          {(compressRuns ? runs.slice(0, 2) : runs).map((r) => {
             const h = r.headline;
             const ret = h?.total_return;
             const sharpe = h?.sharpe;
@@ -1002,13 +1018,25 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
           <h2 className="text-sm font-semibold text-ink">Latest Risk Verdicts</h2>
           <p className="text-xs text-ink/50">Pre-trade check decisions and enforcement audit trail.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => onTab('risk-center')}
-          className="text-xs font-medium text-accent hover:underline"
-        >
-          Risk Center <ArrowRight className="inline h-3 w-3" />
-        </button>
+        <div className="flex items-center gap-2">
+          {verdicts.length > 2 && (
+            <button
+              type="button"
+              onClick={() => setCompressVerdicts((c) => !c)}
+              className="inline-flex items-center gap-1 rounded-lg border border-ink/10 bg-ink/[0.03] px-2 py-1 text-xs font-medium text-ink/70 hover:bg-ink/[0.07] hover:text-ink transition"
+            >
+              {compressVerdicts ? <Maximize2 className="h-3 w-3" /> : <Minimize2 className="h-3 w-3" />}
+              <span>{compressVerdicts ? 'Expand' : 'Compress (1-2)'}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onTab('risk-center')}
+            className="text-xs font-medium text-accent hover:underline"
+          >
+            Risk Center <ArrowRight className="inline h-3 w-3" />
+          </button>
+        </div>
       </div>
 
       {loading && verdicts.length === 0 ? (
@@ -1022,7 +1050,7 @@ export function OverviewDashboard({ onTab, onSelectRun }: OverviewDashboardProps
         </div>
       ) : (
         <div className="divide-y divide-ink/[0.04]">
-          {verdicts.map((v) => {
+          {(compressVerdicts ? verdicts.slice(0, 2) : verdicts).map((v) => {
             const isApproved = v.verdict.toLowerCase() === 'approved';
             const isRejected = v.verdict.toLowerCase() === 'rejected';
             const isReduced = v.verdict.toLowerCase() === 'reduced';

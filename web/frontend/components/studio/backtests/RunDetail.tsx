@@ -38,6 +38,7 @@ import type { MetricId } from '@/lib/learn/metrics';
 import { cn } from '@/lib/utils';
 import { DrawdownChart, EquityChart, MonthlyHeatmap, StrategyCurvesChart } from './Charts';
 import { ago, cash, dash, int, pct, ratio, shortHash, signedPct, tone } from './format';
+import { downloadTearSheetPdf, getTearSheet, type TearSheetResponse } from '@/lib/backtests';
 import { StatusBadge } from './RunList';
 import { AttributionPanel } from './AttributionCard';
 import { SurvivalLabPanel } from '../SurvivalLabPanel';
@@ -851,6 +852,22 @@ export function RunDetail({
   const [downloading, setDownloading] = useState<DownloadKind | null>(null);
   const [copied, setCopied] = useState(false);
   const [tearSheetOpen, setTearSheetOpen] = useState(false);
+  const [tearSheet, setTearSheet] = useState<TearSheetResponse | null>(null);
+
+  useEffect(() => {
+    if (!tearSheetOpen) return;
+    let cancelled = false;
+    getTearSheet(backtestId)
+      .then((t) => {
+        if (!cancelled) setTearSheet(t);
+      })
+      .catch(() => {
+        if (!cancelled) setTearSheet(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tearSheetOpen, backtestId]);
 
   useEffect(() => {
     const ctl = new AbortController();
@@ -1046,6 +1063,7 @@ export function RunDetail({
         <TearSheetModal
           open={tearSheetOpen}
           onClose={() => setTearSheetOpen(false)}
+          onDownloadPdf={() => downloadTearSheetPdf(backtestId)}
           title="Quantitative Strategy Tear-Sheet"
           subtitle={`${describeRequest(b.request, catalog)} · Started ${new Date(b.created_at).toLocaleDateString()}`}
           reportType="Quantitative Backtest"
@@ -1058,131 +1076,8 @@ export function RunDetail({
             datasetOrBook: dataset ? `${dataset.dataset_name} v${dataset.version}` : (b.request.dataset_version_id ?? 'Market Dataset'),
             duration: b.finished_at && b.started_at ? `${((new Date(b.finished_at).getTime() - new Date(b.started_at).getTime()) / 1000).toFixed(2)}s wall-clock` : undefined,
           }}
-          sections={[
-            {
-              category: 'Return & Capital Dynamics',
-              items: [
-                {
-                  label: 'Total Return',
-                  value: signedPct(b.summary.metrics.total_return),
-                  sub: `${int(b.summary.metrics.periods)} trading periods`,
-                  tone: tone(b.summary.metrics.total_return),
-                },
-                {
-                  label: 'Compound Annual Growth (CAGR)',
-                  value: signedPct(b.summary.performance.cagr),
-                  sub: `Annualized σ ${pct(b.summary.metrics.annualized_volatility)}`,
-                  tone: tone(b.summary.performance.cagr),
-                },
-                {
-                  label: 'Initial Capital',
-                  value: cash(Number(b.summary.run.config.initial_cash), 0),
-                  sub: 'Starting cash',
-                },
-                {
-                  label: 'Final Equity',
-                  value: cash(b.summary.activity.final_equity, 0),
-                  sub: `Realized PnL ${cash(b.summary.activity.realized_pnl, 0)}`,
-                  tone: tone(Number(b.summary.activity.realized_pnl)),
-                },
-              ],
-            },
-            {
-              category: 'Risk-Adjusted Performance Ratios',
-              items: [
-                {
-                  label: 'Sharpe Ratio',
-                  value: ratio(b.summary.metrics.sharpe),
-                  sub: 'Annualized excess return / total risk',
-                },
-                {
-                  label: 'Sortino Ratio',
-                  value: ratio(b.summary.performance.sortino),
-                  sub: 'Excess return / downside deviation',
-                },
-                {
-                  label: 'Calmar Ratio',
-                  value: ratio(b.summary.performance.calmar),
-                  sub: 'CAGR / maximum drawdown',
-                },
-                {
-                  label: 'Maximum Drawdown',
-                  value: pct(b.summary.drawdown.max_drawdown),
-                  sub: `Longest underwater: ${int(b.summary.drawdown.longest_underwater_periods)} periods`,
-                  tone: 'loss',
-                },
-              ],
-            },
-            {
-              category: 'Trading Execution & Distribution',
-              items: [
-                {
-                  label: 'Total Completed Trades',
-                  value: int(b.summary.trades.count),
-                  sub: `${int(b.summary.activity.fill_count)} individual fills`,
-                },
-                {
-                  label: 'Win Rate',
-                  value: pct(b.summary.trades.win_rate, 1),
-                  sub: `Profit factor: ${ratio(b.summary.trades.profit_factor)}`,
-                },
-                {
-                  label: 'Payoff Ratio (Win / Loss)',
-                  value: ratio(b.summary.trades.payoff_ratio),
-                  sub: `Expectancy: ${cash(b.summary.trades.expectancy)}`,
-                },
-                {
-                  label: 'Commission & Fees Paid',
-                  value: cash(b.summary.activity.total_fees, 2),
-                  sub: `Financing: ${cash(b.summary.activity.financing, 2)}`,
-                },
-              ],
-            },
-            {
-              category: 'Tail Risk & Statistical Moments',
-              items: [
-                {
-                  label: `Value at Risk (${pct(b.summary.tail.level, 0)})`,
-                  value: pct(b.summary.tail.var),
-                  sub: 'Historical simulation VaR',
-                  tone: 'loss',
-                },
-                {
-                  label: 'Expected Shortfall (CVaR)',
-                  value: pct(b.summary.tail.expected_shortfall),
-                  sub: 'Average loss in tail regime',
-                  tone: 'loss',
-                },
-                {
-                  label: 'Return Skewness',
-                  value: ratio(b.summary.performance.skewness),
-                  sub: 'Asymmetry of return distribution',
-                },
-                {
-                  label: 'Excess Kurtosis',
-                  value: ratio(b.summary.performance.excess_kurtosis),
-                  sub: 'Fat-tail indicator',
-                },
-              ],
-            },
-          ]}
-          table={
-            b.summary.strategies?.list && b.summary.strategies.list.length > 0
-              ? {
-                  title: 'Strategy Sub-Component Allocation & Attribution',
-                  headers: ['Strategy', 'Allocation', 'Final Equity', 'Return', 'Contribution', 'Sharpe', 'Max DD'],
-                  rows: b.summary.strategies.list.map((s) => [
-                    catalog?.strategies.find((strat) => strat.name === s.strategy)?.label ?? s.strategy,
-                    cash(s.allocation, 0),
-                    cash(s.final_equity, 0),
-                    signedPct(s.total_return),
-                    signedPct(s.contribution),
-                    ratio(s.sharpe),
-                    pct(s.max_drawdown),
-                  ]),
-                }
-              : undefined
-          }
+          sections={tearSheet?.sections ?? []}
+          table={tearSheet?.table}
           rawJsonData={b.summary}
           rawCsvData={
             b.summary.strategies?.list

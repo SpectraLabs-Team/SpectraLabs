@@ -4227,6 +4227,18 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "report_type",
+            "in": "path",
+            "description": "Only reports of this type: `validation`, `tear_sheet` or `gap`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {

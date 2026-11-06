@@ -47,9 +47,17 @@ function Sidebar({ tab, onTab, collapsed, onCollapse, onNavigate }: { tab: Studi
   return (
     <div className="flex h-full flex-col">
       <div className={cn('flex h-14 items-center border-b border-ink/[0.06] px-3', collapsed ? 'justify-center' : 'justify-between')}>
-        <Link href="/" aria-label="Spectra Labs home" className="flex items-center">
+        <button
+          type="button"
+          onClick={() => {
+            onTab('overview');
+            if (onNavigate) onNavigate();
+          }}
+          aria-label="Workspace overview"
+          className="flex items-center text-left transition hover:opacity-85"
+        >
           <Logo compact={collapsed} />
-        </Link>
+        </button>
         {onCollapse && !collapsed && (
           <button type="button" onClick={onCollapse} className="rounded-md p-1.5 text-ink/40 transition hover:bg-ink/5 hover:text-ink" aria-label="Collapse sidebar">
             <ChevronsLeft className="h-4 w-4" />

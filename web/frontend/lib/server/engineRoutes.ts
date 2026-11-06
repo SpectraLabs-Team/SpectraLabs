@@ -212,6 +212,7 @@ export function routePolicyKey(path: string): string {
   if (/^api\/(?:v1\/)?alpaca\/crypto\/latest\/bars$/i.test(path)) {
     return path.startsWith('api/v1/') ? 'api/v1/alpaca/crypto/latest/bars' : 'api/alpaca/crypto/latest/bars';
   }
+  if (/^api\/v1\/risk\/replay\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/risk/replay/{id}';
   if (/^api\/v1\/paper\/orders\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/orders/{id}';
   if (/^api\/v1\/paper\/gap\/reports\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/gap/reports/{id}';
   if (/^api\/v1\/me\/state\/import$/i.test(path)) return 'api/v1/me/state/import';

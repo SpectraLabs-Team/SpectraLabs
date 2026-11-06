@@ -39,6 +39,7 @@ import { cn } from '@/lib/utils';
 import { DrawdownChart, EquityChart, MonthlyHeatmap, StrategyCurvesChart } from './Charts';
 import { ago, cash, dash, int, pct, ratio, shortHash, signedPct, tone } from './format';
 import { StatusBadge } from './RunList';
+import { AttributionPanel } from './AttributionCard';
 import { SurvivalLabPanel } from '../SurvivalLabPanel';
 import { BacktestToPaperGap } from '../BacktestToPaperGap';
 import { TearSheetModal } from '../TearSheetModal';
@@ -486,6 +487,7 @@ function Results({
       {summary.bonds && <BondsCard bonds={summary.bonds} />}
       {summary.options && <OptionsCard options={summary.options} />}
       {summary.swaps && <SwapsCard swaps={summary.swaps} />}
+      <AttributionPanel key={b.id} backtestId={b.id} currency={summary.run.base_currency} />
 
       {b.run_id && <ExperimentLineageCard runId={b.run_id} />}
 

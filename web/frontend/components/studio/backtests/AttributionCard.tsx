@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { Layers } from 'lucide-react';
+import { Layers, HelpCircle, BookOpen, X } from 'lucide-react';
 import { ApiError } from '@/lib/api';
 import { getAttribution } from '@/lib/backtests';
 import { hasNoFills, sharePct, sortByShare, waterfallBars, type Attribution, type AttributionDirection } from '@/lib/attribution';
 import { buildWaterfallCsv, buildInstrumentsCsv } from '@/lib/csvExport';
+import { getGlossaryEntry, getAllGlossaryEntries } from '@/lib/attributionGlossary';
 import { GlassCard, Spinner, ErrorNote } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
 import { cash, dash, int, pct } from './format';
@@ -23,16 +24,175 @@ function toneClass(v: number): string {
   return v > 0 ? 'text-profit' : v < 0 ? 'text-loss' : 'text-ink/90';
 }
 
-function Block({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
+function Block({ title, children, className, action }: { title: string; children: ReactNode; className?: string; action?: ReactNode }) {
   return (
     <section className={cn('space-y-2', className)}>
-      <h4 className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink/45">{title}</h4>
+      <div className="flex items-center justify-between">
+        <h4 className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink/45">{title}</h4>
+        {action}
+      </div>
       {children}
     </section>
   );
 }
 
-function Waterfall({ a, currency }: { a: Attribution; currency?: string }) {
+/** Inline contextual help tip trigger that shows a summary tooltip and can open the full glossary. */
+export function HelpTip({
+  term,
+  onOpenGlossary,
+}: {
+  term: string;
+  onOpenGlossary?: (term: string) => void;
+}) {
+  const entry = getGlossaryEntry(term);
+  if (!entry) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpenGlossary?.(entry.term);
+      }}
+      title={`${entry.term}: ${entry.short} (Click for full glossary)`}
+      aria-label={`Learn about ${entry.term}`}
+      className="inline-flex items-center justify-center text-ink/35 hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded transition-colors"
+    >
+      <HelpCircle className="h-3 w-3" />
+    </button>
+  );
+}
+
+/** Interactive modal presenting definitions, worked examples, and categorized entries for P&L attribution terms. */
+export function Glossary({
+  isOpen,
+  onClose,
+  initialTerm,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  initialTerm?: string;
+}) {
+  const [filter, setFilter] = useState('');
+  const initialEntry = initialTerm ? getGlossaryEntry(initialTerm) : undefined;
+  const [category, setCategory] = useState<'all' | 'waterfall' | 'costs' | 'metrics'>(
+    initialEntry?.category ?? 'all'
+  );
+  const [selectedTerm] = useState<string | undefined>(initialTerm);
+
+  if (!isOpen) return null;
+
+  const entries = getAllGlossaryEntries().filter((e) => {
+    if (category !== 'all' && e.category !== category) return false;
+    if (!filter) return true;
+    const q = filter.toLowerCase();
+    return (
+      e.term.toLowerCase().includes(q) ||
+      e.short.toLowerCase().includes(q) ||
+      e.description.toLowerCase().includes(q) ||
+      e.aliases?.some((a) => a.toLowerCase().includes(q))
+    );
+  });
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="attribution-glossary-title"
+      onKeyDown={(e) => e.key === 'Escape' && onClose()}
+    >
+      <div className="relative flex max-h-[85vh] w-full max-w-2xl flex-col rounded-2xl border border-ink/10 bg-surface shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-ink/10 px-5 py-3.5">
+          <div className="flex items-center gap-2">
+            <BookOpen className="h-4 w-4 text-accent" />
+            <h3 id="attribution-glossary-title" className="text-sm font-semibold text-ink">
+              Attribution Glossary &amp; Help
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-ink/40 hover:text-ink hover:bg-ink/[0.05] transition-colors"
+            aria-label="Close glossary"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Search & Tabs */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/5 bg-ink/[0.01] px-5 py-2.5">
+          <div className="flex gap-1.5">
+            {(['all', 'waterfall', 'costs', 'metrics'] as const).map((cat) => (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setCategory(cat)}
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors',
+                  category === cat
+                    ? 'bg-accent/15 text-accent font-semibold'
+                    : 'text-ink/60 hover:text-ink hover:bg-ink/[0.04]'
+                )}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+          <input
+            type="search"
+            placeholder="Search terms…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="rounded border border-ink/15 bg-surface px-2.5 py-1 text-xs text-ink placeholder:text-ink/35 focus:outline-none focus:border-accent"
+          />
+        </div>
+
+        {/* Content list */}
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {entries.length === 0 ? (
+            <p className="text-center text-xs text-ink/40 py-8">No matching glossary terms found.</p>
+          ) : (
+            entries.map((item) => {
+              const isHighlight =
+                selectedTerm &&
+                (item.term.toLowerCase() === selectedTerm.toLowerCase() ||
+                  item.aliases?.some((a) => a.toLowerCase() === selectedTerm.toLowerCase()));
+              return (
+                <article
+                  key={item.term}
+                  className={cn(
+                    'rounded-xl border p-3.5 transition-colors',
+                    isHighlight
+                      ? 'border-accent/40 bg-accent/[0.03]'
+                      : 'border-ink/5 bg-ink/[0.02]'
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-semibold text-ink">{item.term}</h4>
+                    <span className="rounded bg-ink/[0.05] px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wider text-ink/45">
+                      {item.category}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11.5px] text-ink/75 leading-relaxed">{item.description}</p>
+                  <div className="mt-2 rounded bg-surface/80 p-2 border border-ink/[0.04]">
+                    <span className="font-mono text-[10px] uppercase tracking-wider text-ink/45 block mb-0.5">
+                      Example
+                    </span>
+                    <p className="font-mono text-[11px] text-ink/80">{item.example}</p>
+                  </div>
+                </article>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Waterfall({ a, currency, onOpenGlossary }: { a: Attribution; currency?: string; onOpenGlossary?: (term: string) => void }) {
   const bars = waterfallBars(a.waterfall);
   return (
     <Block title="Waterfall">
@@ -50,7 +210,12 @@ function Waterfall({ a, currency }: { a: Attribution; currency?: string }) {
           <tbody>
             {bars.map((b) => (
               <tr key={b.name} className={cn('border-t border-ink/[0.05]', b.subtotal && 'font-semibold')}>
-                <th scope="row" className="py-2 pr-3 text-left font-normal text-ink/80">{b.name}</th>
+                <th scope="row" className="py-2 pr-3 text-left font-normal text-ink/80">
+                  <span className="inline-flex items-center gap-1.5">
+                    {b.name}
+                    <HelpTip term={b.name} onOpenGlossary={onOpenGlossary} />
+                  </span>
+                </th>
                 <td className={cn('num py-2 pr-3 text-right', b.subtotal ? 'text-ink' : toneClass(b.amount))}>
                   {b.subtotal ? dash : signedCash(b.amount)}
                 </td>
@@ -76,7 +241,7 @@ function Waterfall({ a, currency }: { a: Attribution; currency?: string }) {
   );
 }
 
-function Instruments({ a, currency }: { a: Attribution; currency?: string }) {
+function Instruments({ a, currency, onOpenGlossary }: { a: Attribution; currency?: string; onOpenGlossary?: (term: string) => void }) {
   const rows = sortByShare(a.instruments);
   if (rows.length === 0) return <p className="text-[12px] text-ink/50">No closed trades, so no instrument has a result yet.</p>;
   return (
@@ -87,11 +252,21 @@ function Instruments({ a, currency }: { a: Attribution; currency?: string }) {
             <tr className="text-left text-ink/45">
               <th scope="col" className="py-1.5 pr-3 font-medium">Instrument</th>
               <th scope="col" className="py-1.5 pr-3 text-right font-medium">Trades</th>
-              <th scope="col" className="py-1.5 pr-3 text-right font-medium">Win rate</th>
+              <th scope="col" className="py-1.5 pr-3 text-right font-medium">
+                <span className="inline-flex items-center justify-end gap-1">
+                  Win rate
+                  <HelpTip term="Win rate" onOpenGlossary={onOpenGlossary} />
+                </span>
+              </th>
               <th scope="col" className="py-1.5 pr-3 text-right font-medium">Gross</th>
               <th scope="col" className="py-1.5 pr-3 text-right font-medium">Fees</th>
               <th scope="col" className="py-1.5 pr-3 text-right font-medium">Net</th>
-              <th scope="col" className="py-1.5 text-right font-medium">Share of |net|</th>
+              <th scope="col" className="py-1.5 text-right font-medium">
+                <span className="inline-flex items-center justify-end gap-1">
+                  Share of |net|
+                  <HelpTip term="Share of |net|" onOpenGlossary={onOpenGlossary} />
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -127,9 +302,12 @@ function Side({ label, trades, wins, winRate, gross, fees, net }: { label: strin
   );
 }
 
-function LongShort({ d, currency }: { d: AttributionDirection; currency?: string }) {
+function LongShort({ d, currency, onOpenGlossary }: { d: AttributionDirection; currency?: string; onOpenGlossary?: (term: string) => void }) {
   return (
-    <Block title="Long / short">
+    <Block
+      title="Long / short"
+      action={<HelpTip term="Long / short" onOpenGlossary={onOpenGlossary} />}
+    >
       <div className="grid gap-2.5 sm:grid-cols-2">
         <Side label="Long" trades={d.long_trades} wins={d.long_wins} winRate={d.long_win_rate} gross={d.long_gross_pnl} fees={d.long_fees} net={d.long_net_pnl} />
         <Side label="Short" trades={d.short_trades} wins={d.short_wins} winRate={d.short_win_rate} gross={d.short_gross_pnl} fees={d.short_fees} net={d.short_net_pnl} />
@@ -139,7 +317,7 @@ function LongShort({ d, currency }: { d: AttributionDirection; currency?: string
   );
 }
 
-function Costs({ a, currency }: { a: Attribution; currency?: string }) {
+function Costs({ a, currency, onOpenGlossary }: { a: Attribution; currency?: string; onOpenGlossary?: (term: string) => void }) {
   const c = a.costs;
   const rows: [string, number, string?][] = [
     ['Commissions', -c.commission_fees],
@@ -155,7 +333,10 @@ function Costs({ a, currency }: { a: Attribution; currency?: string }) {
       <dl className="grid gap-x-6 gap-y-1.5 text-[12px] sm:grid-cols-2">
         {rows.map(([label, v, memo]) => (
           <div key={label} className={cn('flex justify-between gap-3', memo && 'text-ink/45')}>
-            <dt>{label}</dt>
+            <dt className="inline-flex items-center gap-1.5">
+              {label}
+              <HelpTip term={label} onOpenGlossary={onOpenGlossary} />
+            </dt>
             <dd className="num">{v === 0 ? dash : memo ? cash(v) : signedCash(v, currency)}</dd>
           </div>
         ))}
@@ -236,6 +417,14 @@ export function AttributionCard({
   asOf?: string;
   exportId?: string;
 }) {
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [activeTerm, setActiveTerm] = useState<string | undefined>();
+
+  const handleOpenGlossary = (term?: string) => {
+    setActiveTerm(term);
+    setGlossaryOpen(true);
+  };
+
   const caption = source === 'backtest' ? 'Simulated from this backtest’s fills. Not a live result.' : 'Replayed from this account’s fills.';
   return (
     <GlassCard as="section" className="overflow-hidden">
@@ -251,20 +440,37 @@ export function AttributionCard({
             {currency && <> Values in {currency}.</>}
           </p>
         </div>
-        {!hasNoFills(a) && <ExportButtons a={a} exportId={exportId} currency={currency} />}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleOpenGlossary()}
+            className="inline-flex items-center gap-1.5 rounded border border-ink/15 bg-ink/[0.04] px-2.5 py-1 text-[11px] font-medium text-ink/75 hover:bg-ink/[0.08] hover:text-ink transition-colors"
+          >
+            <BookOpen className="h-3.5 w-3.5 text-ink/50" />
+            Glossary
+          </button>
+          {!hasNoFills(a) && <ExportButtons a={a} exportId={exportId} currency={currency} />}
+        </div>
       </div>
       <div className="space-y-6 p-5">
         {hasNoFills(a) ? (
           <p className="text-[12.5px] text-ink/55">{source === 'paper' ? 'No fills yet, so there is nothing to attribute.' : 'This run has no fills, so there is nothing to attribute.'}</p>
         ) : (
           <>
-            <Waterfall a={a} currency={currency} />
-            <Instruments a={a} currency={currency} />
-            <LongShort d={a.direction} currency={currency} />
-            <Costs a={a} currency={currency} />
+            <Waterfall a={a} currency={currency} onOpenGlossary={handleOpenGlossary} />
+            <Instruments a={a} currency={currency} onOpenGlossary={handleOpenGlossary} />
+            <LongShort d={a.direction} currency={currency} onOpenGlossary={handleOpenGlossary} />
+            <Costs a={a} currency={currency} onOpenGlossary={handleOpenGlossary} />
           </>
         )}
       </div>
+
+      <Glossary
+        key={activeTerm ?? 'all'}
+        isOpen={glossaryOpen}
+        onClose={() => setGlossaryOpen(false)}
+        initialTerm={activeTerm}
+      />
     </GlassCard>
   );
 }

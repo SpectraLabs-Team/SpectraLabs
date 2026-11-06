@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Layers, HelpCircle, BookOpen, X } from 'lucide-react';
 import { ApiError } from '@/lib/api';
 import { getAttribution } from '@/lib/backtests';
@@ -56,7 +56,7 @@ export function HelpTip({
       }}
       title={`${entry.term}: ${entry.short} (Click for full glossary)`}
       aria-label={`Learn about ${entry.term}`}
-      className="inline-flex items-center justify-center text-ink/35 hover:text-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-accent rounded transition-colors"
+      className="inline-flex items-center justify-center text-ink/35 hover:text-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded transition-colors"
     >
       <HelpCircle className="h-3 w-3" />
     </button>
@@ -80,6 +80,58 @@ export function Glossary({
   );
   const [selectedTerm] = useState<string | undefined>(initialTerm);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const opener = document.activeElement as HTMLElement | null;
+
+    // Focus into the dialog (the search box)
+    const timer = setTimeout(() => {
+      searchRef.current?.focus();
+    }, 0);
+
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      // Focus trap: keep Tab cycling inside the dialog
+      const focusables = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => el.offsetParent !== null || el.getClientRects().length > 0);
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !dialogRef.current.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !dialogRef.current.contains(active))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+      if (opener && document.contains(opener)) {
+        opener.focus();
+      }
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const entries = getAllGlossaryEntries().filter((e) => {
@@ -96,6 +148,7 @@ export function Glossary({
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
@@ -114,7 +167,7 @@ export function Glossary({
           <button
             type="button"
             onClick={onClose}
-            className="rounded p-1 text-ink/40 hover:text-ink hover:bg-ink/[0.05] transition-colors"
+            className="rounded p-1 text-ink/40 hover:text-ink hover:bg-ink/[0.05] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             aria-label="Close glossary"
           >
             <X className="h-4 w-4" />
@@ -123,14 +176,15 @@ export function Glossary({
 
         {/* Search & Tabs */}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/5 bg-ink/[0.01] px-5 py-2.5">
-          <div className="flex gap-1.5">
+          <div className="flex gap-1.5" role="group" aria-label="Filter glossary by category">
             {(['all', 'waterfall', 'costs', 'metrics'] as const).map((cat) => (
               <button
                 key={cat}
                 type="button"
                 onClick={() => setCategory(cat)}
+                aria-pressed={category === cat}
                 className={cn(
-                  'rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors',
+                  'rounded-md px-2.5 py-1 text-xs font-medium capitalize transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                   category === cat
                     ? 'bg-accent/15 text-accent font-semibold'
                     : 'text-ink/60 hover:text-ink hover:bg-ink/[0.04]'
@@ -141,11 +195,15 @@ export function Glossary({
             ))}
           </div>
           <input
+            ref={searchRef}
             type="search"
+            name="glossary-search"
+            id="attribution-glossary-search"
+            aria-label="Search glossary terms"
             placeholder="Search terms…"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="rounded border border-ink/15 bg-surface px-2.5 py-1 text-xs text-ink placeholder:text-ink/35 focus:outline-none focus:border-accent"
+            className="rounded border border-ink/15 bg-surface px-2.5 py-1 text-xs text-ink placeholder:text-ink/35 focus:outline-none focus:border-accent focus-visible:ring-2 focus-visible:ring-accent"
           />
         </div>
 
@@ -248,6 +306,7 @@ function Instruments({ a, currency, onOpenGlossary }: { a: Attribution; currency
     <Block title="Instruments">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[640px] text-[12px]">
+          <caption className="sr-only">Attribution breakdown by instrument</caption>
           <thead>
             <tr className="text-left text-ink/45">
               <th scope="col" className="py-1.5 pr-3 font-medium">Instrument</th>
@@ -444,7 +503,7 @@ export function AttributionCard({
           <button
             type="button"
             onClick={() => handleOpenGlossary()}
-            className="inline-flex items-center gap-1.5 rounded border border-ink/15 bg-ink/[0.04] px-2.5 py-1 text-[11px] font-medium text-ink/75 hover:bg-ink/[0.08] hover:text-ink transition-colors"
+            className="inline-flex items-center gap-1.5 rounded border border-ink/15 bg-ink/[0.04] px-2.5 py-1 text-[11px] font-medium text-ink/75 hover:bg-ink/[0.08] hover:text-ink transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <BookOpen className="h-3.5 w-3.5 text-ink/50" />
             Glossary
@@ -495,7 +554,7 @@ export function AttributionPanel({ backtestId, currency }: { backtestId: string;
 
   if (state.status === 'loading') {
     return (
-      <GlassCard as="section" className="flex items-center gap-2 p-5 text-[12px] text-ink/55">
+      <GlassCard as="section" role="status" className="flex items-center gap-2 p-5 text-[12px] text-ink/55">
         <Spinner className="h-3.5 w-3.5" /> Loading P&amp;L attribution…
       </GlassCard>
     );

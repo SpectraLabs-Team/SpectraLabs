@@ -25,9 +25,10 @@ type GapReportSummary = paths['/api/v1/paper/gap/reports']['get']['responses']['
 interface Props {
   strategyId?: string;
   runId?: string;
+  readOnly?: boolean;
 }
 
-export function BacktestToPaperGap({ strategyId, runId }: Props) {
+export function BacktestToPaperGap({ strategyId, runId, readOnly = false }: Props) {
   const [reports, setReports] = useState<GapReportSummary[]>([]);
   const [selectedReport, setSelectedReport] = useState<GapReportDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -47,6 +48,45 @@ export function BacktestToPaperGap({ strategyId, runId }: Props) {
     }
   }, []);
 
+  const runAnalysis = useCallback(async () => {
+    setAnalyzing(true);
+    setError(null);
+    try {
+      const targetStrat = effectiveStrategyId || '00000000-0000-0000-0000-000000000000';
+      const res = await fetch('/api/engine/api/v1/paper/gap/analyze', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          strategy_id: targetStrat,
+          backtest_run_id: runId || (effectiveStrategyId ? effectiveStrategyId : undefined),
+          max_slippage_drift_bps: 10.0,
+          max_timing_latency_ms: 1000.0,
+          max_tracking_error_pct: 3.0,
+          min_fill_ratio: 0.95,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.message || `HTTP ${res.status}`);
+      }
+      const data = (await res.json()) as GapReportDetail;
+      setSelectedReport(data);
+      // Reload reports list
+      const url = effectiveStrategyId
+        ? `/api/engine/api/v1/paper/gap/reports?strategy_id=${encodeURIComponent(effectiveStrategyId)}`
+        : '/api/engine/api/v1/paper/gap/reports';
+      const repRes = await fetch(url);
+      if (repRes.ok) {
+        const reps = (await repRes.json()) as GapReportSummary[];
+        setReports(reps);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Analysis failed');
+    } finally {
+      setAnalyzing(false);
+    }
+  }, [effectiveStrategyId, runId]);
+
   const loadReports = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -63,47 +103,16 @@ export function BacktestToPaperGap({ strategyId, runId }: Props) {
           if (!prev) loadDetail(data[0].id);
           return prev;
         });
+      } else if (readOnly) {
+        // Auto-run analysis if readOnly and no reports exist yet
+        runAnalysis();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load gap reports');
     } finally {
       setLoading(false);
     }
-  }, [effectiveStrategyId, loadDetail]);
-
-  const runAnalysis = async () => {
-    if (!effectiveStrategyId) {
-      setError('A strategy ID or run ID is required for gap comparison.');
-      return;
-    }
-    setAnalyzing(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/engine/api/v1/paper/gap/analyze', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          strategy_id: effectiveStrategyId,
-          backtest_run_id: runId || effectiveStrategyId,
-          max_slippage_drift_bps: 10.0,
-          max_timing_latency_ms: 1000.0,
-          max_tracking_error_pct: 3.0,
-          min_fill_ratio: 0.95,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.message || `HTTP ${res.status}`);
-      }
-      const data = (await res.json()) as GapReportDetail;
-      setSelectedReport(data);
-      await loadReports();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Analysis failed');
-    } finally {
-      setAnalyzing(false);
-    }
-  };
+  }, [effectiveStrategyId, loadDetail, readOnly, runAnalysis]);
 
   useEffect(() => {
     loadReports();
@@ -113,7 +122,14 @@ export function BacktestToPaperGap({ strategyId, runId }: Props) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-ink">Backtest-to-Paper Gap Analysis</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold text-ink">Backtest-to-Paper Gap Analysis</h2>
+            {readOnly && (
+              <Badge tone="neutral" className="text-[10px]">
+                Read-Only
+              </Badge>
+            )}
+          </div>
           <p className="text-xs text-ink/60">
             Compare trade fills, slippage, timing latency and P&L between paper execution and backtests.
           </p>
@@ -122,12 +138,12 @@ export function BacktestToPaperGap({ strategyId, runId }: Props) {
           <button
             type="button"
             onClick={loadReports}
-            disabled={loading}
+            disabled={loading || analyzing}
             className="btn-secondary flex items-center gap-1.5 px-3 py-1.5 text-xs"
           >
-            <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} /> Refresh
+            <RefreshCw className={cn('h-3.5 w-3.5', (loading || analyzing) && 'animate-spin')} /> Refresh
           </button>
-          {strategyId && (
+          {!readOnly && (
             <button
               type="button"
               onClick={runAnalysis}
@@ -204,6 +220,20 @@ export function BacktestToPaperGap({ strategyId, runId }: Props) {
               <p className="mt-1 text-[11px] text-ink/50">Fill execution delay</p>
             </GlassCard>
           </div>
+
+          {/* Judged Thresholds (Task 3) */}
+          {(selectedReport.report as any)?.thresholds && (
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-ink/60 bg-ink/[0.02] border border-ink/[0.06] rounded-xl px-3.5 py-2">
+              <span className="font-semibold text-ink/80">Thresholds Judged Against:</span>
+              <span>Slippage Drift ≤ {(selectedReport.report as any).thresholds.max_slippage_drift_bps} bps</span>
+              <span className="text-ink/30">•</span>
+              <span>Latency ≤ {(selectedReport.report as any).thresholds.max_timing_latency_ms} ms</span>
+              <span className="text-ink/30">•</span>
+              <span>Tracking Error ≤ {(selectedReport.report as any).thresholds.max_tracking_error_pct}%</span>
+              <span className="text-ink/30">•</span>
+              <span>Fill Ratio ≥ {(((selectedReport.report as any).thresholds.min_fill_ratio ?? 0.95) * 100).toFixed(0)}%</span>
+            </div>
+          )}
 
           {/* Gap Attribution Waterfall Breakdown */}
           <GlassCard className="p-5">

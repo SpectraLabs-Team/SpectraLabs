@@ -16,7 +16,14 @@ use uuid::Uuid;
 const SECRET: &str = "test-secret-test-secret-test-secret!";
 
 async fn pool() -> Option<PgPool> {
-    let url = std::env::var("DATABASE_URL").ok()?;
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        assert!(
+            std::env::var("CI").is_err(),
+            "DATABASE_URL must be configured in CI; gap_flow integration tests cannot skip silently"
+        );
+        eprintln!("skipping test_backtest_to_paper_gap_analysis_flow: DATABASE_URL not set");
+        return None;
+    };
     let pool =
         connect(&PoolConfig::new(url)).await.expect("DATABASE_URL is set but the database is unreachable");
     migrate(&pool).await.expect("migrations");
@@ -96,6 +103,7 @@ async fn test_sentry_observability_endpoints() {
 #[tokio::test]
 async fn test_backtest_to_paper_gap_analysis_flow() {
     let Some(pool) = pool().await else { return };
+    eprintln!("CI: executing test_backtest_to_paper_gap_analysis_flow with database...");
     let app = test_app(Some(pool.clone()));
 
     let user_id = Uuid::now_v7();
@@ -197,4 +205,8 @@ async fn test_backtest_to_paper_gap_analysis_flow() {
     assert_eq!(body["id"].as_str().unwrap(), report_id);
     assert!(body["report"]["attribution"].is_object());
     assert!(body["report"]["alerts"].is_array());
+    assert!(body["report"]["thresholds"].is_object(), "saved report must record thresholds");
+    assert_eq!(body["report"]["thresholds"]["max_slippage_drift_bps"].as_f64().unwrap(), 5.0);
+    assert_eq!(body["report"]["thresholds"]["max_timing_latency_ms"].as_f64().unwrap(), 200.0);
+    eprintln!("CI: test_backtest_to_paper_gap_analysis_flow completed successfully with verified thresholds and attribution");
 }

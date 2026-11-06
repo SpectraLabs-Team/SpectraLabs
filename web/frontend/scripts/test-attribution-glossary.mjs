@@ -207,4 +207,22 @@ describe('attribution glossary and help text (M11 Task 5)', () => {
       'Instruments headers must embed HelpTip for Win rate'
     );
   });
+
+  it('Open Positions term does not contain mark-to-market or unrealized text', () => {
+    const entry = getGlossaryEntry('Open Positions (Realized So Far)');
+    assert.ok(entry, 'missing Open Positions (Realized So Far) entry');
+    const text = `${entry.short} ${entry.description} ${entry.example}`.toLowerCase();
+    assert.ok(!text.includes('mark-to-market'), 'must not contain mark-to-market');
+    assert.ok(!text.includes('unrealized'), 'must not contain unrealized');
+  });
+
+  it('Net Account P&L example ends with arithmetic reconciliation to +$540.00', () => {
+    const entry = getGlossaryEntry('Net Account P&L');
+    assert.ok(entry, 'missing Net Account P&L entry');
+    assert.ok(
+      entry.example.endsWith('= Net Account P&L of +$540.00.'),
+      `example must end with '= Net Account P&L of +$540.00.', got: "${entry.example}"`
+    );
+    assert.equal(498 + 40 - 1 + 3, 540);
+  });
 });

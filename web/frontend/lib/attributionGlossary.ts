@@ -46,11 +46,11 @@ export const ATTRIBUTION_GLOSSARY: AttributionGlossaryEntry[] = [
   },
   {
     term: 'Open Positions (Realized So Far)',
-    short: 'Mark-to-market unrealized P&L on holdings that remain open in the portfolio.',
+    short: 'Realized profit or loss from selling part of a position that is still open.',
     description:
-      'The valuation difference between open position entry costs and the latest mark price. Reflects unrealized equity change.',
+      'When part of an open position is sold, the profit or loss on the part sold is realized and counted here. The part still held adds nothing until it is sold.',
     example:
-      'Holding 50 shares bought at $100.00 currently marked at $104.00 contributes +$200.00 in Open Position P&L.',
+      'Sell 4 of 10 shares bought at $100.00 for $110.00 each: +$40.00 realized. The other 6 shares add nothing yet.',
     category: 'waterfall',
     aliases: ['open positions', 'open position pnl', 'open p&l'],
   },
@@ -58,9 +58,9 @@ export const ATTRIBUTION_GLOSSARY: AttributionGlossaryEntry[] = [
     term: 'Net Account P&L',
     short: 'Final reconciled account P&L incorporating trading net, open positions, financing, and fees.',
     description:
-      'The comprehensive portfolio bottom line (total_account_pnl) reconciling closed trading results, open mark-to-market positions, borrow fees, financing costs, and interest income.',
+      "The account's full result (total_account_pnl): trading net P&L, plus realized profit on open positions, less borrow fees and financing interest, plus interest income.",
     example:
-      'Trading Net ($498.00) + Open P&L ($200.00) - Borrow Fees ($1.00) + Interest ($3.00) = Net Account P&L of +$700.00.',
+      'Trading Net $498.00 + realized $40.00 - borrow $1.00 + interest $3.00 = Net Account P&L of +$540.00.',
     category: 'waterfall',
     aliases: ['net account pnl', 'total account pnl', 'account pnl'],
   },
@@ -122,7 +122,7 @@ export const ATTRIBUTION_GLOSSARY: AttributionGlossaryEntry[] = [
     description:
       'Memo line showing bond coupon distributions credited during holding periods, reflected within bond gross trading cash flows.',
     example:
-      'Holding 10 bonds with a 4% annual coupon paid semi-annually generates $200.00 per payment period.',
+      'Holding 10 bonds with a $1,000 face value and a 4% annual coupon paid semi-annually generates $200.00 per payment period.',
     category: 'costs',
     aliases: ['coupons', 'coupon'],
   },

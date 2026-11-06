@@ -21,12 +21,12 @@ const PALETTE = ['#22D3EE', '#38BDF8', '#818CF8', '#34D399', '#F472B6', '#FBBF24
 
 type SortKey = 'symbol' | 'quantity' | 'price' | 'volatility' | 'value' | 'weight';
 
-/** HHI bands on the 0–10,000 scale used in antitrust practice (DOJ/FTC 2023 guidelines). */
+/** Portfolio concentration bands (financial asset diversification). */
 function hhiBand(hhi: number) {
   const pts = hhi * 10_000;
-  if (pts > 1800) return { label: 'Highly concentrated', tone: 'loss' as const };
-  if (pts >= 1000) return { label: 'Moderately concentrated', tone: 'caution' as const };
-  return { label: 'Unconcentrated', tone: 'profit' as const };
+  if (pts > 4000) return { label: 'Highly concentrated', tone: 'loss' as const };
+  if (pts >= 1800) return { label: 'Moderately concentrated', tone: 'caution' as const };
+  return { label: 'Well diversified', tone: 'profit' as const };
 }
 
 function NumberCell({ value, onCommit, placeholder, decimals, className }: { value: number | undefined; onCommit: (v: number | undefined) => boolean; placeholder?: string; decimals?: number; className?: string }) {

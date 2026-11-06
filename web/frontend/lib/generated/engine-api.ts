@@ -8692,7 +8692,7 @@ export interface operations {
                 /** @description The run's id. */
                 run_id: string;
                 /** @description Only reports of this type: `validation`, `tear_sheet` or `gap`. */
-                report_type: string | null;
+                report_type?: string;
             };
             header?: never;
             path?: never;

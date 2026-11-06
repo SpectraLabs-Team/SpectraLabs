@@ -4230,14 +4230,11 @@
           },
           {
             "name": "report_type",
-            "in": "path",
+            "in": "query",
             "description": "Only reports of this type: `validation`, `tear_sheet` or `gap`.",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],

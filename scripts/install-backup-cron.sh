@@ -15,7 +15,7 @@
 # 5. Runs an initial backup verification pass to ensure .dump and .sha256 verify.
 # 6. Runs scripts/check-backup-freshness.sh to confirm green monitoring status.
 #
-# Keep settings default to 14 daily, 90 weekly (pending owner sign-off on M28 Decision 1).
+# Keep settings default to 14 daily, 90 weekly (approved per M28 Decision 1).
 set -euo pipefail
 
 out_dir="${1:-/var/backups/spectra}"

@@ -1,4 +1,4 @@
-import type { WorkspaceAttribution } from './attribution';
+import type { Attribution, WorkspaceAttribution } from './attribution';
 import type {
   BenchmarkResult,
   CpuTelemetry,
@@ -282,6 +282,10 @@ export const getPaperAccount = (strategy_id: string, initial_cash?: number) => {
   const query = initial_cash ? `?strategy_id=${encodeURIComponent(strategy_id)}&initial_cash=${initial_cash}` : `?strategy_id=${encodeURIComponent(strategy_id)}`;
   return get<PaperAccountView>(`/api/v1/paper/account${query}`);
 };
+
+/** P&L attribution of one paper strategy, replayed from its fills since the account started (M11 Task 2). */
+export const getPaperAttribution = (strategy_id: string) =>
+  get<Attribution>(`/api/v1/paper/attribution?strategy_id=${encodeURIComponent(strategy_id)}`);
 
 /** The signed-in user's Paper Lab strategy id in the active workspace (M11 Task 2). */
 export const getPaperLabStrategy = () => get<{ strategy_id: string }>('/api/v1/paper/strategy');

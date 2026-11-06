@@ -707,6 +707,58 @@ async fn workspace_paper_attribution_combines_every_strategy() {
 }
 
 #[tokio::test]
+async fn paper_attribution_date_range_limits_the_fills() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["AAPL"]).await;
+    let path = format!("/api/v1/paper/attribution?strategy_id={}", f.strategy);
+
+    // Round trip 1 wins (buy 10 at 100, sell 10 at 110); round trip 2 loses (buy 5 at 100, sell at 90).
+    async fn trade(f: &TestFixture, side: &str, price: f64, qty: f64) {
+        let v =
+            common::seed_dataset_with_latest_closes(&f.pool, f.ws, &f.dir.join("data"), &[("AAPL", price)])
+                .await;
+        let order = json!({
+            "strategy_id": f.strategy, "symbol": "AAPL", "side": side, "order_type": "market",
+            "qty": qty, "fill_price": price, "fill_now": true, "dataset_version_id": v
+        });
+        let (status, body) = call(f, "POST", "/api/v1/paper/orders", &order).await;
+        assert_eq!(status, 201, "{body}");
+    }
+    trade(&f, "buy", 100.0, 10.0).await;
+    trade(&f, "sell", 110.0, 10.0).await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let mid = chrono::Utc::now();
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    trade(&f, "buy", 100.0, 5.0).await;
+    trade(&f, "sell", 90.0, 5.0).await;
+
+    // Both round trips with no window.
+    let (status, all) = call(&f, "GET", &path, &Value::Null).await;
+    assert_eq!(status, 200, "{all}");
+    assert_eq!(all["total_trades"], 2, "{all}");
+
+    // From the middle: only the losing round trip.
+    let from = mid.format("%Y-%m-%dT%H:%M:%S%.6fZ");
+    let (status, after) = call(&f, "GET", &format!("{path}&from={from}"), &Value::Null).await;
+    assert_eq!(status, 200, "{after}");
+    assert_eq!(after["total_trades"], 1, "{after}");
+    assert!(after["total_gross_pnl"].as_f64().unwrap() < 0.0, "the later trip loses: {after}");
+
+    // Up to the middle: only the winning round trip.
+    let (status, before) = call(&f, "GET", &format!("{path}&to={from}"), &Value::Null).await;
+    assert_eq!(status, 200, "{before}");
+    assert_eq!(before["total_trades"], 1, "{before}");
+    assert!(before["total_gross_pnl"].as_f64().unwrap() > 0.0, "the earlier trip wins: {before}");
+
+    // A range that ends before it starts is refused.
+    let (status, bad) = call(&f, "GET", &format!("{path}&from={from}&to={from}"), &Value::Null).await;
+    assert_eq!(status, 422, "{bad}");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
 async fn kill_switch_rejection_without_price_is_audited() {
     let Some(pool) = pool().await else { return };
     let f = TestFixture::setup(pool).await;

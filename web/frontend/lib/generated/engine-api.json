@@ -3463,15 +3463,29 @@
             }
           },
           {
-            "name": "initial_cash",
+            "name": "from",
             "in": "path",
+            "description": "Only fills at or after this time (RFC 3339). Earlier than the account's start has no effect.",
             "required": true,
             "schema": {
               "type": [
-                "number",
+                "string",
                 "null"
               ],
-              "format": "double"
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "path",
+            "description": "Only fills before this time (RFC 3339). Must be after `from`.",
+            "required": true,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
             }
           }
         ],
@@ -3496,6 +3510,16 @@
           },
           "404": {
             "description": "No such strategy in this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid query: `from` must be before `to`",
             "content": {
               "application/json": {
                 "schema": {

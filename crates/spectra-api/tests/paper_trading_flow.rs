@@ -759,6 +759,56 @@ async fn paper_attribution_date_range_limits_the_fills() {
 }
 
 #[tokio::test]
+async fn paper_account_reports_the_average_entry_of_open_positions() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["AAPL"]).await;
+    let path = format!("/api/v1/paper/account?strategy_id={}", f.strategy);
+
+    // Two buys at 100 and 110 average to 105 (with 5 bps paper slippage: 105.0525); a partial sell
+    // leaves the average where it was.
+    for (side, price, qty) in [("buy", 100.0, 10.0), ("buy", 110.0, 10.0), ("sell", 130.0, 5.0)] {
+        let v =
+            common::seed_dataset_with_latest_closes(&f.pool, f.ws, &f.dir.join("data"), &[("AAPL", price)])
+                .await;
+        let order = json!({
+            "strategy_id": f.strategy, "symbol": "AAPL", "side": side, "order_type": "market",
+            "qty": qty, "fill_now": true, "dataset_version_id": v
+        });
+        let (status, body) = call(&f, "POST", "/api/v1/paper/orders", &order).await;
+        assert_eq!(status, 201, "{body}");
+    }
+
+    let (status, account) = call(&f, "GET", &path, &Value::Null).await;
+    assert_eq!(status, 200, "{account}");
+    let pos = &account["positions"].as_array().unwrap()[0];
+    assert_eq!(pos["symbol"], "AAPL", "{account}");
+    assert!((pos["avg_entry_price"].as_f64().unwrap() - 105.0525).abs() < 1e-6, "{account}");
+    assert!((pos["cost_basis"].as_f64().unwrap() - 15.0 * 105.0525).abs() < 1e-6, "{account}");
+
+    f.clean_up().await;
+}
+
+#[tokio::test]
+async fn paper_lab_strategy_is_stable_for_a_user_in_a_workspace() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+    let (status, first) = call(&f, "GET", "/api/v1/paper/strategy", &Value::Null).await;
+    assert_eq!(status, 200, "{first}");
+    let (_, second) = call(&f, "GET", "/api/v1/paper/strategy", &Value::Null).await;
+    assert_eq!(
+        first["strategy_id"], second["strategy_id"],
+        "the same user and workspace get the same strategy"
+    );
+    assert_ne!(
+        first["strategy_id"],
+        f.strategy.to_string(),
+        "Paper Lab's strategy is its own, not the fixture's"
+    );
+    f.clean_up().await;
+}
+
+#[tokio::test]
 async fn kill_switch_rejection_without_price_is_audited() {
     let Some(pool) = pool().await else { return };
     let f = TestFixture::setup(pool).await;

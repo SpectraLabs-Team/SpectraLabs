@@ -78,6 +78,18 @@ import {
 } from '@/lib/marketStatus';
 import { useAuth } from '@/lib/auth';
 import {
+  createPaperOrder,
+  getPaperAccount,
+  getPaperLabStrategy,
+  listPaperOrders,
+  resetPaperAccount,
+  syncPaperOrders,
+  type CreatePaperOrderRequest,
+  type PaperAccountView,
+  type PaperOrderView,
+} from '@/lib/api';
+import { orderFromEngine, orderRequest, positionFromEngine, starterOrders } from '@/lib/paperLabEngine';
+import {
   appendSandboxOrder,
   clearSandboxOrders,
   conflictCurrent,
@@ -246,6 +258,8 @@ export function PaperLab() {
   const watchlistSaver = useRef<StateSaver<string[]> | null>(null);
   /** Client order id to server row id, so an update can find the row. */
   const serverOrderIds = useRef<Record<string, string>>({});
+  /** The signed-in user's engine paper strategy (M11 Task 2). Null until the account has loaded. */
+  const [engineStrategyId, setEngineStrategyId] = useState<string | null>(null);
 
   /**
    * Record a sandbox trade on the server, then show it. A trade the server refuses is not shown.
@@ -339,6 +353,97 @@ export function PaperLab() {
     return () => clearInterval(timer);
   }, [selectedSymbol]);
 
+  /** Show an engine account and its orders. The engine is the record for a signed-in user. */
+  const applyEngine = (view: PaperAccountView, orders: PaperOrderView[]) => {
+    const positions = view.positions.map(positionFromEngine);
+    const rows = orders.map(orderFromEngine).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    setSandboxCash(view.cash);
+    setSandboxPositions(positions);
+    setSandboxOrders(rows);
+    writeCache(who, 'sandbox', { cash: view.cash, positions });
+  };
+
+  const refreshEngine = async (strategyId: string) => {
+    try {
+      // Fills pending limit and stop orders that the price has reached. A failed sync leaves them open.
+      await syncPaperOrders(strategyId);
+    } catch {
+      /* the next sync picks them up */
+    }
+    const [view, orders] = await Promise.all([getPaperAccount(strategyId), listPaperOrders(strategyId)]);
+    applyEngine(view, orders);
+  };
+
+  const seedStarterBook = async (strategyId: string) => {
+    for (const req of starterOrders(strategyId)) {
+      try {
+        await createPaperOrder(req);
+      } catch (e) {
+        toastError('Starter book not added', `${req.symbol}: ${e instanceof Error ? e.message : 'the engine refused the fill'}`);
+        return;
+      }
+    }
+  };
+
+  /** Load the signed-in user's engine account, seeding the starter book once. False when it cannot load. */
+  const loadEngineSandbox = async (): Promise<boolean> => {
+    try {
+      const { strategy_id } = await getPaperLabStrategy();
+      setEngineStrategyId(strategy_id);
+      const [view, orders] = await Promise.all([getPaperAccount(strategy_id), listPaperOrders(strategy_id)]);
+      if (orders.length === 0 && view.positions.length === 0) {
+        await seedStarterBook(strategy_id);
+        await refreshEngine(strategy_id);
+      } else {
+        applyEngine(view, orders);
+      }
+      return true;
+    } catch (e) {
+      toastError('Paper account did not load', e instanceof Error ? e.message : 'Try again in a moment.');
+      return false;
+    }
+  };
+
+  /** Place an order on the engine and show the account it leaves. True when the order was placed. */
+  const submitEngineOrder = async (request: CreatePaperOrderRequest, label: string): Promise<boolean> => {
+    if (!engineStrategyId) {
+      toastError('Trade not placed', 'Your paper account has not loaded yet. Try again in a moment.');
+      return false;
+    }
+    try {
+      const placed = await createPaperOrder(request);
+      await refreshEngine(engineStrategyId);
+      if (placed.status === 'rejected') {
+        toastError('Order Rejected', placed.reject_reason || 'The engine rejected this order.');
+        return false;
+      }
+      if (placed.status === 'filled') {
+        success(`Order Filled · ${label}`, `Executed at ${formatCurrency(placed.filled_avg_price ?? 0)}`);
+      } else {
+        success('Order Placed', `${label} is waiting for its price.`);
+      }
+      return true;
+    } catch (e) {
+      toastError('Trade not placed', e instanceof Error ? e.message : 'The trade could not be placed. Try again.');
+      return false;
+    }
+  };
+
+  const resetEngineAccount = async () => {
+    if (!engineStrategyId) {
+      toastError('Reset not saved', 'Your paper account has not loaded yet. Try again in a moment.');
+      return;
+    }
+    try {
+      await resetPaperAccount(engineStrategyId, DEFAULT_SANDBOX.cash);
+      await seedStarterBook(engineStrategyId);
+      await refreshEngine(engineStrategyId);
+      info('Sandbox Reset', 'Restored the $100,000 cash balance and the starter book.');
+    } catch (e) {
+      toastError('Reset not saved', e instanceof Error ? e.message : 'The reset could not be saved. Try again.');
+    }
+  };
+
   // Load sandbox, orders and watchlist from the server. The browser copy paints first and is never the record.
   useEffect(() => {
     let alive = true;
@@ -370,8 +475,13 @@ export function PaperLab() {
         const st = await getUserState();
         if (!alive) return;
 
+        const engineOn = await loadEngineSandbox();
+        if (!alive) return;
+
         const sb = st.state.sandbox as StateEntry<SandboxValue>;
-        if (sb.version === 0) {
+        if (engineOn) {
+          // The engine account is the record for a signed-in user; the user-state sandbox is not read.
+        } else if (sb.version === 0) {
           // First sync for this account: seed the demo book so every device starts from it.
           const seeded: SandboxValue = { cash: DEFAULT_SANDBOX.cash, positions: DEFAULT_SANDBOX.positions };
           const saved = await putUserState('sandbox', 0, seeded);
@@ -760,6 +870,10 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
   // Reset Sandbox state
   const handleResetSandbox = () => {
     if (!confirm('Reset Sandbox to default $100,000 cash balance and starter positions?')) return;
+    if (email) {
+      void resetEngineAccount();
+      return;
+    }
     setSandboxCash(DEFAULT_SANDBOX.cash);
     setSandboxPositions(DEFAULT_SANDBOX.positions);
     setSandboxOrders(DEFAULT_SANDBOX.orders);
@@ -921,6 +1035,33 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     setSubmittingOrder(true);
     setConfirmModalOpen(false);
 
+    if (tradingMode === 'sandbox' && email) {
+      if (orderType === 'stop_limit') {
+        toastError('Not on the engine yet', 'Stop-limit orders are not available in Paper Lab yet. Use a market, limit, or stop order.');
+        setSubmittingOrder(false);
+        return;
+      }
+      let request: CreatePaperOrderRequest;
+      try {
+        request = orderRequest({
+          strategyId: engineStrategyId ?? '',
+          symbol: selectedSymbol,
+          side: orderSide,
+          type: orderType,
+          qty: qtyNum,
+          limitPrice: limitPx,
+          stopPrice: stopPx,
+        });
+      } catch (e) {
+        toastError('Invalid Order Size', e instanceof Error ? e.message : 'Please specify a positive quantity.');
+        setSubmittingOrder(false);
+        return;
+      }
+      await submitEngineOrder(request, `${orderSide.toUpperCase()} ${qtyNum} ${selectedSymbol}`);
+      setSubmittingOrder(false);
+      return;
+    }
+
     if (tradingMode === 'sandbox') {
       try {
         const slippageMultiplier = orderSide === 'buy' ? 1 + (slippageBps / 10000) : 1 - (slippageBps / 10000);
@@ -1073,6 +1214,14 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
     const closeSide = pos.side === 'long' ? 'sell' : 'buy';
     const closeQty = Math.abs(parseFloat(pos.qty));
     if (!confirm(`Submit market order to ${closeSide.toUpperCase()} ${closeQty} ${pos.symbol} to close position?`)) {
+      return;
+    }
+
+    if (tradingMode === 'sandbox' && email) {
+      await submitEngineOrder(
+        { strategy_id: engineStrategyId ?? '', symbol: pos.symbol, side: closeSide, order_type: 'market', qty: closeQty, fill_now: true },
+        `Close ${closeQty} ${pos.symbol}`,
+      );
       return;
     }
 

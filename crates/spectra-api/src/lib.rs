@@ -1027,6 +1027,7 @@ fn paper_routes() -> Router<AppState> {
         .route("/api/v1/paper/gap/analyze", only(post(gap_api::handle_analyze_gap)))
         .route("/api/v1/paper/gap/reports", only(get(gap_api::handle_list_gap_reports)))
         .route("/api/v1/paper/gap/reports/{id}", only(get(gap_api::handle_get_gap_report)))
+        .route("/api/v1/paper/gap/reports/{id}/export", only(get(gap_api::handle_export_gap_report)))
 }
 
 /// Module 16: versioned reports.

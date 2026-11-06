@@ -101,7 +101,7 @@ impl GapAlertStatus {
 }
 
 /// Configurable thresholds for alerting.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GapThresholds {
     /// Maximum acceptable slippage drift in basis points.
     pub max_slippage_drift_bps: f64,
@@ -153,6 +153,7 @@ pub struct GapReport {
     pub matched_trades: Vec<MatchedTradeGap>,
     pub attribution: GapAttribution,
     pub metrics: GapMetrics,
+    pub thresholds: GapThresholds,
     pub alert_status: GapAlertStatus,
     pub alerts: Vec<GapAlert>,
 }
@@ -214,6 +215,14 @@ impl GapReport {
                     .with("matched_trades", num(self.metrics.matched_trades as f64))
                     .with("unmatched_paper_trades", num(self.metrics.unmatched_paper_trades as f64))
                     .with("unmatched_backtest_trades", num(self.metrics.unmatched_backtest_trades as f64)),
+            )
+            .with(
+                "thresholds",
+                Json::object()
+                    .with("max_slippage_drift_bps", num(self.thresholds.max_slippage_drift_bps))
+                    .with("max_timing_latency_ms", num(self.thresholds.max_timing_latency_ms))
+                    .with("max_tracking_error_pct", num(self.thresholds.max_tracking_error_pct))
+                    .with("min_fill_ratio", num(self.thresholds.min_fill_ratio)),
             )
             .with("alert_status", Json::string(self.alert_status.as_str()))
             .with("alerts", Json::Array(alerts_arr))
@@ -450,6 +459,7 @@ pub fn compute_backtest_to_paper_gap(
             unmatched_paper_trades: unmatched_paper_count,
             unmatched_backtest_trades: unmatched_bt_count,
         },
+        thresholds: thresholds.clone(),
         alert_status: status,
         alerts,
     }
@@ -561,5 +571,103 @@ mod tests {
         let json = report.to_json();
         assert!(json.dump().contains("attribution"));
         assert!(json.dump().contains("slippage_drift_exceeded"));
+        assert!(json.dump().contains("thresholds"));
+    }
+
+    #[test]
+    fn parity_fixture_asserts_each_attribution_bucket() {
+        // Fixed backtest and paper pair with known, deterministic gaps:
+        // 1. Matched trade (AAPL buy 100 shares):
+        //    - fee delta = 3.0 - 1.0 = 2.0 (cost_gap)
+        //    - slippage delta = 12.0 - 2.0 = 10.0 bps => 100 * 150.0 * 0.0010 = 15.0 (slippage_gap)
+        //    - price delta = 0.50 => total price effect = 50.0, delay component = 50.0 - 15.0 = 35.0 (timing_delay_gap)
+        // 2. Unmatched backtest trade (MSFT buy 50 shares @ 300.0): missed fill in paper => -15000.0
+        // 3. Unmatched paper trade (TSLA buy 10 shares @ 200.0): unexpected fill in paper => +2000.0
+        // Net missed_fills_gap = -13000.0
+        // Total PnL gap = -(2.0 + 15.0 + 35.0) - 13000.0 = -13052.0
+        let paper = vec![
+            PaperFillRecord {
+                symbol: "AAPL".into(),
+                side: GapTradeSide::Buy,
+                qty: 100.0,
+                price: 150.50,
+                timestamp_ns: 250_000_000, // 250 ms latency
+                fee: 3.0,
+                slippage_bps: 12.0,
+                order_id: Some("p-aapl".into()),
+            },
+            PaperFillRecord {
+                symbol: "TSLA".into(),
+                side: GapTradeSide::Buy,
+                qty: 10.0,
+                price: 200.0,
+                timestamp_ns: 200_000_000,
+                fee: 1.0,
+                slippage_bps: 3.0,
+                order_id: Some("p-tsla".into()),
+            },
+        ];
+
+        let backtest = vec![
+            BacktestFillRecord {
+                symbol: "AAPL".into(),
+                side: GapTradeSide::Buy,
+                qty: 100.0,
+                price: 150.0,
+                timestamp_ns: 0,
+                fee: 1.0,
+                slippage_bps: 2.0,
+                bar_price: 150.0,
+                order_id: Some("b-aapl".into()),
+            },
+            BacktestFillRecord {
+                symbol: "MSFT".into(),
+                side: GapTradeSide::Buy,
+                qty: 50.0,
+                price: 300.0,
+                timestamp_ns: 100_000_000,
+                fee: 1.5,
+                slippage_bps: 1.0,
+                bar_price: 300.0,
+                order_id: Some("b-msft".into()),
+            },
+        ];
+
+        let thresholds = GapThresholds {
+            max_slippage_drift_bps: 10.0,
+            max_timing_latency_ms: 1000.0,
+            max_tracking_error_pct: 3.0,
+            min_fill_ratio: 0.95,
+        };
+
+        let report = compute_backtest_to_paper_gap(paper, backtest, &thresholds);
+
+        // 1. Assert each attribution bucket matches exact known fixture values
+        assert_eq!(report.attribution.cost_gap, 2.0, "cost_gap attribution parity");
+        assert_eq!(report.attribution.slippage_gap, 15.0, "slippage_gap attribution parity");
+        assert_eq!(report.attribution.timing_delay_gap, 35.0, "timing_delay_gap attribution parity");
+        assert_eq!(report.attribution.missed_fills_gap, -13000.0, "missed_fills_gap attribution parity");
+        assert_eq!(report.attribution.total_pnl_gap, -13052.0, "total_pnl_gap attribution parity");
+
+        // 2. Assert metrics
+        assert_eq!(report.metrics.matched_trades, 1);
+        assert_eq!(report.metrics.unmatched_paper_trades, 1);
+        assert_eq!(report.metrics.unmatched_backtest_trades, 1);
+        assert_eq!(report.metrics.mean_slippage_drift_bps, 10.0);
+        assert_eq!(report.metrics.mean_timing_latency_ms, 250.0);
+        assert!((report.metrics.fill_ratio - (2.0 / 3.0)).abs() < 1e-12);
+
+        // 3. Assert thresholds are recorded in the report
+        assert_eq!(report.thresholds, thresholds);
+        assert_eq!(report.alert_status, GapAlertStatus::Breach); // fill ratio 66.7% < 95%
+
+        // 4. Assert serialization preserves thresholds and buckets
+        let json_dump = report.to_json().dump();
+        assert!(json_dump.contains(r#""thresholds":{"max_slippage_drift_bps":10,"#));
+        assert!(json_dump.contains(r#""cost_gap":2"#));
+        assert!(json_dump.contains(r#""slippage_gap":15"#));
+        assert!(json_dump.contains(r#""timing_delay_gap":35"#));
+        assert!(json_dump.contains(r#""missed_fills_gap":-13000"#));
+        assert!(json_dump.contains(r#""total_pnl_gap":-13052"#));
     }
 }

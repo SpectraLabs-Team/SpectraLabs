@@ -67,6 +67,7 @@ import { useToast } from '@/components/ui/StudioToast';
 import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import { TradingChart } from './TradingChart';
 import { TradingViewWidget } from './TradingViewWidget';
+import { BacktestToPaperGap } from './BacktestToPaperGap';
 import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 import {
   CURATED_WATCHLIST_ITEMS,
@@ -175,7 +176,7 @@ const DEFAULT_SANDBOX: SandboxState = {
   ],
 };
 
-type BottomTab = 'positions' | 'open-orders' | 'history' | 'performance';
+type BottomTab = 'positions' | 'open-orders' | 'history' | 'performance' | 'gap';
 
 export function PaperLab() {
   const { success, error: toastError, info } = useToast();
@@ -2238,6 +2239,18 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
           >
             Portfolio Metrics
           </button>
+          <button
+            type="button"
+            onClick={() => setBottomTab('gap')}
+            className={cn(
+              'rounded-xl px-3 py-1.5 text-xs font-semibold transition',
+              bottomTab === 'gap'
+                ? 'bg-cyan-500/20 text-accent border border-cyan-500/30'
+                : 'text-ink/55 hover:bg-ink/[0.04] hover:text-ink'
+            )}
+          >
+            Execution Gap
+          </button>
         </div>
 
         {/* Tab 1: Current Positions */}
@@ -2551,6 +2564,13 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
                 <span className="font-mono text-ink">{account?.currency || 'USD'}</span>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Tab 5: Backtest-to-Paper Gap Analysis (M10) */}
+        {bottomTab === 'gap' && (
+          <div className="mt-4">
+            <BacktestToPaperGap readOnly />
           </div>
         )}
       </div>

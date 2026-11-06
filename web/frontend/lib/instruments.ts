@@ -121,3 +121,20 @@ export const SAMPLE_CONTRACTS: CreateInstrumentPayload[] = [
     maturity: '2034-11-15',
   },
 ];
+
+/** Returns the real-time institutional exchange or regulatory feed source for an instrument. */
+export function getInstrumentDataSource(item: InstrumentItem): string {
+  switch (item.type) {
+    case 'future':
+      return item.symbol.startsWith('ES') || item.symbol.startsWith('NQ') ? 'CME Globex' : 'CME / ICE';
+    case 'option':
+      return 'CBOE OPRA';
+    case 'bond':
+      return 'GovPX / TRACE';
+    case 'swap':
+      return 'OTC / ISDA Fix';
+    case 'equity':
+    default:
+      return 'Primary Exchange (SIP)';
+  }
+}

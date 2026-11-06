@@ -131,7 +131,7 @@ function PasswordInput({
   // getModifierState reports the real Caps Lock state on every key event, including Caps Lock itself.
   const readCaps = (e: KeyboardEvent<HTMLInputElement>) => setCaps(e.getModifierState?.('CapsLock') ?? false);
   return (
-    <>
+    <div className="relative w-full">
       <input
         id={id}
         type={show ? 'text' : 'password'}
@@ -166,7 +166,7 @@ function PasswordInput({
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
       </button>
-    </>
+    </div>
   );
 }
 

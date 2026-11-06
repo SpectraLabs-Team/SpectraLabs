@@ -43,7 +43,7 @@ export function PresetMenu({ onSelect }: { onSelect: (id: string) => void }) {
         <Layers className="h-3.5 w-3.5" /> Presets <ChevronDown className={cn('h-3 w-3 transition-transform', open && 'rotate-180')} />
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 z-30 mt-2 w-[min(340px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-ink/10 bg-panel shadow-panel">
+        <div role="menu" className="absolute right-0 z-30 mt-2 max-h-[min(480px,calc(100vh-140px))] w-[min(340px,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-ink/10 bg-panel shadow-panel">
           <p className="border-b border-ink/[0.06] px-3.5 py-2 font-mono text-[10px] uppercase tracking-[0.16em] text-ink/45">Institutional books · illustrative prices</p>
           {PRESETS.map((p) => (
             <button

@@ -1,6 +1,8 @@
 //! Tests for spectra-backtest: configuration as data, the built-in strategy
 //! registry, requests, and result serialization.
 
+mod attribution_check;
+
 use std::collections::BTreeSet;
 
 use spectra_backtest::*;
@@ -481,6 +483,7 @@ fn artifacts_have_one_row_per_record() {
 fn summary_has_metrics_fingerprints_and_trades() {
     let out = sample_output();
     let s = summary_json(&out).unwrap();
+    attribution_check::assert_attribution_reconciles(&out, &s);
     let s = Json::parse(&s.dump()).unwrap(); // survives serialization
     assert_eq!(s.find("schema").unwrap().as_str().unwrap(), SUMMARY_SCHEMA);
     let run = s.find("run").unwrap();

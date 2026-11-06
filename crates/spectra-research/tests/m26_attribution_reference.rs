@@ -5,7 +5,8 @@
 //! a financing charge of 20 (negative interest). Expected values are the sums
 //! the doc describes (`docs/models/research-modules.md`), worked by hand:
 //! gross = (160 - 150) * 100 = 1,000; fees = 10; net = 990; notional = 15,000 + 16,000
-//! = 31,000; slippage cost = 31,000 * 10 / 10,000 = 31; financing = 20.
+//! = 31,000; slippage cost = 31,000 * 10 / 10,000 = 31 (a memo line: already in the fill
+//! prices); financing = 20. The bridge reconciliation is tested in `m11_attribution_totals.rs`.
 //!
 //! Not covered here: positive interest income is dropped (a documented defect,
 //! task 8), and an unknown slippage defaults to zero (task 8). Neither is encoded.
@@ -68,7 +69,9 @@ fn costs_are_commission_slippage_and_financing() {
     // Notional 15,000 + 16,000 = 31,000 at 10 bps.
     close(a.costs.slippage_costs, 31.0, "slippage");
     close(a.costs.financing_interest, 20.0, "financing (absolute)");
-    close(a.costs.total_costs, 61.0, "total costs");
+    // Costs charged: commission 10 + financing 20. Slippage (31) is already in the fill prices,
+    // so it is a memo line and not in the total (M11 Task 3, 6 Nov 2026; was 61).
+    close(a.costs.total_costs, 30.0, "total costs");
 }
 
 #[test]

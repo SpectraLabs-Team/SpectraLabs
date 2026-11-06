@@ -46,10 +46,40 @@ must be tested against the parity golden, not against an independent value).
 Breaks P&L into components from the ledger journal:
 - Fees: sum of fill fees.
 - Borrow fees: sum of borrow entries.
-- Financing: sum of **negative** interest entries only.
-- Dividends and coupons: sums of their entries.
-- Slippage cost = total notional × (slippage bps / 10,000).
-- Per-instrument and per-direction aggregation of gross, fees, net, win and loss counts.
+- Financing: sum of **negative** interest entries only; interest income: sum of positive ones.
+- Dividends and coupons: sums of their entries (memo lines: they are already in trade gross).
+- Slippage cost = total notional × (slippage bps / 10,000). A memo line: fill prices already
+  include slippage, so it is not in `total_costs` or the waterfall.
+- `total_costs` = commissions + borrow fees + financing interest (costs charged).
+- Per-instrument and per-direction aggregation of gross, fees, net, win and loss counts (closed
+  trades).
+
+**Waterfall (M11 Task 3, decided by the product owner 6 Nov 2026).** A two-stage bridge, summed
+in fixed point so both identities are exact:
+
+```
+Gross Trading P&L                     (closed trades: price P&L + dividends + coupons while held)
+− Fees on Closed Trades
+= Trading Net P&L                     = total_net_pnl
++ Open Positions (Realized So Far)    (partial closes, dividends, coupons on open positions, less their fees)
+− Borrow Fees
+− Financing Interest
++ Interest Income
+= Net Account P&L                     = total_account_pnl
+```
+
+Zero steps are left out; the start and the two subtotals (`subtotal: true`) are always there.
+Unrealized P&L is in neither total. `total_account_pnl` equals the journal's realized P&L:
+fills' and expiries' realized P&L, plus dividends, coupons and interest, less fees and borrow
+fees.
+
+**Divergence (M11 Task 3):** the old bridge started from closed-trade gross but then subtracted
+every fill's fee (open positions too), subtracted the slippage estimate (already in prices),
+added dividends and coupons a second time, and left out interest income. Its last line did not
+equal `total_net_pnl`: in the M26 reference scenario it ended at 939 against a net of 990.
+`total_costs` there drops from 61 to 30 (slippage no longer counted). Tests:
+`crates/spectra-research/tests/m11_attribution_totals.rs` (13, including 300 random ledgers),
+and the backtest summaries of the futures, bonds, options, corporate-actions and service tests.
 
 **Known problems (task 8, plus a check):**
 1. **Unknown slippage defaults to zero.** `slippage_bps.unwrap_or(0.0)` (`attribution.rs`): a
@@ -98,6 +128,6 @@ Covered in `statistics.md`: the trial Sharpe variance used by DSR (sample varian
 - Bootstrap: fixed seed gives the same output across runs; L = 1 reproduces i.i.d. resampling
   statistics; invalid inputs return `valid = false`.
 - Attribution: components sum to total P&L on a ledger with fees, borrow, dividends and interest
-  income; unknown slippage is an error (task 8).
+  income (done in M11 Task 3); unknown slippage is an error (task 8, done in #206).
 - Gap: each threshold fires exactly at its boundary.
 - Survival: each component's verdict on a fixed case with a known answer.

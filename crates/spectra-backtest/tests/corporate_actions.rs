@@ -2,6 +2,8 @@
 //! paths, resolving symbols against the dataset, the summary's dividend and
 //! action counts, and trades that span a split.
 
+mod attribution_check;
+
 use spectra_backtest::*;
 use spectra_core::{Bar, Json, Money, Price, Qty, Side, SCALE};
 use spectra_engine::{run_backtest_with_actions, Context, CorporateAction, RunControl, Strategy};
@@ -117,6 +119,7 @@ fn a_run_resolves_symbols_and_reports_dividends() {
     assert_eq!(r.ledger.dividends(), spectra_core::notional(Price::from_f64(0.5).unwrap(), held).unwrap());
 
     let summary = summary_json(&out).unwrap();
+    attribution_check::assert_attribution_reconciles(&out, &summary);
     let activity = summary.find("activity").unwrap();
     assert_eq!(activity.find("corporate_actions_applied").unwrap().as_int().unwrap(), 2);
     assert_eq!(activity.find("dividends").unwrap().as_str().unwrap(), r.ledger.dividends().to_string());

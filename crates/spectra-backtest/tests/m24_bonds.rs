@@ -1,6 +1,8 @@
 //! M24.3 bonds: accrued interest at the fill, coupons, redemption at par,
 //! clean and dirty quotes, and what the run records.
 
+mod attribution_check;
+
 use spectra_backtest::{run_request_on, summary_json, BacktestRequest};
 use spectra_core::{
     Bar, DayCount, EntryType, Instrument, InstrumentType, Json, Money, Price, Qty, Ratio, Reject, Side,
@@ -147,6 +149,7 @@ fn the_summary_reports_yield_and_risk() {
     let out = run_request_on(&bars(200, 98.0), &["UST".into()], &request(&doc), &mut RunControl::default())
         .unwrap();
     let s = summary_json(&out).unwrap();
+    attribution_check::assert_attribution_reconciles(&out, &s);
     let b = s.at("bonds").unwrap();
     assert_eq!(b.at("quote").unwrap().as_str().unwrap(), "clean");
     let first = &b.at("bonds").unwrap().items().unwrap()[0];

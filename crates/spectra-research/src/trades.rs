@@ -47,6 +47,11 @@ pub struct TradeExtraction {
     pub trades: Vec<Trade>,
     /// Instruments still holding a position at the end.
     pub open_positions: usize,
+    /// Realized P&L so far on positions still open, before fees: partial closes, dividends and
+    /// coupons booked since each position opened. Not in any closed trade.
+    pub open_gross: Money,
+    /// Fees paid on the fills of positions still open. Not in any closed trade.
+    pub open_fees: Money,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -120,6 +125,10 @@ pub fn extract_trades(ledger: &Ledger) -> Result<TradeExtraction> {
         }
     }
     out.open_positions = state.values().filter(|s| !s.qty.is_zero()).count();
+    for s in state.values() {
+        out.open_gross = out.open_gross.checked_add(s.gross)?;
+        out.open_fees = out.open_fees.checked_add(s.fees)?;
+    }
     Ok(out)
 }
 

@@ -581,9 +581,12 @@ async fn paper_attribution_comes_from_fills_and_restarts_after_reset() {
     // One round trip: buy 10 at 100, sell 10 at 110.
     let mut fills = Vec::new();
     for (side, price) in [("buy", 100.0), ("sell", 110.0)] {
+        let v =
+            common::seed_dataset_with_latest_closes(&f.pool, f.ws, &f.dir.join("data"), &[("AAPL", price)])
+                .await;
         let order = json!({
             "strategy_id": f.strategy, "symbol": "AAPL", "side": side, "order_type": "market",
-            "qty": 10.0, "fill_price": price, "fill_now": true
+            "qty": 10.0, "fill_price": price, "fill_now": true, "dataset_version_id": v
         });
         let (status, body) = call(&f, "POST", "/api/v1/paper/orders", &order).await;
         assert_eq!(status, 201, "{body}");

@@ -86,3 +86,91 @@ pub async fn seed_volatility_dataset(pool: &PgPool, ws: Uuid, data_dir: &Path, s
     .expect("register dataset version");
     version.id
 }
+
+/// Stores a dataset with [`SEEDED_BARS`] daily bars for each of `symbols_with_closes` in `data_dir`
+/// and registers it as the workspace's latest dataset version. The final bar for each symbol has
+/// `final_close`. Creates the workspace row if it does not exist. Returns the version id.
+pub async fn seed_dataset_with_latest_closes(
+    pool: &PgPool,
+    ws: Uuid,
+    data_dir: &Path,
+    symbols_with_closes: &[(&str, f64)],
+) -> Uuid {
+    sqlx::query("INSERT INTO workspaces (id, slug, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+        .bind(ws)
+        .bind(format!("ws-{}", ws.simple()))
+        .bind("Test Workspace")
+        .execute(pool)
+        .await
+        .expect("insert workspace");
+
+    let mut symbols: Vec<&str> = symbols_with_closes.iter().map(|&(s, _)| s).collect();
+    symbols.sort_unstable();
+    symbols.dedup();
+    let symbol_table = SymbolTable::from_symbols(symbols.iter().copied());
+    let n_symbols = symbol_table.symbols.len();
+
+    let day_ns: i64 = 86_400_000_000_000;
+    let start_ns: i64 = 1_704_153_600_000_000_000; // 2024-01-02
+    let mut bars = Vec::with_capacity(SEEDED_BARS * n_symbols);
+    for i in 0..SEEDED_BARS {
+        let ts_ns = start_ns + i64::try_from(i).expect("bar index fits i64") * day_ns;
+        for &(sym, final_close) in symbols_with_closes {
+            let inst = symbol_table.id(sym).unwrap();
+            let c = if i == SEEDED_BARS - 1 {
+                final_close
+            } else if i % 2 == 0 {
+                final_close * 0.99
+            } else {
+                final_close * 1.01
+            };
+            bars.push(Bar {
+                ts_ns,
+                known_at_ns: ts_ns,
+                instrument: inst,
+                open: Price::from_f64(c).unwrap(),
+                high: Price::from_f64(c * 1.01).unwrap(),
+                low: Price::from_f64(c * 0.99).unwrap(),
+                close: Price::from_f64(c).unwrap(),
+                volume: Qty::from_units(10_000).unwrap(),
+            });
+        }
+    }
+    bars.sort_by_key(|b| (b.ts_ns, b.instrument));
+
+    let id = compute_dataset_id(&bars, &symbol_table);
+    let dataset = Dataset {
+        info: DatasetInfo { id, bars_sha256: spectra_core::bars_sha256(&bars), ..DatasetInfo::default() },
+        quality: spectra_data::dataset::assess_quality(
+            &bars,
+            &symbol_table,
+            &spectra_data::CsvOptions::default(),
+        ),
+        bars,
+        symbols: symbol_table,
+    };
+    let byte_size =
+        i64::try_from(spectra_data::datastore::encode_dataset(&dataset).len()).expect("size fits i64");
+    let checksum = DataStore::new(data_dir.to_path_buf())
+        .expect("open data store")
+        .put(&dataset)
+        .expect("store dataset");
+
+    let version = spectra_db::datasets::register_version(
+        pool,
+        &spectra_db::datasets::NewDatasetVersion {
+            workspace_id: ws,
+            dataset_name: "Pricing fixture",
+            checksum: &checksum,
+            row_count: i64::try_from(dataset.bars.len()).expect("row count fits i64"),
+            byte_size,
+            quality_report: serde_json::json!({}),
+            created_by: None,
+            blob_sha256: None,
+            source: None,
+        },
+    )
+    .await
+    .expect("register dataset version");
+    version.id
+}

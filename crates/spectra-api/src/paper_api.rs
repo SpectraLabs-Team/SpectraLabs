@@ -784,15 +784,28 @@ pub(crate) async fn create_order(
         return json_response(422, json!(PaperOrderView::from(order)).to_string());
     }
 
-    let Some(eval_price) = req.fill_price.or(req.limit_price).or(current_sym_price) else {
-        return error_response(422, "Order price could not be determined.");
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+    let eval_price = if order_type_str == "market" {
+        match crate::dataset_prices::latest_prices(&pool, ws, data_dir, req.dataset_version_id, &[&symbol])
+            .await
+        {
+            Ok(prices) => match prices.get(&symbol) {
+                Some(&p) => p,
+                None => return error_response(422, format!("no bars for {symbol}")),
+            },
+            Err(e) => return error_response(422, e),
+        }
+    } else {
+        let Some(p) = req.fill_price.or(req.limit_price).or(current_sym_price) else {
+            return error_response(422, "Order price could not be determined.");
+        };
+        p
     };
     if eval_price <= 0.0 || !eval_price.is_finite() {
         return error_response(422, format!("Non-positive or non-finite order price: {eval_price}"));
     }
-
-    let default_dir = std::path::PathBuf::from("data");
-    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
 
     let mut syms_to_lookup = vec![symbol.as_str()];
     for p in &account.positions {

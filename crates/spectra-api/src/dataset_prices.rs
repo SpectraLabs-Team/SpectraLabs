@@ -13,7 +13,6 @@ use uuid::Uuid;
 ///
 /// # Errors
 /// Returns an error if any requested symbol has no bars in the dataset.
-#[allow(dead_code)]
 pub fn latest_closes(
     dataset: &spectra_data::Dataset,
     symbols: &[&str],
@@ -47,7 +46,6 @@ pub fn latest_closes(
 /// # Errors
 /// Returns an error if the dataset version cannot be resolved, is sealed in holdout, fails to
 /// load, or if any requested symbol has no bars in the dataset.
-#[allow(dead_code)]
 pub async fn latest_prices(
     pool: &spectra_db::PgPool,
     ws: Uuid,

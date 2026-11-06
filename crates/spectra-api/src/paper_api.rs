@@ -77,6 +77,16 @@ pub(crate) struct PaperAccountQuery {
     pub initial_cash: Option<f64>,
 }
 
+/// Query for the paper attribution: the strategy, and an optional time window over its fills.
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+pub(crate) struct PaperAttributionQuery {
+    pub strategy_id: Uuid,
+    /// Only fills at or after this time (RFC 3339). Earlier than the account's start has no effect.
+    pub from: Option<DateTime<Utc>>,
+    /// Only fills before this time (RFC 3339). Must be after `from`.
+    pub to: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub(crate) struct ResetPaperAccountRequest {
     pub strategy_id: Uuid,
@@ -450,17 +460,18 @@ pub(crate) async fn get_account(
     get,
     path = "/api/v1/paper/attribution",
     tag = "paper",
-    params(PaperAccountQuery),
+    params(PaperAttributionQuery),
     responses(
         (status = 200, description = "Paper trading P&L attribution", body = serde_json::Value),
         (status = 400, description = "The account has no workspace (code `no_workspace`)", body = crate::openapi::ErrorDoc),
         (status = 404, description = "No such strategy in this workspace", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "Invalid query: `from` must be before `to`", body = crate::openapi::ErrorDoc),
     )
 )]
 pub(crate) async fn get_paper_attribution(
     State(st): State<AppState>,
     Extension(identity): Extension<Identity>,
-    query: Result<Query<PaperAccountQuery>, QueryRejection>,
+    query: Result<Query<PaperAttributionQuery>, QueryRejection>,
 ) -> Response {
     let (pool, ws) = match context(&st, &identity) {
         Ok(c) => c,
@@ -469,6 +480,11 @@ pub(crate) async fn get_paper_attribution(
     let Ok(Query(q)) = query else {
         return error_response(422, "Invalid query parameters.");
     };
+    if let (Some(from), Some(to)) = (q.from, q.to) {
+        if from >= to {
+            return error_response(422, "`from` must be before `to`.");
+        }
+    }
 
     // A read: attribution never creates a strategy or an account. A strategy that is not in the
     // signed workspace is a 404, like any other workspace's data (M11 Decision 4).
@@ -484,9 +500,12 @@ pub(crate) async fn get_paper_attribution(
     };
     // Only fills since the start of the current account count: a reset keeps old fills. A
     // strategy with no account yet has no fills, so its breakdown is empty.
+    // The window opens at the later of the account's start and `from`. It replays only the fills
+    // inside it, so positions opened before `from` do not appear in its breakdown.
     let fills = match spectra_db::paper::paper_account_started_at(&pool, ws, q.strategy_id).await {
         Ok(Some(started_at)) => {
-            match spectra_db::paper::list_paper_fills_since(&pool, ws, q.strategy_id, started_at).await {
+            let since = q.from.map_or(started_at, |from| from.max(started_at));
+            match spectra_db::paper::list_paper_fills_between(&pool, ws, q.strategy_id, since, q.to).await {
                 Ok(f) => f,
                 Err(e) => return db_error(&e),
             }
@@ -1659,4 +1678,54 @@ pub(crate) async fn reconcile_paper_positions(
     let creds = crate::providers::vault::resolve_alpaca_credentials(&pool, ws, None, &json!({})).await.ok();
     crate::broker_api::handle_reconcile_positions(&pool, ws, creds.as_ref(), uri.query().unwrap_or_default())
         .await
+}
+
+#[cfg(test)]
+mod attribution_timing_tests {
+    use super::*;
+    use chrono::TimeZone;
+    use std::time::Instant;
+
+    /// `n` fills over `symbols` symbols: each symbol takes round trips (buy then sell), one fill a
+    /// second, oldest first. Prices move so that some trades win and some lose.
+    fn synthetic_fills(n: usize, symbols: &[&str]) -> Vec<PaperFillRow> {
+        let start = Utc.with_ymd_and_hms(2026, 1, 2, 14, 30, 0).unwrap();
+        let workspace_id = Uuid::from_u128(1);
+        let strategy_id = Uuid::from_u128(2);
+        (0..n)
+            .map(|i| {
+                let sym = symbols[(i / 2) % symbols.len()];
+                let side = if i % 2 == 0 { "buy" } else { "sell" };
+                let price = 100.0 + ((i * 37) % 17) as f64 - 8.0 + (i % 5) as f64 * 0.5;
+                PaperFillRow {
+                    id: Uuid::from_u128(1_000_000 + i as u128),
+                    order_id: Uuid::from_u128(2_000_000 + i as u128),
+                    workspace_id,
+                    strategy_id,
+                    symbol: sym.to_string(),
+                    side: side.to_string(),
+                    qty: 10.0,
+                    price,
+                    fee: 1.0,
+                    cost_config: None,
+                    created_at: start + chrono::Duration::seconds(i as i64),
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn replay_of_a_few_thousand_fills_is_fast() {
+        let symbols = ["AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA", "SPY"];
+        let fills = synthetic_fills(5_000, &symbols);
+        let records = HashMap::new();
+
+        let started = Instant::now();
+        let attr = paper_attribution(&fills, &records).expect("attribution");
+        let elapsed = started.elapsed();
+        eprintln!("replayed {} fills in {:?}", fills.len(), elapsed);
+
+        assert_eq!(attr.total_trades, 2_500, "every buy/sell pair closes one trade");
+        assert!(elapsed.as_secs_f64() < 5.0, "5,000 fills took {elapsed:?}; budget is 5 s");
+    }
 }

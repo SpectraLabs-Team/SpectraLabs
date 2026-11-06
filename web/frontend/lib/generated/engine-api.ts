@@ -7952,7 +7952,10 @@ export interface operations {
             header?: never;
             path: {
                 strategy_id: string;
-                initial_cash: number | null;
+                /** @description Only fills at or after this time (RFC 3339). Earlier than the account's start has no effect. */
+                from: string | null;
+                /** @description Only fills before this time (RFC 3339). Must be after `from`. */
+                to: string | null;
             };
             cookie?: never;
         };
@@ -7978,6 +7981,15 @@ export interface operations {
             };
             /** @description No such strategy in this workspace */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid query: `from` must be before `to` */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

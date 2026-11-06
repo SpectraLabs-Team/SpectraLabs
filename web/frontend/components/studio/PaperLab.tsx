@@ -89,7 +89,7 @@ import {
   type PaperOrderView,
 } from '@/lib/api';
 import { orderFromEngine, orderRequest, positionFromEngine, starterOrders } from '@/lib/paperLabEngine';
-import { PaperAttributionPanel } from '@/components/studio/backtests/AttributionCard';
+import { PaperAttributionPanel, WorkspacePaperAttributionPanel } from '@/components/studio/backtests/AttributionCard';
 import {
   appendSandboxOrder,
   clearSandboxOrders,
@@ -1461,6 +1461,9 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
         <PaperAttributionPanel strategyId={engineStrategyId} currency="USD" />
       )}
 
+      {email && tradingMode === 'sandbox' && (
+        <WorkspacePaperAttributionPanel currency="USD" />
+      )}
       {/* Main TradingView-Style 3-Column Dashboard */}
       <div
         className={cn(

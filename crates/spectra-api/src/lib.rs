@@ -68,6 +68,7 @@ pub mod risk_center_api;
 pub mod sessions_api;
 pub mod strategies_api;
 pub mod survival_api;
+pub(crate) mod tear_sheet;
 pub mod telemetry;
 pub mod uploads_api;
 pub mod user_state_api;

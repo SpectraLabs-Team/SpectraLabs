@@ -525,6 +525,18 @@ export const getSeries = (backtestId: string, kind: SeriesKind) =>
 export const getAttribution = (backtestId: string) =>
   request<Attribution>(`/api/v1/backtests/${id(backtestId)}/attribution`, { timeoutMs: 20_000 });
 
+/** M16 Task 6: the tear sheet sections and strategy table, built on the server from the stored summary. */
+export interface TearSheetResponse {
+  sections: {
+    category: string;
+    items: { label: string; value: string; sub?: string; tone?: 'profit' | 'loss' | 'neutral' }[];
+  }[];
+  table?: { title: string; headers: string[]; rows: string[][] };
+}
+
+export const getTearSheet = (backtestId: string) =>
+  request<TearSheetResponse>(`/api/v1/backtests/${id(backtestId)}/tear-sheet`, { timeoutMs: 20_000 });
+
 export const getMonthlyReturns = (backtestId: string) =>
   request<MonthlyReturnsResponse>(`/api/v1/backtests/${id(backtestId)}/monthly-returns`, { timeoutMs: 20_000 });
 

@@ -570,12 +570,10 @@ pub(crate) async fn backtest_tear_sheet_export(
         return error_response(500, "Corrupted summary document.");
     }
     let sheet = crate::tear_sheet::build(&summary);
-    let generated = Utc::now().format("%Y-%m-%d %H:%M UTC").to_string();
     let body = crate::tear_sheet_pdf::render(
         &sheet,
         "Quantitative Strategy Tear-Sheet",
         &format!("Backtest {job_id}"),
-        &generated,
     );
     let report = spectra_db::reports::NewReport {
         report_type: spectra_db::reports::report_type::TEAR_SHEET,

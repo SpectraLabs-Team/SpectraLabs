@@ -127,9 +127,10 @@ impl Writer {
     }
 }
 
-/// Renders the sheet as a PDF. `title`, `subtitle` and `generated` appear on every page header.
-pub fn render(sheet: &TearSheet, title: &str, subtitle: &str, generated: &str) -> Vec<u8> {
-    let mut w = Writer::new(title, &format!("{subtitle}  |  Generated {generated}"));
+/// Renders the sheet as a PDF. `title` and `subtitle` appear on every page header. There is no
+/// generation time in the file, so identical sheets give identical bytes (and reuse a version).
+pub fn render(sheet: &TearSheet, title: &str, subtitle: &str) -> Vec<u8> {
+    let mut w = Writer::new(title, subtitle);
     for section in &sheet.sections {
         w.section(section);
     }
@@ -163,7 +164,6 @@ pub fn render(sheet: &TearSheet, title: &str, subtitle: &str, generated: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tear_sheet::{TearSheetItem, TearSheetSection};
 
     fn sheet(items: usize, rows: usize) -> TearSheet {
         let section = TearSheetSection {
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn renders_a_valid_single_page_pdf() {
-        let out = render(&sheet(4, 2), "Quantitative Strategy Tear-Sheet", "Run X", "2026-11-06 21:00 UTC");
+        let out = render(&sheet(4, 2), "Quantitative Strategy Tear-Sheet", "Run X");
         assert!(out.starts_with(b"%PDF-1.4"));
         assert!(out.ends_with(b"%%EOF\n"));
         let text = String::from_utf8_lossy(&out);
@@ -198,14 +198,9 @@ mod tests {
 
     #[test]
     fn long_tables_break_onto_more_pages() {
-        let out = render(&sheet(4, 80), "Title", "Run", "now");
+        let out = render(&sheet(4, 80), "Title", "Run");
         let text = String::from_utf8_lossy(&out);
         assert!(text.contains("/Count 2") || text.contains("/Count 3"));
-    }
-
-    #[test]
-    fn maps_typographic_characters_to_ascii() {
-        assert_eq!(text("σ 1.00 — −2%"), "sigma 1.00 - -2%");
     }
 
     /// The text the PDF draws, with string escapes undone: every `(...) Tj` operand.
@@ -242,7 +237,7 @@ mod tests {
             ]}
         });
         let sheet = crate::tear_sheet::build(&summary);
-        let pdf = render(&sheet, "Quantitative Strategy Tear-Sheet", "Backtest test", "2026-11-06 21:00 UTC");
+        let pdf = render(&sheet, "Quantitative Strategy Tear-Sheet", "Backtest test");
         let drawn = drawn_text(&pdf);
 
         for section in &sheet.sections {
@@ -271,5 +266,10 @@ mod tests {
                 assert!(drawn.contains(&to_ascii(cell)), "missing table cell {cell}");
             }
         }
+    }
+
+    #[test]
+    fn maps_typographic_characters_to_ascii() {
+        assert_eq!(text("σ 1.00 — −2%"), "sigma 1.00 - -2%");
     }
 }

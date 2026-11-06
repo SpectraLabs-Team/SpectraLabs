@@ -1224,6 +1224,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/strategy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The signed-in user's Paper Lab strategy id in the active workspace. */
+        get: operations["get_paper_lab_strategy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/paper/sync": {
         parameters: {
             query?: never;
@@ -3721,7 +3738,7 @@ export interface components {
             equity: number;
             /** Format: double */
             peak_equity: number;
-            positions: components["schemas"]["PortfolioPositionView"][];
+            positions: components["schemas"]["PaperPositionView"][];
             /** Format: uuid */
             strategy_id: string;
             /** Format: date-time */
@@ -3797,6 +3814,10 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        PaperLabStrategyView: {
+            /** Format: uuid */
+            strategy_id: string;
+        };
         PaperOrderView: {
             /** Format: date-time */
             created_at: string;
@@ -3827,6 +3848,29 @@ export interface components {
             updated_at: string;
             /** Format: uuid */
             workspace_id: string;
+        };
+        /** @description One open position of a paper account, with its cost basis when the fills are known. */
+        PaperPositionView: {
+            /**
+             * Format: double
+             * @description Average price paid for the open quantity; `null` when the fills were not replayed.
+             */
+            avg_entry_price?: number | null;
+            /**
+             * Format: double
+             * @description `qty` times `avg_entry_price`; `null` with it.
+             */
+            cost_basis?: number | null;
+            /**
+             * Format: double
+             * @description Latest price.
+             */
+            price: number;
+            /** Format: double */
+            qty: number;
+            symbol: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         PortfolioBalanceView: {
             /** Format: double */
@@ -8264,6 +8308,35 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_paper_lab_strategy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Paper Lab strategy id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaperLabStrategyView"];
+                };
+            };
+            /** @description The account has no workspace (code `no_workspace`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
             };
         };
     };

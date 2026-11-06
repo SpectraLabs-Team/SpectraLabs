@@ -73,6 +73,7 @@ const CLEAR_POSITIONS_SQL: &str = include_str!("../queries/paper_positions_clear
 const LIST_FILLS_SINCE_SQL: &str = include_str!("../queries/paper_fills_list_since.sql");
 const ACCOUNT_STARTED_AT_SQL: &str = include_str!("../queries/paper_account_started_at.sql");
 const MARK_ACCOUNT_STARTED_SQL: &str = include_str!("../queries/paper_account_mark_started.sql");
+const ACCOUNTS_STARTED_AT_SQL: &str = include_str!("../queries/paper_accounts_started_at.sql");
 
 /// Get the paper account for a strategy, initializing starting balance if it does not exist yet.
 ///
@@ -312,6 +313,17 @@ pub async fn list_paper_fills_since(
         .bind(since)
         .fetch_all(pool)
         .await
+}
+
+/// Every paper account in the workspace: its strategy and when its current account started.
+///
+/// # Errors
+/// Any database error.
+pub async fn list_paper_accounts_started_at(
+    pool: &PgPool,
+    workspace_id: Uuid,
+) -> Result<Vec<(Uuid, DateTime<Utc>)>, Error> {
+    sqlx::query_as(ACCOUNTS_STARTED_AT_SQL).bind(workspace_id).fetch_all(pool).await
 }
 
 /// When the strategy's current paper account started (creation, or the last reset). `None`

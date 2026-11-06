@@ -500,6 +500,57 @@ pub(crate) async fn get_paper_attribution(
     }
 }
 
+/// Portfolio P&L attribution across every paper strategy in the signed workspace (M11 Task 7).
+///
+/// Each account's fills since its current start are attributed as `get_paper_attribution` does,
+/// then the results are summed. Read-only, like the per-strategy route: no account is created.
+#[utoipa::path(
+    get,
+    path = "/api/v1/paper/attribution/workspace",
+    tag = "paper",
+    responses(
+        (status = 200, description = "Combined P&L attribution of every paper strategy in the workspace; `strategy_count` is how many were combined", body = serde_json::Value),
+        (status = 400, description = "The account has no workspace (code `no_workspace`)", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn get_workspace_paper_attribution(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let records = match crate::instruments_api::order_instruments(&pool, ws).await {
+        Ok(r) => r,
+        Err(r) => return r,
+    };
+    let accounts = match spectra_db::paper::list_paper_accounts_started_at(&pool, ws).await {
+        Ok(a) => a,
+        Err(e) => return db_error(&e),
+    };
+    let mut parts = Vec::with_capacity(accounts.len());
+    for (strategy_id, started_at) in &accounts {
+        let fills =
+            match spectra_db::paper::list_paper_fills_since(&pool, ws, *strategy_id, *started_at).await {
+                Ok(f) => f,
+                Err(e) => return db_error(&e),
+            };
+        match paper_attribution(&fills, &records) {
+            Ok(attr) => parts.push(attr),
+            Err(e) => {
+                return error_response(
+                    422,
+                    format!("Failed to compute paper attribution for {strategy_id}: {e}"),
+                )
+            }
+        }
+    }
+    let combined = spectra_research::combine_attributions(&parts);
+    let body = combined.to_json().with("strategy_count", spectra_core::Json::integer(parts.len() as i64));
+    json_response(200, body.dump())
+}
+
 /// The P&L attribution of one paper account's fills (oldest first): the fills are replayed into
 /// a ledger and the backtest attribution runs over it, with the paper slippage rate. As for
 /// backtests, it covers closed trades; positions still open are not in it.

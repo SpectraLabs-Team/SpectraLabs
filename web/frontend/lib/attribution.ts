@@ -67,6 +67,12 @@ export interface Attribution {
   waterfall: AttributionWaterfallStep[];
 }
 
+/** The combined attribution of every paper strategy in a workspace (M11 Task 7). */
+export interface WorkspaceAttribution extends Attribution {
+  /** How many paper strategies were combined. */
+  strategy_count: number;
+}
+
 /** One bar of the waterfall chart, as fractions of the chart's full width (0 to 1). */
 export interface WaterfallBar {
   name: string;

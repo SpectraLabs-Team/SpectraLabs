@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Layers, HelpCircle, BookOpen, X } from 'lucide-react';
-import { ApiError } from '@/lib/api';
+import { ApiError, getWorkspacePaperAttribution } from '@/lib/api';
 import { getAttribution } from '@/lib/backtests';
-import { hasNoFills, sharePct, sortByShare, waterfallBars, type Attribution, type AttributionDirection } from '@/lib/attribution';
+import { hasNoFills, sharePct, sortByShare, waterfallBars, type Attribution, type AttributionDirection, type WorkspaceAttribution } from '@/lib/attribution';
 import { buildWaterfallCsv, buildInstrumentsCsv } from '@/lib/csvExport';
 import { getGlossaryEntry, getAllGlossaryEntries } from '@/lib/attributionGlossary';
 import { GlassCard, Spinner, ErrorNote } from '@/components/ui/primitives';
@@ -12,7 +12,7 @@ import { cn } from '@/lib/utils';
 import { cash, dash, int, pct } from './format';
 
 /** Where the numbers come from, for the panel's caption. Backtests are simulated; paper is a replay of fills. */
-type Source = 'backtest' | 'paper';
+type Source = 'backtest' | 'paper' | 'workspace';
 
 function signedCash(v: number, currency?: string): string {
   const s = cash(Math.abs(v));
@@ -484,7 +484,12 @@ export function AttributionCard({
     setGlossaryOpen(true);
   };
 
-  const caption = source === 'backtest' ? 'Simulated from this backtest’s fills. Not a live result.' : 'Replayed from this account’s fills.';
+  const caption =
+    source === 'backtest'
+      ? 'Simulated from this backtest’s fills. Not a live result.'
+      : source === 'workspace'
+        ? 'Replayed from every paper account’s fills in this workspace.'
+        : 'Replayed from this account’s fills.';
   return (
     <GlassCard as="section" className="overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/[0.06] px-5 py-4">
@@ -513,7 +518,7 @@ export function AttributionCard({
       </div>
       <div className="space-y-6 p-5">
         {hasNoFills(a) ? (
-          <p className="text-[12.5px] text-ink/55">{source === 'paper' ? 'No fills yet, so there is nothing to attribute.' : 'This run has no fills, so there is nothing to attribute.'}</p>
+          <p className="text-[12.5px] text-ink/55">{source === 'backtest' ? 'This run has no fills, so there is nothing to attribute.' : 'No fills yet, so there is nothing to attribute.'}</p>
         ) : (
           <>
             <Waterfall a={a} currency={currency} onOpenGlossary={handleOpenGlossary} />
@@ -561,4 +566,41 @@ export function AttributionPanel({ backtestId, currency }: { backtestId: string;
   }
   if (state.status === 'error') return <ErrorNote>{state.message}</ErrorNote>;
   return <AttributionCard a={state.a} source="backtest" currency={currency} exportId={backtestId} />;
+}
+
+/** Loads the combined attribution of every paper strategy in the workspace (M11 Task 7), with the count of strategies it covers. */
+export function WorkspacePaperAttributionPanel({ currency }: { currency?: string }) {
+  const [state, setState] = useState<{ status: 'loading' } | { status: 'ready'; a: WorkspaceAttribution } | { status: 'error'; message: string }>({ status: 'loading' });
+
+  useEffect(() => {
+    const ctl = new AbortController();
+    getWorkspacePaperAttribution()
+      .then((a) => {
+        if (!ctl.signal.aborted) setState({ status: 'ready', a });
+      })
+      .catch((e) => {
+        if (ctl.signal.aborted) return;
+        const message = e instanceof ApiError && e.status === 404 ? 'No paper strategies to attribute yet.' : e instanceof Error ? e.message : 'Could not load the portfolio attribution.';
+        setState({ status: 'error', message });
+      });
+    return () => ctl.abort();
+  }, []);
+
+  if (state.status === 'loading') {
+    return (
+      <GlassCard as="section" role="status" className="flex items-center gap-2 p-5 text-[12px] text-ink/55">
+        <Spinner className="h-3.5 w-3.5" /> Loading portfolio P&amp;L attribution…
+      </GlassCard>
+    );
+  }
+  if (state.status === 'error') return <ErrorNote>{state.message}</ErrorNote>;
+  const { strategy_count, ...a } = state.a;
+  return (
+    <div className="space-y-2">
+      <p className="text-[12px] text-ink/55">
+        Combined across {strategy_count} paper {strategy_count === 1 ? 'strategy' : 'strategies'}.
+      </p>
+      <AttributionCard a={a} source="workspace" currency={currency} />
+    </div>
+  );
 }

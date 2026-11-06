@@ -629,6 +629,84 @@ async fn paper_attribution_comes_from_fills_and_restarts_after_reset() {
 }
 
 #[tokio::test]
+async fn workspace_paper_attribution_combines_every_strategy() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["AAPL"]).await;
+
+    // A second strategy in the same workspace.
+    let second = spectra_db::new_id();
+    sqlx::query("INSERT INTO strategies (id, workspace_id, name, description) VALUES ($1, $2, $3, 'Second')")
+        .bind(second)
+        .bind(f.ws)
+        .bind(format!("strat-{}", second.simple()))
+        .execute(&f.pool)
+        .await
+        .unwrap();
+
+    // Strategy A wins: buy 10 at 100, sell 10 at 110. Strategy B loses: buy 5 at 100, sell 5 at 90.
+    let round_trips = [
+        (f.strategy, [("buy", 100.0, 10.0), ("sell", 110.0, 10.0)]),
+        (second, [("buy", 100.0, 5.0), ("sell", 90.0, 5.0)]),
+    ];
+    for (strategy, legs) in round_trips {
+        for (side, price, qty) in legs {
+            let v = common::seed_dataset_with_latest_closes(
+                &f.pool,
+                f.ws,
+                &f.dir.join("data"),
+                &[("AAPL", price)],
+            )
+            .await;
+            let order = json!({
+                "strategy_id": strategy, "symbol": "AAPL", "side": side, "order_type": "market",
+                "qty": qty, "fill_price": price, "fill_now": true, "dataset_version_id": v
+            });
+            let (status, body) = call(&f, "POST", "/api/v1/paper/orders", &order).await;
+            assert_eq!(status, 201, "{body}");
+            assert_eq!(body["status"], "filled", "{body}");
+        }
+    }
+
+    let (status_a, attr_a) =
+        call(&f, "GET", &format!("/api/v1/paper/attribution?strategy_id={}", f.strategy), &Value::Null).await;
+    let (status_b, attr_b) =
+        call(&f, "GET", &format!("/api/v1/paper/attribution?strategy_id={second}"), &Value::Null).await;
+    assert_eq!((status_a, status_b), (200, 200), "{attr_a} {attr_b}");
+
+    let (status, w) = call(&f, "GET", "/api/v1/paper/attribution/workspace", &Value::Null).await;
+    assert_eq!(status, 200, "{w}");
+    assert_eq!(w["strategy_count"], 2, "{w}");
+    assert_eq!(w["total_trades"], 2, "{w}");
+    let net = attr_a["total_net_pnl"].as_f64().unwrap() + attr_b["total_net_pnl"].as_f64().unwrap();
+    assert!((w["total_net_pnl"].as_f64().unwrap() - net).abs() < 1e-6, "{w}");
+    let fees = attr_a["total_fees"].as_f64().unwrap() + attr_b["total_fees"].as_f64().unwrap();
+    assert!((w["total_fees"].as_f64().unwrap() - fees).abs() < 1e-6, "{w}");
+
+    // One AAPL row across both strategies, with both trades counted.
+    let instruments = w["instruments"].as_array().unwrap();
+    assert_eq!(instruments.len(), 1, "{w}");
+    assert_eq!(instruments[0]["trades_count"], 2, "{w}");
+    assert_eq!(instruments[0]["win_trades"], 1, "{w}");
+    assert!((instruments[0]["pnl_share"].as_f64().unwrap() - 1.0).abs() < 1e-6, "{w}");
+
+    // The bridge still closes on the combined account total.
+    let steps = w["waterfall"].as_array().unwrap();
+    assert_eq!(steps.last().unwrap()["running_total"], w["total_account_pnl"], "{w}");
+
+    // Cleanup: the second strategy's rows go first, then the fixture's own.
+    let _ = sqlx::query("DELETE FROM paper_fills WHERE strategy_id = $1").bind(second).execute(&f.pool).await;
+    let _ =
+        sqlx::query("DELETE FROM paper_orders WHERE strategy_id = $1").bind(second).execute(&f.pool).await;
+    let _ = sqlx::query("DELETE FROM portfolio_balances WHERE strategy_id = $1")
+        .bind(second)
+        .execute(&f.pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM strategies WHERE id = $1").bind(second).execute(&f.pool).await;
+    f.clean_up().await;
+}
+
+#[tokio::test]
 async fn kill_switch_rejection_without_price_is_audited() {
     let Some(pool) = pool().await else { return };
     let f = TestFixture::setup(pool).await;

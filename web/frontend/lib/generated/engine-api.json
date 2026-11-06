@@ -3507,6 +3507,36 @@
         }
       }
     },
+    "/api/v1/paper/attribution/workspace": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "Portfolio P&L attribution across every paper strategy in the signed workspace (M11 Task 7).",
+        "description": "Each account's fills since its current start are attributed as `get_paper_attribution` does,\nthen the results are summed. Read-only, like the per-strategy route: no account is created.",
+        "operationId": "get_workspace_paper_attribution",
+        "responses": {
+          "200": {
+            "description": "Combined P&L attribution of every paper strategy in the workspace; `strategy_count` is how many were combined",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "400": {
+            "description": "The account has no workspace (code `no_workspace`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/paper/gap/analyze": {
       "post": {
         "tags": [

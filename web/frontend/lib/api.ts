@@ -229,7 +229,7 @@ export interface PaperOrderView {
   strategy_id: string;
   symbol: string;
   side: 'buy' | 'sell';
-  order_type: 'market' | 'limit' | 'stop';
+  order_type: 'market' | 'limit' | 'stop' | 'stop_limit';
   qty: number;
   limit_price?: number | null;
   stop_price?: number | null;
@@ -247,7 +247,7 @@ export interface CreatePaperOrderRequest {
   strategy_id: string;
   symbol: string;
   side: 'buy' | 'sell';
-  order_type: 'market' | 'limit' | 'stop';
+  order_type: 'market' | 'limit' | 'stop' | 'stop_limit';
   qty: number;
   limit_price?: number;
   stop_price?: number;

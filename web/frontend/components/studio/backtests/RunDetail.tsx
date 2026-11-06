@@ -1060,8 +1060,6 @@ export function RunDetail({
       )}
 
       {b.status === 'succeeded' && b.summary && (
-        // Server sections rendered via TearSheetModal (M16 Task 6):
-        // Return & Capital Dynamics, Risk-Adjusted Performance Ratios.
         <TearSheetModal
           open={tearSheetOpen}
           onClose={() => setTearSheetOpen(false)}

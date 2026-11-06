@@ -5891,12 +5891,12 @@ export interface operations {
     };
     list_curves: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description Only this curve. */
-                curve: string | null;
+                curve?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -5970,13 +5970,13 @@ export interface operations {
     };
     list_datasets: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description `grouped` adds `datasets` (one entry per dataset). Without it the
                  *     response is exactly the version list the backtest form reads. */
-                view: string | null;
+                view?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -6154,21 +6154,22 @@ export interface operations {
     };
     bars: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Symbol; default: the version's first. */
+                symbol?: string;
+                /** @description From (inclusive), RFC 3339 or a date (`2024-01-02`). */
+                from?: string;
+                /** @description To (inclusive), RFC 3339 or a date. */
+                to?: string;
+                /** @description Most points to return, 10 to 5000 (default 1000). */
+                points?: number;
+                /** @description Point-in-time date or RFC 3339 timestamp (e.g. `2024-01-05`). Revisions after this date are ignored. */
+                as_of?: string;
+            };
             header?: never;
             path: {
                 /** @description Dataset version id */
                 id: string;
-                /** @description Symbol; default: the version's first. */
-                symbol: string | null;
-                /** @description From (inclusive), RFC 3339 or a date (`2024-01-02`). */
-                from: string | null;
-                /** @description To (inclusive), RFC 3339 or a date. */
-                to: string | null;
-                /** @description Most points to return, 10 to 5000 (default 1000). */
-                points: number | null;
-                /** @description Point-in-time date or RFC 3339 timestamp (e.g. `2024-01-05`). Revisions after this date are ignored. */
-                as_of: string | null;
             };
             cookie?: never;
         };
@@ -6256,13 +6257,14 @@ export interface operations {
     };
     export_version: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Format to export: currently only `parquet` is supported (default: `parquet`). */
+                format?: string;
+            };
             header?: never;
             path: {
                 /** @description Dataset version id */
                 id: string;
-                /** @description Format to export: currently only `parquet` is supported (default: `parquet`). */
-                format: string | null;
             };
             cookie?: never;
         };
@@ -6777,12 +6779,12 @@ export interface operations {
     };
     list_fx_rates: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description Only this currency. */
-                currency: string | null;
+                currency?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -7048,16 +7050,16 @@ export interface operations {
     };
     list_my_runs: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
-                status: string | null;
+                status?: string;
                 /** @description `next_cursor` from the previous page. */
-                cursor: string | null;
+                cursor?: string;
                 /** @description Page size, 1 through 200 (default 50). */
-                limit: number | null;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -7816,12 +7818,13 @@ export interface operations {
     };
     export_sweep: {
         parameters: {
-            query?: never;
+            query?: {
+                format?: string;
+            };
             header?: never;
             path: {
                 /** @description Sweep id */
                 id: string;
-                format: string | null;
             };
             cookie?: never;
         };
@@ -7945,12 +7948,12 @@ export interface operations {
     };
     get_account: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query: {
                 strategy_id: string;
-                initial_cash: number | null;
+                initial_cash?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -7992,15 +7995,15 @@ export interface operations {
     };
     get_paper_attribution: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query: {
                 strategy_id: string;
                 /** @description Only fills at or after this time (RFC 3339). Earlier than the account's start has no effect. */
-                from: string | null;
+                from?: string;
                 /** @description Only fills before this time (RFC 3339). Must be after `from`. */
-                to: string | null;
+                to?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -8112,11 +8115,11 @@ export interface operations {
     };
     handle_list_gap_reports: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string | null;
+            query?: {
+                strategy_id?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -8178,13 +8181,13 @@ export interface operations {
     };
     list_orders: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string | null;
-                status: string | null;
-                limit: number | null;
+            query?: {
+                strategy_id?: string;
+                status?: string;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -8683,16 +8686,16 @@ export interface operations {
     };
     list_reports: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query: {
                 /** @description `sweep`, `backtest` or `paper_gap`. */
                 run_kind: string;
                 /** @description The run's id. */
                 run_id: string;
                 /** @description Only reports of this type: `validation`, `tear_sheet` or `gap`. */
-                report_type: string | null;
+                report_type?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -8811,11 +8814,11 @@ export interface operations {
     };
     get_alerts: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string | null;
+            query?: {
+                strategy_id?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -8833,11 +8836,11 @@ export interface operations {
     };
     list_audit: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                limit: number | null;
+            query?: {
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -8885,11 +8888,11 @@ export interface operations {
     };
     get_balance: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string | null;
+            query?: {
+                strategy_id?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -8983,12 +8986,12 @@ export interface operations {
     };
     get_exposure_history: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string | null;
-                limit: number | null;
+            query?: {
+                strategy_id?: string;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -9036,11 +9039,11 @@ export interface operations {
     };
     get_kill_switches: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string | null;
+            query?: {
+                strategy_id?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -9082,11 +9085,11 @@ export interface operations {
     };
     get_limits: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string | null;
+            query?: {
+                strategy_id?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -9128,11 +9131,11 @@ export interface operations {
     };
     get_metrics: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string | null;
+            query?: {
+                strategy_id?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -9150,11 +9153,11 @@ export interface operations {
     };
     get_positions: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                strategy_id: string | null;
+            query?: {
+                strategy_id?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -9244,22 +9247,22 @@ export interface operations {
     };
     list_runs: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                experiment_id: string | null;
-                dataset_id: string | null;
-                strategy: string | null;
-                kind: string | null;
-                min_sharpe: number | null;
-                only_trials: boolean;
+            query?: {
+                experiment_id?: string;
+                dataset_id?: string;
+                strategy?: string;
+                kind?: string;
+                min_sharpe?: number;
+                only_trials?: boolean;
                 /** @description `queued`, `running`, `succeeded`, `failed` or `cancelled`. */
-                status: string | null;
+                status?: string;
                 /** @description `next_cursor` from the previous page. */
-                cursor: string | null;
+                cursor?: string;
                 /** @description Page size, 1 through 200 (default 50). */
-                limit: number | null;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -10061,13 +10064,14 @@ export interface operations {
     };
     resolve_universe_as_of: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Point-in-time snapshot timestamp or date (RFC 3339 or YYYY-MM-DD). Defaults to now. */
+                as_of?: string;
+            };
             header?: never;
             path: {
                 /** @description Universe id */
                 id: string;
-                /** @description Point-in-time snapshot timestamp or date (RFC 3339 or YYYY-MM-DD). Defaults to now. */
-                as_of: string | null;
             };
             cookie?: never;
         };
@@ -10178,12 +10182,12 @@ export interface operations {
     };
     upload: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query?: {
                 /** @description The file's name as the person chose it (for display; at most 255 characters kept). */
-                filename: string | null;
+                filename?: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         /** @description The file's bytes. Send X-Spectra-Content-SHA256 (signed) and Content-Length. */
@@ -10371,13 +10375,14 @@ export interface operations {
     };
     chunk: {
         parameters: {
-            query?: never;
+            query: {
+                /** @description Where this chunk starts: the bytes received so far. */
+                offset: number;
+            };
             header?: never;
             path: {
                 /** @description Session id */
                 id: string;
-                /** @description Where this chunk starts: the bytes received so far. */
-                offset: number;
             };
             cookie?: never;
         };

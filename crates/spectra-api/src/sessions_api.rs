@@ -103,6 +103,7 @@ impl From<spectra_db::uploads::UploadSession> for SessionView {
 
 /// `PUT .../chunk` query.
 #[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ChunkQuery {
     /// Where this chunk starts: the bytes received so far.
     pub offset: u64,

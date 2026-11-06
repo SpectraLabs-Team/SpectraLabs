@@ -513,16 +513,19 @@ pub struct RiskMetricsSummaryView {
 }
 
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct RiskLimitsQuery {
     pub strategy_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct KillSwitchQuery {
     pub strategy_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct RiskAuditQuery {
     pub limit: Option<i64>,
 }
@@ -595,6 +598,7 @@ impl From<EquitySnapshotRow> for EquitySnapshotView {
 }
 
 #[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ExposureHistoryQuery {
     pub strategy_id: Option<Uuid>,
     pub limit: Option<i64>,

@@ -578,6 +578,7 @@ pub(crate) async fn get_sweep(
 
 /// Query parameters for validation report export.
 #[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct ExportSweepQuery {
     #[param(inline)]
     pub format: Option<String>,

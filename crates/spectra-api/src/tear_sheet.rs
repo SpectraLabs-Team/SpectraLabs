@@ -101,16 +101,9 @@ fn finite(v: Option<f64>) -> Option<f64> {
     v.filter(|x| x.is_finite())
 }
 
-/// `pct`: 12.34% / −5.25%. Negative numbers use U+2212 minus, matching signed_pct and the frontend.
+/// `pct`: 12.34% / -5.25%. Negatives use ASCII '-', as `format.ts` `pct` does (`toFixed`).
 pub fn pct(v: Option<f64>, digits: usize) -> String {
-    finite(v).map_or(DASH.to_string(), |x| {
-        let s = js_fixed(x.abs() * 100.0, digits);
-        if x < 0.0 {
-            format!("−{s}%")
-        } else {
-            format!("{s}%")
-        }
-    })
+    finite(v).map_or(DASH.to_string(), |x| format!("{}%", js_fixed(x * 100.0, digits)))
 }
 
 /// `signedPct`: +4.20% / −1.05%. The minus sign is U+2212, as in the frontend.
@@ -374,6 +367,7 @@ mod tests {
     #[test]
     fn percentages_and_signs() {
         assert_eq!(pct(Some(0.042), 2), "4.20%");
+        assert_eq!(pct(Some(-0.0525), 2), "-5.25%");
         assert_eq!(signed_pct(Some(0.042), 2), "+4.20%");
         assert_eq!(signed_pct(Some(-0.0105), 2), "−1.05%");
         assert_eq!(signed_pct(None, 2), "—");
@@ -420,7 +414,7 @@ mod tests {
         assert_eq!(ret.tone, Some("profit"));
         assert_eq!(sheet.sections[0].items[0].sub.as_deref(), Some("252 trading periods"));
         assert_eq!(sheet.sections[0].items[2].value, "100,000");
-        assert_eq!(sheet.sections[1].items[3].value, "−5.25%");
+        assert_eq!(sheet.sections[1].items[3].value, "-5.25%");
         assert_eq!(sheet.sections[3].items[0].label, "Value at Risk (95%)");
         assert!(sheet.table.is_none());
     }
@@ -432,6 +426,6 @@ mod tests {
              "total_return": 0.04, "contribution": 0.02, "sharpe": 1.1, "max_drawdown": -0.03}
         ]}});
         let t = build(&summary).table.expect("table");
-        assert_eq!(t.rows[0], ["momentum", "50,000", "52,000", "+4.00%", "+2.00%", "1.10", "−3.00%"]);
+        assert_eq!(t.rows[0], ["momentum", "50,000", "52,000", "+4.00%", "+2.00%", "1.10", "-3.00%"]);
     }
 }

@@ -38,7 +38,7 @@ import type { MetricId } from '@/lib/learn/metrics';
 import { cn } from '@/lib/utils';
 import { DrawdownChart, EquityChart, MonthlyHeatmap, StrategyCurvesChart } from './Charts';
 import { ago, cash, dash, int, pct, ratio, shortHash, signedPct, tone } from './format';
-import { getTearSheet, type TearSheetResponse } from '@/lib/backtests';
+import { downloadTearSheetPdf, getTearSheet, type TearSheetResponse } from '@/lib/backtests';
 import { StatusBadge } from './RunList';
 import { AttributionPanel } from './AttributionCard';
 import { SurvivalLabPanel } from '../SurvivalLabPanel';
@@ -1063,6 +1063,7 @@ export function RunDetail({
         <TearSheetModal
           open={tearSheetOpen}
           onClose={() => setTearSheetOpen(false)}
+          onDownloadPdf={() => downloadTearSheetPdf(backtestId)}
           title="Quantitative Strategy Tear-Sheet"
           subtitle={`${describeRequest(b.request, catalog)} · Started ${new Date(b.created_at).toLocaleDateString()}`}
           reportType="Quantitative Backtest"

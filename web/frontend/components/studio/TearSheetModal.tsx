@@ -56,6 +56,8 @@ export interface TearSheetModalProps {
   table?: TearSheetTable;
   rawJsonData?: unknown;
   rawCsvData?: string;
+  /** When set, the PDF button downloads the stored server PDF instead of printing the page. */
+  onDownloadPdf?: () => Promise<void>;
 }
 
 export function TearSheetModal({
@@ -71,6 +73,7 @@ export function TearSheetModal({
   table,
   rawJsonData,
   rawCsvData,
+  onDownloadPdf,
 }: TearSheetModalProps) {
   const { success } = useToast();
   const printRef = useRef<HTMLDivElement>(null);
@@ -78,6 +81,10 @@ export function TearSheetModal({
   if (!open) return null;
 
   const handlePrint = () => {
+    if (onDownloadPdf) {
+      onDownloadPdf().catch(() => {});
+      return;
+    }
     window.print();
   };
 
@@ -136,10 +143,10 @@ export function TearSheetModal({
               type="button"
               onClick={handlePrint}
               className="flex items-center gap-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold text-cyan-400 transition hover:bg-cyan-500/20"
-              title="Print document or Save as PDF"
+              title={onDownloadPdf ? 'Download the stored PDF' : 'Print document or Save as PDF'}
             >
               <Printer className="h-3.5 w-3.5" />
-              <span>Print / Save PDF</span>
+              <span>{onDownloadPdf ? 'Download PDF' : 'Print / Save PDF'}</span>
             </button>
             {rawCsvData && (
               <button

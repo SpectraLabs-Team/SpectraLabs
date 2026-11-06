@@ -11,10 +11,14 @@ const PAGE_BOTTOM: f64 = 60.0;
 const LEFT: f64 = 40.0;
 const VALUE_X: f64 = 420.0;
 
+/// Maps the sheet's non-ASCII characters to ASCII.
+fn to_ascii(s: &str) -> String {
+    s.replace('−', "-").replace('σ', "sigma").replace('—', "-")
+}
+
 /// Maps the sheet's non-ASCII characters to ASCII, then escapes for a PDF string.
 fn text(s: &str) -> String {
-    let ascii = s.replace('−', "-").replace('σ', "sigma").replace('—', "-");
-    escape_pdf(&ascii)
+    escape_pdf(&to_ascii(s))
 }
 
 /// One page of drawing operators under construction.
@@ -202,5 +206,70 @@ mod tests {
     #[test]
     fn maps_typographic_characters_to_ascii() {
         assert_eq!(text("σ 1.00 — −2%"), "sigma 1.00 - -2%");
+    }
+
+    /// The text the PDF draws, with string escapes undone: every `(...) Tj` operand.
+    fn drawn_text(pdf: &[u8]) -> String {
+        let s = String::from_utf8_lossy(pdf).into_owned();
+        let mut out = String::new();
+        for line in s.lines() {
+            if let (Some(start), Some(end)) = (line.find('('), line.rfind(") Tj")) {
+                if start < end {
+                    out.push_str(&line[start + 1..end]);
+                    out.push('\n');
+                }
+            }
+        }
+        out.replace("\\(", "(").replace("\\)", ")").replace("\\\\", "\\")
+    }
+
+    #[test]
+    fn stored_pdf_text_matches_the_sheet_values() {
+        // Golden check: every label, value and sub-line on the sheet, and every table cell,
+        // appears in the PDF's drawn text, after the same ASCII mapping the renderer applies.
+        let summary = serde_json::json!({
+            "metrics": {"total_return": 0.042, "periods": 252, "annualized_volatility": 0.15, "sharpe": 1.2},
+            "performance": {"cagr": -0.0739, "sortino": 1.5, "calmar": -0.8, "skewness": -0.3, "excess_kurtosis": 2.1},
+            "drawdown": {"max_drawdown": -0.0525, "longest_underwater_periods": 40},
+            "run": {"config": {"initial_cash": "100000"}},
+            "activity": {"final_equity": 104_200.0, "realized_pnl": 4200.0, "fill_count": 310,
+                         "total_fees": 12.5, "financing": 0.0},
+            "trades": {"count": 80, "win_rate": 0.55, "profit_factor": 1.4, "payoff_ratio": 1.1, "expectancy": 52.5},
+            "tail": {"level": 0.95, "var": -0.021, "expected_shortfall": -0.034},
+            "strategies": {"list": [
+                {"strategy": "momentum", "allocation": 50_000, "final_equity": 52_000,
+                 "total_return": 0.04, "contribution": 0.02, "sharpe": 1.1, "max_drawdown": -0.03}
+            ]}
+        });
+        let sheet = crate::tear_sheet::build(&summary);
+        let pdf = render(&sheet, "Quantitative Strategy Tear-Sheet", "Backtest test", "2026-11-06 21:00 UTC");
+        let drawn = drawn_text(&pdf);
+
+        for section in &sheet.sections {
+            assert!(
+                drawn.contains(&to_ascii(&section.category.to_uppercase())),
+                "missing section {}",
+                section.category
+            );
+            for item in &section.items {
+                assert!(drawn.contains(&to_ascii(&item.label)), "missing label {}", item.label);
+                assert!(
+                    drawn.contains(&to_ascii(&item.value)),
+                    "missing value {} for {}",
+                    item.value,
+                    item.label
+                );
+                if let Some(sub) = &item.sub {
+                    assert!(drawn.contains(&to_ascii(sub)), "missing sub-line {sub}");
+                }
+            }
+        }
+        let table = sheet.table.as_ref().expect("the summary has a strategy table");
+        assert!(drawn.contains(&to_ascii(&table.title.to_uppercase())), "missing table title");
+        for row in &table.rows {
+            for cell in row {
+                assert!(drawn.contains(&to_ascii(cell)), "missing table cell {cell}");
+            }
+        }
     }
 }

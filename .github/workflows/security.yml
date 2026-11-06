@@ -78,10 +78,5 @@ jobs:
       # not supported by parquet 54.3.1. Requires upgrading parquet across major versions.
       # Date: 2026-11-02
       # remove by 2026-12-02
-      # RUSTSEC-2026-0442: arrow-data 54.3.1
-      # Pulled in transitively by parquet 54.3.1. Patched versions are >=57.3.2.
-      # Requires upgrading parquet across major versions.
-      # Date: 2026-11-05
-      # remove by 2026-12-05
       - name: Audit Cargo.lock
-        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0435 --ignore RUSTSEC-2026-0442
+        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0435

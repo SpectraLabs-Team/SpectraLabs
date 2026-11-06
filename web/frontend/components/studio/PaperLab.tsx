@@ -89,6 +89,7 @@ import {
   type PaperOrderView,
 } from '@/lib/api';
 import { orderFromEngine, orderRequest, positionFromEngine, starterOrders } from '@/lib/paperLabEngine';
+import { PaperAttributionPanel } from '@/components/studio/backtests/AttributionCard';
 import {
   appendSandboxOrder,
   clearSandboxOrders,
@@ -1455,6 +1456,10 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
           <p className="mt-1 text-[11px] text-ink/55">Across {effectivePositions.length} active positions</p>
         </GlassCard>
       </div>
+
+      {email && engineStrategyId && tradingMode === 'sandbox' && (
+        <PaperAttributionPanel strategyId={engineStrategyId} currency="USD" />
+      )}
 
       {/* Main TradingView-Style 3-Column Dashboard */}
       <div

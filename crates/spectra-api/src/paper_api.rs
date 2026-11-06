@@ -56,6 +56,19 @@ async fn ensure_paper_strategy(pool: &spectra_db::PgPool, ws: Uuid, strat_id: Uu
     .await;
 }
 
+/// `true` if `strat_id` is a strategy of workspace `ws`.
+async fn strategy_in_workspace(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    strat_id: Uuid,
+) -> Result<bool, spectra_db::Error> {
+    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM strategies WHERE id = $1 AND workspace_id = $2)")
+        .bind(strat_id)
+        .bind(ws)
+        .fetch_one(pool)
+        .await
+}
+
 // ---------------------------------------------------------------- DTOs
 
 #[derive(Debug, Clone, Deserialize, IntoParams)]
@@ -438,7 +451,11 @@ pub(crate) async fn get_account(
     path = "/api/v1/paper/attribution",
     tag = "paper",
     params(PaperAccountQuery),
-    responses((status = 200, description = "Paper trading P&L attribution", body = serde_json::Value))
+    responses(
+        (status = 200, description = "Paper trading P&L attribution", body = serde_json::Value),
+        (status = 400, description = "The account has no workspace (code `no_workspace`)", body = crate::openapi::ErrorDoc),
+        (status = 404, description = "No such strategy in this workspace", body = crate::openapi::ErrorDoc),
+    )
 )]
 pub(crate) async fn get_paper_attribution(
     State(st): State<AppState>,
@@ -453,26 +470,28 @@ pub(crate) async fn get_paper_attribution(
         return error_response(422, "Invalid query parameters.");
     };
 
-    ensure_paper_strategy(&pool, ws, q.strategy_id, user_of(&identity)).await;
+    // A read: attribution never creates a strategy or an account. A strategy that is not in the
+    // signed workspace is a 404, like any other workspace's data (M11 Decision 4).
+    match strategy_in_workspace(&pool, ws, q.strategy_id).await {
+        Ok(true) => {}
+        Ok(false) => return error_response(404, "No such paper strategy in this workspace."),
+        Err(e) => return db_error(&e),
+    }
 
     let records = match crate::instruments_api::order_instruments(&pool, ws).await {
         Ok(r) => r,
         Err(r) => return r,
     };
-    // The account must exist so the start of the current account is known: a reset keeps old
-    // fills, and only fills since the start count.
-    if let Err(e) =
-        spectra_db::paper::get_or_init_paper_account(&pool, ws, q.strategy_id, q.initial_cash).await
-    {
-        return db_error(&e);
-    }
-    let started_at = match spectra_db::paper::paper_account_started_at(&pool, ws, q.strategy_id).await {
-        Ok(Some(t)) => t,
-        Ok(None) => return error_response(422, "Paper account has no balance row, so its start is unknown."),
-        Err(e) => return db_error(&e),
-    };
-    let fills = match spectra_db::paper::list_paper_fills_since(&pool, ws, q.strategy_id, started_at).await {
-        Ok(f) => f,
+    // Only fills since the start of the current account count: a reset keeps old fills. A
+    // strategy with no account yet has no fills, so its breakdown is empty.
+    let fills = match spectra_db::paper::paper_account_started_at(&pool, ws, q.strategy_id).await {
+        Ok(Some(started_at)) => {
+            match spectra_db::paper::list_paper_fills_since(&pool, ws, q.strategy_id, started_at).await {
+                Ok(f) => f,
+                Err(e) => return db_error(&e),
+            }
+        }
+        Ok(None) => Vec::new(),
         Err(e) => return db_error(&e),
     };
     match paper_attribution(&fills, &records) {

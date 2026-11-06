@@ -7946,6 +7946,24 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
+            /** @description The account has no workspace (code `no_workspace`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description No such strategy in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
         };
     };
     handle_analyze_gap: {

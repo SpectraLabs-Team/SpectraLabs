@@ -4206,6 +4206,11 @@ export interface components {
         };
         /** @description One stored version of a report (without its content). */
         ReportVersionView: {
+            /**
+             * Format: uuid
+             * @description Gap reports only: the backtest run (`runs.id`) the paper trading was compared against.
+             */
+            backtest_run_id?: string | null;
             content_type: string;
             /** Format: date-time */
             created_at: string;
@@ -4215,6 +4220,11 @@ export interface components {
             download_url: string;
             /** @description `pdf` or `csv`. */
             format: string;
+            /**
+             * Format: uuid
+             * @description Gap reports only: the paper strategy (`strategies.id`) the gap report covers.
+             */
+            paper_strategy_id?: string | null;
             /**
              * Format: uuid
              * @description Shared by every version of the report.

@@ -1,7 +1,8 @@
 //! Versioned reports (M16): list the reports of a run and download any stored version.
 //!
-//! Reports are stored by the endpoints that render them (the M4 sweep export today); every export
-//! adds a version and never overwrites one. These handlers only read.
+//! Reports are stored by the endpoints that render them (the M4 sweep export, the backtest tear
+//! sheet export and the M10 gap report export); every export adds a version and never overwrites
+//! one, except that an identical tear sheet reuses its latest version. These handlers only read.
 
 use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
@@ -44,11 +45,19 @@ pub struct ReportVersionView {
     pub created_at: DateTime<Utc>,
     /// Where to download this version.
     pub download_url: String,
+    /// Gap reports only: the backtest run (`runs.id`) the paper trading was compared against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backtest_run_id: Option<Uuid>,
+    /// Gap reports only: the paper strategy (`strategies.id`) the gap report covers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paper_strategy_id: Option<Uuid>,
 }
 
 impl From<ReportVersion> for ReportVersionView {
     fn from(v: ReportVersion) -> Self {
         Self {
+            backtest_run_id: None,
+            paper_strategy_id: None,
             download_url: format!("/api/v1/reports/{}/versions/{}", v.report_id, v.version),
             report_id: v.report_id,
             report_type: v.report_type,
@@ -63,6 +72,33 @@ impl From<ReportVersion> for ReportVersionView {
             created_at: v.created_at,
         }
     }
+}
+
+/// Fills `backtest_run_id` and `paper_strategy_id` on gap report versions from the gap report
+/// they were exported from (`backtest_paper_gap_reports`). Other report types are left as they are.
+async fn link_gap_runs(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    views: &mut [ReportVersionView],
+) -> Result<(), spectra_db::Error> {
+    let mut linked: Vec<(Uuid, Option<Uuid>, Option<Uuid>)> = Vec::new();
+    for view in views.iter_mut() {
+        if view.report_type != reports::report_type::GAP || view.run_kind != reports::run_kind::PAPER_GAP {
+            continue;
+        }
+        let (backtest_run_id, strategy_id) =
+            if let Some(&(_, b, s)) = linked.iter().find(|(id, _, _)| *id == view.run_id) {
+                (b, s)
+            } else {
+                let rec = spectra_db::gap::get_gap_report(pool, ws, view.run_id).await?;
+                let link = rec.map_or((None, None), |r| (r.backtest_run_id, Some(r.strategy_id)));
+                linked.push((view.run_id, link.0, link.1));
+                link
+            };
+        view.backtest_run_id = backtest_run_id;
+        view.paper_strategy_id = strategy_id;
+    }
+    Ok(())
 }
 
 /// Which run's reports to list.
@@ -105,11 +141,14 @@ pub(crate) async fn list_reports(
     }
     match reports::for_run(&pool, ws, &q.run_kind, q.run_id).await {
         Ok(list) => {
-            let list: Vec<ReportVersionView> = list
+            let mut list: Vec<ReportVersionView> = list
                 .into_iter()
                 .filter(|v| q.report_type.as_deref().is_none_or(|t| v.report_type == t))
                 .map(ReportVersionView::from)
                 .collect();
+            if let Err(e) = link_gap_runs(&pool, ws, &mut list).await {
+                return db_error(&e);
+            }
             to_json(200, &list)
         }
         Err(e) => db_error(&e),
@@ -135,7 +174,13 @@ pub(crate) async fn list_versions(
     };
     match reports::versions_of(&pool, ws, report_id).await {
         Ok(list) if list.is_empty() => error_response(404, NOT_FOUND),
-        Ok(list) => to_json(200, &list.into_iter().map(ReportVersionView::from).collect::<Vec<_>>()),
+        Ok(list) => {
+            let mut list: Vec<ReportVersionView> = list.into_iter().map(ReportVersionView::from).collect();
+            if let Err(e) = link_gap_runs(&pool, ws, &mut list).await {
+                return db_error(&e);
+            }
+            to_json(200, &list)
+        }
         Err(e) => db_error(&e),
     }
 }

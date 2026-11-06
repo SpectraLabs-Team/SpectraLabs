@@ -5,6 +5,7 @@ import { Layers } from 'lucide-react';
 import { ApiError } from '@/lib/api';
 import { getAttribution } from '@/lib/backtests';
 import { hasNoFills, sharePct, sortByShare, waterfallBars, type Attribution, type AttributionDirection } from '@/lib/attribution';
+import { buildWaterfallCsv, buildInstrumentsCsv } from '@/lib/csvExport';
 import { GlassCard, Spinner, ErrorNote } from '@/components/ui/primitives';
 import { cn } from '@/lib/utils';
 import { cash, dash, int, pct } from './format';
@@ -166,24 +167,91 @@ function Costs({ a, currency }: { a: Attribution; currency?: string }) {
   );
 }
 
+/** Triggers a browser download of CSV text. */
+export function downloadCsv(filename: string, content: string): void {
+  if (typeof window === 'undefined') return;
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/** Action buttons to download the Waterfall and Instruments CSV files. */
+export function ExportButtons({
+  a,
+  exportId,
+  currency,
+}: {
+  a: Attribution;
+  exportId?: string;
+  currency?: string;
+}) {
+  const onWaterfall = () => {
+    const csv = buildWaterfallCsv(a, { id: exportId, currency });
+    downloadCsv(`attribution-waterfall-${exportId ?? 'export'}.csv`, csv);
+  };
+  const onInstruments = () => {
+    const csv = buildInstrumentsCsv(a, { id: exportId, currency });
+    downloadCsv(`attribution-instruments-${exportId ?? 'export'}.csv`, csv);
+  };
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={onWaterfall}
+        className="rounded border border-ink/15 bg-ink/[0.04] px-2.5 py-1 text-[11px] font-medium text-ink/75 hover:bg-ink/[0.08] hover:text-ink transition-colors"
+      >
+        Waterfall CSV
+      </button>
+      <button
+        type="button"
+        onClick={onInstruments}
+        className="rounded border border-ink/15 bg-ink/[0.04] px-2.5 py-1 text-[11px] font-medium text-ink/75 hover:bg-ink/[0.08] hover:text-ink transition-colors"
+      >
+        Instruments CSV
+      </button>
+    </div>
+  );
+}
+
 /**
  * The P&L attribution of a backtest or paper account: waterfall, instruments, long/short split and
  * costs. The numbers come from the engine's attribution endpoint; this card only lays them out.
  */
-export function AttributionCard({ a, source, currency, asOf }: { a: Attribution; source: Source; currency?: string; asOf?: string }) {
+export function AttributionCard({
+  a,
+  source,
+  currency,
+  asOf,
+  exportId,
+}: {
+  a: Attribution;
+  source: Source;
+  currency?: string;
+  asOf?: string;
+  exportId?: string;
+}) {
   const caption = source === 'backtest' ? 'Simulated from this backtest’s fills. Not a live result.' : 'Replayed from this account’s fills.';
   return (
     <GlassCard as="section" className="overflow-hidden">
-      <div className="border-b border-ink/[0.06] px-5 py-4">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <Layers className="h-4 w-4 text-accent" /> P&amp;L attribution
-          {source === 'backtest' && <span className="rounded bg-caution/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-caution">Simulated</span>}
-        </h3>
-        <p className="mt-0.5 text-xs text-ink/50">
-          Where the result came from. {caption}
-          {asOf && <> As of {asOf}.</>}
-          {currency && <> Values in {currency}.</>}
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/[0.06] px-5 py-4">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <Layers className="h-4 w-4 text-accent" /> P&amp;L attribution
+            {source === 'backtest' && <span className="rounded bg-caution/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-caution">Simulated</span>}
+          </h3>
+          <p className="mt-0.5 text-xs text-ink/50">
+            Where the result came from. {caption}
+            {asOf && <> As of {asOf}.</>}
+            {currency && <> Values in {currency}.</>}
+          </p>
+        </div>
+        {!hasNoFills(a) && <ExportButtons a={a} exportId={exportId} currency={currency} />}
       </div>
       <div className="space-y-6 p-5">
         {hasNoFills(a) ? (
@@ -227,5 +295,5 @@ export function AttributionPanel({ backtestId, currency }: { backtestId: string;
     );
   }
   if (state.status === 'error') return <ErrorNote>{state.message}</ErrorNote>;
-  return <AttributionCard a={state.a} source="backtest" currency={currency} />;
+  return <AttributionCard a={state.a} source="backtest" currency={currency} exportId={backtestId} />;
 }

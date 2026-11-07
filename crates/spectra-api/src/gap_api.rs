@@ -548,7 +548,7 @@ pub(crate) async fn handle_export_gap_report(
             let filename = format!("gap-report-{}.{format}", rec.id);
             crate::reports_api::report_response(&meta, &filename, body)
         }
-        Err(e) => db_error(&e),
+        Err(e) => crate::reports_api::store_error(&e),
     }
 }
 

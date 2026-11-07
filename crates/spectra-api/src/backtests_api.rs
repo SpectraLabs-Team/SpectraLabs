@@ -590,7 +590,7 @@ pub(crate) async fn backtest_tear_sheet_export(
             let filename = format!("backtest-{job_id}-tear-sheet.pdf");
             crate::reports_api::report_response(&meta, &filename, body)
         }
-        Err(e) => db_error(&e),
+        Err(e) => crate::reports_api::store_error(&e),
     }
 }
 

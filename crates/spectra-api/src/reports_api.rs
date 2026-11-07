@@ -216,6 +216,15 @@ pub(crate) async fn download_version(
     }
 }
 
+/// The response for a report that could not be stored: 413 for content over
+/// [`reports::REPORT_MAX_BYTES`], otherwise the usual database error. No report headers.
+pub(crate) fn store_error(e: &reports::CreateError) -> Response {
+    match e {
+        reports::CreateError::TooLarge { .. } => error_response(413, "Report is too large to store."),
+        reports::CreateError::Db(e) => db_error(e),
+    }
+}
+
 /// A report download: its bytes, type and filename, with the stored id, version and hash as
 /// headers.
 pub(crate) fn report_response(meta: &ReportVersion, filename: &str, body: Vec<u8>) -> Response {

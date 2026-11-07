@@ -568,3 +568,37 @@ async fn tear_sheet_reuses_latest_version_for_identical_content() {
     assert_eq!(v2.version, 2);
     assert_eq!(v2.report_id, v1.report_id);
 }
+
+#[tokio::test]
+async fn report_content_over_the_size_limit_is_refused_before_it_is_stored() {
+    use spectra_db::reports::{create_version, for_run, CreateError, NewReport, REPORT_MAX_BYTES};
+
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "reports-size-limit-test@example.com").await.unwrap();
+    let ws = seeded.workspace_id;
+    let run = spectra_db::new_id();
+    let (at_limit, over_limit) = (vec![b'a'; REPORT_MAX_BYTES], vec![b'a'; REPORT_MAX_BYTES + 1]);
+    let fits = NewReport {
+        report_type: spectra_db::reports::report_type::VALIDATION,
+        run_kind: spectra_db::reports::run_kind::SWEEP,
+        run_id: run,
+        format: "csv",
+        content_type: "text/csv; charset=utf-8",
+        content: &at_limit,
+        created_by: None,
+    };
+    let too_large = NewReport { content: &over_limit, ..fits.clone() };
+
+    // One byte over: refused, and no row is written.
+    match create_version(&pool, ws, &too_large).await {
+        Err(CreateError::TooLarge { size }) => assert_eq!(size, REPORT_MAX_BYTES + 1),
+        other => panic!("expected TooLarge, got {other:?}"),
+    }
+    assert!(for_run(&pool, ws, "sweep", run).await.unwrap().is_empty(), "no row for the refused report");
+
+    // Exactly 5 MiB: stored as version 1.
+    let v1 = create_version(&pool, ws, &fits).await.unwrap();
+    assert_eq!(v1.version, 1);
+    assert_eq!(v1.size_bytes, i64::try_from(REPORT_MAX_BYTES).unwrap());
+    assert_eq!(for_run(&pool, ws, "sweep", run).await.unwrap().len(), 1);
+}

@@ -31,6 +31,54 @@ pub mod run_kind {
     pub const PAPER_GAP: &str = "paper_gap";
 }
 
+/// The largest report content, in bytes, that [`create_version`] stores: 5 MiB. Every stored
+/// report (sweep validation, tear sheet and gap exports, PDF or CSV) is checked against it before
+/// anything is written; content of exactly this size is stored. The table's own check (10 MiB) is
+/// a backstop behind it.
+pub const REPORT_MAX_BYTES: usize = 5 * 1024 * 1024;
+
+/// Why a report version could not be stored.
+#[derive(Debug)]
+pub enum CreateError {
+    /// The content is larger than [`REPORT_MAX_BYTES`].
+    TooLarge {
+        /// Bytes in the refused content.
+        size: usize,
+    },
+    /// The database failed or refused the row.
+    Db(Error),
+}
+
+impl std::fmt::Display for CreateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CreateError::TooLarge { size } => {
+                write!(f, "report content is {size} bytes, over the {REPORT_MAX_BYTES}-byte limit")
+            }
+            CreateError::Db(e) => write!(f, "report database: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for CreateError {}
+
+impl From<Error> for CreateError {
+    fn from(e: Error) -> Self {
+        CreateError::Db(e)
+    }
+}
+
+/// Refuses content larger than [`REPORT_MAX_BYTES`].
+///
+/// # Errors
+/// [`CreateError::TooLarge`] when `content` is over the limit.
+pub fn check_size(content: &[u8]) -> Result<(), CreateError> {
+    if content.len() > REPORT_MAX_BYTES {
+        return Err(CreateError::TooLarge { size: content.len() });
+    }
+    Ok(())
+}
+
 /// One stored version of a report, without its content.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow, serde::Serialize, serde::Deserialize)]
 pub struct ReportVersion {
@@ -78,13 +126,15 @@ pub struct NewReport<'a> {
 /// type). Never overwrites a version.
 ///
 /// # Errors
-/// Any database error, including a check violation for an unknown type, kind or format, or
-/// content over 10 MiB.
+/// [`CreateError::TooLarge`] for content over [`REPORT_MAX_BYTES`], refused before the database
+/// is touched. Otherwise [`CreateError::Db`] for any database error, including a check violation
+/// for an unknown type, kind or format.
 pub async fn create_version(
     pool: &PgPool,
     workspace_id: Uuid,
     report: &NewReport<'_>,
-) -> Result<ReportVersion, Error> {
+) -> Result<ReportVersion, CreateError> {
+    check_size(report.content)?;
     let mut tx = pool.begin().await?;
     sqlx::query(include_str!("../queries/report_lock.sql"))
         .bind(workspace_id)
@@ -179,4 +229,20 @@ pub async fn for_run(
         .bind(run_id)
         .fetch_all(pool)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_up_to_the_limit_passes_and_one_byte_more_is_refused() {
+        assert_eq!(REPORT_MAX_BYTES, 5_242_880);
+        assert!(check_size(b"").is_ok());
+        assert!(check_size(&vec![0u8; REPORT_MAX_BYTES]).is_ok(), "exactly 5 MiB is stored");
+        match check_size(&vec![0u8; REPORT_MAX_BYTES + 1]) {
+            Err(CreateError::TooLarge { size }) => assert_eq!(size, REPORT_MAX_BYTES + 1),
+            other => panic!("expected TooLarge, got {other:?}"),
+        }
+    }
 }

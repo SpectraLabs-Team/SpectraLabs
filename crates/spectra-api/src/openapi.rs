@@ -306,6 +306,7 @@ pub struct StressRequest {
         ErrorDoc,
         crate::reports_api::ReportVersionView,
         crate::portfolios_api::CreatePortfolioBody,
+        crate::portfolios_api::HoldingInput,
         crate::portfolios_api::HoldingBody,
         crate::portfolios_api::PortfolioView,
         crate::portfolios_api::PortfolioSummaryView,

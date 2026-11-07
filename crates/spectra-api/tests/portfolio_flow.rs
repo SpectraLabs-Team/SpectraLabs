@@ -189,3 +189,118 @@ async fn a_portfolio_from_another_workspace_is_not_found() {
             .await;
     assert_eq!(status, 404);
 }
+
+#[tokio::test]
+async fn equal_weight_gives_each_of_four_assets_25_percent() {
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "portfolio-api-equal@example.com").await.unwrap();
+    let app = app(pool);
+    let body = json!({
+        "name": unique_name(),
+        "method": "equal",
+        "holdings": [{"symbol": "AAA"}, {"symbol": "BBB"}, {"symbol": "CCC"}, {"symbol": "DDD"}]
+    });
+
+    let (status, created) = send(
+        &app,
+        signed(
+            "POST",
+            "/api/v1/portfolios",
+            &seeded.admin_id,
+            &seeded.workspace_id,
+            body.to_string().into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(created["method"], "equal");
+    let holdings = created["holdings"].as_array().unwrap();
+    assert_eq!(holdings.len(), 4);
+    for h in holdings {
+        assert_eq!(h["weight"].as_f64().unwrap(), 0.25, "{h}");
+    }
+}
+
+#[tokio::test]
+async fn inverse_volatility_matches_hand_calculation_and_is_stored_as_its_method() {
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "portfolio-api-invvol@example.com").await.unwrap();
+    let app = app(pool);
+    // vols 0.10, 0.20, 0.40 -> raw 10, 5, 2.5 -> sum 17.5
+    let body = json!({
+        "name": unique_name(),
+        "method": "inverse_volatility",
+        "holdings": [
+            {"symbol": "AAA", "volatility": 0.10},
+            {"symbol": "BBB", "volatility": 0.20},
+            {"symbol": "CCC", "volatility": 0.40}
+        ]
+    });
+
+    let (status, created) = send(
+        &app,
+        signed(
+            "POST",
+            "/api/v1/portfolios",
+            &seeded.admin_id,
+            &seeded.workspace_id,
+            body.to_string().into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(created["method"], "inverse_volatility");
+    let expected = [("AAA", 10.0 / 17.5), ("BBB", 5.0 / 17.5), ("CCC", 2.5 / 17.5)];
+    let holdings = created["holdings"].as_array().unwrap();
+    for (symbol, want) in expected {
+        let got = holdings.iter().find(|h| h["symbol"] == symbol).unwrap()["weight"].as_f64().unwrap();
+        assert!((got - want).abs() < 1e-12, "{symbol}: {got} vs {want}");
+    }
+}
+
+#[tokio::test]
+async fn inverse_volatility_without_a_volatility_is_refused() {
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "portfolio-api-novol@example.com").await.unwrap();
+    let app = app(pool);
+    let body = json!({
+        "name": unique_name(),
+        "method": "inverse_volatility",
+        "holdings": [{"symbol": "AAA", "volatility": 0.1}, {"symbol": "BBB"}]
+    });
+
+    let (status, err) = send(
+        &app,
+        signed(
+            "POST",
+            "/api/v1/portfolios",
+            &seeded.admin_id,
+            &seeded.workspace_id,
+            body.to_string().into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, 422);
+    assert!(err.to_string().contains("BBB") && err.to_string().contains("volatility"), "{err}");
+}
+
+#[tokio::test]
+async fn unknown_method_is_refused() {
+    let Some(pool) = pool().await else { return };
+    let seeded = seed_dev(&pool, "portfolio-api-method@example.com").await.unwrap();
+    let app = app(pool);
+    let body = json!({"name": unique_name(), "method": "risk_parity", "holdings": [{"symbol": "AAA", "weight": 1.0}]});
+
+    let (status, _) = send(
+        &app,
+        signed(
+            "POST",
+            "/api/v1/portfolios",
+            &seeded.admin_id,
+            &seeded.workspace_id,
+            body.to_string().into_bytes(),
+        ),
+    )
+    .await;
+    assert_eq!(status, 422);
+}

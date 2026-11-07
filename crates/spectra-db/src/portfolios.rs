@@ -24,6 +24,8 @@ pub struct PortfolioRow {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub name: String,
+    /// `fixed`, `equal` or `inverse_volatility`.
+    pub method: String,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
 }
@@ -55,9 +57,32 @@ pub async fn create_portfolio(
     holdings: &[(String, f64)],
     created_by: Option<Uuid>,
 ) -> Result<PortfolioWithHoldings, Error> {
+    create_portfolio_with_method(pool, workspace_id, name, FIXED_METHOD, holdings, created_by).await
+}
+
+/// The method a portfolio was built with, as stored: `fixed`, `equal` or `inverse_volatility`.
+pub const FIXED_METHOD: &str = "fixed";
+
+/// As [`create_portfolio`], recording how the weights were built (`method`).
+///
+/// # Errors
+/// As [`create_portfolio`]; also a check violation if `method` is not one of the three.
+pub async fn create_portfolio_with_method(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    name: &str,
+    method: &str,
+    holdings: &[(String, f64)],
+    created_by: Option<Uuid>,
+) -> Result<PortfolioWithHoldings, Error> {
     let mut tx = pool.begin().await?;
-    let portfolio: PortfolioRow =
-        sqlx::query_as(INSERT_SQL).bind(workspace_id).bind(name).bind(created_by).fetch_one(&mut *tx).await?;
+    let portfolio: PortfolioRow = sqlx::query_as(INSERT_SQL)
+        .bind(workspace_id)
+        .bind(name)
+        .bind(created_by)
+        .bind(method)
+        .fetch_one(&mut *tx)
+        .await?;
     for (symbol, weight) in holdings {
         sqlx::query(INSERT_HOLDING_SQL)
             .bind(portfolio.id)

@@ -93,6 +93,12 @@ export function BacktestReportPanel({ backtestId, refreshKey = 0 }: { backtestId
   return <Frame testId="backtest-reports">{data ? <ReportVersionList versions={data} /> : <Status error={error} />}</Frame>;
 }
 
+/** The stored versions of a signal test report (stored under the signal test run id). `refreshKey` reloads the list after an export. */
+export function SignalTestReportPanel({ signalTestId, refreshKey = 0 }: { signalTestId: string; refreshKey?: number }) {
+  const { data, error } = useLoaded(() => listRunReports('signal_test', signalTestId), `${signalTestId}:${refreshKey}`);
+  return <Frame testId="signal-test-reports">{data ? <ReportVersionList versions={data} /> : <Status error={error} />}</Frame>;
+}
+
 /** The stored versions of each gap report, one group per gap report (stored under the gap report id). */
 export function PaperReportPanel({ strategyId }: { strategyId?: string }) {
   const { data, error } = useLoaded<GapReportVersions[]>(() => listGapReportVersions(strategyId), strategyId ?? '');

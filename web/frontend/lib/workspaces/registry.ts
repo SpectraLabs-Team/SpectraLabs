@@ -45,6 +45,26 @@ export const WORKSPACES: Record<StudioTab, WorkspaceGuide> = {
     pitfalls: ['Figures come from the last saved state. Refresh the page after a run finishes if a number looks stale.'],
     lessons: [{ title: 'Interpreting simulation output', href: '/learn/simulations/interpreting-simulation-output' }],
   },
+  alpha: {
+    purpose: 'Evaluate alpha signals using Information Coefficients, multi-horizon decay curves, and quantile spreads before strategy implementation.',
+    steps: [
+      'Select a built-in signal generator (momentum, mean reversion, SMA crossover) or enter custom observations.',
+      'Configure holding horizons and owner gate thresholds (minimum mean IC and t-statistic).',
+      'Run the signal evaluation and review the Spearman rank correlation, half-life decay, and quantile turnover.',
+      'Export reproducible, versioned reports through the M16 report archive.',
+    ],
+    inputs: ['Point-in-time price bars and signal observations, optional dataset version ID, and evaluation thresholds.'],
+    controls: ['Signal selector, horizon choices, quantile count, gate threshold inputs, and export format triggers.'],
+    outputs: ['Spearman rank IC summary (mean, stdev, t-stat), decay half-life curve, quantile returns, gate decision, and stored M16 reports.'],
+    pitfalls: [
+      'Testing many signals against the same dataset inflates false discovery rates (p-hacking). Check the tests run counter.',
+      'Signals with high IC but rapid decay (short half-life) incur high turnover and execution costs that eat alpha.',
+    ],
+    lessons: [
+      { title: 'Overfitting and validation', href: '/learn/simulations/overfitting-and-validation' },
+      { title: 'Why simulations are useful', href: '/learn/simulations/why-simulations-are-useful' },
+    ],
+  },
   risk: {
     purpose: 'Stress-test a strategy with Monte Carlo simulation and historical scenarios, and fit volatility and regime models to its returns.',
     steps: [

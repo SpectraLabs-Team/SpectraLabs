@@ -34,6 +34,7 @@ pub mod providers;
 pub mod reports;
 pub mod risk_center;
 pub mod roles;
+pub mod signal_tests;
 pub mod strategies;
 pub mod uploads;
 pub mod user_state;

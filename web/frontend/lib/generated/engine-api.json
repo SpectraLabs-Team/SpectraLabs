@@ -10,6 +10,259 @@
     "version": "1"
   },
   "paths": {
+    "/api/v1/alpha/m42/sentiment": {
+      "get": {
+        "tags": [
+          "alpha"
+        ],
+        "summary": "GET /api/v1/alpha/m42/sentiment: M42 sentiment score with gate threshold protection (Task 7).",
+        "operationId": "handle_get_m42_sentiment",
+        "parameters": [
+          {
+            "name": "signal_name",
+            "in": "query",
+            "description": "Signal name to check gate status for (default: \"sentiment\").",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sentiment score active and allowed by gate threshold",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/M42SentimentResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sentiment score blocked because signal test failed owner threshold",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alpha/signal-tests": {
+      "get": {
+        "tags": [
+          "alpha"
+        ],
+        "summary": "GET /api/v1/alpha/signal-tests: List signal tests in workspace.",
+        "operationId": "handle_list_signal_tests",
+        "responses": {
+          "200": {
+            "description": "List of signal test summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SignalTestSummaryView"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workspace not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "alpha"
+        ],
+        "summary": "POST /api/v1/alpha/signal-tests: Run a signal test in the workspace.",
+        "operationId": "handle_run_signal_test",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunSignalTestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signal test completed and saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignalTestDetailView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot run signal tests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Signal evaluation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alpha/signal-tests/{id}": {
+      "get": {
+        "tags": [
+          "alpha"
+        ],
+        "summary": "GET /api/v1/alpha/signal-tests/{id}: Get signal test details.",
+        "operationId": "handle_get_signal_test",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Signal test ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Signal test details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignalTestDetailView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Signal test not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid signal test id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/alpha/signal-tests/{id}/export": {
+      "get": {
+        "tags": [
+          "alpha"
+        ],
+        "summary": "GET /api/v1/alpha/signal-tests/{id}/export: Export report as versioned PDF, JSON or CSV through M16.",
+        "operationId": "handle_export_signal_test",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Signal test ID",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Desired export format: `pdf`, `json`, or `csv` (default `pdf`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exported signal test report version with `x-report-id`, `x-report-version` and `x-report-sha256` headers"
+          },
+          "404": {
+            "description": "Signal test not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Report exceeded storage limits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid format parameter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests": {
       "get": {
         "tags": [
@@ -7317,6 +7570,34 @@
           }
         }
       },
+      "BarInputRecord": {
+        "type": "object",
+        "description": "Price bar input.",
+        "required": [
+          "symbol",
+          "date",
+          "close"
+        ],
+        "properties": {
+          "close": {
+            "type": "number",
+            "format": "double"
+          },
+          "date": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "timestamp_ns": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "BarPoint": {
         "type": "object",
         "description": "One chart point. Prices are decimal numbers (for drawing only).",
@@ -9415,6 +9696,40 @@
           }
         }
       },
+      "GateThresholdInput": {
+        "type": "object",
+        "description": "Owner configurable gate threshold input.",
+        "properties": {
+          "max_turnover": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "min_half_life_days": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "min_mean_ic": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "min_t_stat": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
       "HoldingBody": {
         "type": "object",
         "description": "A holding with its weight, as stored and returned.",
@@ -10048,6 +10363,40 @@
           "workspace_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "M42SentimentResponse": {
+        "type": "object",
+        "description": "Response view for M42 sentiment score.",
+        "required": [
+          "signal_name",
+          "passed_test_id",
+          "status",
+          "sentiment_score",
+          "rating",
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "passed_test_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "rating": {
+            "type": "string"
+          },
+          "sentiment_score": {
+            "type": "number",
+            "format": "double"
+          },
+          "signal_name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
           }
         }
       },
@@ -12496,6 +12845,95 @@
         },
         "additionalProperties": false
       },
+      "RunSignalTestRequest": {
+        "type": "object",
+        "description": "Request to run a signal test.",
+        "required": [
+          "signal_name"
+        ],
+        "properties": {
+          "custom_bars": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/BarInputRecord"
+            },
+            "description": "Custom price bars for test evaluation."
+          },
+          "custom_signals": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/SignalInputRecord"
+            },
+            "description": "Custom signal observations (e.g. M42 sentiment scores)."
+          },
+          "dataset_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional workspace dataset version id to bind the test universe and point-in-time data to."
+          },
+          "horizons": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Optional trading horizons in days (default: [1, 5, 10, 20])."
+          },
+          "primary_horizon": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Primary holding horizon in days (default: 5).",
+            "minimum": 0
+          },
+          "quantile_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Number of quantiles for spread and turnover (default: 5).",
+            "minimum": 0
+          },
+          "signal_name": {
+            "type": "string",
+            "description": "Signal identifier or name (e.g. \"momentum_5d\", \"mean_reversion_5d\", \"sentiment\")."
+          },
+          "symbols": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional universe of symbols (e.g. `[\"AAPL\", \"MSFT\", \"GOOG\"]`)."
+          },
+          "threshold": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GateThresholdInput",
+                "description": "Optional owner threshold gate criteria."
+              }
+            ]
+          }
+        }
+      },
       "SandboxOrderView": {
         "type": "object",
         "description": "Sandbox order view.",
@@ -12758,6 +13196,198 @@
               "string",
               "null"
             ],
+            "format": "uuid"
+          }
+        }
+      },
+      "SignalInputRecord": {
+        "type": "object",
+        "description": "Signal observation input.",
+        "required": [
+          "symbol",
+          "date",
+          "value"
+        ],
+        "properties": {
+          "date": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "SignalTestDetailView": {
+        "type": "object",
+        "description": "Detail view of a signal test record with full metrics.",
+        "required": [
+          "id",
+          "workspace_id",
+          "signal_name",
+          "universe",
+          "horizons",
+          "primary_horizon",
+          "mean_ic",
+          "ic_stdev",
+          "ic_t_stat",
+          "half_life_days",
+          "top_quantile_turnover",
+          "top_bottom_spread",
+          "passed_gate",
+          "tests_run_count",
+          "report_json",
+          "disclaimer",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dataset_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "disclaimer": {
+            "type": "string"
+          },
+          "half_life_days": {
+            "type": "number",
+            "format": "double"
+          },
+          "horizons": {},
+          "ic_stdev": {
+            "type": "number",
+            "format": "double"
+          },
+          "ic_t_stat": {
+            "type": "number",
+            "format": "double"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mean_ic": {
+            "type": "number",
+            "format": "double"
+          },
+          "passed_gate": {
+            "type": "boolean"
+          },
+          "primary_horizon": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "report_json": {},
+          "signal_name": {
+            "type": "string"
+          },
+          "tests_run_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "threshold": {},
+          "top_bottom_spread": {
+            "type": "number",
+            "format": "double"
+          },
+          "top_quantile_turnover": {
+            "type": "number",
+            "format": "double"
+          },
+          "universe": {},
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "SignalTestSummaryView": {
+        "type": "object",
+        "description": "Summary view of a signal test record.",
+        "required": [
+          "id",
+          "workspace_id",
+          "signal_name",
+          "primary_horizon",
+          "mean_ic",
+          "ic_stdev",
+          "ic_t_stat",
+          "half_life_days",
+          "top_quantile_turnover",
+          "top_bottom_spread",
+          "passed_gate",
+          "tests_run_count",
+          "disclaimer",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "dataset_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "disclaimer": {
+            "type": "string"
+          },
+          "half_life_days": {
+            "type": "number",
+            "format": "double"
+          },
+          "ic_stdev": {
+            "type": "number",
+            "format": "double"
+          },
+          "ic_t_stat": {
+            "type": "number",
+            "format": "double"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mean_ic": {
+            "type": "number",
+            "format": "double"
+          },
+          "passed_gate": {
+            "type": "boolean"
+          },
+          "primary_horizon": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "signal_name": {
+            "type": "string"
+          },
+          "tests_run_count": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "top_bottom_spread": {
+            "type": "number",
+            "format": "double"
+          },
+          "top_quantile_turnover": {
+            "type": "number",
+            "format": "double"
+          },
+          "workspace_id": {
+            "type": "string",
             "format": "uuid"
           }
         }
@@ -14657,6 +15287,10 @@
     {
       "name": "user-state",
       "description": "Per-user saved state, sandbox orders and run history (M25)"
+    },
+    {
+      "name": "alpha",
+      "description": "Alpha Workbench: signal tests, IC decay, quantile spread, and sentiment gate (M12)"
     }
   ]
 }

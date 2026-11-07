@@ -867,6 +867,14 @@ test('report routes (M16): listing and downloading stored versions is a read; ev
   }
   assert.equal(engineRoutes.routePolicyKey(`api/v1/reports/${id}/versions/0`), `api/v1/reports/${id}/versions/0`, 'versions start at 1');
   assert.equal(engineRoutes.routePolicyKey(`api/v1/optimization/sweep/${id}/export/x`), `api/v1/optimization/sweep/${id}/export/x`);
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/alpha/signal-tests`), 'api/v1/alpha/signal-tests');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/alpha/signal-tests/${id}`), 'api/v1/alpha/signal-tests/{id}');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/alpha/signal-tests/${id}/export`), 'api/v1/alpha/signal-tests/{id}/export');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/alpha/m42/sentiment`), 'api/v1/alpha/m42/sentiment');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/alpha/signal-tests'], 'GET'), 'viewer');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/alpha/signal-tests'], 'POST'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/alpha/signal-tests/{id}/export'], 'GET'), 'editor');
+  assert.equal(engineRoutes.minimumRole(routes['api/v1/alpha/m42/sentiment'], 'GET'), 'viewer');
 
   // What the proxy does with a session: requireRole(auth, workspace, minimumRole(route, method)).
   const owner = await store.createUser('rp-owner@x.com', 'h', 'O');

@@ -11327,13 +11327,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "created_by": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
           "download_url": {
             "type": "string",
             "description": "Where to download this version."

@@ -4214,8 +4214,6 @@ export interface components {
             content_type: string;
             /** Format: date-time */
             created_at: string;
-            /** Format: uuid */
-            created_by?: string | null;
             /** @description Where to download this version. */
             download_url: string;
             /** @description `pdf` or `csv`. */

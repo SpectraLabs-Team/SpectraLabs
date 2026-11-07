@@ -795,7 +795,7 @@ async fn sweep_exports_are_versioned_reports() {
     let list = list.as_array().unwrap();
     assert_eq!(list.iter().map(|v| v["version"].as_i64().unwrap()).collect::<Vec<_>>(), [3, 2, 1]);
     assert!(list.iter().all(|v| v["report_type"] == "validation" && v["run_id"] == sweep_id.as_str()));
-    assert_eq!(list[2]["created_by"], f.user.to_string());
+    assert!(list.iter().all(|v| v.get("created_by").is_none()), "no exporter user id in the listing");
     // The same list filtered by report type: validation keeps all three, tear sheets none.
     let (_, typed) = f
         .call(
@@ -835,6 +835,7 @@ async fn sweep_exports_are_versioned_reports() {
         f.call("GET", &format!("/api/v1/reports/{report_id}/versions"), &Value::Null).await;
     assert_eq!(status, 200);
     assert_eq!(versions.as_array().unwrap().len(), 3);
+    assert!(versions.as_array().unwrap().iter().all(|v| v.get("created_by").is_none()));
 
     // Unknown version, unknown run kind, and another workspace.
     assert_eq!(f.get_raw(f.ws, &format!("/api/v1/reports/{report_id}/versions/99")).await.0, 404);
@@ -842,10 +843,26 @@ async fn sweep_exports_are_versioned_reports() {
         f.call("GET", &format!("/api/v1/reports?run_kind=job&run_id={sweep_id}"), &Value::Null).await.0,
         422
     );
+    // Another workspace: the versions and download routes are a 404 with only the fixed message,
+    // and the run's listing is an empty list.
     let other = spectra_db::new_id();
-    assert_eq!(f.get_raw(other, &format!("/api/v1/reports/{report_id}/versions/1")).await.0, 404);
-    let (_, empty) =
+    for path in
+        [format!("/api/v1/reports/{report_id}/versions"), format!("/api/v1/reports/{report_id}/versions/1")]
+    {
+        let (status, h, body) = f.get_raw(other, &path).await;
+        assert_eq!(status, 404, "{path}");
+        assert!(h.get("x-report-id").is_none() && h.get("x-report-sha256").is_none(), "{path}");
+        let err: Value = serde_json::from_slice(&body).unwrap();
+        let mut keys: Vec<&str> = err.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["code", "detail", "details", "message", "request_id"], "{path}: {err}");
+        assert_eq!(err["message"], "Report not found.", "{path}");
+        assert_eq!(err["detail"], "Report not found.", "{path}");
+        assert_eq!(err["details"], Value::Null, "{path}");
+    }
+    let (status, empty) =
         f.call_in(other, "GET", &format!("/api/v1/reports?run_kind=sweep&run_id={sweep_id}"), "").await;
+    assert_eq!(status, 200);
     assert_eq!(empty, json!([]));
     f.clean_up().await;
 }

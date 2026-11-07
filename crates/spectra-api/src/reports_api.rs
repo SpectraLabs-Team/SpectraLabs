@@ -41,7 +41,6 @@ pub struct ReportVersionView {
     /// Lower-case hex SHA-256 of the content.
     pub sha256: String,
     pub size_bytes: i64,
-    pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     /// Where to download this version.
     pub download_url: String,
@@ -68,7 +67,6 @@ impl From<ReportVersion> for ReportVersionView {
             content_type: v.content_type,
             sha256: v.sha256,
             size_bytes: v.size_bytes,
-            created_by: v.created_by,
             created_at: v.created_at,
         }
     }

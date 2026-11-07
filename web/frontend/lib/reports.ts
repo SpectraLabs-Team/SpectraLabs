@@ -18,7 +18,6 @@ export interface ReportVersion {
   content_type: string;
   sha256: string;
   size_bytes: number;
-  created_by: string | null;
   created_at: string;
   /** Engine path of the stored bytes, e.g. /api/v1/reports/{id}/versions/2. */
   download_url: string;

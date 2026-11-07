@@ -878,7 +878,7 @@ fn generate_validation_pdf(
         let ret_vol = t.returns_vol.map_or("—".to_string(), |v| format!("{v:.4}"));
         let params_str = serde_json::to_string(&t.params).unwrap_or_default();
         let params_truncated =
-            if params_str.len() > 38 { format!("{}...", &params_str[..35]) } else { params_str };
+            if params_str.len() > 38 { format!("{}...", prefix_within(&params_str, 35)) } else { params_str };
 
         stream.push_str("BT\n");
         stream.push_str(&format!(
@@ -910,6 +910,15 @@ fn generate_validation_pdf(
     pdf.add_object(stream_object(&stream));
 
     pdf.finish()
+}
+
+/// The longest prefix of `s` that is at most `max` bytes and ends on a character boundary.
+fn prefix_within(s: &str, max: usize) -> &str {
+    let mut end = max.min(s.len());
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
 /// Computes 2D heatmap matrix if two distinct parameters vary across trials.
@@ -1713,5 +1722,20 @@ mod tests {
             spectra_core::sha256_hex(&with),
             "b5ba5086df1a8be27d86cb992b80376139eca954a19fe330e8c33950a37fdf23"
         );
+    }
+
+    #[test]
+    fn params_are_cut_on_a_character_boundary() {
+        // 34 ASCII bytes, then "é" (2 bytes) straddles byte 35.
+        let params = format!("{{\"name\":\"{}é tail\"}}", "a".repeat(25));
+        assert!(!params.is_char_boundary(35), "the test string must straddle byte 35");
+        let cut = prefix_within(&params, 35);
+        assert!(cut.len() <= 35);
+        assert_eq!(cut, &params[..34]);
+        assert!(std::str::from_utf8(cut.as_bytes()).is_ok());
+
+        let ascii = "x".repeat(50);
+        assert_eq!(prefix_within(&ascii, 35), &ascii[..35], "ASCII input is cut at byte 35 as before");
+        assert_eq!(prefix_within("short", 35), "short");
     }
 }

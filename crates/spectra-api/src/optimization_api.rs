@@ -706,7 +706,7 @@ async fn store_and_send(
     };
     match reports::create_version(pool, ws, &report).await {
         Ok(meta) => crate::reports_api::report_response(&meta, &filename, body),
-        Err(e) => db_error(&e),
+        Err(e) => crate::reports_api::store_error(&e),
     }
 }
 

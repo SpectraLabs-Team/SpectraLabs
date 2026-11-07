@@ -169,3 +169,51 @@ async fn tear_sheet_export_of_a_running_backtest_is_a_conflict() {
 
     f.clean_up().await;
 }
+
+#[tokio::test]
+async fn tear_sheet_export_over_the_size_limit_is_refused_and_not_stored() {
+    let Some(pool) = pool().await else { return };
+    let f = Fixture::setup(pool).await;
+
+    // One strategy whose name is over 5 MiB: the table cell is drawn as is, so the PDF is too.
+    let name = "a".repeat(spectra_db::reports::REPORT_MAX_BYTES + 1);
+    let huge = spectra_db::new_id();
+    let summary = json!({ "summary": {
+        "metrics": { "total_return": 0.042 },
+        "strategies": { "list": [ { "strategy": name, "allocation": 50_000 } ] }
+    } });
+    sqlx::query(
+        "INSERT INTO jobs (id, workspace_id, kind, status, finished_at, result, created_by) \
+         VALUES ($1, $2, 'backtest', 'succeeded', now(), $3, $4)",
+    )
+    .bind(huge)
+    .bind(f.ws)
+    .bind(summary)
+    .bind(f.user)
+    .execute(&f.pool)
+    .await
+    .unwrap();
+
+    let path = format!("/api/v1/backtests/{huge}/tear-sheet/export");
+    let res = f.app.clone().oneshot(signed_get(&path, f.user, f.ws)).await.unwrap();
+    assert_eq!(res.status().as_u16(), 413);
+    for h in ["x-report-id", "x-report-version", "x-report-sha256", "content-disposition"] {
+        assert!(res.headers().get(h).is_none(), "no {h} header on a refused report");
+    }
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let err: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(err["code"], "payload_too_large", "{err}");
+    assert_eq!(err["message"], "Report is too large to store.");
+    assert_eq!(err["detail"], "Report is too large to store.");
+
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM reports WHERE workspace_id = $1 AND run_id = $2")
+            .bind(f.ws)
+            .bind(huge)
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, 0, "the refused report leaves no row");
+
+    f.clean_up().await;
+}

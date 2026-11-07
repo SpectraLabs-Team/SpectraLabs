@@ -75,6 +75,9 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/backtests/{id}/series': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/backtests/{id}/attribution': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/backtests/{id}/monthly-returns': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  'api/v1/backtests/{id}/tear-sheet': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  // Stores a new report version, so it is a write.
+  'api/v1/backtests/{id}/tear-sheet/export': { method: 'GET', minRole: 'editor', timeoutMs: 30_000 },
   'api/v1/backtests/{id}/artifacts/{kind}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   'api/v1/datasets': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/datasets/preview': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
@@ -133,6 +136,8 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/optimization/sweep': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
   'api/v1/optimization/sweeps': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/optimization/sweep/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
+  // Stores a new report version, so it is a write.
+  'api/v1/optimization/sweep/{id}/export': { method: 'GET', minRole: 'editor', timeoutMs: 30_000 },
   'api/v1/optimization/walkforward': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 30_000 },
   'api/v1/optimization/walkforward/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 20_000 },
   'api/v1/optimization/overfitting': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
@@ -169,6 +174,11 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/paper/gap/analyze': { method: 'POST', minRole: 'editor', timeoutMs: 30_000 },
   'api/v1/paper/gap/reports': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/paper/gap/reports/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  // Stores a new report version, so it is a write.
+  'api/v1/paper/gap/reports/{id}/export': { method: 'GET', minRole: 'editor', timeoutMs: 30_000 },
+  // Versioned reports (M16): a run's stored versions and the bytes of one version
+  'api/v1/reports': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/reports/{id}/versions/{version}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   // Per-user state and sandbox trades (M25)
   'api/v1/me/state': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/me/state/import': { method: 'POST', minRole: 'viewer', timeoutMs: 15_000 },
@@ -215,6 +225,8 @@ export function routePolicyKey(path: string): string {
   if (/^api\/v1\/risk\/replay\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/risk/replay/{id}';
   if (/^api\/v1\/paper\/orders\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/orders/{id}';
   if (/^api\/v1\/paper\/gap\/reports\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/gap/reports/{id}';
+  if (/^api\/v1\/paper\/gap\/reports\/[0-9a-f-]{36}\/export$/i.test(path)) return 'api/v1/paper/gap/reports/{id}/export';
+  if (/^api\/v1\/reports\/[0-9a-f-]{36}\/versions\/[1-9][0-9]{0,8}$/i.test(path)) return 'api/v1/reports/{id}/versions/{version}';
   if (/^api\/v1\/me\/state\/import$/i.test(path)) return 'api/v1/me/state/import';
   if (/^api\/v1\/me\/state\/[^/]+$/i.test(path)) return 'api/v1/me/state/{key}';
   if (/^api\/v1\/me\/sandbox\/orders\/[^/]+$/i.test(path)) return 'api/v1/me/sandbox/orders/{id}';
@@ -227,7 +239,7 @@ export function routePolicyKey(path: string): string {
   if (/^api\/v1\/backtests\/[0-9a-f-]{36}\/artifacts\/(summary|request|equity_csv|orders_csv|fills_csv|returns_csv|strategies_csv)$/i.test(path)) {
     return 'api/v1/backtests/{id}/artifacts/{kind}';
   }
-  const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series|\/monthly-returns|\/attribution)?$/i.exec(path);
+  const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series|\/monthly-returns|\/attribution|\/tear-sheet|\/tear-sheet\/export)?$/i.exec(path);
   if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
   const session = /^api\/v1\/uploads\/sessions\/[0-9a-f-]{36}(\/complete)?$/i.exec(path);
   if (session) return `api/v1/uploads/sessions/{id}${session[1] ?? ''}`;
@@ -247,6 +259,7 @@ export function routePolicyKey(path: string): string {
   const strategy = /^api\/v1\/strategies\/[0-9a-f-]{36}(\/versions|\/draft|\/diff)?$/i.exec(path);
   if (strategy) return `api/v1/strategies/{id}${strategy[1] ?? ''}`;
   if (/^api\/v1\/optimization\/sweep\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/optimization/sweep/{id}';
+  if (/^api\/v1\/optimization\/sweep\/[0-9a-f-]{36}\/export$/i.test(path)) return 'api/v1/optimization/sweep/{id}/export';
   if (/^api\/v1\/optimization\/walkforward\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/optimization/walkforward/{id}';
   const holdout = /^api\/v1\/optimization\/holdout\/[0-9a-f-]{36}(\/evaluate)?$/i.exec(path);
   if (holdout) return `api/v1/optimization/holdout/{id}${holdout[1] ?? ''}`;

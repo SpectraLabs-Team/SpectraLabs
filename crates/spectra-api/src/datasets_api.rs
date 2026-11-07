@@ -1062,7 +1062,7 @@ fn parse_time(text: &str, end: bool) -> Option<i64> {
 /// The decoded dataset of a version: from the cache, the API's local store,
 /// or the artifact store (verified either way).
 #[allow(clippy::result_large_err)] // the error is the finished response
-async fn load_for_chart(
+pub(crate) async fn load_for_chart(
     st: &AppState,
     checksum: &str,
     blob: Option<&str>,

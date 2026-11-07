@@ -4299,6 +4299,118 @@
         }
       }
     },
+    "/api/v1/portfolio-runs/{id}": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "One portfolio run: its inputs, status, and result once succeeded.",
+        "operationId": "get_portfolio_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The portfolio run id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioRunView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/portfolio-runs/{id}/report": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "The run's portfolio report PDF, stored as a report version (M16). An export identical to the\nnewest version reuses it.",
+        "operationId": "portfolio_run_report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The portfolio run id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The portfolio report PDF, stored as a report version; `x-report-id`, `x-report-version` and `x-report-sha256` describe it",
+            "content": {
+              "application/pdf": {}
+            }
+          },
+          "403": {
+            "description": "Viewers cannot store reports (code `viewer_read_only`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The run has not succeeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The report is over 5 MiB and was not stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/portfolios": {
       "get": {
         "tags": [
@@ -4345,6 +4457,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PortfolioView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot save portfolios (code `viewer_read_only`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
                 }
               }
             }
@@ -4404,6 +4526,293 @@
           },
           "404": {
             "description": "Not found in this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Edit a saved portfolio: its name, method and holdings, with the same checks as a save. The\nholdings are replaced as a whole; if the new weights are refused, the old ones are kept.",
+        "operationId": "update_portfolio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The portfolio id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePortfolioBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot edit portfolios (code `viewer_read_only`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found in this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another portfolio in the workspace has this name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name, method, holdings or weights",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Delete a saved portfolio and its holdings. Its runs are kept (with their recorded inputs) and\nno longer listed under it.",
+        "operationId": "delete_portfolio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The portfolio id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedPortfolioView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot delete portfolios (code `viewer_read_only`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found in this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/portfolios/{id}/runs": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "A portfolio's runs, newest first, with headline numbers once finished.",
+        "operationId": "list_portfolio_runs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The portfolio id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "`next_cursor` from the previous page.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1..200, default 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioRunPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such portfolio in this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Run a saved portfolio through the rebalancing simulator on a dataset version.",
+        "operationId": "run_portfolio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The portfolio id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunPortfolioBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The run, finished: `succeeded` with its result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioRunView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot run portfolios (code `viewer_read_only`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such portfolio or dataset version in this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The dataset version is sealed as a holdout, or its bars are not reachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid dates, rule, cash or cost config (`details.errors`), or a holding with no bars; a refused run is stored as `failed`",
             "content": {
               "application/json": {
                 "schema": {
@@ -8160,6 +8569,63 @@
           }
         }
       },
+      "CostConfigBody": {
+        "type": "object",
+        "description": "The cost config every rebalance trade is priced with. Omit it, or give `{\"name\":\n\"paper-default\"}`, for the M26 paper config; or give `slippage_bps` and `min_fee` together,\nrecorded as the `custom` config.",
+        "properties": {
+          "min_fee": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Commission on each trade, in currency."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slippage_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Adverse price move on every trade, in basis points."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CostConfigView": {
+        "type": "object",
+        "description": "The cost config the run's trades were priced with.",
+        "required": [
+          "name",
+          "version",
+          "slippage_bps",
+          "min_fee"
+        ],
+        "properties": {
+          "min_fee": {
+            "type": "number",
+            "format": "double"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slippage_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "CreateBacktest": {
         "type": "object",
         "description": "`POST /api/v1/backtests` body: the `backtest` job payload, plus a priority.",
@@ -9243,6 +9709,23 @@
           }
         }
       },
+      "DeletedPortfolioView": {
+        "type": "object",
+        "description": "A deleted portfolio.",
+        "required": [
+          "id",
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "DeletedVersionView": {
         "type": "object",
         "description": "What deleting a version did.",
@@ -9361,6 +9844,24 @@
           }
         },
         "additionalProperties": false
+      },
+      "EquityPointView": {
+        "type": "object",
+        "description": "Equity at one day's close.",
+        "required": [
+          "date",
+          "equity"
+        ],
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "`YYYY-MM-DD`."
+          },
+          "equity": {
+            "type": "number",
+            "format": "double"
+          }
+        }
       },
       "EquitySnapshotView": {
         "type": "object",
@@ -11246,6 +11747,239 @@
           }
         }
       },
+      "PortfolioRunListItem": {
+        "type": "object",
+        "description": "One run in a list: its inputs, state and headline numbers.",
+        "required": [
+          "id",
+          "status",
+          "request",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "headline": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRunSummary",
+                "description": "Once succeeded."
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "portfolio_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "request": {
+            "type": "object"
+          },
+          "status": {
+            "type": "string",
+            "description": "`running`, `succeeded` or `failed`."
+          }
+        }
+      },
+      "PortfolioRunPage": {
+        "type": "object",
+        "description": "A page of a portfolio's runs, newest first.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortfolioRunListItem"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Pass as `cursor` for the next page; null on the last."
+          }
+        }
+      },
+      "PortfolioRunResult": {
+        "type": "object",
+        "description": "The result of a finished run.",
+        "required": [
+          "summary",
+          "equity",
+          "rebalances",
+          "cost_config",
+          "prices"
+        ],
+        "properties": {
+          "cost_config": {
+            "$ref": "#/components/schemas/CostConfigView"
+          },
+          "equity": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EquityPointView"
+            },
+            "description": "Equity at every priced day's close."
+          },
+          "prices": {
+            "$ref": "#/components/schemas/PriceCoverageView"
+          },
+          "rebalances": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RebalanceView"
+            },
+            "description": "Every rebalance in order: weights over time, turnover and costs."
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PortfolioRunSummary"
+          }
+        }
+      },
+      "PortfolioRunSummary": {
+        "type": "object",
+        "description": "Headline numbers of a finished run.",
+        "required": [
+          "total_return",
+          "max_drawdown",
+          "total_turnover",
+          "total_cost",
+          "rebalance_count",
+          "initial_cash",
+          "final_equity"
+        ],
+        "properties": {
+          "final_equity": {
+            "type": "number",
+            "format": "double"
+          },
+          "initial_cash": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_drawdown": {
+            "type": "number",
+            "format": "double",
+            "description": "Largest peak-to-trough fall, a positive fraction."
+          },
+          "rebalance_count": {
+            "type": "integer",
+            "description": "Rebalances, including the initial one.",
+            "minimum": 0
+          },
+          "total_cost": {
+            "type": "number",
+            "format": "double",
+            "description": "Costs of every rebalance, in currency."
+          },
+          "total_return": {
+            "type": "number",
+            "format": "double",
+            "description": "Final equity over starting cash, minus one."
+          },
+          "total_turnover": {
+            "type": "number",
+            "format": "double",
+            "description": "Sum of every rebalance's turnover."
+          }
+        }
+      },
+      "PortfolioRunView": {
+        "type": "object",
+        "description": "A portfolio run as the API shows it.",
+        "required": [
+          "id",
+          "status",
+          "request",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it failed."
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "portfolio_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The portfolio run; null once it has been deleted."
+          },
+          "request": {
+            "type": "object",
+            "description": "Every input: the portfolio snapshot, dataset version, dates, rule, cash and cost config."
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PortfolioRunResult",
+                "description": "Once succeeded."
+              }
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "`running`, `succeeded` or `failed`."
+          }
+        }
+      },
       "PortfolioSnapshotDto": {
         "type": "object",
         "required": [
@@ -11637,6 +12371,35 @@
         },
         "additionalProperties": false
       },
+      "PriceCoverageView": {
+        "type": "object",
+        "description": "The days the run priced.",
+        "required": [
+          "first",
+          "last",
+          "days",
+          "skipped_days"
+        ],
+        "properties": {
+          "days": {
+            "type": "integer",
+            "description": "Days on which every holding had a close.",
+            "minimum": 0
+          },
+          "first": {
+            "type": "string",
+            "description": "First and last priced day, `YYYY-MM-DD`."
+          },
+          "last": {
+            "type": "string"
+          },
+          "skipped_days": {
+            "type": "integer",
+            "description": "Days in the range on which some holding had a bar but another did not; not priced.",
+            "minimum": 0
+          }
+        }
+      },
       "ProjectedMetricsView": {
         "type": "object",
         "required": [
@@ -11964,6 +12727,53 @@
           }
         },
         "additionalProperties": false
+      },
+      "RebalanceView": {
+        "type": "object",
+        "description": "One rebalance: why, how much it traded and cost, and the weights around it.",
+        "required": [
+          "date",
+          "reasons",
+          "turnover",
+          "cost",
+          "weights",
+          "trades"
+        ],
+        "properties": {
+          "cost": {
+            "type": "number",
+            "format": "double",
+            "description": "Cost of its trades, in currency."
+          },
+          "date": {
+            "type": "string",
+            "description": "`YYYY-MM-DD`."
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`initial`, `calendar` and/or `drift`."
+          },
+          "trades": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TradeView"
+            }
+          },
+          "turnover": {
+            "type": "number",
+            "format": "double",
+            "description": "Traded notional over equity before the rebalance."
+          },
+          "weights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WeightView"
+            }
+          }
+        }
       },
       "ReconcilePositionsResponse": {
         "type": "object",
@@ -12841,6 +13651,73 @@
           "message": {
             "type": "string",
             "description": "What was wrong."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunPortfolioBody": {
+        "type": "object",
+        "description": "`POST /api/v1/portfolios/{id}/runs` body.",
+        "required": [
+          "dataset_version_id",
+          "start",
+          "end",
+          "rule",
+          "initial_cash"
+        ],
+        "properties": {
+          "cost_config": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CostConfigBody"
+              }
+            ]
+          },
+          "dataset_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A dataset version of the caller's workspace with bars for every holding."
+          },
+          "end": {
+            "type": "string",
+            "description": "Last day of the run, `YYYY-MM-DD` (UTC), on or after `start`."
+          },
+          "initial_cash": {
+            "type": "number",
+            "format": "double",
+            "description": "Starting cash, positive."
+          },
+          "rule": {
+            "$ref": "#/components/schemas/RunRuleBody"
+          },
+          "start": {
+            "type": "string",
+            "description": "First day of the run, `YYYY-MM-DD` (UTC)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunRuleBody": {
+        "type": "object",
+        "description": "When a run rebalances. At least one of the two must be set.",
+        "properties": {
+          "calendar": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`monthly` or `quarterly`: rebalance on the first trading day of each new month or quarter."
+          },
+          "drift_threshold": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Rebalance when a holding's weight is more than this far from its target (a fraction in\n(0, 1], e.g. 0.05 for 5 percentage points)."
           }
         },
         "additionalProperties": false
@@ -14198,6 +15075,46 @@
           }
         }
       },
+      "TradeView": {
+        "type": "object",
+        "description": "One rebalance trade with its recorded cost.",
+        "required": [
+          "symbol",
+          "qty",
+          "price",
+          "exec_price",
+          "slippage_cost",
+          "fee"
+        ],
+        "properties": {
+          "exec_price": {
+            "type": "number",
+            "format": "double",
+            "description": "The price after slippage."
+          },
+          "fee": {
+            "type": "number",
+            "format": "double"
+          },
+          "price": {
+            "type": "number",
+            "format": "double",
+            "description": "The close the trade is priced from."
+          },
+          "qty": {
+            "type": "number",
+            "format": "double",
+            "description": "Positive buys, negative sells."
+          },
+          "slippage_cost": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
       "TransactRequest": {
         "type": "object",
         "description": "`POST /api/v1/me/sandbox/transact` body: one trade, applied atomically.",
@@ -15206,6 +16123,28 @@
           "workspace_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "WeightView": {
+        "type": "object",
+        "description": "A holding's weight before and after one rebalance.",
+        "required": [
+          "symbol",
+          "before",
+          "after"
+        ],
+        "properties": {
+          "after": {
+            "type": "number",
+            "format": "double"
+          },
+          "before": {
+            "type": "number",
+            "format": "double"
+          },
+          "symbol": {
+            "type": "string"
           }
         }
       }

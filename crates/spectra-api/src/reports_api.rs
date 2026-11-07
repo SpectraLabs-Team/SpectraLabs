@@ -18,10 +18,20 @@ use crate::jobs_api::{context, db_error, to_json};
 use crate::{error_response, AppState, Identity};
 
 const NOT_FOUND: &str = "Report not found.";
-const REPORT_TYPES: [&str; 3] =
-    [reports::report_type::VALIDATION, reports::report_type::TEAR_SHEET, reports::report_type::GAP];
-const RUN_KINDS: [&str; 3] =
-    [reports::run_kind::SWEEP, reports::run_kind::BACKTEST, reports::run_kind::PAPER_GAP];
+const REPORT_TYPES: [&str; 5] = [
+    reports::report_type::VALIDATION,
+    reports::report_type::TEAR_SHEET,
+    reports::report_type::GAP,
+    reports::report_type::SIGNAL_TEST,
+    reports::report_type::PORTFOLIO,
+];
+const RUN_KINDS: [&str; 5] = [
+    reports::run_kind::SWEEP,
+    reports::run_kind::BACKTEST,
+    reports::run_kind::PAPER_GAP,
+    reports::run_kind::SIGNAL_TEST,
+    reports::run_kind::PORTFOLIO_BACKTEST,
+];
 
 /// One stored version of a report (without its content).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -123,10 +133,16 @@ pub(crate) async fn list_reports(
     query: Result<Query<ListReportsQuery>, QueryRejection>,
 ) -> Response {
     let Ok(Query(q)) = query else {
-        return error_response(422, "Give run_kind (sweep, backtest or paper_gap) and run_id.");
+        return error_response(
+            422,
+            "Give run_kind (sweep, backtest, paper_gap, signal_test or portfolio_backtest) and run_id.",
+        );
     };
     if !RUN_KINDS.contains(&q.run_kind.as_str()) {
-        return error_response(422, "run_kind must be sweep, backtest or paper_gap.");
+        return error_response(
+            422,
+            "run_kind must be sweep, backtest, paper_gap, signal_test or portfolio_backtest.",
+        );
     }
     let (pool, ws) = match context(&st, &id) {
         Ok(c) => c,
@@ -134,7 +150,10 @@ pub(crate) async fn list_reports(
     };
     if let Some(t) = q.report_type.as_deref() {
         if !REPORT_TYPES.contains(&t) {
-            return error_response(422, "report_type must be validation, tear_sheet or gap.");
+            return error_response(
+                422,
+                "report_type must be validation, tear_sheet, gap, signal_test or portfolio.",
+            );
         }
     }
     match reports::for_run(&pool, ws, &q.run_kind, q.run_id).await {

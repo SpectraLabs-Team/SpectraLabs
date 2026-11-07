@@ -892,6 +892,44 @@ test('report routes (M16): listing and downloading stored versions is a read; ev
   }
 });
 
+test('portfolio routes (M15): reads are viewer; saving, editing, deleting, running and the report export are editor, like backtests', async () => {
+  const routes = engineRoutes.ENGINE_ROUTES;
+  const id = '0192f3a4-0000-7000-8000-00000000002c';
+  // [concrete path, method, policy key, role, the backtest route whose role it copies, its method]
+  const table = [
+    ['api/v1/portfolios', 'GET', 'api/v1/portfolios', 'viewer', 'api/v1/backtests', 'GET'],
+    ['api/v1/portfolios', 'POST', 'api/v1/portfolios', 'editor', 'api/v1/backtests', 'POST'],
+    [`api/v1/portfolios/${id}`, 'GET', 'api/v1/portfolios/{id}', 'viewer', 'api/v1/backtests/{id}', 'GET'],
+    [`api/v1/portfolios/${id}`, 'PUT', 'api/v1/portfolios/{id}', 'editor', 'api/v1/backtests', 'POST'],
+    [`api/v1/portfolios/${id}`, 'DELETE', 'api/v1/portfolios/{id}', 'editor', 'api/v1/backtests/{id}/cancel', 'POST'],
+    [`api/v1/portfolios/${id}/runs`, 'GET', 'api/v1/portfolios/{id}/runs', 'viewer', 'api/v1/backtests', 'GET'],
+    [`api/v1/portfolios/${id}/runs`, 'POST', 'api/v1/portfolios/{id}/runs', 'editor', 'api/v1/backtests', 'POST'],
+    [`api/v1/portfolio-runs/${id}`, 'GET', 'api/v1/portfolio-runs/{id}', 'viewer', 'api/v1/backtests/{id}', 'GET'],
+    [`api/v1/portfolio-runs/${id}/report`, 'GET', 'api/v1/portfolio-runs/{id}/report', 'editor', 'api/v1/backtests/{id}/tear-sheet/export', 'GET'],
+  ];
+  for (const [p, method, policy, role, sibling, siblingMethod] of table) {
+    assert.equal(engineRoutes.routePolicyKey(p), policy, p);
+    assert.ok(engineRoutes.allowsMethod(routes[policy], method), `${method} ${policy}`);
+    assert.equal(engineRoutes.minimumRole(routes[policy], method), role, `${method} ${policy}`);
+    assert.equal(engineRoutes.minimumRole(routes[sibling], siblingMethod), role, `${method} ${policy} has the role of ${siblingMethod} ${sibling}`);
+  }
+
+  // What the proxy does with a session: requireRole(auth, workspace, minimumRole(route, method)).
+  const owner = await store.createUser('pf-owner@x.com', 'h', 'O');
+  const editor = await store.createUser('pf-editor@x.com', 'h', 'E');
+  const viewer = await store.createUser('pf-viewer@x.com', 'h', 'V');
+  const team = await workspaces.createWorkspace(owner.id, 'Portfolio Desk');
+  await addMember(team.id, editor.id, 'editor');
+  await addMember(team.id, viewer.id, 'viewer');
+  const viewerAuth = await authFor(viewer);
+  const editorAuth = await authFor(editor);
+  for (const [p, method, , role] of table) {
+    const needs = engineRoutes.minimumRole(routes[engineRoutes.routePolicyKey(p)], method);
+    assert.equal(await authzStatus(authz.requireRole(viewerAuth, team.id, needs)), role === 'editor' ? 403 : 200, `viewer ${method} ${p}`);
+    assert.equal(await authzStatus(authz.requireRole(editorAuth, team.id, needs)), 200, `editor ${method} ${p}`);
+  }
+});
+
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {
   // admin@x.com signed up earlier (2FA test) and became the first admin.
   assert.equal((await store.findUser('admin@x.com')).role, 'admin');

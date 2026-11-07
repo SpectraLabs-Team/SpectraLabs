@@ -13,7 +13,7 @@ import { OptimizationLab } from './OptimizationLab';
 import { OverviewDashboard } from './OverviewDashboard';
 import { PaperLab } from './PaperLab';
 import { PortfolioProvider } from './PortfolioContext';
-import { PortfolioStudio } from './PortfolioStudio';
+import { PortfolioWorkspace } from './PortfolioWorkspace';
 import { RiskCenter } from './RiskCenter';
 import { RiskLab } from './RiskLab';
 import { StrategyStudio } from './StrategyStudio';
@@ -43,7 +43,7 @@ export function StudioApp() {
             {tab === 'risk' && <RiskLab />}
             {tab === 'risk-center' && <RiskCenter />}
             {tab === 'paper' && <PaperLab />}
-            {tab === 'portfolio' && <PortfolioStudio />}
+            {tab === 'portfolio' && <PortfolioWorkspace />}
             {tab === 'data' && <DataLab />}
             {tab === 'strategies' && <StrategyStudio />}
             {tab === 'backtests' && <BacktestLab />}

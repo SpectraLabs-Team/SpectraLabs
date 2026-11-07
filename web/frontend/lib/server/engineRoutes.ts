@@ -79,6 +79,14 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   // Stores a new report version, so it is a write.
   'api/v1/backtests/{id}/tear-sheet/export': { method: 'GET', minRole: 'editor', timeoutMs: 30_000 },
   'api/v1/backtests/{id}/artifacts/{kind}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
+  // Saved portfolios and portfolio backtests (M15): reads are viewer; saving, editing, deleting
+  // and running are editor, like backtests. A run is computed in the request, so it gets a
+  // backtest-sized timeout. The report export stores a new version, so it is a write.
+  'api/v1/portfolios': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 15_000 },
+  'api/v1/portfolios/{id}': { method: ['GET', 'PUT', 'DELETE'], minRole: 'viewer', methodRoles: { PUT: 'editor', DELETE: 'editor' }, timeoutMs: 15_000 },
+  'api/v1/portfolios/{id}/runs': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 120_000 },
+  'api/v1/portfolio-runs/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/portfolio-runs/{id}/report': { method: 'GET', minRole: 'editor', timeoutMs: 30_000 },
   'api/v1/datasets': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/datasets/preview': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/datasets/ingest': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
@@ -248,6 +256,10 @@ export function routePolicyKey(path: string): string {
   }
   const backtest = /^api\/v1\/backtests\/[0-9a-f-]{36}(\/cancel|\/series|\/monthly-returns|\/attribution|\/tear-sheet|\/tear-sheet\/export)?$/i.exec(path);
   if (backtest) return `api/v1/backtests/{id}${backtest[1] ?? ''}`;
+  const portfolio = /^api\/v1\/portfolios\/[0-9a-f-]{36}(\/runs)?$/i.exec(path);
+  if (portfolio) return `api/v1/portfolios/{id}${portfolio[1] ?? ''}`;
+  const portfolioRun = /^api\/v1\/portfolio-runs\/[0-9a-f-]{36}(\/report)?$/i.exec(path);
+  if (portfolioRun) return `api/v1/portfolio-runs/{id}${portfolioRun[1] ?? ''}`;
   const session = /^api\/v1\/uploads\/sessions\/[0-9a-f-]{36}(\/complete)?$/i.exec(path);
   if (session) return `api/v1/uploads/sessions/{id}${session[1] ?? ''}`;
   if (/^api\/v1\/corporate-actions\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/corporate-actions/{id}';

@@ -21,6 +21,8 @@ pub mod report_type {
     pub const GAP: &str = "gap";
     /// M12 alpha workbench signal test report.
     pub const SIGNAL_TEST: &str = "signal_test";
+    /// M15 portfolio backtest report.
+    pub const PORTFOLIO: &str = "portfolio";
 }
 
 /// What a report's `run_id` points at.
@@ -33,6 +35,8 @@ pub mod run_kind {
     pub const PAPER_GAP: &str = "paper_gap";
     /// An M12 signal test (`signal_tests.id`).
     pub const SIGNAL_TEST: &str = "signal_test";
+    /// An M15 portfolio backtest run (`portfolio_runs.id`).
+    pub const PORTFOLIO_BACKTEST: &str = "portfolio_backtest";
 }
 
 /// The largest report content, in bytes, that [`create_version`] stores: 5 MiB. Every stored
@@ -147,9 +151,9 @@ pub async fn create_version(
         .bind(report.run_id)
         .execute(&mut *tx)
         .await?;
-    // Tear sheets only: an export identical to the newest version reuses it. Sweep exports keep
-    // every version (see the M16 decisions).
-    if report.report_type == report_type::TEAR_SHEET {
+    // Tear sheets and portfolio reports: an export identical to the newest version reuses it.
+    // Sweep exports keep every version (see the M16 decisions).
+    if report.report_type == report_type::TEAR_SHEET || report.report_type == report_type::PORTFOLIO {
         let latest: Option<ReportVersion> = sqlx::query_as(include_str!("../queries/report_latest.sql"))
             .bind(workspace_id)
             .bind(report.report_type)

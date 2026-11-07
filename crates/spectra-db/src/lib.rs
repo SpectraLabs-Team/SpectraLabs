@@ -29,6 +29,7 @@ pub mod jobs;
 pub mod lifecycle;
 pub mod optimization;
 pub mod paper;
+pub mod portfolio_runs;
 pub mod portfolios;
 pub mod providers;
 pub mod reports;

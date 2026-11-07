@@ -29,6 +29,23 @@ pub enum DependenceModel {
 }
 
 impl DependenceModel {
+    /// Checks the model's parameters: Student-t needs `degrees_of_freedom >= 1`, Clayton needs a
+    /// finite `theta > 0`. Out-of-range values are refused, never adjusted.
+    ///
+    /// # Errors
+    /// [`Error::InvalidArgument`] naming the parameter and the bad value.
+    pub fn validate(&self) -> Result<()> {
+        match *self {
+            Self::TCopula { degrees_of_freedom } if degrees_of_freedom < 1 => Err(Error::InvalidArgument(
+                format!("t_copula degrees_of_freedom must be at least 1, got {degrees_of_freedom}"),
+            )),
+            Self::ClaytonCopula { theta } if !(theta > 0.0 && theta.is_finite()) => {
+                Err(Error::InvalidArgument(format!("clayton theta must be finite and > 0, got {theta}")))
+            }
+            _ => Ok(()),
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Aggregate => "aggregate",
@@ -139,6 +156,7 @@ pub fn simulate_correlated(
 ) -> Result<CorrelatedSimulationResult> {
     let start = std::time::Instant::now();
     portfolio.validate()?;
+    model.validate()?;
     if simulations == 0 {
         return Err(Error::InvalidArgument("simulations must be > 0".into()));
     }
@@ -215,7 +233,7 @@ pub fn simulate_correlated(
 
         match model {
             DependenceModel::TCopula { degrees_of_freedom } => {
-                let nu = degrees_of_freedom.max(1);
+                let nu = degrees_of_freedom;
                 let mut sum_sq = 0.0;
                 for _ in 0..nu {
                     let u = normal.sample(&mut rng);
@@ -227,7 +245,7 @@ pub fn simulate_correlated(
                 }
             }
             DependenceModel::ClaytonCopula { theta } => {
-                let th = theta.max(0.1);
+                let th = theta;
                 let u_common = (normal.sample(&mut rng).abs() + 0.1).ln().abs();
                 let scale = (1.0 + th * u_common).powf(1.0 / th);
                 for z in &mut z_vec {

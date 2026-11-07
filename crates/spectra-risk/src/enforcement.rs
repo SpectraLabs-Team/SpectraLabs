@@ -198,13 +198,8 @@ impl PortfolioSnapshot {
             return Ok((0.0, 0.0));
         }
 
-        if let crate::copula::DependenceModel::TCopula { degrees_of_freedom } = model {
-            if degrees_of_freedom == 0 {
-                return Err(Error::InvalidArgument(
-                    "t_copula requires degrees_of_freedom parameter (must be >= 1)".into(),
-                ));
-            }
-        }
+        // Checked here, not left to the simulation below, whose errors are reported as Error::Data.
+        model.validate()?;
 
         let mut p = crate::portfolio::Portfolio::new();
         for (sym, pos) in &self.positions {

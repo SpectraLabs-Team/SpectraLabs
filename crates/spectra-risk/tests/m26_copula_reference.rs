@@ -252,110 +252,67 @@ fn test_clayton_copula_amplifies_downside_cvar() {
 }
 
 #[test]
-fn test_dof_floor_silent_default() {
-    // finding for Task 7/8: degrees_of_freedom floor max(1) silently clamps dof 0 to 1 without warning or validation error.
-    // In copula.rs line 173: let nu = degrees_of_freedom.max(1);
-    // Verifies dof 0 produces identical simulation output to dof 1 under the same seed,
-    // and that dof 0 and dof 1 are floored at 1 (distinct from dof 2).
+fn test_dof_zero_is_rejected() {
+    // Task 1 (M7): the max(1) clamp on degrees_of_freedom is gone. dof 0 is refused with
+    // Error::InvalidArgument naming the parameter and value; dof 1 is the smallest accepted.
     let mut p = Portfolio::new();
     p.add_asset_with_volatility("ASSET_A", 10.0, 100.0, 0.20)
         .add_asset_with_volatility("ASSET_B", 10.0, 100.0, 0.20);
     let identity = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+    let run = |dof: u32| {
+        simulate_correlated(
+            &p,
+            Some(&identity),
+            DependenceModel::TCopula { degrees_of_freedom: dof },
+            1_000,
+            42,
+            1.0 / 252.0,
+            0.99,
+        )
+    };
 
-    let res_dof0 = simulate_correlated(
-        &p,
-        Some(&identity),
-        DependenceModel::TCopula { degrees_of_freedom: 0 },
-        1_000,
-        42,
-        1.0 / 252.0,
-        0.99,
-    )
-    .expect("TCopula dof 0 failed");
-
-    let res_dof1 = simulate_correlated(
-        &p,
-        Some(&identity),
-        DependenceModel::TCopula { degrees_of_freedom: 1 },
-        1_000,
-        42,
-        1.0 / 252.0,
-        0.99,
-    )
-    .expect("TCopula dof 1 failed");
-
-    let res_dof2 = simulate_correlated(
-        &p,
-        Some(&identity),
-        DependenceModel::TCopula { degrees_of_freedom: 2 },
-        1_000,
-        42,
-        1.0 / 252.0,
-        0.99,
-    )
-    .expect("TCopula dof 2 failed");
-
-    assert_eq!(
-        res_dof0.portfolio_losses, res_dof1.portfolio_losses,
-        "dof 0 must behave identically to dof 1 due to max(1) clamp"
-    );
-    assert_ne!(res_dof0.portfolio_losses, res_dof2.portfolio_losses, "dof 0 must not floor to dof 2");
-    assert_ne!(res_dof1.portfolio_losses, res_dof2.portfolio_losses, "dof 1 must not floor to dof 2");
+    match run(0) {
+        Err(Error::InvalidArgument(msg)) => {
+            assert!(msg.contains("degrees_of_freedom") && msg.contains("got 0"), "{msg}");
+        }
+        other => panic!("expected Error::InvalidArgument on dof 0, got {other:?}"),
+    }
+    let dof1 = run(1).expect("TCopula dof 1 failed");
+    let dof2 = run(2).expect("TCopula dof 2 failed");
+    assert_ne!(dof1.portfolio_losses, dof2.portfolio_losses, "dof 1 and dof 2 are distinct models");
 }
 
 #[test]
-fn test_theta_floor_silent_default() {
-    // finding for Task 7/8: theta floor max(0.1) silently clamps theta <= 0.0 to 0.1 without warning or validation error.
-    // In copula.rs line 185: let th = theta.max(0.1);
-    // Verifies theta 0.0 produces identical simulation output to theta 0.1 under the same seed,
-    // and that theta 0.0 and 0.1 are floored at 0.1 (distinct from theta 0.5).
+fn test_theta_not_positive_is_rejected() {
+    // Task 1 (M7): the max(0.1) clamp on theta is gone. theta <= 0 is refused with
+    // Error::InvalidArgument naming the parameter and value; theta 0.1 still runs.
     let mut p = Portfolio::new();
     p.add_asset_with_volatility("ASSET_A", 10.0, 100.0, 0.20)
         .add_asset_with_volatility("ASSET_B", 10.0, 100.0, 0.20);
     let identity = vec![vec![1.0, 0.0], vec![0.0, 1.0]];
+    let run = |theta: f64| {
+        simulate_correlated(
+            &p,
+            Some(&identity),
+            DependenceModel::ClaytonCopula { theta },
+            1_000,
+            42,
+            1.0 / 252.0,
+            0.99,
+        )
+    };
 
-    let res_th0 = simulate_correlated(
-        &p,
-        Some(&identity),
-        DependenceModel::ClaytonCopula { theta: 0.0 },
-        1_000,
-        42,
-        1.0 / 252.0,
-        0.99,
-    )
-    .expect("Clayton theta 0 failed");
-
-    let res_th0_1 = simulate_correlated(
-        &p,
-        Some(&identity),
-        DependenceModel::ClaytonCopula { theta: 0.1 },
-        1_000,
-        42,
-        1.0 / 252.0,
-        0.99,
-    )
-    .expect("Clayton theta 0.1 failed");
-
-    let res_th0_5 = simulate_correlated(
-        &p,
-        Some(&identity),
-        DependenceModel::ClaytonCopula { theta: 0.5 },
-        1_000,
-        42,
-        1.0 / 252.0,
-        0.99,
-    )
-    .expect("Clayton theta 0.5 failed");
-
-    assert_eq!(
-        res_th0.portfolio_losses, res_th0_1.portfolio_losses,
-        "theta 0.0 must behave identically to theta 0.1 due to max(0.1) clamp"
-    );
-    assert_ne!(res_th0.portfolio_losses, res_th0_5.portfolio_losses, "theta 0.0 must not floor to theta 0.5");
-    assert_ne!(
-        res_th0_1.portfolio_losses, res_th0_5.portfolio_losses,
-        "theta 0.1 must not floor to theta 0.5"
-    );
+    for theta in [0.0, -1.0] {
+        match run(theta) {
+            Err(Error::InvalidArgument(msg)) => {
+                assert!(msg.contains("theta") && msg.contains(&format!("got {theta}")), "{msg}");
+            }
+            other => panic!("expected Error::InvalidArgument on theta {theta}, got {other:?}"),
+        }
+    }
+    let th0_1 = run(0.1).expect("Clayton theta 0.1 failed");
+    let th0_5 = run(0.5).expect("Clayton theta 0.5 failed");
+    assert_ne!(th0_1.portfolio_losses, th0_5.portfolio_losses, "theta 0.1 and 0.5 are distinct models");
 }
 
 #[test]

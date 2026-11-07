@@ -3,8 +3,8 @@
 
 use spectra_core::{Bar, InstrumentId, LedgerConfig, Money, Price, Qty, Ratio, Side, SCALE};
 use spectra_engine::{
-    run_backtest, BacktestConfig, BacktestResult, Context, ExecutionConfig, OrderState, RebalanceConfig,
-    RebalanceRule, Rebalancer, WeightStrategy,
+    run_backtest, BacktestConfig, BacktestResult, CalendarFrequency, Context, ExecutionConfig, OrderState,
+    RebalanceConfig, RebalanceRule, Rebalancer, WeightStrategy,
 };
 
 /// Bars for two instruments; `px(step, instrument)` gives the price (open = close).
@@ -171,4 +171,54 @@ fn dropped_instruments_are_closed() {
     assert_eq!(units(&r, 2), 0.0);
     // 0.5 alone is under the cap: topped up from 490 to 500.
     assert_eq!(units(&r, 1), 500.0);
+}
+
+/// Daily bars starting at `start` (y, m, d), instrument 1 rising every day so weights drift daily.
+fn dated_bars(start: (i64, u32, u32), n: usize) -> Vec<Bar> {
+    let first = spectra_engine::bonds::days_from_civil(start.0, start.1, start.2);
+    let mut out = Vec::new();
+    for i in 0..n {
+        for id in [1, 2] {
+            let px = if id == 1 { 100.0 + 4.0 * i as f64 } else { 50.0 };
+            let p = Price::from_f64(px).unwrap();
+            let ts = (first + i as i64) * 86_400_000_000_000;
+            out.push(Bar {
+                ts_ns: ts,
+                known_at_ns: ts,
+                instrument: id,
+                open: p,
+                high: p,
+                low: p,
+                close: p,
+                volume: Qty::from_raw(10_000_000 * SCALE),
+            });
+        }
+    }
+    out
+}
+
+#[test]
+fn calendar_monthly_trades_on_the_first_bar_of_each_month() {
+    // Jan 29 is bar 0; Jan 31 is bar 2; Feb 1 is bar 3. Targets are set on bar 0.
+    let data = dated_bars((2026, 1, 29), 8);
+    let rc = RebalanceConfig {
+        rule: RebalanceRule::Calendar(CalendarFrequency::Monthly),
+        ..RebalanceConfig::default()
+    };
+    let r = run(&data, vec![(1, 0.5), (2, 0.5)], rc, &cfg());
+    let steps: std::collections::BTreeSet<i64> = r.orders.iter().map(|o| o.submit_step).collect();
+    assert_eq!(steps.into_iter().collect::<Vec<_>>(), vec![0, 3]);
+}
+
+#[test]
+fn calendar_quarterly_ignores_month_ends() {
+    // Within one quarter, only the initial allocation trades, even though prices drift every day.
+    let data = dated_bars((2026, 1, 29), 8);
+    let rc = RebalanceConfig {
+        rule: RebalanceRule::Calendar(CalendarFrequency::Quarterly),
+        ..RebalanceConfig::default()
+    };
+    let r = run(&data, vec![(1, 0.5), (2, 0.5)], rc, &cfg());
+    let steps: std::collections::BTreeSet<i64> = r.orders.iter().map(|o| o.submit_step).collect();
+    assert_eq!(steps.into_iter().collect::<Vec<_>>(), vec![0]);
 }

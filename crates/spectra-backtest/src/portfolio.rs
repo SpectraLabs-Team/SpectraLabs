@@ -45,6 +45,10 @@ pub enum PortfolioError {
     LengthMismatch { symbols: usize, values: usize },
     /// The tolerance is not finite and non-negative.
     InvalidTolerance(f64),
+    /// A price history is too short to estimate a volatility (M7 needs 60 bars).
+    InsufficientHistory { symbol: String, need: usize, have: usize },
+    /// A close is not finite and strictly positive.
+    InvalidPrice { symbol: String, value: f64 },
 }
 
 impl fmt::Display for PortfolioError {
@@ -66,6 +70,12 @@ impl fmt::Display for PortfolioError {
                 write!(f, "{symbols} symbols but {values} volatilities")
             }
             Self::InvalidTolerance(t) => write!(f, "tolerance must be finite and non-negative, got {t}"),
+            Self::InsufficientHistory { symbol, need, have } => {
+                write!(f, "need {need} prices for {symbol} to estimate volatility, have {have}")
+            }
+            Self::InvalidPrice { symbol, value } => {
+                write!(f, "price {value} for {symbol} is not finite and positive")
+            }
         }
     }
 }
@@ -282,5 +292,123 @@ mod tests {
     fn equal_weights_refuse_empty_and_duplicates() {
         assert_eq!(equal_weights(&[]), Err(PortfolioError::Empty));
         assert_eq!(equal_weights(&syms(&["A", "A"])), Err(PortfolioError::DuplicateSymbol("A".into())));
+    }
+}
+
+/// Bars needed to estimate a volatility: the same minimum M7 uses (`MIN_VOLATILITY_BARS`).
+pub const MIN_VOLATILITY_PRICES: usize = 60;
+
+/// Annualized volatility from a close series: the sample standard deviation (N - 1) of log returns,
+/// scaled by `sqrt(periods_per_year)`. The same method as M7's `volatility_from_bars`.
+///
+/// # Errors
+/// - [`PortfolioError::InsufficientHistory`] with fewer than [`MIN_VOLATILITY_PRICES`] closes.
+/// - [`PortfolioError::InvalidPrice`] if a close is not finite and strictly positive.
+/// - [`PortfolioError::InvalidVolatility`] if `periods_per_year` is not finite and positive.
+pub fn annualized_volatility(
+    symbol: &str,
+    closes: &[f64],
+    periods_per_year: f64,
+) -> Result<f64, PortfolioError> {
+    if !(periods_per_year.is_finite() && periods_per_year > 0.0) {
+        return Err(PortfolioError::InvalidVolatility {
+            symbol: symbol.to_string(),
+            value: periods_per_year,
+        });
+    }
+    if closes.len() < MIN_VOLATILITY_PRICES {
+        return Err(PortfolioError::InsufficientHistory {
+            symbol: symbol.to_string(),
+            need: MIN_VOLATILITY_PRICES,
+            have: closes.len(),
+        });
+    }
+    if let Some(&bad) = closes.iter().find(|p| !(p.is_finite() && **p > 0.0)) {
+        return Err(PortfolioError::InvalidPrice { symbol: symbol.to_string(), value: bad });
+    }
+    let returns: Vec<f64> = closes.windows(2).map(|w| (w[1] / w[0]).ln()).collect();
+    let n = returns.len() as f64;
+    let mean = returns.iter().sum::<f64>() / n;
+    let variance = returns.iter().map(|r| (r - mean).powi(2)).sum::<f64>() / (n - 1.0);
+    Ok(variance.sqrt() * periods_per_year.sqrt())
+}
+
+/// Inverse-volatility weights estimated from price history: each symbol's volatility comes from
+/// [`annualized_volatility`], then the weights are as [`inverse_volatility_weights`].
+///
+/// `closes[i]` is the close series of `symbols[i]`, oldest first.
+///
+/// # Errors
+/// As [`annualized_volatility`] and [`inverse_volatility_weights`].
+pub fn inverse_volatility_weights_from_closes(
+    symbols: &[String],
+    closes: &[Vec<f64>],
+    periods_per_year: f64,
+) -> Result<Vec<Holding>, PortfolioError> {
+    if symbols.len() != closes.len() {
+        return Err(PortfolioError::LengthMismatch { symbols: symbols.len(), values: closes.len() });
+    }
+    let mut vols = Vec::with_capacity(symbols.len());
+    for (symbol, series) in symbols.iter().zip(closes) {
+        vols.push(annualized_volatility(symbol, series, periods_per_year)?);
+    }
+    inverse_volatility_weights(symbols, &vols)
+}
+
+#[cfg(test)]
+mod volatility_tests {
+    use super::*;
+
+    /// Closes whose log returns alternate +a and -a, starting from 100: mean 0, and the sample
+    /// variance of N returns is N * a^2 / (N - 1).
+    fn alternating(a: f64, returns: usize) -> Vec<f64> {
+        let mut p = 100.0;
+        let mut out = vec![p];
+        for k in 0..returns {
+            let r = if k % 2 == 0 { a } else { -a };
+            p *= r.exp();
+            out.push(p);
+        }
+        out
+    }
+
+    #[test]
+    fn volatility_matches_the_closed_form_on_alternating_returns() {
+        let n = 60;
+        let a = 0.01;
+        let vol = annualized_volatility("A", &alternating(a, n), 252.0).unwrap();
+        let expected = a * (n as f64 / (n as f64 - 1.0)).sqrt() * 252.0_f64.sqrt();
+        assert!((vol - expected).abs() < 1e-12, "{vol} vs {expected}");
+    }
+
+    #[test]
+    fn inverse_volatility_from_prices_is_proportional_to_inverse_vol() {
+        // Asset B moves twice as much as A, so its weight is half of A's.
+        let symbols = vec!["A".to_string(), "B".to_string()];
+        let closes = vec![alternating(0.01, 60), alternating(0.02, 60)];
+        let w = inverse_volatility_weights_from_closes(&symbols, &closes, 252.0).unwrap();
+        assert!((w[0].weight / w[1].weight - 2.0).abs() < 1e-12);
+        let sum: f64 = w.iter().map(|h| h.weight).sum();
+        assert!((sum - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn short_history_is_refused_with_the_symbol_named() {
+        let err = annualized_volatility("AAA", &alternating(0.01, 30), 252.0).unwrap_err();
+        assert_eq!(err, PortfolioError::InsufficientHistory { symbol: "AAA".into(), need: 60, have: 31 });
+    }
+
+    #[test]
+    fn bad_prices_and_bad_periods_are_refused() {
+        let mut closes = alternating(0.01, 60);
+        closes[10] = 0.0;
+        assert!(matches!(
+            annualized_volatility("A", &closes, 252.0),
+            Err(PortfolioError::InvalidPrice { .. })
+        ));
+        assert!(matches!(
+            annualized_volatility("A", &alternating(0.01, 60), 0.0),
+            Err(PortfolioError::InvalidVolatility { .. })
+        ));
     }
 }

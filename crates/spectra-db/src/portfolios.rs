@@ -17,6 +17,9 @@ const INSERT_HOLDING_SQL: &str = include_str!("../queries/portfolio_holding_inse
 const GET_SQL: &str = include_str!("../queries/portfolio_get.sql");
 const LIST_SQL: &str = include_str!("../queries/portfolios_list.sql");
 const HOLDINGS_SQL: &str = include_str!("../queries/portfolio_holdings_list.sql");
+const UPDATE_SQL: &str = include_str!("../queries/portfolio_update.sql");
+const DELETE_HOLDINGS_SQL: &str = include_str!("../queries/portfolio_holdings_delete.sql");
+const DELETE_SQL: &str = include_str!("../queries/portfolio_delete.sql");
 
 /// A saved portfolio, without its holdings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, FromRow)]
@@ -114,6 +117,59 @@ pub async fn get_portfolio(
     };
     let holdings = list_holdings(pool, workspace_id, id).await?;
     Ok(Some(PortfolioWithHoldings { portfolio, holdings }))
+}
+
+/// Rename a portfolio and replace its method and holdings, in one transaction (M15 Task 6).
+/// Returns `None` if the portfolio is not in the workspace; nothing is changed then.
+///
+/// # Errors
+/// As [`create_portfolio_with_method`]: a unique violation if another portfolio in the workspace
+/// has the name, a check violation if the new weights do not sum to 1 within 1e-6. The old
+/// holdings are kept in either case.
+pub async fn update_portfolio(
+    pool: &PgPool,
+    workspace_id: Uuid,
+    id: Uuid,
+    name: &str,
+    method: &str,
+    holdings: &[(String, f64)],
+) -> Result<Option<PortfolioWithHoldings>, Error> {
+    let mut tx = pool.begin().await?;
+    let Some(portfolio) = sqlx::query_as::<_, PortfolioRow>(UPDATE_SQL)
+        .bind(workspace_id)
+        .bind(id)
+        .bind(name)
+        .bind(method)
+        .fetch_optional(&mut *tx)
+        .await?
+    else {
+        return Ok(None);
+    };
+    sqlx::query(DELETE_HOLDINGS_SQL).bind(workspace_id).bind(id).execute(&mut *tx).await?;
+    for (symbol, weight) in holdings {
+        sqlx::query(INSERT_HOLDING_SQL)
+            .bind(id)
+            .bind(workspace_id)
+            .bind(symbol)
+            .bind(weight)
+            .execute(&mut *tx)
+            .await?;
+    }
+    // The weight-sum trigger runs here, at commit.
+    tx.commit().await?;
+    let holdings = list_holdings(pool, workspace_id, id).await?;
+    Ok(Some(PortfolioWithHoldings { portfolio, holdings }))
+}
+
+/// Delete a portfolio and its holdings. Its runs are kept, without the link. Returns whether a
+/// portfolio of the workspace was deleted.
+///
+/// # Errors
+/// Any database error.
+pub async fn delete_portfolio(pool: &PgPool, workspace_id: Uuid, id: Uuid) -> Result<bool, Error> {
+    let deleted: Option<Uuid> =
+        sqlx::query_scalar(DELETE_SQL).bind(workspace_id).bind(id).fetch_optional(pool).await?;
+    Ok(deleted.is_some())
 }
 
 /// The portfolios of a workspace, by name, without holdings.

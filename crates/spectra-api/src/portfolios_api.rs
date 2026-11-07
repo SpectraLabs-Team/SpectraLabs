@@ -6,6 +6,9 @@
 //! gets a clear message, then by the database, which refuses rows whose weights do not sum to 1
 //! within 1e-6. Everything is scoped to the caller's workspace; another workspace's portfolio is
 //! reported as not found.
+//!
+//! M15 Task 6 adds editing (`PUT`, the same body and checks as create) and deleting. Writes need
+//! the editor role, like backtests: a viewer gets 403 `viewer_read_only`.
 
 use axum::body::Bytes;
 use axum::extract::rejection::PathRejection;
@@ -25,7 +28,8 @@ use uuid::Uuid;
 use crate::jobs_api::{context, db_error, to_json};
 use crate::{error_response, AppState, Identity};
 
-const NOT_FOUND: &str = "Portfolio not found.";
+pub(crate) const NOT_FOUND: &str = "Portfolio not found.";
+const FORBIDDEN_VIEWER: &str = "Viewers have read-only access to portfolios.";
 const MAX_NAME_CHARS: usize = 120;
 const METHOD_FIXED: &str = "fixed";
 const METHOD_EQUAL: &str = "equal";
@@ -82,6 +86,13 @@ pub struct PortfolioSummaryView {
     pub method: String,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
+}
+
+/// A deleted portfolio.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct DeletedPortfolioView {
+    pub id: Uuid,
+    pub deleted: bool,
 }
 
 impl From<PortfolioWithHoldings> for PortfolioView {
@@ -143,10 +154,65 @@ fn build_weights(method: &str, holdings: &[HoldingInput]) -> Result<Vec<Holding>
     }
 }
 
+/// Refuses a viewer of the workspace with 403 `viewer_read_only`; editors and owners pass. Callers
+/// without a user id (service calls) pass, as in the other workspace-scoped write routes.
+#[allow(clippy::result_large_err)] // the error is the finished response
+pub(crate) async fn ensure_can_edit(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    id: &Identity,
+) -> Result<(), Response> {
+    let Ok(uid) = Uuid::parse_str(&id.user) else { return Ok(()) };
+    let role: Option<(String,)> =
+        sqlx::query_as("SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2")
+            .bind(ws)
+            .bind(uid)
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| db_error(&e))?;
+    if role.is_some_and(|(r,)| r == "viewer") {
+        return Err(crate::error_with_code(403, "viewer_read_only", FORBIDDEN_VIEWER));
+    }
+    Ok(())
+}
+
+/// The trimmed name, the method, and the (symbol, weight) pairs a checked body builds.
+type CheckedPortfolio = (String, String, Vec<(String, f64)>);
+
+/// A checked create or edit body: the trimmed name, the method, and the weights it builds.
+#[allow(clippy::result_large_err)] // the error is the finished response
+fn checked_body(bytes: &Bytes) -> Result<CheckedPortfolio, Response> {
+    let req: CreatePortfolioBody =
+        serde_json::from_slice(bytes).map_err(|e| error_response(422, format!("Invalid portfolio: {e}")))?;
+    let name = req.name.trim();
+    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+        return Err(error_response(422, "Name must be 1 to 120 characters."));
+    }
+    let method = req.method.as_deref().unwrap_or(METHOD_FIXED);
+    let weights = build_weights(method, &req.holdings).map_err(|message| error_response(422, message))?;
+    let pairs = weights.into_iter().map(|h| (h.symbol, h.weight)).collect();
+    Ok((name.to_string(), method.to_string(), pairs))
+}
+
+/// The response for a failed save: 409 for a taken name, 422 for weights the database refused.
+fn save_error(e: &spectra_db::Error) -> Response {
+    if let Some(db) = e.as_database_error() {
+        match db.code().as_deref() {
+            // 23505: unique violation, the name is taken.
+            Some("23505") => return error_response(409, "A portfolio with this name already exists."),
+            // 23514: check violation, raised by the weight-sum trigger or the method check.
+            Some("23514") => return error_response(422, db.message().to_string()),
+            _ => {}
+        }
+    }
+    db_error(e)
+}
+
 /// Save a named portfolio with target weights.
 #[utoipa::path(post, path = "/api/v1/portfolios", tag = "portfolios", request_body = CreatePortfolioBody,
     responses(
         (status = 201, description = "Saved", body = PortfolioView),
+        (status = 403, description = "Viewers cannot save portfolios (code `viewer_read_only`)", body = crate::openapi::ErrorDoc),
         (status = 409, description = "A portfolio with this name already exists in the workspace", body = crate::openapi::ErrorDoc),
         (status = 422, description = "Invalid name, method, holdings or weights", body = crate::openapi::ErrorDoc),
     ))]
@@ -156,41 +222,87 @@ pub(crate) async fn create_portfolio(
     body: Result<Bytes, axum::extract::rejection::BytesRejection>,
 ) -> Response {
     let Ok(bytes) = body else { return error_response(400, "Could not read the request body.") };
-    let req: CreatePortfolioBody = match serde_json::from_slice(&bytes) {
-        Ok(r) => r,
-        Err(e) => return error_response(422, format!("Invalid portfolio: {e}")),
-    };
-    let name = req.name.trim();
-    if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
-        return error_response(422, "Name must be 1 to 120 characters.");
-    }
-    let method = req.method.as_deref().unwrap_or(METHOD_FIXED);
-    let weights = match build_weights(method, &req.holdings) {
-        Ok(w) => w,
-        Err(message) => return error_response(422, message),
+    let (name, method, pairs) = match checked_body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
     };
     let (pool, ws) = match context(&st, &id) {
         Ok(c) => c,
         Err(r) => return r,
     };
-    let pairs: Vec<(String, f64)> = weights.into_iter().map(|h| (h.symbol, h.weight)).collect();
+    if let Err(r) = ensure_can_edit(&pool, ws, &id).await {
+        return r;
+    }
     let created_by = Uuid::parse_str(&id.user).ok();
-    match portfolios::create_portfolio_with_method(&pool, ws, name, method, &pairs, created_by).await {
+    match portfolios::create_portfolio_with_method(&pool, ws, &name, &method, &pairs, created_by).await {
         Ok(saved) => to_json(201, &PortfolioView::from(saved)),
-        Err(e) => {
-            if let Some(db) = e.as_database_error() {
-                match db.code().as_deref() {
-                    // 23505: unique violation, the name is taken.
-                    Some("23505") => {
-                        return error_response(409, "A portfolio with this name already exists.")
-                    }
-                    // 23514: check violation, raised by the weight-sum trigger or the method check.
-                    Some("23514") => return error_response(422, db.message().to_string()),
-                    _ => {}
-                }
-            }
-            db_error(&e)
-        }
+        Err(e) => save_error(&e),
+    }
+}
+
+/// Edit a saved portfolio: its name, method and holdings, with the same checks as a save. The
+/// holdings are replaced as a whole; if the new weights are refused, the old ones are kept.
+#[utoipa::path(put, path = "/api/v1/portfolios/{id}", tag = "portfolios", request_body = CreatePortfolioBody,
+    params(("id" = Uuid, Path, description = "The portfolio id")),
+    responses(
+        (status = 200, description = "Saved", body = PortfolioView),
+        (status = 403, description = "Viewers cannot edit portfolios (code `viewer_read_only`)", body = crate::openapi::ErrorDoc),
+        (status = 404, description = "Not found in this workspace", body = crate::openapi::ErrorDoc),
+        (status = 409, description = "Another portfolio in the workspace has this name", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "Invalid name, method, holdings or weights", body = crate::openapi::ErrorDoc),
+    ))]
+pub(crate) async fn update_portfolio(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    path: Result<Path<Uuid>, PathRejection>,
+    body: Result<Bytes, axum::extract::rejection::BytesRejection>,
+) -> Response {
+    let Ok(Path(portfolio_id)) = path else { return error_response(404, NOT_FOUND) };
+    let Ok(bytes) = body else { return error_response(400, "Could not read the request body.") };
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = ensure_can_edit(&pool, ws, &id).await {
+        return r;
+    }
+    let (name, method, pairs) = match checked_body(&bytes) {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    match portfolios::update_portfolio(&pool, ws, portfolio_id, &name, &method, &pairs).await {
+        Ok(Some(saved)) => to_json(200, &PortfolioView::from(saved)),
+        Ok(None) => error_response(404, NOT_FOUND),
+        Err(e) => save_error(&e),
+    }
+}
+
+/// Delete a saved portfolio and its holdings. Its runs are kept (with their recorded inputs) and
+/// no longer listed under it.
+#[utoipa::path(delete, path = "/api/v1/portfolios/{id}", tag = "portfolios",
+    params(("id" = Uuid, Path, description = "The portfolio id")),
+    responses(
+        (status = 200, description = "Deleted", body = DeletedPortfolioView),
+        (status = 403, description = "Viewers cannot delete portfolios (code `viewer_read_only`)", body = crate::openapi::ErrorDoc),
+        (status = 404, description = "Not found in this workspace", body = crate::openapi::ErrorDoc),
+    ))]
+pub(crate) async fn delete_portfolio(
+    State(st): State<AppState>,
+    Extension(id): Extension<Identity>,
+    path: Result<Path<Uuid>, PathRejection>,
+) -> Response {
+    let Ok(Path(portfolio_id)) = path else { return error_response(404, NOT_FOUND) };
+    let (pool, ws) = match context(&st, &id) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    if let Err(r) = ensure_can_edit(&pool, ws, &id).await {
+        return r;
+    }
+    match portfolios::delete_portfolio(&pool, ws, portfolio_id).await {
+        Ok(true) => to_json(200, &DeletedPortfolioView { id: portfolio_id, deleted: true }),
+        Ok(false) => error_response(404, NOT_FOUND),
+        Err(e) => db_error(&e),
     }
 }
 

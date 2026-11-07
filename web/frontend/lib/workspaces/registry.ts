@@ -123,11 +123,22 @@ export const WORKSPACES: Record<StudioTab, WorkspaceGuide> = {
       'Add the strategies or positions you want to combine.',
       'Set a weight for each, or let the workspace weight them equally.',
       'Review the combined return, drawdown and concentration.',
+      'Under Saved Portfolios & Backtests, save target weights, run a rebalancing backtest on a dataset version, and export its report.',
     ],
-    inputs: ['Strategies or positions, and their weights.'],
-    controls: ['Weights: set the share of each position; check that they add up to the portfolio you intend.'],
-    outputs: ['Combined performance, gross weights and concentration (HHI).'],
-    pitfalls: ['Weights that look balanced can still be concentrated in one position. Check the HHI figure.'],
+    inputs: ['Strategies or positions, and their weights.', 'For a saved portfolio backtest: a dataset version, dates, a rebalance rule and a cost config.'],
+    controls: [
+      'Weights: set the share of each position; check that they add up to the portfolio you intend.',
+      'Rebalance rule: monthly or quarterly, a drift threshold, or both.',
+      'Report PDF: stores the run report as a new version, or reuses an identical one.',
+    ],
+    outputs: [
+      'Combined performance, gross weights and concentration (HHI).',
+      'For a backtest: weights at each rebalance, the equity curve, turnover and cost per rebalance, and stored reports.',
+    ],
+    pitfalls: [
+      'Weights that look balanced can still be concentrated in one position. Check the HHI figure.',
+      'A holding with no bars in the dataset version stops the run. Days on which a holding has no bar are skipped, not filled.',
+    ],
     lessons: [
       { title: 'Portfolio management', href: '/learn/engine/portfolio-management' },
       { title: 'Concentration (HHI)', href: '/learn/metrics/concentration-hhi' },

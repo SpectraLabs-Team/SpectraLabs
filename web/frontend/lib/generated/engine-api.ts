@@ -1379,6 +1379,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/portfolio-runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One portfolio run: its inputs, status, and result once succeeded. */
+        get: operations["get_portfolio_run"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolio-runs/{id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The run's portfolio report PDF, stored as a report version (M16). An export identical to the
+         *     newest version reuses it. */
+        get: operations["portfolio_run_report"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/portfolios": {
         parameters: {
             query?: never;
@@ -1406,8 +1441,30 @@ export interface paths {
         };
         /** One saved portfolio with its holdings. */
         get: operations["get_portfolio"];
-        put?: never;
+        /** Edit a saved portfolio: its name, method and holdings, with the same checks as a save. The
+         *     holdings are replaced as a whole; if the new weights are refused, the old ones are kept. */
+        put: operations["update_portfolio"];
         post?: never;
+        /** Delete a saved portfolio and its holdings. Its runs are kept (with their recorded inputs) and
+         *     no longer listed under it. */
+        delete: operations["delete_portfolio"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolios/{id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A portfolio's runs, newest first, with headline numbers once finished. */
+        get: operations["list_portfolio_runs"];
+        put?: never;
+        /** Run a saved portfolio through the rebalancing simulator on a dataset version. */
+        post: operations["run_portfolio"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2848,6 +2905,32 @@ export interface components {
             /** @description Instrument symbol. */
             symbol: string;
         };
+        /** @description The cost config every rebalance trade is priced with. Omit it, or give `{"name":
+         *     "paper-default"}`, for the M26 paper config; or give `slippage_bps` and `min_fee` together,
+         *     recorded as the `custom` config. */
+        CostConfigBody: {
+            /**
+             * Format: double
+             * @description Commission on each trade, in currency.
+             */
+            min_fee?: number | null;
+            name?: string | null;
+            /**
+             * Format: double
+             * @description Adverse price move on every trade, in basis points.
+             */
+            slippage_bps?: number | null;
+        };
+        /** @description The cost config the run's trades were priced with. */
+        CostConfigView: {
+            /** Format: double */
+            min_fee: number;
+            name: string;
+            /** Format: double */
+            slippage_bps: number;
+            /** Format: int32 */
+            version: number;
+        };
         /** @description `POST /api/v1/backtests` body: the `backtest` job payload, plus a priority. */
         CreateBacktest: {
             /** @description Optional point-in-time timestamp (RFC 3339 string or integer nanoseconds). */
@@ -3289,6 +3372,12 @@ export interface components {
             /** @description True when the item was deleted. */
             deleted: boolean;
         };
+        /** @description A deleted portfolio. */
+        DeletedPortfolioView: {
+            deleted: boolean;
+            /** Format: uuid */
+            id: string;
+        };
         /** @description What deleting a version did. */
         DeletedVersionView: {
             /** @description It was the dataset's last version, so the dataset was deleted too. */
@@ -3341,6 +3430,13 @@ export interface components {
             corporate_action_set_id: string;
             /** @description Target dataset name (defaults to source dataset name if omitted or null). */
             target_dataset_name?: string | null;
+        };
+        /** @description Equity at one day's close. */
+        EquityPointView: {
+            /** @description `YYYY-MM-DD`. */
+            date: string;
+            /** Format: double */
+            equity: number;
         };
         EquitySnapshotView: {
             /** Format: double */
@@ -4108,6 +4204,93 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description One run in a list: its inputs, state and headline numbers. */
+        PortfolioRunListItem: {
+            /** Format: date-time */
+            created_at: string;
+            error?: string | null;
+            /** Format: date-time */
+            finished_at?: string | null;
+            headline?: null | components["schemas"]["PortfolioRunSummary"];
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            portfolio_id?: string | null;
+            request: Record<string, never>;
+            /** @description `running`, `succeeded` or `failed`. */
+            status: string;
+        };
+        /** @description A page of a portfolio's runs, newest first. */
+        PortfolioRunPage: {
+            items: components["schemas"]["PortfolioRunListItem"][];
+            /**
+             * Format: uuid
+             * @description Pass as `cursor` for the next page; null on the last.
+             */
+            next_cursor?: string | null;
+        };
+        /** @description The result of a finished run. */
+        PortfolioRunResult: {
+            cost_config: components["schemas"]["CostConfigView"];
+            /** @description Equity at every priced day's close. */
+            equity: components["schemas"]["EquityPointView"][];
+            prices: components["schemas"]["PriceCoverageView"];
+            /** @description Every rebalance in order: weights over time, turnover and costs. */
+            rebalances: components["schemas"]["RebalanceView"][];
+            summary: components["schemas"]["PortfolioRunSummary"];
+        };
+        /** @description Headline numbers of a finished run. */
+        PortfolioRunSummary: {
+            /** Format: double */
+            final_equity: number;
+            /** Format: double */
+            initial_cash: number;
+            /**
+             * Format: double
+             * @description Largest peak-to-trough fall, a positive fraction.
+             */
+            max_drawdown: number;
+            /** @description Rebalances, including the initial one. */
+            rebalance_count: number;
+            /**
+             * Format: double
+             * @description Costs of every rebalance, in currency.
+             */
+            total_cost: number;
+            /**
+             * Format: double
+             * @description Final equity over starting cash, minus one.
+             */
+            total_return: number;
+            /**
+             * Format: double
+             * @description Sum of every rebalance's turnover.
+             */
+            total_turnover: number;
+        };
+        /** @description A portfolio run as the API shows it. */
+        PortfolioRunView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by?: string | null;
+            /** @description Why it failed. */
+            error?: string | null;
+            /** Format: date-time */
+            finished_at?: string | null;
+            /** Format: uuid */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The portfolio run; null once it has been deleted.
+             */
+            portfolio_id?: string | null;
+            /** @description Every input: the portfolio snapshot, dataset version, dates, rule, cash and cost config. */
+            request: Record<string, never>;
+            result?: null | components["schemas"]["PortfolioRunResult"];
+            /** @description `running`, `succeeded` or `failed`. */
+            status: string;
+        };
         PortfolioSnapshotDto: {
             /** Format: double */
             cash: number;
@@ -4232,6 +4415,16 @@ export interface components {
             /** @description UTC, RFC 3339. */
             timestamp: string;
             volume: string;
+        };
+        /** @description The days the run priced. */
+        PriceCoverageView: {
+            /** @description Days on which every holding had a close. */
+            days: number;
+            /** @description First and last priced day, `YYYY-MM-DD`. */
+            first: string;
+            last: string;
+            /** @description Days in the range on which some holding had a bar but another did not; not priced. */
+            skipped_days: number;
         };
         ProjectedMetricsView: {
             /** Format: double */
@@ -4376,6 +4569,25 @@ export interface components {
              * @description Frozen bars in a row that count as a stale run (default 5).
              */
             stale_run?: number | null;
+        };
+        /** @description One rebalance: why, how much it traded and cost, and the weights around it. */
+        RebalanceView: {
+            /**
+             * Format: double
+             * @description Cost of its trades, in currency.
+             */
+            cost: number;
+            /** @description `YYYY-MM-DD`. */
+            date: string;
+            /** @description `initial`, `calendar` and/or `drift`. */
+            reasons: string[];
+            trades: components["schemas"]["TradeView"][];
+            /**
+             * Format: double
+             * @description Traded notional over equity before the rebalance.
+             */
+            turnover: number;
+            weights: components["schemas"]["WeightView"][];
         };
         ReconcilePositionsResponse: {
             mismatches: components["schemas"]["PositionMismatchView"][];
@@ -4739,6 +4951,36 @@ export interface components {
             line: number;
             /** @description What was wrong. */
             message: string;
+        };
+        /** @description `POST /api/v1/portfolios/{id}/runs` body. */
+        RunPortfolioBody: {
+            cost_config?: null | components["schemas"]["CostConfigBody"];
+            /**
+             * Format: uuid
+             * @description A dataset version of the caller's workspace with bars for every holding.
+             */
+            dataset_version_id: string;
+            /** @description Last day of the run, `YYYY-MM-DD` (UTC), on or after `start`. */
+            end: string;
+            /**
+             * Format: double
+             * @description Starting cash, positive.
+             */
+            initial_cash: number;
+            rule: components["schemas"]["RunRuleBody"];
+            /** @description First day of the run, `YYYY-MM-DD` (UTC). */
+            start: string;
+        };
+        /** @description When a run rebalances. At least one of the two must be set. */
+        RunRuleBody: {
+            /** @description `monthly` or `quarterly`: rebalance on the first trading day of each new month or quarter. */
+            calendar?: string | null;
+            /**
+             * Format: double
+             * @description Rebalance when a holding's weight is more than this far from its target (a fraction in
+             *     (0, 1], e.g. 0.05 for 5 percentage points).
+             */
+            drift_threshold?: number | null;
         };
         /** @description Request to run a signal test. */
         RunSignalTestRequest: {
@@ -5232,6 +5474,29 @@ export interface components {
             rows: string[][];
             title: string;
         };
+        /** @description One rebalance trade with its recorded cost. */
+        TradeView: {
+            /**
+             * Format: double
+             * @description The price after slippage.
+             */
+            exec_price: number;
+            /** Format: double */
+            fee: number;
+            /**
+             * Format: double
+             * @description The close the trade is priced from.
+             */
+            price: number;
+            /**
+             * Format: double
+             * @description Positive buys, negative sells.
+             */
+            qty: number;
+            /** Format: double */
+            slippage_cost: number;
+            symbol: string;
+        };
         /** @description `POST /api/v1/me/sandbox/transact` body: one trade, applied atomically. */
         TransactRequest: {
             /** Format: double */
@@ -5718,6 +5983,14 @@ export interface components {
             train_size: number;
             /** Format: uuid */
             workspace_id: string;
+        };
+        /** @description A holding's weight before and after one rebalance. */
+        WeightView: {
+            /** Format: double */
+            after: number;
+            /** Format: double */
+            before: number;
+            symbol: string;
         };
     };
     responses: never;
@@ -9094,6 +9367,94 @@ export interface operations {
             };
         };
     };
+    get_portfolio_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The portfolio run id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioRunView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    portfolio_run_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The portfolio run id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The portfolio report PDF, stored as a report version; `x-report-id`, `x-report-version` and `x-report-sha256` describe it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description Viewers cannot store reports (code `viewer_read_only`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The run has not succeeded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The report is over 5 MiB and was not stored */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     list_portfolios: {
         parameters: {
             query?: never;
@@ -9134,6 +9495,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioView"];
+                };
+            };
+            /** @description Viewers cannot save portfolios (code `viewer_read_only`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
             /** @description A portfolio with this name already exists in the workspace */
@@ -9179,6 +9549,217 @@ export interface operations {
             };
             /** @description Not found in this workspace */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    update_portfolio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The portfolio id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePortfolioBody"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioView"];
+                };
+            };
+            /** @description Viewers cannot edit portfolios (code `viewer_read_only`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Another portfolio in the workspace has this name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid name, method, holdings or weights */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_portfolio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The portfolio id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedPortfolioView"];
+                };
+            };
+            /** @description Viewers cannot delete portfolios (code `viewer_read_only`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_portfolio_runs: {
+        parameters: {
+            query?: {
+                /** @description `next_cursor` from the previous page. */
+                cursor?: string;
+                /** @description 1..200, default 50. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The portfolio id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioRunPage"];
+                };
+            };
+            /** @description No such portfolio in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    run_portfolio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The portfolio id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunPortfolioBody"];
+            };
+        };
+        responses: {
+            /** @description The run, finished: `succeeded` with its result */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioRunView"];
+                };
+            };
+            /** @description Viewers cannot run portfolios (code `viewer_read_only`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description No such portfolio or dataset version in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The dataset version is sealed as a holdout, or its bars are not reachable */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid dates, rule, cash or cost config (`details.errors`), or a holding with no bars; a refused run is stored as `failed` */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

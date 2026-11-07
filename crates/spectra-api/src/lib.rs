@@ -61,6 +61,7 @@ pub mod optimization_api;
 pub mod paper_api;
 pub(crate) mod pdf;
 pub mod portfolio_report;
+pub mod portfolio_runs_api;
 pub mod portfolios_api;
 pub mod pricing_api;
 pub mod providers;
@@ -1040,7 +1041,20 @@ fn portfolio_routes() -> Router<AppState> {
             "/api/v1/portfolios",
             only(get(portfolios_api::list_portfolios).post(portfolios_api::create_portfolio)),
         )
-        .route("/api/v1/portfolios/{id}", only(get(portfolios_api::get_portfolio)))
+        .route(
+            "/api/v1/portfolios/{id}",
+            only(
+                get(portfolios_api::get_portfolio)
+                    .put(portfolios_api::update_portfolio)
+                    .delete(portfolios_api::delete_portfolio),
+            ),
+        )
+        .route(
+            "/api/v1/portfolios/{id}/runs",
+            only(get(portfolio_runs_api::list_portfolio_runs).post(portfolio_runs_api::run_portfolio)),
+        )
+        .route("/api/v1/portfolio-runs/{id}", only(get(portfolio_runs_api::get_portfolio_run)))
+        .route("/api/v1/portfolio-runs/{id}/report", only(get(portfolio_runs_api::portfolio_run_report)))
 }
 
 /// Module 16: versioned reports.

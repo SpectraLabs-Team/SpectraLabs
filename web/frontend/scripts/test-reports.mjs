@@ -36,11 +36,15 @@ describe('report client helpers', () => {
   });
 
   it('names every report type the API can return', () => {
-    let api = src('../../crates/spectra-db/migrations/20261101000002_reports.sql');
-    try {
-      const update = src('../../crates/spectra-db/migrations/20261107000003_signal_tests.sql');
-      if (update && update.includes('report_type IN')) api = update;
-    } catch {}
+    // The report_type check as the newest migration that (re)defines it leaves it.
+    const dir = '../../crates/spectra-db/migrations';
+    const api = fs
+      .readdirSync(path.join(root, dir))
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .map((f) => src(`${dir}/${f}`))
+      .filter((sql) => /report_type IN \(/.test(sql))
+      .at(-1);
     const types = api.match(/report_type IN \(([^)]*)\)/)[1].match(/'([a-z_]+)'/g).map((s) => s.slice(1, -1));
     assert.deepEqual(Object.keys(r.REPORT_TYPE_LABEL).sort(), types.sort());
   });

@@ -2,7 +2,9 @@
 //!
 //! Student-t needs `degrees_of_freedom >= 1`; Clayton needs a finite `theta > 0`. The expected
 //! numbers below were recorded on main (7911e15) before the clamps were removed, so valid inputs
-//! are shown to give the same paths as before, bit for bit.
+//! are shown to give the same paths as before. They are compared within a relative 1e-12, as in the
+//! other risk reference tests: the paths go through libm (`exp`, `ln`, `powf`), which rounds the
+//! last bit differently on glibc and macOS (bit-exact checks are glibc-only, see `parity_risk.rs`).
 
 use std::collections::HashMap;
 
@@ -26,12 +28,20 @@ fn invalid_argument(res: spectra_core::Result<CorrelatedSimulationResult>) -> St
     }
 }
 
-/// The losses' sum, first three and last values, printed in Rust's shortest round-trip form (so
-/// equal text means equal bits), against the text recorded on main.
+/// Relative tolerance for values recorded on main.
+const TOL: f64 = 1e-12;
+
+/// The losses' sum, first three and last values, against the values recorded on main (written as
+/// text: sum, path 0, path 1, path 2, path 999).
 fn assert_same_as_main(model: DependenceModel, expected: &str) {
     let l = run(model).unwrap().portfolio_losses;
-    let got = format!("{:?} {:?} {:?} {:?} {:?}", l.iter().sum::<f64>(), l[0], l[1], l[2], l[999]);
-    assert_eq!(got, expected, "{model:?}: sum, first three paths, last path");
+    let got = [l.iter().sum::<f64>(), l[0], l[1], l[2], l[999]];
+    let want: Vec<f64> = expected.split_whitespace().map(|v| v.parse().unwrap()).collect();
+    assert_eq!(want.len(), got.len());
+    for (what, (g, w)) in ["sum", "path 0", "path 1", "path 2", "path 999"].iter().zip(got.iter().zip(&want))
+    {
+        assert!((g - w).abs() <= TOL * w.abs(), "{model:?} {what}: got {g:?}, main gave {w:?}");
+    }
 }
 
 #[test]

@@ -174,3 +174,19 @@ pub async fn seed_dataset_with_latest_closes(
     .expect("register dataset version");
     version.id
 }
+
+/// The text a PDF draws, with string escapes undone: every `(...) Tj` operand. A copy of the
+/// helper in `tear_sheet_pdf.rs`'s unit tests, which integration tests cannot reach.
+pub fn drawn_text(pdf: &[u8]) -> String {
+    let s = String::from_utf8_lossy(pdf).into_owned();
+    let mut out = String::new();
+    for line in s.lines() {
+        if let (Some(start), Some(end)) = (line.find('('), line.rfind(") Tj")) {
+            if start < end {
+                out.push_str(&line[start + 1..end]);
+                out.push('\n');
+            }
+        }
+    }
+    out.replace("\\(", "(").replace("\\)", ")").replace("\\\\", "\\")
+}

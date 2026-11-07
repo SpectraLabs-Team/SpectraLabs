@@ -12,6 +12,7 @@ pub mod formula;
 pub mod gap;
 pub mod indicators;
 pub mod pbo;
+pub mod portfolio_basket;
 pub mod screener;
 pub mod stats;
 pub mod survival;
@@ -44,6 +45,10 @@ pub use gap::{
     GapReport, GapThresholds, GapTradeSide, MatchedTradeGap, PaperFillRecord,
 };
 pub use pbo::{cscv_pbo, PboResult};
+pub use portfolio_basket::{
+    compute_rebalance_trades, evaluate_portfolio, Basket, BasketError, BasketItem, CostConfig,
+    HoldingPosition, OrderSide, PortfolioValuation, RebalancePlan, RebalanceTrade,
+};
 pub use screener::{
     run_screen, FundamentalFilter, RankingWeight, ScreenDefinition, ScreenMatch, ScreenResult,
     SymbolScreenData, TechnicalFilter, Watchlist, WatchlistItem,

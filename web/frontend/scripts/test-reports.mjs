@@ -36,7 +36,11 @@ describe('report client helpers', () => {
   });
 
   it('names every report type the API can return', () => {
-    const api = src('../../crates/spectra-db/migrations/20261101000002_reports.sql');
+    let api = src('../../crates/spectra-db/migrations/20261101000002_reports.sql');
+    try {
+      const update = src('../../crates/spectra-db/migrations/20261107000003_signal_tests.sql');
+      if (update && update.includes('report_type IN')) api = update;
+    } catch {}
     const types = api.match(/report_type IN \(([^)]*)\)/)[1].match(/'([a-z_]+)'/g).map((s) => s.slice(1, -1));
     assert.deepEqual(Object.keys(r.REPORT_TYPE_LABEL).sort(), types.sort());
   });

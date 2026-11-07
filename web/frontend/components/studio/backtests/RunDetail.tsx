@@ -44,6 +44,7 @@ import { AttributionPanel } from './AttributionCard';
 import { SurvivalLabPanel } from '../SurvivalLabPanel';
 import { BacktestToPaperGap } from '../BacktestToPaperGap';
 import { TearSheetModal } from '../TearSheetModal';
+import { BacktestReportPanel } from '../ReportPanel';
 
 type Row = [label: string, value: string, tone?: 'profit' | 'loss' | 'neutral', metric?: MetricId];
 
@@ -853,6 +854,7 @@ export function RunDetail({
   const [copied, setCopied] = useState(false);
   const [tearSheetOpen, setTearSheetOpen] = useState(false);
   const [tearSheet, setTearSheet] = useState<TearSheetResponse | null>(null);
+  const [reportsRefresh, setReportsRefresh] = useState(0);
 
   useEffect(() => {
     if (!tearSheetOpen) return;
@@ -1058,12 +1060,13 @@ export function RunDetail({
           <BacktestToPaperGap strategyId={b.request.strategy_version_id || b.run_id || b.id} runId={b.run_id || b.id} />
         </GlassCard>
       )}
+      {b.status === 'succeeded' && b.summary && <BacktestReportPanel backtestId={backtestId} refreshKey={reportsRefresh} />}
 
       {b.status === 'succeeded' && b.summary && (
         <TearSheetModal
           open={tearSheetOpen}
           onClose={() => setTearSheetOpen(false)}
-          onDownloadPdf={() => downloadTearSheetPdf(backtestId)}
+          onDownloadPdf={() => downloadTearSheetPdf(backtestId).finally(() => setReportsRefresh((n) => n + 1))}
           title="Quantitative Strategy Tear-Sheet"
           subtitle={`${describeRequest(b.request, catalog)} · Started ${new Date(b.created_at).toLocaleDateString()}`}
           reportType="Quantitative Backtest"

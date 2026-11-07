@@ -35,6 +35,31 @@ export const listRunReports = (runKind: RunKind, runId: string) =>
     `/api/v1/reports?run_kind=${encodeURIComponent(runKind)}&run_id=${encodeURIComponent(runId)}`,
   );
 
+/** One gap report as GET /api/v1/paper/gap/reports lists it (only the fields the report panel uses). */
+export interface GapReportRef {
+  id: string;
+  strategy_id: string;
+  created_at: string;
+}
+
+/** A gap report and the stored versions of its exports. */
+export interface GapReportVersions {
+  gap: GapReportRef;
+  versions: ReportVersion[];
+}
+
+/**
+ * The stored versions of each gap report of a strategy (or of the workspace when no strategy is
+ * given). Gap exports are stored under the gap report's id (`run_kind=paper_gap`), not the
+ * strategy's, so each gap report is looked up on its own.
+ */
+export async function listGapReportVersions(strategyId?: string): Promise<GapReportVersions[]> {
+  const gaps = await request<GapReportRef[]>(
+    strategyId ? `/api/v1/paper/gap/reports?strategy_id=${encodeURIComponent(strategyId)}` : '/api/v1/paper/gap/reports',
+  );
+  return Promise.all(gaps.map(async (gap) => ({ gap, versions: await listRunReports('paper_gap', gap.id) })));
+}
+
 /** Browser link to download a stored version through the authenticated engine proxy. */
 export const reportHref = (v: Pick<ReportVersion, 'download_url'>) => `${API_BASE}${v.download_url}`;
 

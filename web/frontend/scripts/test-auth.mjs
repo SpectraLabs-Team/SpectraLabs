@@ -846,6 +846,44 @@ test('engine routes: computations need editor, reads need viewer, nothing is unl
   assert.equal(engineRoutes.minimumRole(routes['api/v1/paper/gap/reports'], 'GET'), 'viewer');
 });
 
+test('report routes (M16): listing and downloading stored versions is a read; every export stores a version, so it needs editor', async () => {
+  const routes = engineRoutes.ENGINE_ROUTES;
+  const id = '0192f3a4-0000-7000-8000-00000000001f';
+  // [concrete path, policy key, role, the existing route whose role it copies]
+  const table = [
+    ['api/v1/reports', 'api/v1/reports', 'viewer', 'api/v1/paper/gap/reports'],
+    [`api/v1/reports/${id}/versions/3`, 'api/v1/reports/{id}/versions/{version}', 'viewer', 'api/v1/backtests/{id}/artifacts/{kind}'],
+    [`api/v1/backtests/${id}/tear-sheet`, 'api/v1/backtests/{id}/tear-sheet', 'viewer', 'api/v1/backtests/{id}/series'],
+    [`api/v1/backtests/${id}/tear-sheet/export`, 'api/v1/backtests/{id}/tear-sheet/export', 'editor', 'api/v1/backtests/{id}/cancel'],
+    [`api/v1/optimization/sweep/${id}/export`, 'api/v1/optimization/sweep/{id}/export', 'editor', 'api/v1/optimization/sweep'],
+    [`api/v1/paper/gap/reports/${id}/export`, 'api/v1/paper/gap/reports/{id}/export', 'editor', 'api/v1/paper/gap/analyze'],
+  ];
+  for (const [p, policy, role, sibling] of table) {
+    assert.equal(engineRoutes.routePolicyKey(p), policy, p);
+    assert.equal(engineRoutes.minimumRole(routes[policy], 'GET'), role, policy);
+    assert.ok(!engineRoutes.allowsMethod(routes[policy], 'POST'), `${policy} is GET only`);
+    const siblingMethod = [routes[sibling].method].flat().at(-1);
+    assert.equal(engineRoutes.minimumRole(routes[sibling], siblingMethod), role, `${policy} has the role of ${sibling}`);
+  }
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/reports/${id}/versions/0`), `api/v1/reports/${id}/versions/0`, 'versions start at 1');
+  assert.equal(engineRoutes.routePolicyKey(`api/v1/optimization/sweep/${id}/export/x`), `api/v1/optimization/sweep/${id}/export/x`);
+
+  // What the proxy does with a session: requireRole(auth, workspace, minimumRole(route, method)).
+  const owner = await store.createUser('rp-owner@x.com', 'h', 'O');
+  const editor = await store.createUser('rp-editor@x.com', 'h', 'E');
+  const viewer = await store.createUser('rp-viewer@x.com', 'h', 'V');
+  const team = await workspaces.createWorkspace(owner.id, 'Reports Desk');
+  await addMember(team.id, editor.id, 'editor');
+  await addMember(team.id, viewer.id, 'viewer');
+  const viewerAuth = await authFor(viewer);
+  const editorAuth = await authFor(editor);
+  for (const [p, , role] of table) {
+    const needs = engineRoutes.minimumRole(routes[engineRoutes.routePolicyKey(p)], 'GET');
+    assert.equal(await authzStatus(authz.requireRole(viewerAuth, team.id, needs)), role === 'editor' ? 403 : 200, `viewer on ${p}`);
+    assert.equal(await authzStatus(authz.requireRole(editorAuth, team.id, needs)), 200, `editor on ${p}`);
+  }
+});
+
 test('platform admin: seeded once from ADMIN_EMAIL, then only from the database', async () => {
   // admin@x.com signed up earlier (2FA test) and became the first admin.
   assert.equal((await store.findUser('admin@x.com')).role, 'admin');

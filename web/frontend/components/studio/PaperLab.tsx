@@ -68,6 +68,7 @@ import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import { TradingChart } from './TradingChart';
 import { TradingViewWidget } from './TradingViewWidget';
 import { BacktestToPaperGap } from './BacktestToPaperGap';
+import { PaperReportPanel } from './ReportPanel';
 import { InfoTip, MetricLabel } from '@/components/ui/MetricInfo';
 import { getKillSwitches } from '@/lib/riskCenter';
 import {
@@ -2806,6 +2807,9 @@ function backfillHistoricalBars(sym: string, tf: string, liveBars: CandleBar[]):
         {bottomTab === 'gap' && (
           <div className="mt-4">
             <BacktestToPaperGap readOnly />
+            <div className="mt-5">
+              <PaperReportPanel />
+            </div>
           </div>
         )}
           </>

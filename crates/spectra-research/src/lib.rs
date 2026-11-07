@@ -7,6 +7,7 @@ pub mod alpha;
 pub mod attribution;
 pub mod benchmark;
 pub mod company_research;
+pub mod formula;
 pub mod gap;
 pub mod indicators;
 pub mod pbo;
@@ -31,6 +32,10 @@ pub use benchmark::{aligned_returns, benchmark_returns, compute_benchmark_metric
 pub use company_research::{
     compute_ratios, evaluate_health_scorecard, multiple_percentile, CompanyRatios, FinancialHealthScorecard,
     FinancialStatementItems, HealthScoreCheck, StatementTieOut,
+};
+pub use formula::{
+    evaluate_formula, parse_formula, run_idea_scanner, BinaryOp, Expr, FormulaError, IdeaSignal, SeriesField,
+    UnaryOp,
 };
 pub use gap::{
     compute_backtest_to_paper_gap, BacktestFillRecord, GapAlert, GapAlertStatus, GapAttribution, GapMetrics,

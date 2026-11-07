@@ -59,6 +59,7 @@ pub mod openapi;
 pub mod optimization_api;
 pub mod paper_api;
 pub(crate) mod pdf;
+pub mod portfolios_api;
 pub mod pricing_api;
 pub mod providers;
 pub mod providers_api;
@@ -1030,6 +1031,16 @@ fn paper_routes() -> Router<AppState> {
         .route("/api/v1/paper/gap/reports/{id}/export", only(get(gap_api::handle_export_gap_report)))
 }
 
+/// M15: saved portfolios with target weights.
+fn portfolio_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/v1/portfolios",
+            only(get(portfolios_api::list_portfolios).post(portfolios_api::create_portfolio)),
+        )
+        .route("/api/v1/portfolios/{id}", only(get(portfolios_api::get_portfolio)))
+}
+
 /// Module 16: versioned reports.
 fn report_routes() -> Router<AppState> {
     Router::new()
@@ -1059,6 +1070,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(risk_center_routes())
         .merge(paper_routes())
         .merge(report_routes())
+        .merge(portfolio_routes())
         .merge(user_state_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()

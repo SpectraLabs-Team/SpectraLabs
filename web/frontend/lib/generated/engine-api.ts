@@ -1310,6 +1310,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/portfolios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The saved portfolios of the caller's workspace, by name. */
+        get: operations["list_portfolios"];
+        put?: never;
+        /** Save a named portfolio with target weights. */
+        post: operations["create_portfolio"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/portfolios/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One saved portfolio with its holdings. */
+        get: operations["get_portfolio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricing/bond": {
         parameters: {
             query?: never;
@@ -2850,6 +2885,14 @@ export interface components {
             symbol: string;
             tif?: string | null;
         };
+        /** @description Create a saved portfolio. */
+        CreatePortfolioBody: {
+            holdings: components["schemas"]["HoldingInput"][];
+            /** @description `fixed` (default), `equal` or `inverse_volatility`. */
+            method?: string | null;
+            /** @description Unique within the workspace, at most 120 characters. */
+            name: string;
+        };
         CreateRegistryRun: {
             /** @description OHLCV CSV with timestamp, symbol, open, high, low, close and volume columns. */
             csv: string;
@@ -3343,6 +3386,26 @@ export interface components {
             tracking_error_pct: number;
             /** Format: uuid */
             workspace_id: string;
+        };
+        /** @description A holding with its weight, as stored and returned. */
+        HoldingBody: {
+            symbol: string;
+            /** Format: double */
+            weight: number;
+        };
+        /** @description One holding in a request. Which fields are needed depends on the method. */
+        HoldingInput: {
+            symbol: string;
+            /**
+             * Format: double
+             * @description Annualized volatility, e.g. 0.2 for 20%. Required for `inverse_volatility`; ignored otherwise.
+             */
+            volatility?: number | null;
+            /**
+             * Format: double
+             * @description Target weight, a fraction (not a percentage). Required for `fixed`; ignored otherwise.
+             */
+            weight?: number | null;
         };
         HoldoutEvaluationView: {
             /** Format: double */
@@ -3957,6 +4020,32 @@ export interface components {
             positions: {
                 [key: string]: components["schemas"]["PositionSnapshotDto"];
             };
+        };
+        /** @description A saved portfolio without its holdings (the list view). */
+        PortfolioSummaryView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by?: string | null;
+            /** Format: uuid */
+            id: string;
+            method: string;
+            name: string;
+        };
+        /** @description A saved portfolio with its holdings. */
+        PortfolioView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by?: string | null;
+            holdings: components["schemas"]["HoldingBody"][];
+            /** Format: uuid */
+            id: string;
+            /** @description `fixed`, `equal` or `inverse_volatility`. */
+            method: string;
+            name: string;
+            /** Format: uuid */
+            workspace_id: string;
         };
         PositionMismatchView: {
             /** Format: double */
@@ -8603,6 +8692,100 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SyncOrdersResponse"];
+                };
+            };
+        };
+    };
+    list_portfolios: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Portfolios in the workspace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioSummaryView"][];
+                };
+            };
+        };
+    };
+    create_portfolio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePortfolioBody"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioView"];
+                };
+            };
+            /** @description A portfolio with this name already exists in the workspace */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid name, method, holdings or weights */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_portfolio: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The portfolio id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The portfolio */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioView"];
+                };
+            };
+            /** @description Not found in this workspace */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
         };

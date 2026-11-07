@@ -21,6 +21,7 @@ pub mod corporate;
 pub mod instruments;
 pub mod job;
 pub mod output;
+pub mod portfolio;
 pub mod run;
 pub mod strategies;
 

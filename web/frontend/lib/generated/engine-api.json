@@ -4046,6 +4046,122 @@
         }
       }
     },
+    "/api/v1/portfolios": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "The saved portfolios of the caller's workspace, by name.",
+        "operationId": "list_portfolios",
+        "responses": {
+          "200": {
+            "description": "Portfolios in the workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PortfolioSummaryView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "Save a named portfolio with target weights.",
+        "operationId": "create_portfolio",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePortfolioBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioView"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A portfolio with this name already exists in the workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid name, method, holdings or weights",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/portfolios/{id}": {
+      "get": {
+        "tags": [
+          "portfolios"
+        ],
+        "summary": "One saved portfolio with its holdings.",
+        "operationId": "get_portfolio",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The portfolio id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The portfolio",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found in this workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pricing/bond": {
       "post": {
         "tags": [
@@ -8075,6 +8191,33 @@
           }
         }
       },
+      "CreatePortfolioBody": {
+        "type": "object",
+        "description": "Create a saved portfolio.",
+        "required": [
+          "name",
+          "holdings"
+        ],
+        "properties": {
+          "holdings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldingInput"
+            }
+          },
+          "method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`fixed` (default), `equal` or `inverse_volatility`."
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique within the workspace, at most 120 characters."
+          }
+        }
+      },
       "CreateRegistryRun": {
         "type": "object",
         "required": [
@@ -9269,6 +9412,51 @@
           "workspace_id": {
             "type": "string",
             "format": "uuid"
+          }
+        }
+      },
+      "HoldingBody": {
+        "type": "object",
+        "description": "A holding with its weight, as stored and returned.",
+        "required": [
+          "symbol",
+          "weight"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "weight": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "HoldingInput": {
+        "type": "object",
+        "description": "One holding in a request. Which fields are needed depends on the method.",
+        "required": [
+          "symbol"
+        ],
+        "properties": {
+          "symbol": {
+            "type": "string"
+          },
+          "volatility": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Annualized volatility, e.g. 0.2 for 20%. Required for `inverse_volatility`; ignored otherwise."
+          },
+          "weight": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Target weight, a fraction (not a percentage). Required for `fixed`; ignored otherwise."
           }
         }
       },
@@ -10743,6 +10931,85 @@
             "propertyNames": {
               "type": "string"
             }
+          }
+        }
+      },
+      "PortfolioSummaryView": {
+        "type": "object",
+        "description": "A saved portfolio without its holdings (the list view).",
+        "required": [
+          "id",
+          "name",
+          "method",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "method": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "PortfolioView": {
+        "type": "object",
+        "description": "A saved portfolio with its holdings.",
+        "required": [
+          "id",
+          "workspace_id",
+          "name",
+          "method",
+          "created_at",
+          "holdings"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "holdings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HoldingBody"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "method": {
+            "type": "string",
+            "description": "`fixed`, `equal` or `inverse_volatility`."
+          },
+          "name": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
           }
         }
       },

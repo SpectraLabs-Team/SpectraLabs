@@ -3063,6 +3063,7 @@ name = "spectra-research"
 version = "0.1.0"
 dependencies = [
  "spectra-core",
+ "spectra-data",
  "spectra-engine",
 ]
 

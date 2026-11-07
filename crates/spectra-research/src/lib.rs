@@ -9,6 +9,7 @@ pub mod benchmark;
 pub mod gap;
 pub mod indicators;
 pub mod pbo;
+pub mod screener;
 pub mod stats;
 pub mod survival;
 pub mod sweep;
@@ -31,6 +32,10 @@ pub use gap::{
     GapReport, GapThresholds, GapTradeSide, MatchedTradeGap, PaperFillRecord,
 };
 pub use pbo::{cscv_pbo, PboResult};
+pub use screener::{
+    run_screen, FundamentalFilter, RankingWeight, ScreenDefinition, ScreenMatch, ScreenResult,
+    SymbolScreenData, TechnicalFilter, Watchlist, WatchlistItem,
+};
 pub use stats::{
     deflated_sharpe, expected_max_sharpe, min_track_record_length, moments, normal_cdf, normal_inv_cdf,
     probabilistic_sharpe, sharpe_per_period, Moments,

@@ -60,6 +60,7 @@ pub mod openapi;
 pub mod optimization_api;
 pub mod paper_api;
 pub(crate) mod pdf;
+pub mod portfolio_report;
 pub mod portfolios_api;
 pub mod pricing_api;
 pub mod providers;

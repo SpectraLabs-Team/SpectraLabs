@@ -57,8 +57,9 @@ fn tone_colour(tone: Option<&str>) -> (f64, f64, f64) {
     }
 }
 
-/// Pages in order, starting a new one whenever the next block would not fit.
-struct Writer {
+/// Pages in order, starting a new one whenever the next block would not fit. Shared with the
+/// portfolio report (M15 Task 5), which draws the same sections and tables.
+pub(crate) struct Writer {
     title: String,
     subtitle: String,
     pages: Vec<Page>,
@@ -66,7 +67,7 @@ struct Writer {
 }
 
 impl Writer {
-    fn new(title: &str, subtitle: &str) -> Self {
+    pub(crate) fn new(title: &str, subtitle: &str) -> Self {
         let page = Page::new(title, subtitle);
         Writer { title: title.into(), subtitle: subtitle.into(), pages: vec![page], y: PAGE_TOP - 40.0 }
     }
@@ -83,7 +84,7 @@ impl Writer {
         self.pages.last_mut().expect("at least one page")
     }
 
-    fn section(&mut self, section: &TearSheetSection) {
+    pub(crate) fn section(&mut self, section: &TearSheetSection) {
         self.reserve(30.0 + 30.0 * section.items.len() as f64);
         let y = self.y;
         self.page().draw(10.0, "F2", LEFT, y, (0.12, 0.35, 0.85), &section.category.to_uppercase());
@@ -105,7 +106,20 @@ impl Writer {
         self.y -= 30.0;
     }
 
-    fn table(&mut self, table: &TearSheetTable) {
+    /// A line of body text, e.g. to say a table has no rows.
+    pub(crate) fn note(&mut self, s: &str) {
+        self.reserve(20.0);
+        let y = self.y;
+        self.page().draw(10.0, "F1", LEFT, y, (0.08, 0.08, 0.12), s);
+        self.y -= 20.0;
+    }
+
+    /// Vertical space between blocks.
+    pub(crate) fn gap(&mut self, height: f64) {
+        self.y -= height;
+    }
+
+    pub(crate) fn table(&mut self, table: &TearSheetTable) {
         self.reserve(40.0 + 14.0 * table.rows.len() as f64);
         let y = self.y;
         self.page().draw(10.0, "F2", LEFT, y, (0.12, 0.35, 0.85), &table.title.to_uppercase());
@@ -125,6 +139,32 @@ impl Writer {
             self.y -= 14.0;
         }
     }
+
+    /// The finished PDF. There is no generation time in the file, so identical content gives
+    /// identical bytes.
+    pub(crate) fn finish(self) -> Vec<u8> {
+        let n = self.pages.len();
+        let mut pdf = SimplePdf::new();
+        // Objects: 1 catalog, 2 page tree, 3 Helvetica, 4 Helvetica-Bold, then a page and its
+        // content stream for each page.
+        pdf.add_object(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
+        let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", 5 + 2 * i)).collect();
+        pdf.add_object(format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" ")).into_bytes());
+        pdf.add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec());
+        pdf.add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>".to_vec());
+        for (i, page) in self.pages.iter().enumerate() {
+            pdf.add_object(
+                format!(
+                    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
+                     /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {} 0 R >>",
+                    6 + 2 * i
+                )
+                .into_bytes(),
+            );
+            pdf.add_object(stream_object(&page.ops));
+        }
+        pdf.finish()
+    }
 }
 
 /// Renders the sheet as a PDF. `title` and `subtitle` appear on every page header. There is no
@@ -137,28 +177,7 @@ pub fn render(sheet: &TearSheet, title: &str, subtitle: &str) -> Vec<u8> {
     if let Some(table) = &sheet.table {
         w.table(table);
     }
-
-    let n = w.pages.len();
-    let mut pdf = SimplePdf::new();
-    // Objects: 1 catalog, 2 page tree, 3 Helvetica, 4 Helvetica-Bold, then a page and its
-    // content stream for each page.
-    pdf.add_object(b"<< /Type /Catalog /Pages 2 0 R >>".to_vec());
-    let kids: Vec<String> = (0..n).map(|i| format!("{} 0 R", 5 + 2 * i)).collect();
-    pdf.add_object(format!("<< /Type /Pages /Kids [{}] /Count {n} >>", kids.join(" ")).into_bytes());
-    pdf.add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_vec());
-    pdf.add_object(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>".to_vec());
-    for (i, page) in w.pages.iter().enumerate() {
-        pdf.add_object(
-            format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] \
-                 /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents {} 0 R >>",
-                6 + 2 * i
-            )
-            .into_bytes(),
-        );
-        pdf.add_object(stream_object(&page.ops));
-    }
-    pdf.finish()
+    w.finish()
 }
 
 #[cfg(test)]

@@ -157,11 +157,23 @@ impl RebalanceTrade {
     }
 }
 
+/// A holding's weight (its value at the close as a fraction of equity) around one rebalance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HoldingWeight {
+    pub symbol: String,
+    /// Before the rebalance's trades, against equity before the rebalance.
+    pub before: f64,
+    /// After the trades and their costs, against equity after the rebalance.
+    pub after: f64,
+}
+
 /// One rebalance: its date, reasons, trades, cost and turnover.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RebalanceEvent {
     pub date: Date,
     pub reasons: Vec<Reason>,
+    /// Every holding's weight before and after, in symbol order (traded or not).
+    pub weights: Vec<HoldingWeight>,
     pub trades: Vec<RebalanceTrade>,
     /// Sum of the trades' costs in currency.
     pub cost: f64,
@@ -291,6 +303,7 @@ pub fn simulate(
         }
 
         if !reasons.is_empty() {
+            let before: Vec<f64> = (0..n).map(|i| held[i] * px[i] / equity_before).collect();
             let deltas = size_trades(equity_before, &weights, &held, px, slip, cost.min_fee);
             let mut trades = Vec::new();
             let mut event_cost = 0.0;
@@ -319,9 +332,18 @@ pub fn simulate(
             let turnover = traded_notional / equity_before;
             total_cost += event_cost;
             total_turnover += turnover;
+            let equity_after = cash + held.iter().zip(px).map(|(q, p)| q * p).sum::<f64>();
+            let weights_around = (0..n)
+                .map(|i| HoldingWeight {
+                    symbol: symbols[i].clone(),
+                    before: before[i],
+                    after: held[i] * px[i] / equity_after,
+                })
+                .collect();
             events.push(RebalanceEvent {
                 date: dates[t],
                 reasons,
+                weights: weights_around,
                 trades,
                 cost: event_cost,
                 turnover,
@@ -456,6 +478,18 @@ mod tests {
             assert!((w - h.weight).abs() < 1e-9, "{} weight {w} vs {}", h.symbol, h.weight);
         }
         assert!(ev.cost > 0.0);
+        // The event records the same weights after its trades, and the drift before them.
+        for (h, w) in t.iter().zip(&ev.weights) {
+            assert_eq!(w.symbol, h.symbol);
+            assert!((w.after - h.weight).abs() < 1e-9, "{} recorded after {}", w.symbol, w.after);
+        }
+        let before: f64 = ev.weights.iter().map(|w| w.before).sum();
+        assert!((before - 1.0).abs() < 1e-9, "weights before sum to 1 with no cash left: {before}");
+        assert!(
+            ev.weights[0].before > 0.5,
+            "A rose 30%, so it was overweight before: {}",
+            ev.weights[0].before
+        );
     }
 
     #[test]

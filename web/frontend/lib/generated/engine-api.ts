@@ -3883,7 +3883,7 @@ export interface components {
             delta: number;
             /**
              * Format: double
-             * @description d┬▓Price/dSpot┬▓.
+             * @description d²Price/dSpot².
              */
             gamma: number;
             /** @description The model's review status: it awaits the M26 correctness audit. */

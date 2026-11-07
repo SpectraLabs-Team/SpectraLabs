@@ -18,6 +18,8 @@ use spectra_db::{connect, migrate, PgPool, PoolConfig};
 use tower::ServiceExt;
 use uuid::Uuid;
 
+mod common;
+
 const SECRET: &str = "test-secret-test-secret-test-secret!";
 
 async fn pool() -> Option<PgPool> {
@@ -211,6 +213,10 @@ async fn every_gap_report_export_is_a_new_version_and_lists_with_its_links() {
     assert_eq!(content_type, "application/pdf");
     assert_eq!(version.as_deref(), Some("2"));
     assert!(pdf.starts_with(b"%PDF-1.4"), "the response is a PDF");
+    let drawn = common::drawn_text(&pdf);
+    assert!(drawn.contains("Backtest-to-Paper Gap Report"), "{drawn}");
+    assert!(drawn.contains(&format!("Gap report {}", f.gap_report)), "{drawn}");
+    assert!(!drawn.contains("Quantitative Strategy Tear-Sheet"), "{drawn}");
 
     let (status, content_type, version, third_csv) = fetch(&f.app, &f.export_path("csv"), f.user, f.ws).await;
     assert_eq!(status, 200);

@@ -13,9 +13,59 @@
 
 use std::fmt;
 
-use chrono::{Datelike, NaiveDate};
-
 use crate::portfolio::{validate_weights, Holding, PortfolioError, DEFAULT_WEIGHT_TOLERANCE};
+
+/// A civil (calendar) date. Ordering is by year, then month, then day. Std-only: this crate must
+/// not depend on third-party crates, so dates are represented here rather than with `chrono`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Date {
+    pub year: i32,
+    /// 1 to 12.
+    pub month: u32,
+    /// 1 to 31, valid for the month. The caller supplies a real calendar date.
+    pub day: u32,
+}
+
+impl Date {
+    /// A date from its parts. The caller supplies a valid calendar date.
+    #[must_use]
+    pub const fn new(year: i32, month: u32, day: u32) -> Self {
+        Self { year, month, day }
+    }
+
+    /// Days since 1970-01-01 (proleptic Gregorian calendar; Howard Hinnant's algorithm).
+    #[must_use]
+    pub fn to_days(self) -> i64 {
+        let y = i64::from(self.year) - i64::from(self.month <= 2);
+        let era = y.div_euclid(400);
+        let yoe = y - era * 400;
+        let m = i64::from(self.month);
+        let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(self.day) - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        era * 146_097 + doe - 719_468
+    }
+
+    /// The date `days` after 1970-01-01.
+    #[must_use]
+    pub fn from_days(days: i64) -> Self {
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let day = doy - (153 * mp + 2) / 5 + 1;
+        let month = if mp < 10 { mp + 3 } else { mp - 9 };
+        let year = yoe + era * 400 + i64::from(month <= 2);
+        Self { year: i32::try_from(year).unwrap_or(i32::MAX), month: month as u32, day: day as u32 }
+    }
+}
+
+impl fmt::Display for Date {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:04}-{:02}-{:02}", self.year, self.month, self.day)
+    }
+}
 
 /// Calendar frequency for rebalancing: on the first trading day of each new month or quarter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,7 +156,7 @@ impl RebalanceTrade {
 /// One rebalance: its date, reasons, trades, cost and turnover.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RebalanceEvent {
-    pub date: NaiveDate,
+    pub date: Date,
     pub reasons: Vec<Reason>,
     pub trades: Vec<RebalanceTrade>,
     /// Sum of the trades' costs in currency.
@@ -122,7 +172,7 @@ pub struct RebalanceEvent {
 pub struct RebalanceRun {
     pub events: Vec<RebalanceEvent>,
     /// Equity at each close, from the first date.
-    pub equity: Vec<(NaiveDate, f64)>,
+    pub equity: Vec<(Date, f64)>,
     /// Costs of all rebalances in currency.
     pub total_cost: f64,
     /// Sum of the events' turnover.
@@ -143,7 +193,7 @@ pub struct RebalanceRun {
 pub fn simulate(
     symbols: &[String],
     targets: &[Holding],
-    dates: &[NaiveDate],
+    dates: &[Date],
     closes: &[Vec<f64>],
     initial_cash: f64,
     rule: RebalanceRule,
@@ -278,10 +328,10 @@ pub fn simulate(
 }
 
 /// The calendar period a date falls in, so a change of period marks a rebalance date.
-fn period(date: NaiveDate, freq: Frequency) -> (i32, u32) {
+fn period(date: Date, freq: Frequency) -> (i32, u32) {
     match freq {
-        Frequency::Monthly => (date.year(), date.month()),
-        Frequency::Quarterly => (date.year(), (date.month() - 1) / 3),
+        Frequency::Monthly => (date.year, date.month),
+        Frequency::Quarterly => (date.year, (date.month - 1) / 3),
     }
 }
 
@@ -316,8 +366,8 @@ fn size_trades(equity: f64, weights: &[f64], held: &[f64], px: &[f64], slip: f64
 mod tests {
     use super::*;
 
-    fn d(y: i32, m: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(y, m, day).unwrap()
+    fn d(y: i32, m: u32, day: u32) -> Date {
+        Date::new(y, m, day)
     }
 
     fn syms(names: &[&str]) -> Vec<String> {
@@ -383,7 +433,7 @@ mod tests {
         let run = simulate(&s, &t, &dates, &closes, 100_000.0, monthly(), &paper_like()).unwrap();
         let ev = &run.events[1];
         // Rebuild holdings at the close of the rebalance day from the trades.
-        let mut held = vec![0.0; 3];
+        let mut held = [0.0_f64; 3];
         for ev_i in &run.events[..2] {
             for tr in &ev_i.trades {
                 let i = s.iter().position(|x| *x == tr.symbol).unwrap();
@@ -478,7 +528,7 @@ mod tests {
         let run =
             simulate(&s, &targets(&[("A", 0.5), ("B", 0.5)]), &dates, &closes, 1000.0, rule, &zero_cost())
                 .unwrap();
-        let dates_hit: Vec<(NaiveDate, Vec<Reason>)> =
+        let dates_hit: Vec<(Date, Vec<Reason>)> =
             run.events.iter().map(|e| (e.date, e.reasons.clone())).collect();
         assert_eq!(
             dates_hit,
@@ -490,10 +540,11 @@ mod tests {
     fn rebalance_uses_only_prices_available_on_that_date() {
         // Changing prices after date t must not change any decision or trade up to t.
         let s = syms(&["A", "B", "C"]);
-        let dates: Vec<NaiveDate> = (0..70).map(|i| d(2026, 1, 1) + chrono::Duration::days(i)).collect();
+        let dates: Vec<Date> =
+            (0..70).map(|i| Date::from_days(d(2026, 1, 1).to_days() + i64::from(i))).collect();
         let closes: Vec<Vec<f64>> = (0..70)
             .map(|i| {
-                let x = i as f64;
+                let x = f64::from(i);
                 vec![100.0 + (x * 0.7).sin() * 20.0 + x * 0.3, 80.0 + (x * 0.4).cos() * 15.0, 50.0 + x * 0.2]
             })
             .collect();
@@ -559,5 +610,24 @@ mod tests {
             simulate(&s, &good, &dates, &closes, 0.0, monthly(), &zero_cost()),
             Err(RebalanceError::Input(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod date_tests {
+    use super::Date;
+
+    #[test]
+    fn day_numbers_match_known_dates_and_round_trip() {
+        assert_eq!(Date::new(1970, 1, 1).to_days(), 0);
+        assert_eq!(Date::new(2000, 3, 1).to_days(), 11_017);
+        assert_eq!(Date::new(2026, 11, 7).to_days(), 20_764);
+        for days in -800..30_000 {
+            assert_eq!(Date::from_days(days).to_days(), days);
+        }
+        assert_eq!(Date::from_days(Date::new(2024, 2, 28).to_days() + 1), Date::new(2024, 2, 29));
+        assert_eq!(Date::from_days(Date::new(2025, 2, 28).to_days() + 1), Date::new(2025, 3, 1));
+        assert!(Date::new(2026, 1, 31) < Date::new(2026, 2, 1));
+        assert_eq!(Date::new(2026, 2, 3).to_string(), "2026-02-03");
     }
 }

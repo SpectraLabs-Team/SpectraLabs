@@ -2972,7 +2972,6 @@ dependencies = [
 name = "spectra-backtest"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "spectra-core",
  "spectra-data",
  "spectra-engine",

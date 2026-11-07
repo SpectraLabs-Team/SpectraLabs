@@ -788,6 +788,14 @@ async fn sweep_exports_are_versioned_reports() {
     let report_id = header(&h1, "x-report-id");
     assert!([&h2, &h3].iter().all(|h| header(h, "x-report-id") == report_id));
 
+    // An unknown format is a 422, like the gap export: no CSV fallback, and nothing stored (the
+    // listing below still has exactly three versions).
+    let (status, h, body) = f.get_raw(f.ws, &format!("{export}?format=docx")).await;
+    assert_eq!(status, 422);
+    assert!(h.get("x-report-id").is_none() && h.get("x-report-version").is_none());
+    let err: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(err["message"], "format must be csv or pdf.", "{err}");
+
     // The run lists its report versions, newest first.
     let (status, list) =
         f.call("GET", &format!("/api/v1/reports?run_kind=sweep&run_id={sweep_id}"), &Value::Null).await;

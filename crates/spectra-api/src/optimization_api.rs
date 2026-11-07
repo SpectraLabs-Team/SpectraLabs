@@ -590,7 +590,12 @@ pub(crate) struct ExportSweepQuery {
         ("id" = Uuid, Path, description = "Sweep id"),
         ExportSweepQuery
     ),
-    responses((status = 200, description = "Validation report CSV or PDF"), (status = 404, body = crate::openapi::ErrorDoc)))]
+    responses(
+        (status = 200, description = "Validation report CSV or PDF"),
+        (status = 404, body = crate::openapi::ErrorDoc),
+        (status = 413, description = "The report is over 5 MiB and was not stored", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "A format other than csv or pdf", body = crate::openapi::ErrorDoc),
+    ))]
 pub(crate) async fn export_sweep(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,
@@ -598,13 +603,17 @@ pub(crate) async fn export_sweep(
     query: Result<Query<ExportSweepQuery>, QueryRejection>,
 ) -> Response {
     let Ok(Path(sweep_id)) = sweep_id else { return error_response(404, NOT_FOUND) };
-    let export_format =
-        query.ok().and_then(|Query(q)| q.format).unwrap_or_else(|| "csv".to_string()).to_lowercase();
-
     let (pool, ws) = match context(&st, &id) {
         Ok(c) => c,
         Err(r) => return r,
     };
+    let Ok(Query(q)) = query else {
+        return error_response(422, "Invalid query parameters.");
+    };
+    let export_format = q.format.unwrap_or_else(|| "csv".to_string()).to_lowercase();
+    if export_format != "csv" && export_format != "pdf" {
+        return error_response(422, "format must be csv or pdf.");
+    }
     let sweep = match optimization::get_sweep(&pool, ws, sweep_id).await {
         Ok(Some(s)) => s,
         Ok(None) => return error_response(404, NOT_FOUND),

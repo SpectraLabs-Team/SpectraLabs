@@ -129,6 +129,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/backtests/{id}/tear-sheet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The tear sheet sections for a finished backtest, built from its stored summary (M16 Task 6). */
+        get: operations["backtest_tear_sheet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{id}/tear-sheet/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The tear sheet as a PDF, stored as a version of the backtest's tear sheet report (M16 Task 6). */
+        get: operations["backtest_tear_sheet_export"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/base-currency": {
         parameters: {
             query?: never;
@@ -1147,6 +1181,24 @@ export interface paths {
         };
         /** GET /api/v1/paper/gap/reports/{id} */
         get: operations["handle_get_gap_report"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/gap/reports/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/paper/gap/reports/{id}/export: the gap report as CSV or PDF, stored as the next
+         *     version of its `gap` report (M16 Task 7). Every export is kept, as for sweeps. */
+        get: operations["handle_export_gap_report"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4873,6 +4925,30 @@ export interface components {
             source: string;
             synced: boolean;
         };
+        /** @description Everything the sheet shows below its header. */
+        TearSheet: {
+            sections: components["schemas"]["TearSheetSection"][];
+            table?: null | components["schemas"]["TearSheetTable"];
+        };
+        /** @description One metric card on the sheet. */
+        TearSheetItem: {
+            label: string;
+            sub?: string | null;
+            /** @description `profit`, `loss` or `neutral` when the value is coloured. */
+            tone?: string | null;
+            value: string;
+        };
+        /** @description A titled group of metric cards. */
+        TearSheetSection: {
+            category: string;
+            items: components["schemas"]["TearSheetItem"][];
+        };
+        /** @description The strategy allocation table, shown only when the run has strategies. */
+        TearSheetTable: {
+            headers: string[];
+            rows: string[][];
+            title: string;
+        };
         /** @description `POST /api/v1/me/sandbox/transact` body: one trade, applied atomically. */
         TransactRequest: {
             /** Format: double */
@@ -5659,6 +5735,97 @@ export interface operations {
             };
             /** @description The backtest has not succeeded (yet) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    backtest_tear_sheet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest job id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tear sheet sections and strategy table */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TearSheet"];
+                };
+            };
+            /** @description No such backtest, or no summary recorded */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The backtest has not succeeded yet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    backtest_tear_sheet_export: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Backtest job id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tear sheet PDF, stored as a report version; `x-report-id`, `x-report-version` and `x-report-sha256` describe it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": unknown;
+                };
+            };
+            /** @description No such backtest, or no summary recorded */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The backtest has not succeeded yet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The report is over 5 MiB and was not stored */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7853,6 +8020,24 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
+            /** @description The report is over 5 MiB and was not stored */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description A format other than csv or pdf */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
         };
     };
     list_sweeps: {
@@ -8184,6 +8369,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    handle_export_gap_report: {
+        parameters: {
+            query?: {
+                /** @description `csv` (default) or `pdf`. */
+                format?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Gap report id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The gap report as CSV or PDF, stored as a report version; `x-report-id`, `x-report-version` and `x-report-sha256` describe it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such gap report */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description The report is over 5 MiB and was not stored */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description An invalid id, or a format other than csv or pdf */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
             };
         };
     };

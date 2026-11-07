@@ -417,6 +417,118 @@
         }
       }
     },
+    "/api/v1/backtests/{id}/tear-sheet": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "The tear sheet sections for a finished backtest, built from its stored summary (M16 Task 6).",
+        "operationId": "backtest_tear_sheet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest job id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tear sheet sections and strategy table",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TearSheet"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such backtest, or no summary recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The backtest has not succeeded yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{id}/tear-sheet/export": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "The tear sheet as a PDF, stored as a version of the backtest's tear sheet report (M16 Task 6).",
+        "operationId": "backtest_tear_sheet_export",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Backtest job id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tear sheet PDF, stored as a report version; `x-report-id`, `x-report-version` and `x-report-sha256` describe it",
+            "content": {
+              "application/pdf": {}
+            }
+          },
+          "404": {
+            "description": "No such backtest, or no summary recorded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The backtest has not succeeded yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The report is over 5 MiB and was not stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/base-currency": {
       "get": {
         "tags": [
@@ -3197,6 +3309,26 @@
                 }
               }
             }
+          },
+          "413": {
+            "description": "The report is over 5 MiB and was not stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A format other than csv or pdf",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
           }
         }
       }
@@ -3623,6 +3755,71 @@
           },
           "500": {
             "description": "Database error"
+          }
+        }
+      }
+    },
+    "/api/v1/paper/gap/reports/{id}/export": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "GET /api/v1/paper/gap/reports/{id}/export: the gap report as CSV or PDF, stored as the next\nversion of its `gap` report (M16 Task 7). Every export is kept, as for sweeps.",
+        "operationId": "handle_export_gap_report",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Gap report id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "`csv` (default) or `pdf`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The gap report as CSV or PDF, stored as a report version; `x-report-id`, `x-report-version` and `x-report-sha256` describe it"
+          },
+          "404": {
+            "description": "No such gap report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The report is over 5 MiB and was not stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An invalid id, or a format other than csv or pdf",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
           }
         }
       }
@@ -12999,6 +13196,108 @@
           },
           "synced": {
             "type": "boolean"
+          }
+        }
+      },
+      "TearSheet": {
+        "type": "object",
+        "description": "Everything the sheet shows below its header.",
+        "required": [
+          "sections"
+        ],
+        "properties": {
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TearSheetSection"
+            }
+          },
+          "table": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TearSheetTable"
+              }
+            ]
+          }
+        }
+      },
+      "TearSheetItem": {
+        "type": "object",
+        "description": "One metric card on the sheet.",
+        "required": [
+          "label",
+          "value"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "sub": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`profit`, `loss` or `neutral` when the value is coloured."
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "TearSheetSection": {
+        "type": "object",
+        "description": "A titled group of metric cards.",
+        "required": [
+          "category",
+          "items"
+        ],
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TearSheetItem"
+            }
+          }
+        }
+      },
+      "TearSheetTable": {
+        "type": "object",
+        "description": "The strategy allocation table, shown only when the run has strategies.",
+        "required": [
+          "title",
+          "headers",
+          "rows"
+        ],
+        "properties": {
+          "headers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "title": {
+            "type": "string"
           }
         }
       },

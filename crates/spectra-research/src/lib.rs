@@ -11,6 +11,7 @@ pub mod company_research;
 pub mod formula;
 pub mod gap;
 pub mod indicators;
+pub mod patterns;
 pub mod pbo;
 pub mod portfolio_basket;
 pub mod screener;
@@ -43,6 +44,10 @@ pub use formula::{
 pub use gap::{
     compute_backtest_to_paper_gap, BacktestFillRecord, GapAlert, GapAlertStatus, GapAttribution, GapMetrics,
     GapReport, GapThresholds, GapTradeSide, MatchedTradeGap, PaperFillRecord,
+};
+pub use patterns::{
+    cluster_support_resistance, compute_sector_heatmap, detect_double_tops_and_bottoms, find_pivots,
+    ChartPatternKind, DetectedPattern, PivotKind, PivotPoint, SectorHeatmapEntry, SupportResistanceLevel,
 };
 pub use pbo::{cscv_pbo, PboResult};
 pub use portfolio_basket::{

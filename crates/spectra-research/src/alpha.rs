@@ -590,8 +590,8 @@ pub fn run_signal_test(
 
     let universe: Vec<String> = universe_set.into_iter().collect();
     let dates: Vec<String> = signals_by_date.keys().cloned().collect();
-    let start_date = dates.first().cloned().unwrap_or_default();
-    let end_date = dates.last().cloned().unwrap_or_default();
+    let start_date = dates.first().cloned().unwrap_or_else(String::new);
+    let end_date = dates.last().cloned().unwrap_or_else(String::new);
 
     // Compute IC per horizon
     let mut horizon_metrics = Vec::new();

@@ -82,14 +82,14 @@ async fn test_alpha_workbench_flow_and_sentiment_gate() {
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO users (id, email) VALUES ($1, $2)")
+    sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1, $2, '!')")
         .bind(editor_user)
         .bind(format!("editor-{}@example.com", editor_user.simple()))
         .execute(&pool)
         .await
         .unwrap();
 
-    sqlx::query("INSERT INTO users (id, email) VALUES ($1, $2)")
+    sqlx::query("INSERT INTO users (id, email, password_hash) VALUES ($1, $2, '!')")
         .bind(viewer_user)
         .bind(format!("viewer-{}@example.com", viewer_user.simple()))
         .execute(&pool)

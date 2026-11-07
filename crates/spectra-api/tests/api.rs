@@ -926,3 +926,34 @@ async fn m7_advanced_clayton_copula_risk() {
     assert_eq!(j.at("dependence_model").unwrap().as_str().unwrap(), "clayton_copula");
     assert!(j.find("position_contributions").is_some());
 }
+
+#[tokio::test]
+async fn m7_copula_parameters_out_of_range_are_unprocessable() {
+    let single_csv = "symbol,quantity,price,volatility\nAAPL,1000,190.00,0.20\n";
+    let body = |dependence: &str, key: &str, value: Json| {
+        Json::object()
+            .with("portfolio_csv", Json::string(single_csv))
+            .with("metric", Json::string("var"))
+            .with("confidence", Json::number(0.99).unwrap())
+            .with("simulations", Json::integer(1_000))
+            .with("dependence", Json::string(dependence))
+            .with(key, value)
+    };
+
+    for theta in [0.0, -1.0] {
+        let (status, j) =
+            call(post("/api/v1/risk", &body("clayton_copula", "theta", Json::number(theta).unwrap()))).await;
+        assert_eq!(status, 422, "theta {theta}: {}", j.dump());
+        assert!(j.dump().contains("theta"), "{}", j.dump());
+    }
+    for dof in [0, -1] {
+        let (status, j) =
+            call(post("/api/v1/risk", &body("t_copula", "degrees_of_freedom", Json::integer(dof)))).await;
+        assert_eq!(status, 422, "dof {dof}: {}", j.dump());
+        assert!(j.dump().contains("degrees_of_freedom"), "{}", j.dump());
+    }
+    // Below the old 0.1 clamp floor but positive: accepted.
+    let (status, j) =
+        call(post("/api/v1/risk", &body("clayton_copula", "theta", Json::number(0.05).unwrap()))).await;
+    assert_eq!(status, 200, "{}", j.dump());
+}

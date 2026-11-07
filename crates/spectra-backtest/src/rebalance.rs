@@ -45,9 +45,9 @@ impl Date {
         era * 146_097 + doe - 719_468
     }
 
-    /// The date `days` after 1970-01-01.
+    /// The date `days` after 1970-01-01, or `None` if its year does not fit in an `i32`.
     #[must_use]
-    pub fn from_days(days: i64) -> Self {
+    pub fn from_days(days: i64) -> Option<Self> {
         let z = days + 719_468;
         let era = z.div_euclid(146_097);
         let doe = z - era * 146_097;
@@ -57,7 +57,11 @@ impl Date {
         let day = doy - (153 * mp + 2) / 5 + 1;
         let month = if mp < 10 { mp + 3 } else { mp - 9 };
         let year = yoe + era * 400 + i64::from(month <= 2);
-        Self { year: i32::try_from(year).unwrap_or(i32::MAX), month: month as u32, day: day as u32 }
+        Some(Self {
+            year: i32::try_from(year).ok()?,
+            month: u32::try_from(month).ok()?,
+            day: u32::try_from(day).ok()?,
+        })
     }
 }
 
@@ -247,8 +251,13 @@ pub fn simulate(
         }
     }
 
-    let weights: Vec<f64> =
-        (0..n).map(|i| targets.iter().find(|h| h.symbol == symbols[i]).map_or(0.0, |h| h.weight)).collect();
+    let mut weights = Vec::with_capacity(n);
+    for symbol in symbols {
+        let Some(target) = targets.iter().find(|h| h.symbol == *symbol) else {
+            return Err(RebalanceError::Input(format!("no target weight for {symbol}")));
+        };
+        weights.push(target.weight);
+    }
     let slip = cost.slippage_bps / 10_000.0;
     let mut cash = initial_cash;
     let mut held = vec![0.0_f64; n];
@@ -541,7 +550,7 @@ mod tests {
         // Changing prices after date t must not change any decision or trade up to t.
         let s = syms(&["A", "B", "C"]);
         let dates: Vec<Date> =
-            (0..70).map(|i| Date::from_days(d(2026, 1, 1).to_days() + i64::from(i))).collect();
+            (0..70).map(|i| Date::from_days(d(2026, 1, 1).to_days() + i64::from(i)).unwrap()).collect();
         let closes: Vec<Vec<f64>> = (0..70)
             .map(|i| {
                 let x = f64::from(i);
@@ -623,11 +632,29 @@ mod date_tests {
         assert_eq!(Date::new(2000, 3, 1).to_days(), 11_017);
         assert_eq!(Date::new(2026, 11, 7).to_days(), 20_764);
         for days in -800..30_000 {
-            assert_eq!(Date::from_days(days).to_days(), days);
+            assert_eq!(Date::from_days(days).unwrap().to_days(), days);
         }
-        assert_eq!(Date::from_days(Date::new(2024, 2, 28).to_days() + 1), Date::new(2024, 2, 29));
-        assert_eq!(Date::from_days(Date::new(2025, 2, 28).to_days() + 1), Date::new(2025, 3, 1));
+        assert_eq!(Date::from_days(Date::new(2024, 2, 28).to_days() + 1), Some(Date::new(2024, 2, 29)));
+        assert_eq!(Date::from_days(Date::new(2025, 2, 28).to_days() + 1), Some(Date::new(2025, 3, 1)));
         assert!(Date::new(2026, 1, 31) < Date::new(2026, 2, 1));
         assert_eq!(Date::new(2026, 2, 3).to_string(), "2026-02-03");
+    }
+}
+
+#[cfg(test)]
+mod target_tests {
+    use super::*;
+
+    #[test]
+    fn a_holding_without_a_target_weight_is_refused() {
+        let symbols = vec!["A".to_string(), "B".to_string()];
+        let targets =
+            vec![Holding { symbol: "A".into(), weight: 0.5 }, Holding { symbol: "C".into(), weight: 0.5 }];
+        let dates = [Date::new(2026, 1, 2), Date::new(2026, 1, 3)];
+        let closes = vec![vec![1.0, 1.0], vec![1.0, 1.0]];
+        let rule = RebalanceRule { calendar: None, drift_threshold: Some(0.1) };
+        let cost = TradeCostConfig { name: "zero".into(), version: 1, slippage_bps: 0.0, min_fee: 0.0 };
+        let err = simulate(&symbols, &targets, &dates, &closes, 100.0, rule, &cost).unwrap_err();
+        assert!(matches!(err, RebalanceError::Input(ref m) if m.contains("no target weight for B")), "{err}");
     }
 }

@@ -489,14 +489,28 @@ pub(crate) async fn handle_get_gap_report(
 }
 
 /// Query parameters for exporting a gap report.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub(crate) struct ExportGapReportQuery {
     /// `csv` (default) or `pdf`.
+    #[param(inline)]
     pub format: Option<String>,
 }
 
 /// GET /api/v1/paper/gap/reports/{id}/export: the gap report as CSV or PDF, stored as the next
 /// version of its `gap` report (M16 Task 7). Every export is kept, as for sweeps.
+#[utoipa::path(
+    get,
+    path = "/api/v1/paper/gap/reports/{id}/export",
+    tag = "paper",
+    params(("id" = Uuid, Path, description = "Gap report id"), ExportGapReportQuery),
+    responses(
+        (status = 200, description = "The gap report as CSV or PDF, stored as a report version; `x-report-id`, `x-report-version` and `x-report-sha256` describe it"),
+        (status = 404, description = "No such gap report", body = crate::openapi::ErrorDoc),
+        (status = 413, description = "The report is over 5 MiB and was not stored", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "An invalid id, or a format other than csv or pdf", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn handle_export_gap_report(
     State(st): State<AppState>,
     Extension(identity): Extension<Identity>,

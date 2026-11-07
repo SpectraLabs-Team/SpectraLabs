@@ -7,27 +7,30 @@
 
 use serde::Serialize;
 use serde_json::Value;
+use utoipa::ToSchema;
 
 /// One metric card on the sheet.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub struct TearSheetItem {
     pub label: String,
     pub value: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sub: Option<String>,
+    /// `profit`, `loss` or `neutral` when the value is coloured.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
     pub tone: Option<&'static str>,
 }
 
 /// A titled group of metric cards.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub struct TearSheetSection {
     pub category: String,
     pub items: Vec<TearSheetItem>,
 }
 
 /// The strategy allocation table, shown only when the run has strategies.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub struct TearSheetTable {
     pub title: String,
     pub headers: Vec<String>,
@@ -35,7 +38,7 @@ pub struct TearSheetTable {
 }
 
 /// Everything the sheet shows below its header.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 pub struct TearSheet {
     pub sections: Vec<TearSheetSection>,
     #[serde(skip_serializing_if = "Option::is_none")]

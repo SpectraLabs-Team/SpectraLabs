@@ -507,7 +507,7 @@ pub(crate) async fn backtest_attribution(
     tag = "backtests",
     params(("id" = Uuid, Path, description = "Backtest job id")),
     responses(
-        (status = 200, description = "The tear sheet sections and strategy table"),
+        (status = 200, description = "The tear sheet sections and strategy table", body = crate::tear_sheet::TearSheet),
         (status = 404, description = "No such backtest, or no summary recorded", body = crate::openapi::ErrorDoc),
         (status = 409, description = "The backtest has not succeeded yet", body = crate::openapi::ErrorDoc),
     )
@@ -543,6 +543,18 @@ pub(crate) async fn backtest_tear_sheet(
 }
 
 /// The tear sheet as a PDF, stored as a version of the backtest's tear sheet report (M16 Task 6).
+#[utoipa::path(
+    get,
+    path = "/api/v1/backtests/{id}/tear-sheet/export",
+    tag = "backtests",
+    params(("id" = Uuid, Path, description = "Backtest job id")),
+    responses(
+        (status = 200, description = "The tear sheet PDF, stored as a report version; `x-report-id`, `x-report-version` and `x-report-sha256` describe it", content_type = "application/pdf"),
+        (status = 404, description = "No such backtest, or no summary recorded", body = crate::openapi::ErrorDoc),
+        (status = 409, description = "The backtest has not succeeded yet", body = crate::openapi::ErrorDoc),
+        (status = 413, description = "The report is over 5 MiB and was not stored", body = crate::openapi::ErrorDoc),
+    )
+)]
 pub(crate) async fn backtest_tear_sheet_export(
     State(st): State<AppState>,
     Extension(id): Extension<Identity>,

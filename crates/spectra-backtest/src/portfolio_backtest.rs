@@ -5,7 +5,7 @@
 //! rules and costs are the ones Task 3 tests. Wiring the rebalances into the M3 engine's multi-strategy
 //! run is a separate step and is not part of this module.
 
-use chrono::NaiveDate;
+use crate::rebalance::Date;
 
 use crate::portfolio::Holding;
 use crate::rebalance::{
@@ -26,7 +26,7 @@ pub struct PortfolioBacktestSummary {
     /// Number of rebalances, including the initial one.
     pub rebalance_count: usize,
     /// Each rebalance's date and cost, in order.
-    pub cost_per_rebalance: Vec<(NaiveDate, f64)>,
+    pub cost_per_rebalance: Vec<(Date, f64)>,
 }
 
 /// Summarize a finished rebalancing run against its starting cash.
@@ -64,7 +64,7 @@ pub fn summarize(run: &RebalanceRun, initial_cash: f64) -> PortfolioBacktestSumm
 pub fn run_portfolio_backtest(
     symbols: &[String],
     targets: &[Holding],
-    dates: &[NaiveDate],
+    dates: &[Date],
     closes: &[Vec<f64>],
     initial_cash: f64,
     rule: RebalanceRule,
@@ -80,8 +80,8 @@ mod tests {
     use super::*;
     use crate::rebalance::{Frequency, TradeCostConfig};
 
-    fn d(y: i32, m: u32, day: u32) -> NaiveDate {
-        NaiveDate::from_ymd_opt(y, m, day).unwrap()
+    fn d(y: i32, m: u32, day: u32) -> Date {
+        Date::new(y, m, day)
     }
 
     fn zero_cost() -> TradeCostConfig {

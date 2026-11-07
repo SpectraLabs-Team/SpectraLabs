@@ -8,6 +8,7 @@ pub mod calendar;
 pub mod chart;
 pub mod dataset;
 pub mod datastore;
+pub mod fundamentals;
 mod records;
 pub mod report;
 pub mod settings;
@@ -24,6 +25,10 @@ pub use dataset::{
     SymbolTable,
 };
 pub use datastore::DataStore;
+pub use fundamentals::{
+    FundamentalRecord, FundamentalsProvider, ListingStatus, MockFundamentalsProvider,
+    PointInTimeFundamentalsStore, QuarantinedFundamental, SymbolMaster, SymbolMetadata,
+};
 pub use report::{preview_json, quality_report_json};
 pub use settings::{parse_settings, settings_json, suggest, SettingsError, Suggestions};
 pub use time::{format_timestamp, parse_fixed, parse_timestamp, ParsedTime, TimeFormat, TimeOptions};

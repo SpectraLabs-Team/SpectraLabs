@@ -22,6 +22,7 @@ pub mod instruments;
 pub mod job;
 pub mod output;
 pub mod portfolio;
+pub mod rebalance;
 pub mod run;
 pub mod strategies;
 

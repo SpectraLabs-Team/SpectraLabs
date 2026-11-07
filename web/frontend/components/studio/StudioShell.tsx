@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BookOpen, Briefcase, ChevronsLeft, ChevronsRight, Compass, Cpu, Database, FileCode2, LayoutDashboard, LineChart, Lock, LogOut, Menu, PlugZap, ShieldAlert, ShieldCheck, Sliders, TrendingUp, X } from 'lucide-react';
+import { BookOpen, Briefcase, ChevronsLeft, ChevronsRight, Compass, Cpu, Database, FileCode2, FlaskConical, LayoutDashboard, LineChart, Lock, LogOut, Menu, PlugZap, ShieldAlert, ShieldCheck, Sliders, TrendingUp, X } from 'lucide-react';
 import { RolePill } from '@/components/landing/Header';
 import { HelpMenu } from '@/components/onboarding/HelpMenu';
 import { useTour } from '@/components/onboarding/OnboardingTour';
@@ -18,10 +18,11 @@ import { usePortfolio } from './PortfolioContext';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { WorkspaceGuide } from './WorkspaceGuide';
 
-export type StudioTab = 'overview' | 'risk' | 'risk-center' | 'paper' | 'portfolio' | 'data' | 'strategies' | 'backtests' | 'optimization' | 'benchmark' | 'registry' | 'settings';
+export type StudioTab = 'overview' | 'alpha' | 'risk' | 'risk-center' | 'paper' | 'portfolio' | 'data' | 'strategies' | 'backtests' | 'optimization' | 'benchmark' | 'registry' | 'settings';
 
 export const TABS: { id: StudioTab; label: string; short: string; icon: typeof Cpu }[] = [
   { id: 'overview', label: 'Workspace Overview', short: 'Overview', icon: LayoutDashboard },
+  { id: 'alpha', label: 'Alpha Workbench', short: 'Alpha', icon: FlaskConical },
   { id: 'risk', label: 'Risk & Stress Lab', short: 'Risk', icon: ShieldAlert },
   { id: 'risk-center', label: 'Risk Center & Controls', short: 'Risk Center', icon: ShieldCheck },
   { id: 'paper', label: 'Paper Trading & Execution', short: 'Paper Trading', icon: TrendingUp },

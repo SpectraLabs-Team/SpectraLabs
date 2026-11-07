@@ -39,6 +39,7 @@
 //!
 //! Configuration is read once at startup: see [`config`].
 
+pub mod alpha_api;
 pub mod auth;
 pub mod backtests_api;
 pub mod broker_adapters;
@@ -1038,6 +1039,18 @@ fn report_routes() -> Router<AppState> {
         .route("/api/v1/reports/{report_id}/versions/{version}", only(get(reports_api::download_version)))
 }
 
+/// Module 12: Alpha Workbench signal tests and gate verification.
+fn alpha_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/v1/alpha/signal-tests",
+            only(get(alpha_api::handle_list_signal_tests).post(alpha_api::handle_run_signal_test)),
+        )
+        .route("/api/v1/alpha/signal-tests/{id}", only(get(alpha_api::handle_get_signal_test)))
+        .route("/api/v1/alpha/signal-tests/{id}/export", only(get(alpha_api::handle_export_signal_test)))
+        .route("/api/v1/alpha/m42/sentiment", only(get(alpha_api::handle_get_m42_sentiment)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -1059,6 +1072,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(risk_center_routes())
         .merge(paper_routes())
         .merge(report_routes())
+        .merge(alpha_routes())
         .merge(user_state_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()

@@ -19,6 +19,8 @@ pub mod report_type {
     pub const TEAR_SHEET: &str = "tear_sheet";
     /// M10 backtest-to-paper gap report.
     pub const GAP: &str = "gap";
+    /// M12 alpha workbench signal test report.
+    pub const SIGNAL_TEST: &str = "signal_test";
 }
 
 /// What a report's `run_id` points at.
@@ -29,6 +31,8 @@ pub mod run_kind {
     pub const BACKTEST: &str = "backtest";
     /// A backtest-to-paper gap report (`backtest_paper_gap_reports.id`).
     pub const PAPER_GAP: &str = "paper_gap";
+    /// An M12 signal test (`signal_tests.id`).
+    pub const SIGNAL_TEST: &str = "signal_test";
 }
 
 /// The largest report content, in bytes, that [`create_version`] stores: 5 MiB. Every stored

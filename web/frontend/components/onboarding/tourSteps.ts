@@ -31,6 +31,15 @@ export const MAIN_TOUR: TourStep[] = [
     side: 'right',
   },
   {
+    id: 'alpha',
+    tab: 'alpha',
+    requiresTab: 'alpha',
+    title: 'Alpha Workbench',
+    body: 'Evaluate raw predictive signals with Information Coefficients (IC), horizon decay curves, and quantile spreads before implementing full strategies.',
+    targets: ['nav-alpha', 'studio-main'],
+    side: 'right',
+  },
+  {
     id: 'simulations',
     tab: 'backtests',
     requiresTab: 'backtests',

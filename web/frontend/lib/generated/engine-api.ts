@@ -4,6 +4,75 @@
  */
 
 export interface paths {
+    "/api/v1/alpha/m42/sentiment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/alpha/m42/sentiment: M42 sentiment score with gate threshold protection (Task 7). */
+        get: operations["handle_get_m42_sentiment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alpha/signal-tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/alpha/signal-tests: List signal tests in workspace. */
+        get: operations["handle_list_signal_tests"];
+        put?: never;
+        /** POST /api/v1/alpha/signal-tests: Run a signal test in the workspace. */
+        post: operations["handle_run_signal_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alpha/signal-tests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/alpha/signal-tests/{id}: Get signal test details. */
+        get: operations["handle_get_signal_test"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alpha/signal-tests/{id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/alpha/signal-tests/{id}/export: Export report as versioned PDF, JSON or CSV through M16. */
+        get: operations["handle_export_signal_test"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests": {
         parameters: {
             query?: never;
@@ -2454,6 +2523,15 @@ export interface components {
             /** @description Metrics, drawdown, tail, activity and trade statistics, once finished. */
             summary?: Record<string, never> | null;
         };
+        /** @description Price bar input. */
+        BarInputRecord: {
+            /** Format: double */
+            close: number;
+            date: string;
+            symbol: string;
+            /** Format: int64 */
+            timestamp_ns?: number | null;
+        };
         /** @description One chart point. Prices are decimal numbers (for drawing only). */
         BarPoint: {
             /** Format: double */
@@ -3344,6 +3422,17 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        /** @description Owner configurable gate threshold input. */
+        GateThresholdInput: {
+            /** Format: double */
+            max_turnover?: number | null;
+            /** Format: double */
+            min_half_life_days?: number | null;
+            /** Format: double */
+            min_mean_ic?: number | null;
+            /** Format: double */
+            min_t_stat?: number | null;
+        };
         HoldoutEvaluationView: {
             /** Format: double */
             dsr?: number | null;
@@ -3581,6 +3670,17 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        /** @description Response view for M42 sentiment score. */
+        M42SentimentResponse: {
+            message: string;
+            /** Format: uuid */
+            passed_test_id: string;
+            rating: string;
+            /** Format: double */
+            sentiment_score: number;
+            signal_name: string;
+            status: string;
+        };
         /** @description A monthly return point for the heatmap and dashboard. */
         MonthlyReturn: {
             /**
@@ -3720,7 +3820,7 @@ export interface components {
             delta: number;
             /**
              * Format: double
-             * @description d²Price/dSpot².
+             * @description d┬▓Price/dSpot┬▓.
              */
             gamma: number;
             /** @description The model's review status: it awaits the M26 correctness audit. */
@@ -4551,6 +4651,29 @@ export interface components {
             /** @description What was wrong. */
             message: string;
         };
+        /** @description Request to run a signal test. */
+        RunSignalTestRequest: {
+            /** @description Custom price bars for test evaluation. */
+            custom_bars?: components["schemas"]["BarInputRecord"][] | null;
+            /** @description Custom signal observations (e.g. M42 sentiment scores). */
+            custom_signals?: components["schemas"]["SignalInputRecord"][] | null;
+            /**
+             * Format: uuid
+             * @description Optional workspace dataset version id to bind the test universe and point-in-time data to.
+             */
+            dataset_version_id?: string | null;
+            /** @description Optional trading horizons in days (default: [1, 5, 10, 20]). */
+            horizons?: number[] | null;
+            /** @description Primary holding horizon in days (default: 5). */
+            primary_horizon?: number | null;
+            /** @description Number of quantiles for spread and turnover (default: 5). */
+            quantile_count?: number | null;
+            /** @description Signal identifier or name (e.g. "momentum_5d", "mean_reversion_5d", "sentiment"). */
+            signal_name: string;
+            /** @description Optional universe of symbols (e.g. `["AAPL", "MSFT", "GOOG"]`). */
+            symbols?: string[] | null;
+            threshold?: null | components["schemas"]["GateThresholdInput"];
+        };
         /** @description Sandbox order view. */
         SandboxOrderView: {
             created_at: string;
@@ -4647,6 +4770,77 @@ export interface components {
             reason?: string | null;
             /** Format: uuid */
             strategy_id?: string | null;
+        };
+        /** @description Signal observation input. */
+        SignalInputRecord: {
+            date: string;
+            symbol: string;
+            /** Format: double */
+            value: number;
+        };
+        /** @description Detail view of a signal test record with full metrics. */
+        SignalTestDetailView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            dataset_version_id?: string | null;
+            disclaimer: string;
+            /** Format: double */
+            half_life_days: number;
+            horizons: unknown;
+            /** Format: double */
+            ic_stdev: number;
+            /** Format: double */
+            ic_t_stat: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: double */
+            mean_ic: number;
+            passed_gate: boolean;
+            /** Format: int32 */
+            primary_horizon: number;
+            report_json: unknown;
+            signal_name: string;
+            /** Format: int32 */
+            tests_run_count: number;
+            threshold?: unknown;
+            /** Format: double */
+            top_bottom_spread: number;
+            /** Format: double */
+            top_quantile_turnover: number;
+            universe: unknown;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        /** @description Summary view of a signal test record. */
+        SignalTestSummaryView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            dataset_version_id?: string | null;
+            disclaimer: string;
+            /** Format: double */
+            half_life_days: number;
+            /** Format: double */
+            ic_stdev: number;
+            /** Format: double */
+            ic_t_stat: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: double */
+            mean_ic: number;
+            passed_gate: boolean;
+            /** Format: int32 */
+            primary_horizon: number;
+            signal_name: string;
+            /** Format: int32 */
+            tests_run_count: number;
+            /** Format: double */
+            top_bottom_spread: number;
+            /** Format: double */
+            top_quantile_turnover: number;
+            /** Format: uuid */
+            workspace_id: string;
         };
         StartSurvival: {
             config?: unknown;
@@ -5445,6 +5639,210 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    handle_get_m42_sentiment: {
+        parameters: {
+            query?: {
+                /** @description Signal name to check gate status for (default: "sentiment"). */
+                signal_name?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sentiment score active and allowed by gate threshold */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["M42SentimentResponse"];
+                };
+            };
+            /** @description Sentiment score blocked because signal test failed owner threshold */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    handle_list_signal_tests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of signal test summaries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalTestSummaryView"][];
+                };
+            };
+            /** @description Workspace not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    handle_run_signal_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunSignalTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Signal test completed and saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalTestDetailView"];
+                };
+            };
+            /** @description Invalid request payload */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Viewers cannot run signal tests */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Signal evaluation error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    handle_get_signal_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Signal test ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Signal test details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalTestDetailView"];
+                };
+            };
+            /** @description Signal test not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid signal test id */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    handle_export_signal_test: {
+        parameters: {
+            query?: {
+                /** @description Desired export format: `pdf`, `json`, or `csv` (default `pdf`). */
+                format?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Signal test ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Exported signal test report version with `x-report-id`, `x-report-version` and `x-report-sha256` headers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signal test not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Report exceeded storage limits */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid format parameter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     list_backtests: {
         parameters: {
             query?: {

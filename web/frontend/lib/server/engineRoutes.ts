@@ -179,6 +179,11 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   // Versioned reports (M16): a run's stored versions and the bytes of one version
   'api/v1/reports': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/reports/{id}/versions/{version}': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
+  // Module 12: Alpha Workbench Signal Testing and M42 Sentiment Gate
+  'api/v1/alpha/signal-tests': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 30_000 },
+  'api/v1/alpha/signal-tests/{id}': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/alpha/signal-tests/{id}/export': { method: 'GET', minRole: 'editor', timeoutMs: 30_000 },
+  'api/v1/alpha/m42/sentiment': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   // Per-user state and sandbox trades (M25)
   'api/v1/me/state': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/me/state/import': { method: 'POST', minRole: 'viewer', timeoutMs: 15_000 },
@@ -226,6 +231,8 @@ export function routePolicyKey(path: string): string {
   if (/^api\/v1\/paper\/orders\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/orders/{id}';
   if (/^api\/v1\/paper\/gap\/reports\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/paper/gap/reports/{id}';
   if (/^api\/v1\/paper\/gap\/reports\/[0-9a-f-]{36}\/export$/i.test(path)) return 'api/v1/paper/gap/reports/{id}/export';
+  if (/^api\/v1\/alpha\/signal-tests\/[0-9a-f-]{36}\/export$/i.test(path)) return 'api/v1/alpha/signal-tests/{id}/export';
+  if (/^api\/v1\/alpha\/signal-tests\/[0-9a-f-]{36}$/i.test(path)) return 'api/v1/alpha/signal-tests/{id}';
   if (/^api\/v1\/reports\/[0-9a-f-]{36}\/versions\/[1-9][0-9]{0,8}$/i.test(path)) return 'api/v1/reports/{id}/versions/{version}';
   if (/^api\/v1\/me\/state\/import$/i.test(path)) return 'api/v1/me/state/import';
   if (/^api\/v1\/me\/state\/[^/]+$/i.test(path)) return 'api/v1/me/state/{key}';

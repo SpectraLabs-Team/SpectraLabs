@@ -4,8 +4,8 @@
  */
 import { API_BASE, request } from './api';
 
-export type ReportType = 'validation' | 'tear_sheet' | 'gap';
-export type RunKind = 'sweep' | 'backtest' | 'paper_gap';
+export type ReportType = 'validation' | 'tear_sheet' | 'gap' | 'signal_test';
+export type RunKind = 'sweep' | 'backtest' | 'paper_gap' | 'signal_test';
 
 /** One stored version of a report (GET /api/v1/reports). */
 export interface ReportVersion {
@@ -27,6 +27,7 @@ export const REPORT_TYPE_LABEL: Record<ReportType, string> = {
   validation: 'Validation report',
   tear_sheet: 'Tear sheet',
   gap: 'Gap report',
+  signal_test: 'Signal test report',
 };
 
 /** Every report version for a run, grouped by type and newest first. */

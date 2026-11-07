@@ -3,6 +3,7 @@
 //! statistics and the Strategy Survival Lab. Ported from the C++ reference
 //! (`quantforge` v0.6.0); reports are text-identical.
 
+pub mod alerts;
 pub mod alpha;
 pub mod attribution;
 pub mod benchmark;
@@ -19,6 +20,7 @@ pub mod trades;
 pub mod validation;
 pub mod walkforward;
 
+pub use alerts::{AlertCondition, AlertDefinition, AlertEvent, AlertManager, TriggerFrequency};
 pub use alpha::{
     compute_forward_returns, fit_signal_half_life, fractional_ranks, generate_builtin_signal,
     run_signal_test, spearman_correlation, BuiltinSignal, DecayResult, IcSummary, PriceBar, QuantileAnalysis,

@@ -39,7 +39,7 @@ pub use metrics::{
     TailStats,
 };
 pub use options::{norm_cdf, norm_pdf, OptionInputs, OptionValue};
-pub use rebalance::{RebalanceConfig, RebalanceRule, Rebalancer, WeightStrategy};
+pub use rebalance::{CalendarFrequency, RebalanceConfig, RebalanceRule, Rebalancer, WeightStrategy};
 pub use swaps::{
     swap_bars, CurveHistory, CurvePoint, CurveSnapshot, QuoteKind, SwapMark, SwapTerms, YEAR_NS,
 };

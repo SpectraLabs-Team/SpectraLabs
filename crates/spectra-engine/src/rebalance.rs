@@ -45,6 +45,26 @@ pub enum RebalanceRule {
     /// Whenever an instrument's actual weight is more than this far from its
     /// target (e.g. 0.05 = 5 percentage points), and whenever the targets change.
     Drift(f64),
+    /// On the first bar of each new month or quarter (by the bar timestamp, UTC), and
+    /// whenever the targets change.
+    Calendar(CalendarFrequency),
+}
+
+/// Calendar frequency for [`RebalanceRule::Calendar`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalendarFrequency {
+    Monthly,
+    Quarterly,
+}
+
+/// The calendar period (year, and month or quarter index) of a bar timestamp in nanoseconds.
+fn calendar_period(ts_ns: i64, freq: CalendarFrequency) -> (i64, u32) {
+    let days = ts_ns.div_euclid(86_400_000_000_000);
+    let (y, m, _) = crate::bonds::civil_from_days(days);
+    match freq {
+        CalendarFrequency::Monthly => (y, m),
+        CalendarFrequency::Quarterly => (y, (m - 1) / 3),
+    }
 }
 
 /// How targets turn into orders.
@@ -79,6 +99,8 @@ pub struct Rebalancer<S> {
     changed: bool,
     /// Bars seen so far.
     bar: usize,
+    /// The calendar period of the last bar, for the calendar rule.
+    period: Option<(i64, u32)>,
     /// Orders of the last rebalance, checked before sending more.
     pending: Vec<OrderId>,
     /// Every instrument this rebalancer has traded.
@@ -94,6 +116,7 @@ impl<S: WeightStrategy> Rebalancer<S> {
             targets: BTreeMap::new(),
             changed: false,
             bar: 0,
+            period: None,
             pending: Vec::new(),
             traded: BTreeSet::new(),
         }
@@ -135,9 +158,10 @@ impl<S: WeightStrategy> Rebalancer<S> {
         u
     }
 
-    fn due(&self, ctx: &Context<'_>, equity: f64) -> bool {
+    fn due(&self, ctx: &Context<'_>, equity: f64, boundary: bool) -> bool {
         match self.cfg.rule {
             RebalanceRule::EveryBar => true,
+            RebalanceRule::Calendar(_) => self.changed || boundary,
             RebalanceRule::EveryNBars(n) => self.changed || self.bar.is_multiple_of(n.max(1)),
             RebalanceRule::Drift(th) => {
                 self.changed
@@ -206,7 +230,16 @@ impl<S: WeightStrategy> Strategy for Rebalancer<S> {
             .iter()
             .any(|&id| id >= 1 && ctx.orders().get((id - 1) as usize).is_some_and(|o| o.state.is_open()));
         let equity = ctx.equity().to_f64();
-        if !waiting && self.due(ctx, equity) {
+        let boundary = match (self.cfg.rule, bars.first()) {
+            (RebalanceRule::Calendar(freq), Some(bar)) => {
+                let now = calendar_period(bar.ts_ns, freq);
+                let crossed = self.period.is_some_and(|old| old != now);
+                self.period = Some(now);
+                crossed
+            }
+            _ => false,
+        };
+        if !waiting && self.due(ctx, equity, boundary) {
             let mut sells = Vec::new();
             let mut buys = Vec::new();
             for id in self.universe(ctx) {

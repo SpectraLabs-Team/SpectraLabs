@@ -16,6 +16,17 @@ import {
 import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import type { CandleBar } from '@/lib/alpaca';
 import { useTheme } from '@/lib/theme';
+import type { IndicatorName } from '@/lib/indicators';
+
+export interface OverlaySeries {
+  id?: string;
+  indicator: IndicatorName | string;
+  name?: string;
+  color?: string;
+  values?: (number | null)[];
+  series?: Record<string, (number | null)[]>;
+  visible?: boolean;
+}
 
 export interface TradingChartProps {
   symbol: string;
@@ -28,6 +39,18 @@ export interface TradingChartProps {
   onRefresh?: () => void;
   className?: string;
   priceFlash?: 'up' | 'down' | null;
+  overlays?: OverlaySeries[];
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.replace('#', '');
+  if (clean.length === 6) {
+    const r = parseInt(clean.substring(0, 2), 16);
+    const g = parseInt(clean.substring(2, 4), 16);
+    const b = parseInt(clean.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  return hex;
 }
 
 export const TIMEFRAMES = [
@@ -51,6 +74,7 @@ export function TradingChart({
   onRefresh,
   className = '',
   priceFlash = null,
+  overlays = [],
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -211,6 +235,33 @@ export function TradingChart({
       if (b.v > maxVolume) maxVolume = b.v;
     }
 
+    // Expand price range to include visible overlay values
+    if (overlays && overlays.length > 0) {
+      for (const o of overlays) {
+        if (o.visible === false) continue;
+        if (o.values) {
+          for (let i = 0; i < count; i++) {
+            const v = o.values[start + i];
+            if (v !== null && v !== undefined && !isNaN(v)) {
+              if (v < minPrice) minPrice = v;
+              if (v > maxPrice) maxPrice = v;
+            }
+          }
+        }
+        if (o.series) {
+          for (const line of Object.values(o.series)) {
+            for (let i = 0; i < count; i++) {
+              const v = line[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                if (v < minPrice) minPrice = v;
+                if (v > maxPrice) maxPrice = v;
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Add padding to price range
     const priceRange = maxPrice - minPrice || 1;
     const paddedMin = Math.max(0.01, minPrice - priceRange * 0.05);
@@ -296,6 +347,87 @@ export function TradingChart({
       ctx.fillRect(x, vY, bodyWidth, vHeight);
     }
 
+    // Draw Overlay Channel Fills / Cloud (behind candlesticks)
+    if (overlays && overlays.length > 0) {
+      for (const o of overlays) {
+        if (o.visible === false) continue;
+        const color = o.color || '#3B82F6';
+        const ind = String(o.indicator).toUpperCase();
+
+        if (ind === 'BB' || ind === 'KELTNER' || ind === 'DONCHIAN') {
+          const upper = o.series?.upper;
+          const lower = o.series?.lower;
+          if (upper && lower) {
+            ctx.fillStyle = hexToRgba(color, 0.08);
+            ctx.beginPath();
+            let hasPoint = false;
+            for (let i = 0; i < count; i++) {
+              const u = upper[start + i];
+              if (u !== null && u !== undefined && !isNaN(u)) {
+                const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const y = priceToY(u);
+                if (!hasPoint) {
+                  ctx.moveTo(x, y);
+                  hasPoint = true;
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              }
+            }
+            if (hasPoint) {
+              for (let i = count - 1; i >= 0; i--) {
+                const l = lower[start + i];
+                if (l !== null && l !== undefined && !isNaN(l)) {
+                  const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                  const y = priceToY(l);
+                  ctx.lineTo(x, y);
+                }
+              }
+              ctx.closePath();
+              ctx.fill();
+            }
+          }
+        } else if (ind === 'ICHIMOKU') {
+          const spanA = o.series?.senkou_span_a;
+          const spanB = o.series?.senkou_span_b;
+          if (spanA && spanB) {
+            for (let i = 0; i < count - 1; i++) {
+              const a0 = spanA[start + i];
+              const b0 = spanB[start + i];
+              const a1 = spanA[start + i + 1];
+              const b1 = spanB[start + i + 1];
+              if (
+                a0 !== null &&
+                b0 !== null &&
+                a1 !== null &&
+                b1 !== null &&
+                a0 !== undefined &&
+                b0 !== undefined &&
+                a1 !== undefined &&
+                b1 !== undefined
+              ) {
+                const x0 = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const x1 = xOffset + (i + 1) * candleSlotWidth + candleSlotWidth / 2;
+                const yA0 = priceToY(a0);
+                const yB0 = priceToY(b0);
+                const yA1 = priceToY(a1);
+                const yB1 = priceToY(b1);
+
+                ctx.fillStyle = a0 >= b0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)';
+                ctx.beginPath();
+                ctx.moveTo(x0, yA0);
+                ctx.lineTo(x1, yA1);
+                ctx.lineTo(x1, yB1);
+                ctx.lineTo(x0, yB0);
+                ctx.closePath();
+                ctx.fill();
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Draw Candlesticks (Wick + Body)
     for (let i = 0; i < count; i++) {
       const b = visibleBars[i];
@@ -327,6 +459,131 @@ export function TradingChart({
       // Draw body
       ctx.fillStyle = candleColor;
       ctx.fillRect(xBody, yTop, bodyWidth, bHeight);
+    }
+
+    // Draw Overlay Lines and Indicators (on top of candlesticks)
+    if (overlays && overlays.length > 0) {
+      for (const o of overlays) {
+        if (o.visible === false) continue;
+        const color = o.color || '#3B82F6';
+        const ind = String(o.indicator).toUpperCase();
+
+        if (ind === 'PSAR') {
+          // Parabolic SAR dots
+          const pts = o.values || o.series?.values;
+          if (pts) {
+            ctx.fillStyle = color;
+            for (let i = 0; i < count; i++) {
+              const v = pts[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const y = priceToY(v);
+                ctx.beginPath();
+                ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+        } else if (ind === 'BB' || ind === 'KELTNER' || ind === 'DONCHIAN') {
+          // Multi-line bands
+          const lines = [
+            { key: 'middle', style: 'solid', width: 1.2, stroke: color },
+            { key: 'upper', style: 'dashed', width: 1.0, stroke: color },
+            { key: 'lower', style: 'dashed', width: 1.0, stroke: color },
+          ];
+          for (const line of lines) {
+            const seriesData = o.series?.[line.key];
+            if (!seriesData) continue;
+            ctx.strokeStyle = line.stroke;
+            ctx.lineWidth = line.width;
+            if (line.style === 'dashed') {
+              ctx.setLineDash([3, 3]);
+            } else {
+              ctx.setLineDash([]);
+            }
+            ctx.beginPath();
+            let drawing = false;
+            for (let i = 0; i < count; i++) {
+              const v = seriesData[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const y = priceToY(v);
+                if (!drawing) {
+                  ctx.moveTo(x, y);
+                  drawing = true;
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              } else {
+                drawing = false;
+              }
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        } else if (ind === 'ICHIMOKU') {
+          // Ichimoku 5 lines
+          const ichiLines = [
+            { key: 'tenkan_sen', stroke: '#3B82F6', width: 1.2, dash: [] },
+            { key: 'kijun_sen', stroke: '#EF4444', width: 1.4, dash: [] },
+            { key: 'senkou_span_a', stroke: '#10B981', width: 1.0, dash: [4, 2] },
+            { key: 'senkou_span_b', stroke: '#F59E0B', width: 1.0, dash: [4, 2] },
+            { key: 'chikou_span', stroke: '#8B5CF6', width: 1.0, dash: [2, 2] },
+          ];
+          for (const line of ichiLines) {
+            const seriesData = o.series?.[line.key];
+            if (!seriesData) continue;
+            ctx.strokeStyle = line.stroke;
+            ctx.lineWidth = line.width;
+            ctx.setLineDash(line.dash);
+            ctx.beginPath();
+            let drawing = false;
+            for (let i = 0; i < count; i++) {
+              const v = seriesData[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const y = priceToY(v);
+                if (!drawing) {
+                  ctx.moveTo(x, y);
+                  drawing = true;
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              } else {
+                drawing = false;
+              }
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+          }
+        } else {
+          // Single-line overlay: SMA, EMA, WMA, DEMA, TEMA, VWAP, TYPICAL, MEDIAN
+          const pts = o.values || o.series?.values;
+          if (pts) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            let drawing = false;
+            for (let i = 0; i < count; i++) {
+              const v = pts[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const y = priceToY(v);
+                if (!drawing) {
+                  ctx.moveTo(x, y);
+                  drawing = true;
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              } else {
+                drawing = false;
+              }
+            }
+            ctx.stroke();
+          }
+        }
+      }
     }
 
     // Latest price dotted line
@@ -412,7 +669,7 @@ export function TradingChart({
     ctx.stroke();
 
     ctx.restore();
-  }, [bars, viewWindow, crosshair, hoveredIdx, loading, symbol, timeframe, plotSize, theme]);
+  }, [bars, viewWindow, crosshair, hoveredIdx, loading, symbol, timeframe, plotSize, theme, overlays]);
 
   // Mouse interaction handlers
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -623,6 +880,55 @@ export function TradingChart({
           </div>
         )}
       </div>
+
+      {/* Active Overlays Readout in Legend */}
+      {overlays && overlays.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3.5 border-t border-ink/[0.06] py-1.5 font-mono text-[11px]">
+          {overlays.map((ov, oIdx) => {
+            if (ov.visible === false) return null;
+            const idx = hoveredIdx !== null ? hoveredIdx : (bars.length > 0 ? bars.length - 1 : null);
+            if (idx === null) return null;
+            const color = ov.color || '#3B82F6';
+            const label = ov.name || ov.indicator;
+
+            if (ov.values) {
+              const val = ov.values[idx];
+              return (
+                <div key={ov.id || `${ov.indicator}-${oIdx}`} className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                  <span className="text-ink/60">{label}:</span>
+                  <span className="font-semibold text-ink">
+                    {val !== null && val !== undefined ? val.toFixed(2) : '–'}
+                  </span>
+                </div>
+              );
+            }
+
+            if (ov.series) {
+              return (
+                <div key={ov.id || `${ov.indicator}-${oIdx}`} className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
+                  <span className="text-ink/60">{label}:</span>
+                  {Object.entries(ov.series).map(([k, s]) => {
+                    const val = s[idx];
+                    const cleanKey = k.replace('_sen', '').replace('senkou_', '');
+                    return (
+                      <span key={k} className="text-ink/75">
+                        <span className="text-[9px] uppercase text-ink/45 mr-0.5">{cleanKey}:</span>
+                        <span className="font-medium text-ink">
+                          {val !== null && val !== undefined ? val.toFixed(2) : '–'}
+                        </span>
+                      </span>
+                    );
+                  })}
+                </div>
+              );
+            }
+
+            return null;
+          })}
+        </div>
+      )}
 
       <p className="pb-1 text-right text-[10px] text-ink/40">Drag to pan · Ctrl/⌘ + scroll to zoom</p>
       {/* Chart Canvas */}

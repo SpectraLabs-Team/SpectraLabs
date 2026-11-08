@@ -9,7 +9,7 @@
 import { API_BASE, ApiError, errorFrom, request } from './api';
 import type { Series } from './backtests';
 
-export type PortfolioMethod = 'fixed' | 'equal' | 'inverse_volatility';
+export type PortfolioMethod = 'fixed' | 'equal' | 'inverse_volatility' | 'risk_parity';
 export type CalendarFrequency = 'monthly' | 'quarterly';
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 
@@ -34,7 +34,7 @@ export interface Portfolio extends PortfolioSummary {
   holdings: Holding[];
 }
 
-/** A holding as a save or edit sends it: `weight` for fixed, `volatility` for inverse volatility. */
+/** A holding as a save or edit sends it: `weight` for fixed, `volatility` for inverse volatility, the symbol alone for equal and risk parity. */
 export interface HoldingInput {
   symbol: string;
   weight?: number;
@@ -45,6 +45,10 @@ export interface SavePortfolioRequest {
   name: string;
   method: PortfolioMethod;
   holdings: HoldingInput[];
+  /** Risk parity: the dataset version whose daily closes give the covariance. */
+  dataset_version_id?: string;
+  /** Risk parity: YYYY-MM-DD, only closes up to this day are used. Defaults to, and may not be after, the day of the save. */
+  as_of?: string;
 }
 
 export interface RunRule {

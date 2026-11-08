@@ -4462,7 +4462,17 @@
             }
           },
           "403": {
-            "description": "Viewers cannot save portfolios (code `viewer_read_only`)",
+            "description": "Viewers cannot save portfolios (code `viewer_read_only`), or the risk_parity dataset version is a sealed holdout (code `holdout_sealed`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "risk_parity: no such dataset version in this workspace",
             "content": {
               "application/json": {
                 "schema": {
@@ -4482,7 +4492,7 @@
             }
           },
           "422": {
-            "description": "Invalid name, method, holdings or weights",
+            "description": "Invalid name, method, holdings or weights; for risk_parity, a holding with no bars, too little history (60 closes) or a singular covariance",
             "content": {
               "application/json": {
                 "schema": {
@@ -4576,7 +4586,7 @@
             }
           },
           "403": {
-            "description": "Viewers cannot edit portfolios (code `viewer_read_only`)",
+            "description": "Viewers cannot edit portfolios (code `viewer_read_only`), or the risk_parity dataset version is a sealed holdout (code `holdout_sealed`)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4586,7 +4596,7 @@
             }
           },
           "404": {
-            "description": "Not found in this workspace",
+            "description": "Not found in this workspace (the portfolio, or for risk_parity the dataset version)",
             "content": {
               "application/json": {
                 "schema": {
@@ -4606,7 +4616,7 @@
             }
           },
           "422": {
-            "description": "Invalid name, method, holdings or weights",
+            "description": "Invalid name, method, holdings or weights; for risk_parity, a holding with no bars, too little history (60 closes) or a singular covariance",
             "content": {
               "application/json": {
                 "schema": {
@@ -8946,6 +8956,21 @@
           "holdings"
         ],
         "properties": {
+          "as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`YYYY-MM-DD`: only closes on or before this UTC day are used. For `risk_parity`; defaults to\nthe day of the save and may not be after it (no look-ahead). Ignored otherwise."
+          },
+          "dataset_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The dataset version whose daily closes give the covariance. Required for `risk_parity`;\nignored otherwise."
+          },
           "holdings": {
             "type": "array",
             "items": {
@@ -8957,7 +8982,7 @@
               "string",
               "null"
             ],
-            "description": "`fixed` (default), `equal` or `inverse_volatility`."
+            "description": "`fixed` (default), `equal`, `inverse_volatility` or `risk_parity`."
           },
           "name": {
             "type": "string",
@@ -12085,7 +12110,7 @@
           },
           "method": {
             "type": "string",
-            "description": "`fixed`, `equal` or `inverse_volatility`."
+            "description": "`fixed`, `equal`, `inverse_volatility` or `risk_parity`."
           },
           "name": {
             "type": "string"

@@ -3048,8 +3048,17 @@ export interface components {
         };
         /** @description Create a saved portfolio. */
         CreatePortfolioBody: {
+            /** @description `YYYY-MM-DD`: only closes on or before this UTC day are used. For `risk_parity`; defaults to
+             *     the day of the save and may not be after it (no look-ahead). Ignored otherwise. */
+            as_of?: string | null;
+            /**
+             * Format: uuid
+             * @description The dataset version whose daily closes give the covariance. Required for `risk_parity`;
+             *     ignored otherwise.
+             */
+            dataset_version_id?: string | null;
             holdings: components["schemas"]["HoldingInput"][];
-            /** @description `fixed` (default), `equal` or `inverse_volatility`. */
+            /** @description `fixed` (default), `equal`, `inverse_volatility` or `risk_parity`. */
             method?: string | null;
             /** @description Unique within the workspace, at most 120 characters. */
             name: string;
@@ -4324,7 +4333,7 @@ export interface components {
             holdings: components["schemas"]["HoldingBody"][];
             /** Format: uuid */
             id: string;
-            /** @description `fixed`, `equal` or `inverse_volatility`. */
+            /** @description `fixed`, `equal`, `inverse_volatility` or `risk_parity`. */
             method: string;
             name: string;
             /** Format: uuid */
@@ -9497,8 +9506,17 @@ export interface operations {
                     "application/json": components["schemas"]["PortfolioView"];
                 };
             };
-            /** @description Viewers cannot save portfolios (code `viewer_read_only`) */
+            /** @description Viewers cannot save portfolios (code `viewer_read_only`), or the risk_parity dataset version is a sealed holdout (code `holdout_sealed`) */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description risk_parity: no such dataset version in this workspace */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9515,7 +9533,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
-            /** @description Invalid name, method, holdings or weights */
+            /** @description Invalid name, method, holdings or weights; for risk_parity, a holding with no bars, too little history (60 closes) or a singular covariance */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9583,7 +9601,7 @@ export interface operations {
                     "application/json": components["schemas"]["PortfolioView"];
                 };
             };
-            /** @description Viewers cannot edit portfolios (code `viewer_read_only`) */
+            /** @description Viewers cannot edit portfolios (code `viewer_read_only`), or the risk_parity dataset version is a sealed holdout (code `holdout_sealed`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9592,7 +9610,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
-            /** @description Not found in this workspace */
+            /** @description Not found in this workspace (the portfolio, or for risk_parity the dataset version) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9610,7 +9628,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorDoc"];
                 };
             };
-            /** @description Invalid name, method, holdings or weights */
+            /** @description Invalid name, method, holdings or weights; for risk_parity, a holding with no bars, too little history (60 closes) or a singular covariance */
             422: {
                 headers: {
                     [name: string]: unknown;

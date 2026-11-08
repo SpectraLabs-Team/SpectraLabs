@@ -178,6 +178,49 @@ describe('results', () => {
   });
 });
 
+describe('risk parity', () => {
+  it('is in the method selector with its label and hint', () => {
+    assert.match(lab, /\{ id: 'risk_parity', label: 'Risk parity' \}/);
+    assert.match(lab, /risk_parity: 'Equal risk contributions/);
+    assert.match(lab, /\{METHODS\.map\(\(m\) =>/, 'the selector lists every method');
+  });
+
+  it('asks for a dataset version and an as-of date (no later than today), only for risk parity', () => {
+    assert.match(lab, /const fromPrices = method === 'risk_parity';/);
+    assert.match(lab, /\{fromPrices && \(\s*<>\s*<Field label="dataset version"/);
+    assert.match(lab, /<Field label="as of"[^>]*>\s*<input type="date"[^>]*max=\{today\(\)\}/);
+    assert.match(lab, /disabled=\{busy \|\| !name\.trim\(\) \|\| \(fromPrices && !datasetId\)\}/);
+  });
+
+  it('saves through the same route with the dataset version and as-of date', async () => {
+    const seen = capture({ id: ID });
+    const body = { name: 'RP', method: 'risk_parity', holdings: [{ symbol: 'SPY' }, { symbol: 'TLT' }], dataset_version_id: ID, as_of: '2026-11-06' };
+    await p.createPortfolio(body);
+    await p.updatePortfolio(ID, body);
+    assert.deepEqual(
+      seen.map((s) => [s.method, s.url]),
+      [
+        ['POST', '/api/engine/api/v1/portfolios'],
+        ['PUT', `/api/engine/api/v1/portfolios/${ID}`],
+      ],
+    );
+    assert.deepEqual(seen[0].body, body);
+  });
+
+  it('adds no route: the portfolio routes and their roles are unchanged', () => {
+    const keys = Object.keys(routes.ENGINE_ROUTES).filter((k) => k.startsWith('api/v1/portfolio')).sort();
+    assert.deepEqual(keys, [
+      'api/v1/portfolio-runs/{id}',
+      'api/v1/portfolio-runs/{id}/report',
+      'api/v1/portfolios',
+      'api/v1/portfolios/{id}',
+      'api/v1/portfolios/{id}/runs',
+    ]);
+    assert.equal(routes.minimumRole(routes.ENGINE_ROUTES['api/v1/portfolios'], 'POST'), 'editor');
+    assert.equal(routes.minimumRole(routes.ENGINE_ROUTES['api/v1/portfolios/{id}'], 'PUT'), 'editor');
+  });
+});
+
 describe('route policy', () => {
   // [concrete path, policy key, method, minimum role]
   const table = [

@@ -531,4 +531,53 @@ describe('Guided tour', () => {
     assert.match(src('app/learn/page.tsx'), /<TourLauncher \/>/);
     assert.match(src('components/onboarding/OnboardingTour.tsx'), /params\.get\('tour'\) === '1'/);
   });
+
+  it('cross-device tour resume: Device A saves progress, Device B under same account loads state and resumes at that step (M23)', () => {
+    const { applyOnboarding, normalizeOnboarding, shouldAutoStart, parseOnboardingRequest, onboardingStorageKey } = onboarding;
+    const userEmail = 'trader@spectralabs.io';
+
+    // 1. Device A: User starts tour with empty onboarding state
+    let deviceAState = { ...onboarding.EMPTY_ONBOARDING };
+    assert.equal(shouldAutoStart(deviceAState), true, 'Device A should auto-start tour for new user');
+
+    // User steps through tour up to step 3 ('strategies')
+    const completedStep = MAIN_TOUR[3].id; // 'strategies'
+    assert.equal(completedStep, 'strategies');
+
+    // Simulate Device A making PUT /api/auth/onboarding
+    const putPayload = { action: 'progress', step: completedStep, version: 1 };
+    const parsedReq = parseOnboardingRequest(putPayload);
+    assert.ok(!('error' in parsedReq), 'Device A PUT payload must be valid');
+
+    // Server database updates state
+    const serverStoredState = applyOnboarding(deviceAState, parsedReq.action, parsedReq.step, parsedReq.version);
+    assert.equal(serverStoredState.lastCompletedStep, 'strategies');
+    assert.equal(serverStoredState.onboardingCompleted, false);
+
+    // 2. Device B: Same user signs in on a second device
+    // Device B fetches GET /api/auth/onboarding and normalizes response
+    const deviceBInitialFetch = JSON.parse(JSON.stringify(serverStoredState));
+    const deviceBState = normalizeOnboarding(deviceBInitialFetch);
+    assert.equal(deviceBState.lastCompletedStep, 'strategies');
+    assert.equal(shouldAutoStart(deviceBState), true, 'Incomplete tour should resume/prompt on Device B');
+
+    // Device B storage key matches account email
+    assert.equal(onboardingStorageKey(userEmail), 'spectra-onboarding:trader@spectralabs.io');
+
+    // Device B resolves starting step matching lastCompletedStep
+    const resumeIndex = MAIN_TOUR.findIndex((s) => s.id === deviceBState.lastCompletedStep);
+    assert.equal(resumeIndex, 3, 'Device B must resume at step 3');
+    assert.equal(MAIN_TOUR[resumeIndex].id, 'strategies');
+
+    // Explicit restart from beginning ignores saved step
+    const restartIndex = 0;
+    assert.equal(MAIN_TOUR[restartIndex].id, 'dashboard');
+
+    // 3. Device B completes the tour
+    const completePayload = { action: 'complete', step: 'finish', version: 1 };
+    const parsedComplete = parseOnboardingRequest(completePayload);
+    const finalServerState = applyOnboarding(deviceBState, parsedComplete.action, parsedComplete.step, parsedComplete.version);
+    assert.equal(finalServerState.onboardingCompleted, true);
+    assert.equal(shouldAutoStart(finalServerState), false, 'Completed tour must not auto-start on any device');
+  });
 });

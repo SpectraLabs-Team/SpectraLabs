@@ -19,9 +19,7 @@ fn test_m29_csv_injection_prevention() {
         let escaped = escape_csv_cell(input);
         assert!(
             escaped.starts_with('\''),
-            "Input '{}' must be escaped with single quote, got '{}'",
-            input,
-            escaped
+            "Input '{input}' must be escaped with single quote, got '{escaped}'"
         );
     }
 

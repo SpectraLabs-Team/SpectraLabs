@@ -26,17 +26,17 @@ impl fmt::Display for SecurityError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::FileSizeExceeded { actual, max } => {
-                write!(f, "file size {} exceeds maximum allowed limit of {} bytes", actual, max)
+                write!(f, "file size {actual} exceeds maximum allowed limit of {max} bytes")
             }
             Self::InvalidUtf8 => write!(f, "file content is not valid UTF-8"),
             Self::IllegalControlCharacters => {
                 write!(f, "file contains illegal control characters or null bytes")
             }
             Self::RowCountExceeded { actual, max } => {
-                write!(f, "row count {} exceeds maximum allowed limit of {}", actual, max)
+                write!(f, "row count {actual} exceeds maximum allowed limit of {max}")
             }
             Self::FieldLengthExceeded { length, max } => {
-                write!(f, "field length {} exceeds maximum allowed limit of {}", length, max)
+                write!(f, "field length {length} exceeds maximum allowed limit of {max}")
             }
             Self::NonFiniteNumericValue => write!(f, "numeric value is NaN or infinite"),
         }
@@ -62,7 +62,7 @@ pub fn escape_csv_cell(cell: &str) -> String {
 
     let first = trimmed.as_bytes()[0];
     if matches!(first, b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r' | b'%') {
-        format!("'{}", cell)
+        format!("'{cell}")
     } else {
         cell.to_string()
     }
@@ -74,6 +74,11 @@ pub fn escape_csv_row<'a>(fields: impl IntoIterator<Item = &'a str>) -> Vec<Stri
 }
 
 /// Validates raw text file bytes for UTF-8 validity, BOM, and null-byte injection.
+///
+/// # Errors
+/// Returns `SecurityError::FileSizeExceeded` if input exceeds `max_size`,
+/// `SecurityError::InvalidUtf8` if payload is not valid UTF-8, or
+/// `SecurityError::IllegalControlCharacters` if null bytes are present.
 pub fn validate_text_upload(bytes: &[u8], max_size: usize) -> Result<&str, SecurityError> {
     if bytes.len() > max_size {
         return Err(SecurityError::FileSizeExceeded { actual: bytes.len(), max: max_size });
@@ -93,6 +98,9 @@ pub fn validate_text_upload(bytes: &[u8], max_size: usize) -> Result<&str, Secur
 }
 
 /// Validates a parsed floating-point number, rejecting NaNs and infinities.
+///
+/// # Errors
+/// Returns `SecurityError::NonFiniteNumericValue` if the value is NaN or infinite.
 pub fn validate_finite(val: f64) -> Result<f64, SecurityError> {
     if val.is_finite() {
         Ok(val)

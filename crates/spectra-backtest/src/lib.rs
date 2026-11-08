@@ -25,6 +25,7 @@ pub mod portfolio;
 pub mod portfolio_backtest;
 pub mod rebalance;
 pub mod run;
+pub mod shrinkage;
 pub mod strategies;
 
 pub use config::{

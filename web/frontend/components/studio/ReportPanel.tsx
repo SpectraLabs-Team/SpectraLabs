@@ -22,7 +22,6 @@ export function ReportVersionList({ versions }: { versions: ReportVersion[] }) {
         <tr className="text-left text-[11px] uppercase text-ink/50">
           <th className="py-1.5 font-medium">Report</th>
           <th className="py-1.5 font-medium">Version</th>
-          <th className="py-1.5 font-medium">Created By</th>
           <th className="py-1.5 font-medium">Created</th>
           <th className="py-1.5" />
         </tr>
@@ -32,7 +31,6 @@ export function ReportVersionList({ versions }: { versions: ReportVersion[] }) {
           <tr key={`${v.report_id}-${v.version}`} className="border-t border-ink/[0.04]">
             <td className="py-1.5 text-ink">{REPORT_TYPE_LABEL[v.report_type] ?? v.report_type}</td>
             <td className="py-1.5 font-semibold text-ink">v{v.version}</td>
-            <td className="py-1.5 font-mono text-[11px] text-ink/60">{v.created_by ? v.created_by.slice(0, 8) : '—'}</td>
             <td className="py-1.5 text-ink/70">{new Date(v.created_at).toLocaleString()}</td>
             <td className="py-1.5 text-right">
               <a

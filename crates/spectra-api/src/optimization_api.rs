@@ -674,7 +674,6 @@ pub(crate) async fn export_sweep(
     let mut csv = String::new();
     csv.push_str("# SpectraLabs M4 Optimization & Validation Report\n");
     csv.push_str(&format!("# Sweep ID: {}\n", sweep.id));
-    csv.push_str(&format!("# Created By: {}\n", sweep.created_by.map_or("-".to_string(), |u| u.to_string())));
     csv.push_str(&format!("# Method: {}\n", sweep.method));
     csv.push_str(&format!("# Objective: {}\n", sweep.objective));
     csv.push_str(&format!("# Total Trials Attempted: {}\n", sweep.trial_count));

@@ -294,8 +294,14 @@ pub fn run_screen(
             let val = match rk.name.as_str() {
                 "price" => cand.last_price,
                 "volume" => cand.last_volume,
-                "pe" => cand.pe_ratio.unwrap_or(999.0),
-                "margin" => cand.net_margin.unwrap_or(0.0),
+                "pe" => match cand.pe_ratio {
+                    Some(v) => v,
+                    None => 999.0,
+                },
+                "margin" => match cand.net_margin {
+                    Some(v) => v,
+                    None => 0.0,
+                },
                 _ => 0.0,
             };
             if rk.ascending {

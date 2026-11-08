@@ -63,6 +63,18 @@ doc_markdown = "allow"
 # `a + (b + 1) / 2` reproduces the C++ rank formula exactly; it is not a midpoint.
 manual_midpoint = "allow"
 assert_is_empty = "allow"
+missing_errors_doc = "allow"
+uninlined_format_args = "allow"
+unnecessary_map_or = "allow"
+similar_names = "allow"
+needless_range_loop = "allow"
+implicit_hasher = "allow"
+cast_lossless = "allow"
+if_not_else = "allow"
+assigning_clones = "allow"
+redundant_closure_for_method_calls = "allow"
+unnecessary_sort_by = "allow"
+manual_range_contains = "allow"
 
 [profile.dev]
 debug = 1

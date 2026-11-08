@@ -3573,6 +3573,8 @@ export interface components {
         /** @description Owner configurable gate threshold input. */
         GateThresholdInput: {
             /** Format: double */
+            max_half_life_days?: number | null;
+            /** Format: double */
             max_turnover?: number | null;
             /** Format: double */
             min_half_life_days?: number | null;
@@ -5008,8 +5010,18 @@ export interface components {
             primary_horizon?: number | null;
             /** @description Number of quantiles for spread and turnover (default: 5). */
             quantile_count?: number | null;
+            /**
+             * Format: uuid
+             * @description Optional saved signal id to reload.
+             */
+            signal_id?: string | null;
             /** @description Signal identifier or name (e.g. "momentum_5d", "mean_reversion_5d", "sentiment"). */
             signal_name: string;
+            /**
+             * Format: int32
+             * @description Optional saved signal version to reload.
+             */
+            signal_version?: number | null;
             /** @description Optional universe of symbols (e.g. `["AAPL", "MSFT", "GOOG"]`). */
             symbols?: string[] | null;
             threshold?: null | components["schemas"]["GateThresholdInput"];

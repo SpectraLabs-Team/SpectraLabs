@@ -140,6 +140,8 @@ pub struct CorrelatedSimulationResult {
     pub model: DependenceModel,
     /// Paths simulated.
     pub simulations_run: u64,
+    /// Paths dropped due to NaN.
+    pub dropped_nan_paths: u64,
     /// Execution wall time in milliseconds.
     pub elapsed_ms: f64,
 }
@@ -180,6 +182,17 @@ pub fn simulate_correlated(
                 corr.len()
             )));
         }
+        for (row_idx, row) in corr.iter().enumerate() {
+            if row.len() != n_assets {
+                return Err(Error::InvalidArgument(format!(
+                    "Correlation row {row_idx} length {} does not match asset count {n_assets}",
+                    row.len()
+                )));
+            }
+            if row.iter().any(|v| v.is_nan()) {
+                return Err(Error::InvalidArgument(format!("Correlation row {row_idx} contains NaN")));
+            }
+        }
         cholesky(corr)?
     } else if n_assets > 1 {
         return Err(Error::Data("missing correlation matrix for multi-asset copula simulation".into()));
@@ -191,8 +204,9 @@ pub fn simulate_correlated(
     let mut normal = PolarNormal::new();
 
     let n_paths = usize::try_from(simulations).map_err(|_| Error::Overflow)?;
-    let mut portfolio_losses = vec![0.0; n_paths];
-    let mut asset_losses = vec![vec![0.0; n_paths]; n_assets];
+    let mut portfolio_losses = Vec::with_capacity(n_paths);
+    let mut asset_losses = vec![Vec::with_capacity(n_paths); n_assets];
+    let mut dropped_nan_paths = 0u64;
 
     let mut drift_terms = Vec::with_capacity(n_assets);
     let mut diffusions = Vec::with_capacity(n_assets);
@@ -217,13 +231,17 @@ pub fn simulate_correlated(
     let mut z_vec = vec![0.0; n_assets];
     let mut x_vec = vec![0.0; n_assets];
 
-    for path_idx in 0..n_paths {
+    for _path_idx in 0..n_paths {
         if n_assets == 1 {
             let z = normal.sample(&mut rng);
             let terminal = initial_values[0] * (drift_terms[0] + diffusions[0] * z).exp();
             let loss = initial_values[0] - terminal;
-            portfolio_losses[path_idx] = loss;
-            asset_losses[0][path_idx] = loss;
+            if loss.is_nan() {
+                dropped_nan_paths += 1;
+            } else {
+                portfolio_losses.push(loss);
+                asset_losses[0].push(loss);
+            }
             continue;
         }
 
@@ -266,13 +284,31 @@ pub fn simulate_correlated(
         }
 
         let mut port_loss = 0.0;
+        let mut path_has_nan = false;
+        let mut path_asset_losses = Vec::with_capacity(n_assets);
         for i in 0..n_assets {
             let terminal = initial_values[i] * (drift_terms[i] + diffusions[i] * x_vec[i]).exp();
             let loss = initial_values[i] - terminal;
-            asset_losses[i][path_idx] = loss;
+            if loss.is_nan() {
+                path_has_nan = true;
+                break;
+            }
+            path_asset_losses.push(loss);
             port_loss += loss;
         }
-        portfolio_losses[path_idx] = port_loss;
+
+        if path_has_nan || port_loss.is_nan() {
+            dropped_nan_paths += 1;
+        } else {
+            portfolio_losses.push(port_loss);
+            for i in 0..n_assets {
+                asset_losses[i].push(path_asset_losses[i]);
+            }
+        }
+    }
+
+    if portfolio_losses.is_empty() {
+        return Err(Error::NumericalValidation("All Monte Carlo paths produced NaN".into()));
     }
 
     let contributions = compute_risk_contributions(assets, &portfolio_losses, &asset_losses, confidence);
@@ -283,6 +319,7 @@ pub fn simulate_correlated(
         contributions,
         model,
         simulations_run: simulations,
+        dropped_nan_paths,
         elapsed_ms: start.elapsed().as_secs_f64() * 1e3,
     })
 }

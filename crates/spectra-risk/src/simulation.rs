@@ -122,11 +122,47 @@ pub struct SimulationTask {
     pub horizon_years: f64,
 }
 
+impl SimulationTask {
+    /// Validates simulation task inputs for NaN or non-finite values.
+    pub fn validate(&self) -> Result<()> {
+        if self.drift.is_nan() {
+            return Err(Error::InvalidArgument("Monte Carlo drift is NaN".into()));
+        }
+        if self.volatility.is_nan() {
+            return Err(Error::InvalidArgument("Monte Carlo volatility is NaN".into()));
+        }
+        if self.initial_value.is_nan() {
+            return Err(Error::InvalidArgument("Monte Carlo initial_value is NaN".into()));
+        }
+        if self.horizon_years.is_nan() {
+            return Err(Error::InvalidArgument("Monte Carlo horizon_years is NaN".into()));
+        }
+        if self.volatility < 0.0 || !self.volatility.is_finite() {
+            return Err(Error::InvalidArgument(
+                "Monte Carlo volatility must be non-negative and finite".into(),
+            ));
+        }
+        if self.initial_value <= 0.0 || !self.initial_value.is_finite() {
+            return Err(Error::InvalidArgument(
+                "Monte Carlo initial_value must be positive and finite".into(),
+            ));
+        }
+        if self.horizon_years <= 0.0 || !self.horizon_years.is_finite() {
+            return Err(Error::InvalidArgument(
+                "Monte Carlo horizon_years must be positive and finite".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Losses of one batch.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SimulationResult {
     /// One loss per path (positive = the portfolio lost value).
     pub terminal_losses: Vec<f64>,
+    /// Number of paths that produced NaN and were dropped.
+    pub dropped_nan_paths: u64,
     /// Kernel time.
     pub elapsed_ms: f64,
 }
@@ -138,14 +174,22 @@ fn coefficients(task: &SimulationTask) -> (f64, f64) {
     (drift_term, diffusion)
 }
 
-fn fill(out: &mut [f64], seed: u64, task: &SimulationTask, drift_term: f64, diffusion: f64) {
+fn fill(out: &mut [f64], seed: u64, task: &SimulationTask, drift_term: f64, diffusion: f64) -> u64 {
     let mut rng = Mt19937_64::new(seed);
     let mut normal = PolarNormal::new();
+    let mut dropped = 0u64;
     for slot in out {
         let z = normal.sample(&mut rng);
         let terminal = task.initial_value * (drift_term + diffusion * z).exp();
-        *slot = task.initial_value - terminal;
+        let loss = task.initial_value - terminal;
+        if loss.is_nan() {
+            dropped += 1;
+            *slot = f64::NAN;
+        } else {
+            *slot = loss;
+        }
     }
+    dropped
 }
 
 fn path_count(task: &SimulationTask) -> Result<usize> {
@@ -157,11 +201,22 @@ fn path_count(task: &SimulationTask) -> Result<usize> {
 /// # Errors
 /// If the path count does not fit in memory addressing.
 pub fn run_reference(task: &SimulationTask) -> Result<SimulationResult> {
+    task.validate()?;
     let start = Instant::now();
     let mut losses = vec![0.0; path_count(task)?];
     let (d, s) = coefficients(task);
-    fill(&mut losses, task.seed, task, d, s);
-    Ok(SimulationResult { terminal_losses: losses, elapsed_ms: start.elapsed().as_secs_f64() * 1e3 })
+    let dropped = fill(&mut losses, task.seed, task, d, s);
+    if dropped > 0 {
+        losses.retain(|l| !l.is_nan());
+        if losses.is_empty() {
+            return Err(Error::NumericalValidation("All Monte Carlo paths produced NaN".into()));
+        }
+    }
+    Ok(SimulationResult {
+        terminal_losses: losses,
+        dropped_nan_paths: dropped,
+        elapsed_ms: start.elapsed().as_secs_f64() * 1e3,
+    })
 }
 
 /// The seed of chunk `k` of the parallel backend.
@@ -178,6 +233,7 @@ pub const fn chunk_seed(task_seed: u64, chunk: u64) -> u64 {
 /// # Errors
 /// If the path count does not fit in memory addressing.
 pub fn run_parallel(task: &SimulationTask, threads: usize) -> Result<SimulationResult> {
+    task.validate()?;
     let start = Instant::now();
     let mut losses = vec![0.0; path_count(task)?];
     let (d, s) = coefficients(task);
@@ -189,9 +245,10 @@ pub fn run_parallel(task: &SimulationTask, threads: usize) -> Result<SimulationR
     let mut chunks: Vec<(u64, &mut [f64])> =
         losses.chunks_mut(PARALLEL_CHUNK).enumerate().map(|(i, c)| (i as u64, c)).collect();
     let workers = threads.min(chunks.len()).max(1);
+    let mut dropped_total = 0u64;
     if workers == 1 {
         for (k, c) in &mut chunks {
-            fill(c, chunk_seed(task.seed, *k), task, d, s);
+            dropped_total += fill(c, chunk_seed(task.seed, *k), task, d, s);
         }
     } else {
         // Deal chunks round-robin; each chunk's content depends only on its index.
@@ -199,17 +256,32 @@ pub fn run_parallel(task: &SimulationTask, threads: usize) -> Result<SimulationR
         for (i, c) in chunks.into_iter().enumerate() {
             lanes[i % workers].push(c);
         }
-        std::thread::scope(|scope| {
+        let dropped_counts: Vec<u64> = std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(lanes.len());
             for lane in lanes {
-                scope.spawn(move || {
+                handles.push(scope.spawn(move || {
+                    let mut lane_dropped = 0u64;
                     for (k, c) in lane {
-                        fill(c, chunk_seed(task.seed, k), task, d, s);
+                        lane_dropped += fill(c, chunk_seed(task.seed, k), task, d, s);
                     }
-                });
+                    lane_dropped
+                }));
             }
+            handles.into_iter().map(|h| h.join().unwrap_or(0)).collect()
         });
+        dropped_total = dropped_counts.into_iter().sum();
     }
-    Ok(SimulationResult { terminal_losses: losses, elapsed_ms: start.elapsed().as_secs_f64() * 1e3 })
+    if dropped_total > 0 {
+        losses.retain(|l| !l.is_nan());
+        if losses.is_empty() {
+            return Err(Error::NumericalValidation("All Monte Carlo paths produced NaN".into()));
+        }
+    }
+    Ok(SimulationResult {
+        terminal_losses: losses,
+        dropped_nan_paths: dropped_total,
+        elapsed_ms: start.elapsed().as_secs_f64() * 1e3,
+    })
 }
 
 /// Runs a task on a concrete backend (`Cpu` or `Parallel`).
@@ -239,4 +311,60 @@ pub fn plan_batches(total: u64, max_batch: u64) -> Vec<u64> {
         remaining -= b;
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simulation_task_rejects_nan_inputs() {
+        let base_task = SimulationTask {
+            num_paths: 100,
+            seed: 42,
+            drift: 0.0,
+            volatility: 0.20,
+            initial_value: 100_000.0,
+            horizon_years: 1.0,
+        };
+
+        let mut nan_vol = base_task;
+        nan_vol.volatility = f64::NAN;
+        assert!(nan_vol.validate().is_err());
+        assert!(run_reference(&nan_vol).is_err());
+        assert!(run_parallel(&nan_vol, 2).is_err());
+
+        let mut nan_val = base_task;
+        nan_val.initial_value = f64::NAN;
+        assert!(nan_val.validate().is_err());
+        assert!(run_reference(&nan_val).is_err());
+
+        let mut nan_drift = base_task;
+        nan_drift.drift = f64::NAN;
+        assert!(nan_drift.validate().is_err());
+
+        let mut nan_horizon = base_task;
+        nan_horizon.horizon_years = f64::NAN;
+        assert!(nan_horizon.validate().is_err());
+    }
+
+    #[test]
+    fn test_simulation_runs_finite_paths() {
+        let task = SimulationTask {
+            num_paths: 500,
+            seed: 1234,
+            drift: 0.05,
+            volatility: 0.15,
+            initial_value: 50_000.0,
+            horizon_years: 0.5,
+        };
+
+        let res_ref = run_reference(&task).unwrap();
+        assert_eq!(res_ref.terminal_losses.len(), 500);
+        assert_eq!(res_ref.dropped_nan_paths, 0);
+
+        let res_par = run_parallel(&task, 2).unwrap();
+        assert_eq!(res_par.terminal_losses.len(), 500);
+        assert_eq!(res_par.dropped_nan_paths, 0);
+    }
 }

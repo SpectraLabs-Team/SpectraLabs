@@ -75,6 +75,8 @@ assigning_clones = "allow"
 redundant_closure_for_method_calls = "allow"
 unnecessary_sort_by = "allow"
 manual_range_contains = "allow"
+manual_unwrap_or_default = "allow"
+manual_unwrap_or = "allow"
 
 [profile.dev]
 debug = 1

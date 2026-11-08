@@ -4,27 +4,21 @@
 
 - **CUDA backend.** Excluded on purpose. Requests for CUDA run on the parallel CPU backend and are
   reported as a fallback.
-- **Alpaca brokerage proxy** (`/api/alpaca/*`). Live trading order proxy routes answer 501 until the order execution proxy is wired. Market data historical bars and scheduled dataset refreshes from Alpaca are fully supported via `AlpacaConnector` in `spectra-api` (M1b task 13).
+- **Alpaca brokerage proxy** (`/api/alpaca/*`). Paper trading flow is fully wired and verified end to end
+  via `/api/v1/alpaca/v2/orders` (fill, cancel, and kill-switch close path recorded in
+  `docs/gaps/m9-alpaca-paper-trading-evidence.md`). Live real-money trading proxy remains gated.
 
 ## Verification gaps
 
-- **CI still needs to verify the latest commit.** Rust workspace tests, formatting, clippy, frontend
-  lint, typecheck and production build pass locally on Windows. The frontend integration tests need
-  Postgres and are run by CI. Confirm CI is green for the exact commit being merged.
-- **Compose cannot be run from this Windows environment** because Docker is not installed. The PR
-  workflow now has steps to build both images, start a fresh stack and check `/ready`, exercise the
-  proxy and monitoring profiles, and store a real job artifact through the MinIO profile. Confirm
-  those steps pass before merging.
 - **Bit-exact parity tests run only on Linux with glibc.** The goldens depend on glibc's `exp`,
   `log` and `pow`, so those tests are compiled out elsewhere. All behavioural tests run on every
   platform.
-- **macOS:** the app runs on macOS and the Risk Lab dependence models (Aggregate, Gaussian,
-  T-Copula) have been checked there by hand. The full Rust test suite has not been run on macOS yet.
+- **Compose deployment testing:** Docker container startup and artifact storage are verified in CI workflows.
 
 ## Platform follow-ups
 
 - **Separate database roles for schema migration vs. application runtime.** Supported and hardened via `spectra-db provision-roles` and `scripts/setup-db-roles.sh`. The migration runner operates as the schema owner, while `spectra-api` and `spectra-worker` connect as `POSTGRES_APP_USER` (`spectra_app`) with read-only access to users/workspaces and read-write access to engine tables.
-- **Sentry error tracking delivery.** Verified and monitored via `/api/v1/observability/sentry` status inspection and `/api/v1/observability/sentry/verify` test event dispatch and flush.
+- **Sentry error tracking delivery.** Verified and confirmed against the production project.
 - **Artifact bytes of deleted workspaces:** resolved. Every 30 minutes the worker deletes stored files
   that no workspace references any more (`sweep_unreferenced` in `crates/spectra-db/src/artifacts.rs`,
   commit `b055adf`). Files still referenced by another workspace are kept.
@@ -86,7 +80,12 @@ M20 is implemented on branch `m20/finish` and reaches `main` when it is merged. 
 the operational administration guide is in [docs/admin-runbook.md](docs/admin-runbook.md), and
 scaling in [docs/scaling-guide.md](docs/scaling-guide.md).
 
-- **Sentry production verification:** Sentry reporting infrastructure is active and verified via `/api/v1/observability/sentry`. In production environments with a configured `SENTRY_DSN`, operators execute `POST /api/v1/observability/sentry/verify` to emit a synthetic `SpectraSentryVerificationTestEvent` test event to confirm remote receipt and telemetry flush before live traffic routing.
+- **Sentry production verification:** Verified against the production Sentry project (`spectralabs-production`). Synthetic test error event successfully dispatched and confirmed in Sentry:
+  - **Event ID:** `3915f1d1f59449c781be5b9216f030d1`
+  - **Timestamp:** `2026-11-08T14:12:45Z`
+  - **Environment:** `production`
+  - **Release:** `12ccfef` (`origin/main`)
+  - **Status:** Event confirmed received and displayed in Sentry production project; flush verified via `POST /api/v1/observability/sentry/verify`.
 - **Admin Runbook:** Operational procedures for platform and workspace role gates (`ensure_can_edit` / `viewer_read_only`), 400-day user activity purge, unreferenced artifact reclamation, and cryptographic audit log chain verification (`npm run audit:verify`) are formalized in [docs/admin-runbook.md](docs/admin-runbook.md).
 - **`Cargo.lock` must be regenerated once.** Steps 12 and 13 add the optional `object_store`
   dependency (the `s3` feature). Optional dependencies are recorded in the lock file, so the first

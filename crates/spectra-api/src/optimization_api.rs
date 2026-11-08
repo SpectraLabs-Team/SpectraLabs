@@ -47,6 +47,9 @@ fn user_of(id: &Identity) -> Option<Uuid> {
     Uuid::parse_str(&id.user).ok()
 }
 
+const FORBIDDEN_HOLDOUT_ROLE: &str =
+    "Viewers are not permitted to view sealed holdout evaluations or results.";
+
 #[allow(clippy::result_large_err)]
 async fn ensure_can_edit(pool: &spectra_db::PgPool, ws: Uuid, user_id: Option<Uuid>) -> Result<(), Response> {
     if let Some(uid) = user_id {
@@ -61,6 +64,30 @@ async fn ensure_can_edit(pool: &spectra_db::PgPool, ws: Uuid, user_id: Option<Uu
         if let Some((r,)) = role {
             if r == "viewer" {
                 return Err(error_with_code(403, "viewer_read_only", FORBIDDEN_VIEWER));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::result_large_err)]
+async fn ensure_can_view_holdout(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    user_id: Option<Uuid>,
+) -> Result<(), Response> {
+    if let Some(uid) = user_id {
+        let role: Option<(String,)> =
+            sqlx::query_as("SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2")
+                .bind(ws)
+                .bind(uid)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| db_error(&e))?;
+
+        if let Some((r,)) = role {
+            if r == "viewer" {
+                return Err(error_with_code(403, "holdout_role_forbidden", FORBIDDEN_HOLDOUT_ROLE));
             }
         }
     }
@@ -624,15 +651,19 @@ pub(crate) async fn export_sweep(
         Err(e) => return db_error(&e),
     };
 
-    let holdout_eval = optimization::evaluations_for_run_target(
-        &pool,
-        ws,
-        sweep.strategy_version_id,
-        Some(sweep.dataset_version_id),
-    )
-    .await
-    .ok()
-    .and_then(|list| list.into_iter().next());
+    let holdout_eval = if ensure_can_view_holdout(&pool, ws, user_of(&id)).await.is_err() {
+        None
+    } else {
+        optimization::evaluations_for_run_target(
+            &pool,
+            ws,
+            sweep.strategy_version_id,
+            Some(sweep.dataset_version_id),
+        )
+        .await
+        .ok()
+        .and_then(|list| list.into_iter().next())
+    };
 
     if export_format == "pdf" {
         let pdf_bytes = generate_validation_pdf(&sweep, &trials, holdout_eval.as_ref(), Utc::now());
@@ -643,6 +674,7 @@ pub(crate) async fn export_sweep(
     let mut csv = String::new();
     csv.push_str("# SpectraLabs M4 Optimization & Validation Report\n");
     csv.push_str(&format!("# Sweep ID: {}\n", sweep.id));
+    csv.push_str(&format!("# Created By: {}\n", sweep.created_by.map_or("-".to_string(), |u| u.to_string())));
     csv.push_str(&format!("# Method: {}\n", sweep.method));
     csv.push_str(&format!("# Objective: {}\n", sweep.objective));
     csv.push_str(&format!("# Total Trials Attempted: {}\n", sweep.trial_count));
@@ -1330,6 +1362,9 @@ pub(crate) async fn list_holdouts(
         Ok(c) => c,
         Err(r) => return r,
     };
+    if let Err(r) = ensure_can_view_holdout(&pool, ws, user_of(&id)).await {
+        return r;
+    }
     match optimization::list_holdouts(&pool, ws).await {
         Ok(items) => {
             let views: Vec<HoldoutVaultView> = items.into_iter().map(HoldoutVaultView::from).collect();
@@ -1353,6 +1388,9 @@ pub(crate) async fn get_holdout(
         Ok(c) => c,
         Err(r) => return r,
     };
+    if let Err(r) = ensure_can_view_holdout(&pool, ws, user_of(&id)).await {
+        return r;
+    }
     let holdout = match optimization::get_holdout(&pool, ws, holdout_id).await {
         Ok(Some(h)) => HoldoutVaultView::from(h),
         Ok(None) => return error_response(404, NOT_FOUND),

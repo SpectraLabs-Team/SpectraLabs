@@ -51,6 +51,9 @@ pub struct ReportVersionView {
     /// Lower-case hex SHA-256 of the content.
     pub sha256: String,
     pub size_bytes: i64,
+    /// Who created this report version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     /// Where to download this version.
     pub download_url: String,
@@ -77,6 +80,7 @@ impl From<ReportVersion> for ReportVersionView {
             content_type: v.content_type,
             sha256: v.sha256,
             size_bytes: v.size_bytes,
+            created_by: v.created_by,
             created_at: v.created_at,
         }
     }
@@ -256,4 +260,32 @@ pub(crate) fn report_response(meta: &ReportVersion, filename: &str, body: Vec<u8
         .header("x-report-sha256", &meta.sha256)
         .body(axum::body::Body::from(body))
         .unwrap_or_else(|_| error_response(500, "Could not build the response."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn report_version_view_preserves_created_by() {
+        let user_id = spectra_db::new_id();
+        let meta = ReportVersion {
+            id: spectra_db::new_id(),
+            report_id: spectra_db::new_id(),
+            report_type: reports::report_type::VALIDATION.to_string(),
+            run_kind: reports::run_kind::SWEEP.to_string(),
+            run_id: spectra_db::new_id(),
+            version: 1,
+            format: "csv".to_string(),
+            content_type: "text/csv".to_string(),
+            sha256: "abc123".to_string(),
+            size_bytes: 1024,
+            created_by: Some(user_id),
+            created_at: Utc::now(),
+        };
+
+        let view = ReportVersionView::from(meta);
+        assert_eq!(view.created_by, Some(user_id));
+        assert_eq!(view.version, 1);
+    }
 }

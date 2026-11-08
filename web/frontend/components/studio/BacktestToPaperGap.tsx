@@ -9,6 +9,7 @@ import {
   Clock,
   DollarSign,
   Layers,
+  Mail,
   Play,
   RefreshCw,
   TrendingDown,
@@ -28,14 +29,66 @@ interface Props {
   readOnly?: boolean;
 }
 
+interface GapDigest {
+  workspace_id: string;
+  period_start: string;
+  period_end: string;
+  total_reports: number;
+  total_warnings: number;
+  total_breaches: number;
+  max_tracking_error_pct: number;
+  max_slippage_drift_bps: number;
+  max_timing_latency_ms: number;
+  warnings: Array<{
+    report_id: string;
+    strategy_id: string;
+    code: string;
+    severity: string;
+    message: string;
+    metric_name: string;
+    threshold: number;
+    actual_value: number;
+    created_at: string;
+  }>;
+}
+
 export function BacktestToPaperGap({ strategyId, runId, readOnly = false }: Props) {
   const [reports, setReports] = useState<GapReportSummary[]>([]);
   const [selectedReport, setSelectedReport] = useState<GapReportDetail | null>(null);
+  const [digest, setDigest] = useState<GapDigest | null>(null);
+  const [dispatchingDigest, setDispatchingDigest] = useState(false);
+  const [digestDispatchResult, setDigestDispatchResult] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const effectiveStrategyId = strategyId || runId;
+
+  const loadDigest = useCallback(async () => {
+    try {
+      const res = await fetch('/api/engine/api/v1/paper/gap/digest');
+      if (res.ok) {
+        const d = (await res.json()) as GapDigest;
+        setDigest(d);
+      }
+    } catch {}
+  }, []);
+
+  const handleDispatchDigest = async () => {
+    setDispatchingDigest(true);
+    setDigestDispatchResult(null);
+    try {
+      const res = await fetch('/api/engine/api/v1/paper/gap/digest/dispatch', { method: 'POST' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setDigestDispatchResult(`Delivered via M27 email: ${data.warning_count} warnings, ${data.breach_count} breaches`);
+      loadDigest();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to dispatch gap digest');
+    } finally {
+      setDispatchingDigest(false);
+    }
+  };
 
   const loadDetail = useCallback(async (id: string) => {
     try {
@@ -90,6 +143,7 @@ export function BacktestToPaperGap({ strategyId, runId, readOnly = false }: Prop
   const loadReports = useCallback(async () => {
     setLoading(true);
     setError(null);
+    loadDigest();
     try {
       const url = effectiveStrategyId
         ? `/api/engine/api/v1/paper/gap/reports?strategy_id=${encodeURIComponent(effectiveStrategyId)}`
@@ -112,7 +166,7 @@ export function BacktestToPaperGap({ strategyId, runId, readOnly = false }: Prop
     } finally {
       setLoading(false);
     }
-  }, [effectiveStrategyId, loadDetail, readOnly, runAnalysis]);
+  }, [effectiveStrategyId, loadDetail, loadDigest, readOnly, runAnalysis]);
 
   useEffect(() => {
     loadReports();
@@ -155,6 +209,49 @@ export function BacktestToPaperGap({ strategyId, runId, readOnly = false }: Prop
           )}
         </div>
       </div>
+
+      {/* Daily Gap Warning Digest Card (M10) */}
+      <GlassCard className="p-4 border-ink/10">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className={cn('h-4 w-4', (digest?.total_breaches ?? 0) > 0 ? 'text-loss animate-pulse' : (digest?.total_warnings ?? 0) > 0 ? 'text-amber-500' : 'text-emerald-500')} />
+            <div>
+              <h3 className="text-xs font-semibold text-ink">Daily Gap Warning Digest (Workspace 24h)</h3>
+              <p className="text-[11px] text-ink/60">
+                {digest
+                  ? `${digest.total_reports} reports analyzed · ${digest.total_warnings} warnings · ${digest.total_breaches} breaches`
+                  : 'Monitoring workspace backtest-to-paper execution drift'}
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleDispatchDigest}
+            disabled={dispatchingDigest}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-ink/15 bg-surface/80 px-2.5 py-1 text-xs font-medium text-ink shadow-xs hover:bg-surface disabled:opacity-50"
+          >
+            <Mail className="h-3.5 w-3.5" />
+            <span>{digestDispatchResult ? digestDispatchResult : dispatchingDigest ? 'Delivering...' : 'Deliver Digest via M27 Email'}</span>
+          </button>
+        </div>
+
+        {digest && (digest.total_warnings > 0 || digest.total_breaches > 0) && (
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg bg-surface/60 p-2.5 border border-ink/5 text-xs">
+              <span className="text-ink/60">Max Slippage Drift</span>
+              <p className="font-mono font-semibold text-ink">{digest.max_slippage_drift_bps.toFixed(1)} bps</p>
+            </div>
+            <div className="rounded-lg bg-surface/60 p-2.5 border border-ink/5 text-xs">
+              <span className="text-ink/60">Max Timing Latency</span>
+              <p className="font-mono font-semibold text-ink">{digest.max_timing_latency_ms.toFixed(1)} ms</p>
+            </div>
+            <div className="rounded-lg bg-surface/60 p-2.5 border border-ink/5 text-xs">
+              <span className="text-ink/60">Max Tracking Error</span>
+              <p className="font-mono font-semibold text-ink">{digest.max_tracking_error_pct.toFixed(2)}%</p>
+            </div>
+          </div>
+        )}
+      </GlassCard>
 
       {error && <ErrorNote>{error}</ErrorNote>}
 

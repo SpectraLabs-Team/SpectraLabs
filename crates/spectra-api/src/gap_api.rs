@@ -892,7 +892,7 @@ pub(crate) async fn handle_get_gap_digest(
         Ok(c) => c,
         Err(r) => return r,
     };
-    let hours = query.map(|q| q.hours.unwrap_or(24)).unwrap_or(24);
+    let hours = query.map_or(24, |q| q.hours.unwrap_or(24));
 
     match build_gap_warning_digest(&pool, ws, hours).await {
         Ok(digest) => json_response(200, json!(digest).to_string()),
@@ -920,7 +920,7 @@ pub(crate) async fn handle_dispatch_gap_digest(
         Ok(c) => c,
         Err(r) => return r,
     };
-    let hours = query.map(|q| q.hours.unwrap_or(24)).unwrap_or(24);
+    let hours = query.map_or(24, |q| q.hours.unwrap_or(24));
 
     let digest = match build_gap_warning_digest(&pool, ws, hours).await {
         Ok(d) => d,

@@ -324,6 +324,15 @@ pub struct StressRequest {
         crate::fundamentals_api::get_schedule,
         crate::fundamentals_api::put_schedule,
         crate::fundamentals_api::delete_schedule,
+        crate::chart_drawings_api::list_drawings,
+        crate::chart_drawings_api::create_drawing,
+        crate::chart_drawings_api::update_drawing,
+        crate::chart_drawings_api::delete_drawing,
+        crate::chart_drawings_api::compare_symbols,
+        crate::chart_drawings_api::list_templates,
+        crate::chart_drawings_api::create_template,
+        crate::chart_drawings_api::get_template,
+        crate::chart_drawings_api::delete_template,
     ),
     components(schemas(
         ErrorDoc,
@@ -550,6 +559,13 @@ pub struct StressRequest {
         crate::fundamentals_api::ScheduleRequest,
         crate::fundamentals_api::ScheduleView,
         crate::fundamentals_api::ScheduleDeleted,
+        crate::chart_drawings_api::DrawingView,
+        crate::chart_drawings_api::CreateDrawingPayload,
+        crate::chart_drawings_api::UpdateDrawingPayload,
+        crate::chart_drawings_api::TemplateView,
+        crate::chart_drawings_api::CreateTemplatePayload,
+        crate::chart_drawings_api::CompareSymbolSeries,
+        crate::chart_drawings_api::CompareResponse,
     )),
     tags(
         (name = "system", description = "System observability, probes and metrics"),
@@ -574,6 +590,7 @@ pub struct StressRequest {
         (name = "alpha", description = "Alpha Workbench: signal tests, IC decay, quantile spread, and sentiment gate (M12)"),
         (name = "indicators", description = "Technical indicator engine series calculations (M35)"),
         (name = "fundamentals", description = "Point-in-time company fundamentals from SEC EDGAR (M34)"),
+        (name = "charts", description = "Chart drawings, symbol comparison, and saved layout templates (M36)"),
     )
 )]
 pub struct ApiDoc;
@@ -674,6 +691,11 @@ mod tests {
             "/api/v1/fundamentals/loads",
             "/api/v1/fundamentals/quarantine",
             "/api/v1/fundamentals/schedule",
+            "/api/v1/charts/{chart_id}/drawings",
+            "/api/v1/drawings/{id}",
+            "/api/v1/charts/compare",
+            "/api/v1/chart-templates",
+            "/api/v1/chart-templates/{id}",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

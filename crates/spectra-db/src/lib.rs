@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 pub mod activity;
 pub mod artifacts;
+pub mod chart_drawings;
 pub mod corporate_actions;
 pub mod datasets;
 pub mod fundamentals;

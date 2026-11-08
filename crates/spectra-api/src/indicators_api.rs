@@ -98,12 +98,20 @@ enum IndicatorOutput {
     Multi(BTreeMap<String, Vec<Option<f64>>>),
 }
 
+pub(crate) fn upper_median_pub(v: Vec<f64>) -> f64 {
+    upper_median(v)
+}
+
 fn upper_median(mut v: Vec<f64>) -> f64 {
     if v.is_empty() {
         return 0.0;
     }
     let mid = v.len() / 2;
     *v.select_nth_unstable_by(mid, f64::total_cmp).1
+}
+
+pub(crate) fn check_timeframe_pub(tf: &str, median_ns: i64) -> Result<(), String> {
+    check_timeframe(tf, median_ns)
 }
 
 /// Checks whether `timeframe` matches the dataset's native bar interval.

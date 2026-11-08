@@ -44,6 +44,7 @@ pub mod auth;
 pub mod backtests_api;
 pub mod broker_adapters;
 pub mod broker_api;
+pub mod chart_drawings_api;
 pub mod config;
 pub mod corporate_actions_api;
 pub mod dataset_prices;
@@ -272,7 +273,7 @@ fn error_with_details(
 /// A 422 listing every invalid field at once:
 /// `details: {"errors": [{"field": "settings.columns.close", "message": "required"}, ...]}`.
 /// `message` joins them for people reading only that.
-fn invalid_fields(errors: &[(String, String)]) -> Response {
+pub(crate) fn invalid_fields(errors: &[(String, String)]) -> Response {
     let mut list = Json::array();
     let mut parts = Vec::with_capacity(errors.len());
     for (field, message) in errors {
@@ -1117,6 +1118,27 @@ fn indicator_routes() -> Router<AppState> {
     Router::new().route("/api/v1/indicators", only(get(indicators_api::indicators_handler)))
 }
 
+fn chart_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/v1/charts/{chart_id}/drawings",
+            only(get(chart_drawings_api::list_drawings).post(chart_drawings_api::create_drawing)),
+        )
+        .route(
+            "/api/v1/drawings/{id}",
+            only(put(chart_drawings_api::update_drawing).delete(chart_drawings_api::delete_drawing)),
+        )
+        .route("/api/v1/charts/compare", only(get(chart_drawings_api::compare_symbols)))
+        .route(
+            "/api/v1/chart-templates",
+            only(get(chart_drawings_api::list_templates).post(chart_drawings_api::create_template)),
+        )
+        .route(
+            "/api/v1/chart-templates/{id}",
+            only(get(chart_drawings_api::get_template).delete(chart_drawings_api::delete_template)),
+        )
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -1142,6 +1164,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(alpha_routes())
         .merge(user_state_routes())
         .merge(indicator_routes())
+        .merge(chart_routes())
         .merge(fundamentals_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()

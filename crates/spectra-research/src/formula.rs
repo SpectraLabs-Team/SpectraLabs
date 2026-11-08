@@ -595,7 +595,10 @@ impl<'a> Evaluator<'a> {
                 }
                 let series = self.eval(&args[0])?;
                 let offset_series = self.eval(&args[1])?;
-                let offset_f64 = offset_series.last().and_then(|x| *x).unwrap_or(0.0);
+                let offset_f64 = match offset_series.last().and_then(|x| *x) {
+                    Some(v) => v,
+                    None => 0.0,
+                };
                 let offset_int = offset_f64.round() as i64;
 
                 // Look-ahead prevention check: positive offsets reference the future!
@@ -620,18 +623,32 @@ impl<'a> Evaluator<'a> {
                 }
                 let series = self.eval(&args[0])?;
                 let period_series = self.eval(&args[1])?;
-                let period = period_series.last().and_then(|x| *x).unwrap_or(20.0).max(1.0) as usize;
+                let period_val = match period_series.last().and_then(|x| *x) {
+                    Some(v) => v,
+                    None => 20.0,
+                };
+                let period = period_val.max(1.0) as usize;
 
                 let mode = if args.len() == 3 {
                     let m_series = self.eval(&args[2])?;
                     // Mode represented numerically or default Simple
-                    m_series.last().and_then(|x| *x).unwrap_or(0.0) as i64
+                    let m_val = match m_series.last().and_then(|x| *x) {
+                        Some(v) => v,
+                        None => 0.0,
+                    };
+                    m_val as i64
                 } else {
                     0 // default Simple
                 };
 
                 // Filter out nones for standard calculation
-                let values: Vec<f64> = series.iter().map(|v| v.unwrap_or(0.0)).collect();
+                let values: Vec<f64> = series
+                    .iter()
+                    .map(|v| match v {
+                        Some(x) => *x,
+                        None => 0.0,
+                    })
+                    .collect();
                 let res = match mode {
                     1 => ema(&values, period),
                     2 => wma(&values, period),
@@ -649,9 +666,19 @@ impl<'a> Evaluator<'a> {
                 }
                 let series = self.eval(&args[0])?;
                 let period_series = self.eval(&args[1])?;
-                let period = period_series.last().and_then(|x| *x).unwrap_or(14.0).max(1.0) as usize;
+                let period_val = match period_series.last().and_then(|x| *x) {
+                    Some(v) => v,
+                    None => 14.0,
+                };
+                let period = period_val.max(1.0) as usize;
 
-                let values: Vec<f64> = series.iter().map(|v| v.unwrap_or(0.0)).collect();
+                let values: Vec<f64> = series
+                    .iter()
+                    .map(|v| match v {
+                        Some(x) => *x,
+                        None => 0.0,
+                    })
+                    .collect();
                 Ok(rsi(&values, period))
             }
             "CROSS" => {
@@ -687,7 +714,11 @@ impl<'a> Evaluator<'a> {
                 }
                 let series = self.eval(&args[0])?;
                 let p_series = self.eval(&args[1])?;
-                let period = p_series.last().and_then(|x| *x).unwrap_or(20.0).max(1.0) as usize;
+                let period_val = match p_series.last().and_then(|x| *x) {
+                    Some(v) => v,
+                    None => 20.0,
+                };
+                let period = period_val.max(1.0) as usize;
                 let mut out = vec![None; n];
 
                 for i in 0..n {
@@ -711,7 +742,11 @@ impl<'a> Evaluator<'a> {
                 }
                 let series = self.eval(&args[0])?;
                 let p_series = self.eval(&args[1])?;
-                let period = p_series.last().and_then(|x| *x).unwrap_or(20.0).max(1.0) as usize;
+                let period_val = match p_series.last().and_then(|x| *x) {
+                    Some(v) => v,
+                    None => 20.0,
+                };
+                let period = period_val.max(1.0) as usize;
                 let mut out = vec![None; n];
 
                 for i in 0..n {

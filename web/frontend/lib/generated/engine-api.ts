@@ -650,6 +650,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fundamentals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The latest revision of each value of a symbol known at `as_of`. Values published later, and
+         *     quarantined rows, are never returned. */
+        get: operations["facts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/fundamentals/loads": {
         parameters: {
             query?: never;
@@ -715,6 +733,24 @@ export interface paths {
         post?: never;
         /** Remove the workspace's fundamentals refresh schedule (editor). */
         delete: operations["delete_schedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fundamentals/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A company statement (M37 line items) built from the values known at `as_of`. Lines with no
+         *     value known then are null and listed in `missing`; they are never reported as zero. */
+        get: operations["statement"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3622,6 +3658,41 @@ export interface components {
             /** @description Format to export: currently only `parquet` is supported (default: `parquet`). */
             format?: string | null;
         };
+        /** @description One value: its latest revision known at the requested time. */
+        FactView: {
+            /** @description `USD`, or empty for share counts. */
+            currency: string;
+            filing_ref: string;
+            /**
+             * Format: int32
+             * @description 1 to 4, or 0 for a full year.
+             */
+            fiscal_quarter: number;
+            /** Format: int32 */
+            fiscal_year: number;
+            /**
+             * Format: date-time
+             * @description When this revision became public.
+             */
+            known_at: string;
+            metric: string;
+            period: string;
+            /**
+             * Format: int32
+             * @description 0 for the first filing, then one per restatement.
+             */
+            revision: number;
+            source: string;
+            /** Format: double */
+            value: number;
+        };
+        /** @description Values of a symbol known at `as_of`. */
+        FactsView: {
+            /** Format: date-time */
+            as_of: string;
+            items: components["schemas"]["FactView"][];
+            symbol: string;
+        };
         /** @description FX rates against the workspace's base currency. */
         FxRateListView: {
             /** @description The base the rates are quoted against. */
@@ -5507,6 +5578,67 @@ export interface components {
             current: components["schemas"]["UserStateItem"];
             details: Record<string, never>;
             message: string;
+        };
+        /** @description Statement lines (M37 `FinancialStatementItems`); null when no value was known. */
+        StatementLines: {
+            /** Format: double */
+            capital_expenditures?: number | null;
+            /** Format: double */
+            cash_and_equivalents?: number | null;
+            /** Format: double */
+            cost_of_goods_sold?: number | null;
+            /** Format: double */
+            current_assets?: number | null;
+            /** Format: double */
+            current_liabilities?: number | null;
+            /** Format: double */
+            diluted_shares_outstanding?: number | null;
+            /** Format: double */
+            free_cash_flow?: number | null;
+            /** Format: double */
+            gross_profit?: number | null;
+            /** Format: double */
+            interest_expense?: number | null;
+            /** Format: double */
+            inventory?: number | null;
+            /** Format: double */
+            net_income?: number | null;
+            /** Format: double */
+            operating_cash_flow?: number | null;
+            /** Format: double */
+            operating_expenses?: number | null;
+            /** Format: double */
+            operating_income?: number | null;
+            /** Format: double */
+            revenue?: number | null;
+            /** Format: double */
+            stockholders_equity?: number | null;
+            /** Format: double */
+            total_assets?: number | null;
+            /**
+             * Format: double
+             * @description Long-term debt.
+             */
+            total_debt?: number | null;
+            /** Format: double */
+            total_liabilities?: number | null;
+        };
+        /** @description A company statement as it was known at `as_of`. */
+        StatementView: {
+            /** Format: date-time */
+            as_of: string;
+            /** Format: int32 */
+            fiscal_year: number;
+            /**
+             * Format: date-time
+             * @description The latest known-at time among the values used.
+             */
+            known_at: string;
+            lines: components["schemas"]["StatementLines"];
+            /** @description Lines with no value known at `as_of`. */
+            missing: string[];
+            period: string;
+            symbol: string;
         };
         StepPaperRequest: {
             bars: components["schemas"]["PaperBarInput"][];
@@ -8035,6 +8167,42 @@ export interface operations {
             };
         };
     };
+    facts: {
+        parameters: {
+            query?: {
+                /** @description Ticker (required). */
+                symbol?: string;
+                /** @description What was known at this time: `YYYY-MM-DD` (the end of that day, UTC) or an RFC 3339 time.
+                 *     Default: now. */
+                as_of?: string;
+                /** @description Only this metric, e.g. `revenue`. */
+                metric?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FactsView"];
+                };
+            };
+            /** @description No symbol, or a bad as_of */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
     list_loads: {
         parameters: {
             query?: {
@@ -8237,6 +8405,50 @@ export interface operations {
             };
             /** @description No schedule */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    statement: {
+        parameters: {
+            query?: {
+                /** @description Ticker (required). */
+                symbol?: string;
+                /** @description As in `GET /api/v1/fundamentals`. */
+                as_of?: string;
+                /** @description Period, e.g. `2024-Q1` or `2024-FY`. Default: the latest period with a value known at `as_of`. */
+                period?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatementView"];
+                };
+            };
+            /** @description Nothing for that symbol and period was known at as_of */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description No symbol, or a bad as_of or period */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -274,6 +274,157 @@ pub fn evaluate_health_scorecard(
     FinancialHealthScorecard { score, max_score, checks }
 }
 
+/// Statement line items, by field name, in the order of [`FinancialStatementItems`].
+pub const STATEMENT_FIELDS: [&str; 19] = [
+    "revenue",
+    "cost_of_goods_sold",
+    "gross_profit",
+    "operating_expenses",
+    "operating_income",
+    "interest_expense",
+    "net_income",
+    "diluted_shares_outstanding",
+    "cash_and_equivalents",
+    "current_assets",
+    "inventory",
+    "total_assets",
+    "current_liabilities",
+    "total_debt",
+    "total_liabilities",
+    "stockholders_equity",
+    "operating_cash_flow",
+    "capital_expenditures",
+    "free_cash_flow",
+];
+
+/// A statement built from point-in-time fundamentals (M34): only values known at `as_of`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatementAsOf {
+    pub items: FinancialStatementItems,
+    /// Fields of [`STATEMENT_FIELDS`] that had a value; every other field is 0 in `items` and
+    /// must be read as missing, not as zero.
+    pub found: Vec<&'static str>,
+    /// The latest known-at time (ns) among the values used.
+    pub known_at_ns: i64,
+}
+
+impl StatementAsOf {
+    /// The value of a field, or `None` if it was missing.
+    pub fn get(&self, field: &str) -> Option<f64> {
+        if !self.found.contains(&field) {
+            return None;
+        }
+        let i = &self.items;
+        Some(match field {
+            "revenue" => i.revenue,
+            "cost_of_goods_sold" => i.cost_of_goods_sold,
+            "gross_profit" => i.gross_profit,
+            "operating_expenses" => i.operating_expenses,
+            "operating_income" => i.operating_income,
+            "interest_expense" => i.interest_expense,
+            "net_income" => i.net_income,
+            "diluted_shares_outstanding" => i.diluted_shares_outstanding,
+            "cash_and_equivalents" => i.cash_and_equivalents,
+            "current_assets" => i.current_assets,
+            "inventory" => i.inventory,
+            "total_assets" => i.total_assets,
+            "current_liabilities" => i.current_liabilities,
+            "total_debt" => i.total_debt,
+            "total_liabilities" => i.total_liabilities,
+            "stockholders_equity" => i.stockholders_equity,
+            "operating_cash_flow" => i.operating_cash_flow,
+            "capital_expenditures" => i.capital_expenditures,
+            "free_cash_flow" => i.free_cash_flow,
+            _ => return None,
+        })
+    }
+}
+
+/// The most recent period of `symbol` with any value known at `as_of_ts_ns`: the highest fiscal
+/// year, and within it the full year after the fourth quarter.
+pub fn latest_period(
+    store: &spectra_data::fundamentals::PointInTimeFundamentalsStore,
+    symbol: &str,
+    as_of_ts_ns: i64,
+) -> Option<String> {
+    store
+        .records()
+        .iter()
+        .filter(|r| r.symbol.eq_ignore_ascii_case(symbol) && r.publication_ts_ns <= as_of_ts_ns)
+        .max_by_key(|r| (r.fiscal_year, if r.fiscal_quarter == 0 { 5 } else { r.fiscal_quarter }))
+        .map(|r| r.period.clone())
+}
+
+/// The statement of `symbol` for `period` as known at `as_of_ts_ns`, from the latest revision of
+/// each value published by then. `None` if nothing for that period was known yet.
+///
+/// Loaded metrics map to fields by name; three fields are derived when their inputs are known:
+/// `cost_of_goods_sold = revenue - gross_profit`, `free_cash_flow = operating_cash_flow -
+/// capital_expenditures`, `diluted_shares_outstanding = net_income / eps_diluted`. `total_debt` is
+/// long-term debt. Operating expenses, interest expense and inventory are not loaded, so they are
+/// always missing.
+pub fn statement_as_of(
+    store: &spectra_data::fundamentals::PointInTimeFundamentalsStore,
+    symbol: &str,
+    period: &str,
+    as_of_ts_ns: i64,
+) -> Option<StatementAsOf> {
+    let mut known_at_ns = None;
+    let mut value = |metric: &str| {
+        let r = store.query_point_in_time(symbol, period, metric, as_of_ts_ns)?;
+        known_at_ns = Some(known_at_ns.map_or(r.publication_ts_ns, |t: i64| t.max(r.publication_ts_ns)));
+        Some(r.value)
+    };
+    let mut items =
+        FinancialStatementItems { period: period.to_string(), ..FinancialStatementItems::default() };
+    let mut found = Vec::new();
+    let loaded: [(&'static str, &str, &mut f64); 12] = [
+        ("revenue", "revenue", &mut items.revenue),
+        ("gross_profit", "gross_profit", &mut items.gross_profit),
+        ("operating_income", "operating_income", &mut items.operating_income),
+        ("net_income", "net_income", &mut items.net_income),
+        ("cash_and_equivalents", "cash_and_equivalents", &mut items.cash_and_equivalents),
+        ("current_assets", "current_assets", &mut items.current_assets),
+        ("total_assets", "total_assets", &mut items.total_assets),
+        ("current_liabilities", "current_liabilities", &mut items.current_liabilities),
+        ("total_debt", "long_term_debt", &mut items.total_debt),
+        ("total_liabilities", "total_liabilities", &mut items.total_liabilities),
+        ("stockholders_equity", "stockholders_equity", &mut items.stockholders_equity),
+        ("operating_cash_flow", "operating_cash_flow", &mut items.operating_cash_flow),
+    ];
+    for (field, metric, slot) in loaded {
+        if let Some(v) = value(metric) {
+            *slot = v;
+            found.push(field);
+        }
+    }
+    if let Some(capex) = value("capital_expenditures") {
+        items.capital_expenditures = capex;
+        found.push("capital_expenditures");
+    }
+    let eps = value("eps_diluted");
+    let known_at_ns = known_at_ns?;
+    if found.contains(&"revenue") && found.contains(&"gross_profit") {
+        items.cost_of_goods_sold = items.revenue - items.gross_profit;
+        found.push("cost_of_goods_sold");
+    }
+    if found.contains(&"operating_cash_flow") && found.contains(&"capital_expenditures") {
+        items.free_cash_flow = items.operating_cash_flow - items.capital_expenditures;
+        found.push("free_cash_flow");
+    }
+    if let Some(eps) = eps.filter(|e| *e != 0.0 && found.contains(&"net_income")) {
+        items.diluted_shares_outstanding = items.net_income / eps;
+        found.push("diluted_shares_outstanding");
+    }
+    items.fiscal_year = store
+        .records()
+        .iter()
+        .find(|r| r.symbol.eq_ignore_ascii_case(symbol) && r.period.eq_ignore_ascii_case(period))
+        .map_or(items.fiscal_year, |r| r.fiscal_year);
+    found.sort_by_key(|f| STATEMENT_FIELDS.iter().position(|s| s == f));
+    Some(StatementAsOf { items, found, known_at_ns })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +499,68 @@ mod tests {
         for check in &card.checks {
             assert!(check.passed);
         }
+    }
+
+    fn fact(
+        metric: &str,
+        period: &str,
+        quarter: u8,
+        value: f64,
+        known_at: i64,
+        revision: u32,
+    ) -> spectra_data::FundamentalRecord {
+        spectra_data::FundamentalRecord {
+            symbol: "EXA".into(),
+            period: period.into(),
+            fiscal_year: 2024,
+            fiscal_quarter: quarter,
+            metric: metric.into(),
+            value,
+            currency: "USD".into(),
+            publication_ts_ns: known_at,
+            restatement_index: revision,
+            filing_ref: format!("F-{known_at}-{revision}"),
+        }
+    }
+
+    #[test]
+    fn statement_as_of_sees_only_values_known_then() {
+        let mut store = spectra_data::PointInTimeFundamentalsStore::new();
+        store.ingest(vec![
+            fact("revenue", "2024-Q1", 1, 100.0, 10, 0),
+            fact("gross_profit", "2024-Q1", 1, 40.0, 10, 0),
+            fact("net_income", "2024-Q1", 1, 12.0, 10, 0),
+            fact("eps_diluted", "2024-Q1", 1, 0.5, 10, 0),
+            fact("operating_cash_flow", "2024-Q1", 1, 30.0, 10, 0),
+            fact("capital_expenditures", "2024-Q1", 1, 8.0, 10, 0),
+            fact("revenue", "2024-Q1", 1, 110.0, 20, 1),
+        ]);
+        assert!(statement_as_of(&store, "EXA", "2024-Q1", 9).is_none(), "nothing known before the filing");
+
+        let first = statement_as_of(&store, "exa", "2024-Q1", 10).unwrap();
+        assert_eq!((first.items.revenue, first.known_at_ns, first.items.fiscal_year), (100.0, 10, 2024));
+        // Derived: 100 - 40 = 60, 30 - 8 = 22, 12 / 0.5 = 24 shares.
+        assert_eq!(first.get("cost_of_goods_sold"), Some(60.0));
+        assert_eq!(first.get("free_cash_flow"), Some(22.0));
+        assert_eq!(first.get("diluted_shares_outstanding"), Some(24.0));
+        // Not loaded from EDGAR: missing, never a zero.
+        assert_eq!((first.get("inventory"), first.get("interest_expense")), (None, None));
+        assert_eq!(first.found.first(), Some(&"revenue"), "fields come in statement order");
+
+        let restated = statement_as_of(&store, "EXA", "2024-Q1", 20).unwrap();
+        assert_eq!((restated.items.revenue, restated.get("cost_of_goods_sold")), (110.0, Some(70.0)));
+        assert_eq!(restated.known_at_ns, 20);
+    }
+
+    #[test]
+    fn latest_period_prefers_the_newest_known_period() {
+        let mut store = spectra_data::PointInTimeFundamentalsStore::new();
+        store.ingest(vec![
+            fact("revenue", "2024-Q4", 4, 1.0, 10, 0),
+            fact("revenue", "2024-FY", 0, 4.0, 30, 0),
+        ]);
+        assert_eq!(latest_period(&store, "EXA", 5), None);
+        assert_eq!(latest_period(&store, "EXA", 10).as_deref(), Some("2024-Q4"));
+        assert_eq!(latest_period(&store, "EXA", 30).as_deref(), Some("2024-FY"));
     }
 }

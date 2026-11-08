@@ -10307,6 +10307,7 @@
           "id",
           "holdout_id",
           "workspace_id",
+          "status",
           "evaluation_num",
           "metrics",
           "warnings",
@@ -10344,6 +10345,16 @@
             "format": "uuid"
           },
           "metrics": {},
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
           "strategy_version_id": {
             "type": [
               "string",

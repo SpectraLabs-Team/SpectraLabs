@@ -3616,6 +3616,9 @@ export interface components {
             id: string;
             metrics: unknown;
             /** Format: uuid */
+            run_id?: string | null;
+            status: string;
+            /** Format: uuid */
             strategy_version_id?: string | null;
             warnings: unknown;
             /** Format: uuid */

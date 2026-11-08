@@ -576,9 +576,10 @@ pub const INGEST_JOB_KIND: &str = "ingest";
 pub const PROVIDER_REFRESH_JOB_KIND: &str = crate::providers::runner::PROVIDER_REFRESH_JOB_KIND;
 
 /// Job kinds the background worker runs.
-pub const WORKER_KINDS: [&str; 9] = [
+pub const WORKER_KINDS: [&str; 10] = [
     "backtest",
     "benchmark",
+    crate::fundamentals::FUNDAMENTALS_REFRESH_JOB_KIND,
     "risk",
     "stress",
     INGEST_JOB_KIND,
@@ -805,6 +806,8 @@ pub fn job_timeout(kind: &str) -> std::time::Duration {
         "backtest" | INGEST_JOB_KIND | "survival" | "sweep" | "walk_forward" | PROVIDER_REFRESH_JOB_KIND => {
             900
         }
+        // Up to 100 symbols at one EDGAR request each, spaced for SEC's rate limit.
+        crate::fundamentals::FUNDAMENTALS_REFRESH_JOB_KIND => 1800,
         "benchmark" => 600,
         _ => 300,
     })

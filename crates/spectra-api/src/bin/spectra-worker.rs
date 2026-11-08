@@ -59,6 +59,8 @@ const EXPIRE_UPLOADS_EVERY: Duration = Duration::from_secs(600);
 const EXPIRE_UPLOADS_BATCH: i32 = 500;
 /// How often to delete daily activity rows past the retention window (M21).
 const ACTIVITY_PURGE_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// How often to enqueue due fundamentals refresh schedules (M34).
+const FUNDAMENTALS_SWEEP_EVERY: Duration = Duration::from_secs(60);
 
 struct Ctx {
     pool: PgPool,
@@ -70,6 +72,8 @@ struct Ctx {
     /// Size limits for one backtest.
     backtest_max_bars: usize,
     backtest_max_instruments: usize,
+    /// SEC EDGAR settings for fundamentals refreshes, or why they are missing.
+    edgar: Result<spectra_api::fundamentals::EdgarConfig, String>,
 }
 
 /// Deletes daily activity rows past the retention window and records the result: a log line,
@@ -210,6 +214,7 @@ async fn main() -> ExitCode {
         let mut refresh_sweep = tokio::time::interval(Duration::from_secs(30));
         let mut artifact_sweep = tokio::time::interval(Duration::from_secs(1800));
         let mut activity_purge = tokio::time::interval(ACTIVITY_PURGE_EVERY);
+        let mut fundamentals_sweep = tokio::time::interval(FUNDAMENTALS_SWEEP_EVERY);
         loop {
             tokio::select! {
                 _ = hk_stop.changed() => break,
@@ -232,6 +237,7 @@ async fn main() -> ExitCode {
                 _ = refresh_sweep.tick() => {
                     spectra_api::providers::runner::sweep_due_refresh_schedules(&hk_pool).await;
                 }
+                _ = fundamentals_sweep.tick() => spectra_api::fundamentals::sweep_due_schedules(&hk_pool).await,
                 _ = sweep.tick() => match jobs::requeue_stale(&hk_pool, STALE_AFTER).await {
                     Ok(0) => {}
                     Ok(n) => info!("requeued {n} job(s) whose worker stopped responding"),
@@ -248,6 +254,10 @@ async fn main() -> ExitCode {
         }
     });
 
+    let edgar = spectra_api::fundamentals::EdgarConfig::from_env();
+    if let Err(why) = &edgar {
+        warn!("fundamentals refreshes will fail: {why}");
+    }
     let ctx = Arc::new(Ctx {
         pool: pool.clone(),
         store,
@@ -256,6 +266,7 @@ async fn main() -> ExitCode {
         data_dir: cfg.data_dir.clone(),
         backtest_max_bars: cfg.backtest_max_bars,
         backtest_max_instruments: cfg.backtest_max_instruments,
+        edgar,
     });
     let slots = Arc::new(Semaphore::new(cfg.concurrency));
     let mut running = JoinSet::new();
@@ -345,6 +356,10 @@ async fn run_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePer
     }
     if job.kind == spectra_api::providers::runner::PROVIDER_REFRESH_JOB_KIND {
         run_refresh_job(ctx, job, permit).await;
+        return;
+    }
+    if job.kind == spectra_api::fundamentals::FUNDAMENTALS_REFRESH_JOB_KIND {
+        run_fundamentals_job(ctx, job, permit).await;
         return;
     }
     let job_start = Instant::now();
@@ -1080,6 +1095,86 @@ async fn run_refresh_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSema
             fail_job(&ctx, &job, started, &message, retryable).await;
         }
         None => fail_job(&ctx, &job, started, "The refresh job crashed.", true).await,
+    }
+}
+
+/// Runs a `fundamentals_refresh` job (M34): fetch from SEC EDGAR and record new revisions.
+#[allow(clippy::needless_pass_by_value)] // the spawned task owns its job and permit
+async fn run_fundamentals_job(ctx: Arc<Ctx>, job: Job, permit: tokio::sync::OwnedSemaphorePermit) {
+    use spectra_api::fundamentals::{run_refresh, RefreshOutcome};
+    let started = Instant::now();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let progress = Arc::new(AtomicU32::new(0f32.to_bits()));
+    let mut work = {
+        let (ctx, job, cancel, progress) =
+            (Arc::clone(&ctx), job.clone(), Arc::clone(&cancel), Arc::clone(&progress));
+        tokio::spawn(async move {
+            let edgar = ctx.edgar.as_ref().map_err(String::as_str);
+            run_refresh(&ctx.pool, edgar, &job, cancel, progress).await
+        })
+    };
+    let deadline = tokio::time::Instant::now() + engine::job_timeout(&job.kind);
+    let mut beat = tokio::time::interval(HEARTBEAT);
+    beat.tick().await;
+    let (mut cancel_requested, mut lost) = (false, false);
+    let outcome = loop {
+        tokio::select! {
+            res = &mut work => break res.ok(),
+            _ = beat.tick() => {
+                let p = f32::from_bits(progress.load(Ordering::Relaxed));
+                match jobs::heartbeat(&ctx.pool, job.id, &ctx.worker_id, Some(p)).await {
+                    Ok(Beat::Continue) => {}
+                    Ok(Beat::CancelRequested) => {
+                        cancel_requested = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Ok(Beat::Lost) => {
+                        lost = true;
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                    Err(e) => error!(job_id = %job.id, "heartbeat failed: {e}"),
+                }
+            },
+            () = tokio::time::sleep_until(deadline) => {
+                cancel.store(true, Ordering::Relaxed);
+                work.abort();
+                break Some(RefreshOutcome::Failed {
+                    message: "The fundamentals refresh ran longer than its limit.".into(),
+                    retryable: false,
+                });
+            }
+        }
+    };
+    drop(permit);
+    if lost {
+        warn!(job_id = %job.id, "job was taken over after a missed heartbeat; dropping it");
+        record_metrics(&job.kind, "lost", started);
+        return;
+    }
+    match outcome {
+        Some(RefreshOutcome::Done(result)) => {
+            match jobs::complete(&ctx.pool, job.id, &ctx.worker_id, &result).await {
+                Ok(Some(_)) => {
+                    record_metrics(&job.kind, "succeeded", started);
+                    info!(job_id = %job.id, loaded = %result["loaded"], "fundamentals refresh recorded");
+                }
+                Ok(None) => warn!(job_id = %job.id, "refresh finished, but another worker had taken it over"),
+                Err(e) => error!(job_id = %job.id, "could not record the refresh: {e}"),
+            }
+        }
+        Some(RefreshOutcome::Cancelled) => {
+            if !cancel_requested {
+                warn!(job_id = %job.id, "fundamentals refresh stopped without a cancel request");
+            }
+            record_metrics(&job.kind, "cancelled", started);
+            if let Err(e) = jobs::mark_cancelled(&ctx.pool, job.id, &ctx.worker_id).await {
+                error!(job_id = %job.id, "could not record the cancellation: {e}");
+            }
+        }
+        Some(RefreshOutcome::Failed { message, retryable }) => {
+            fail_job(&ctx, &job, started, &message, retryable).await;
+        }
+        None => fail_job(&ctx, &job, started, "The fundamentals refresh crashed.", true).await,
     }
 }
 

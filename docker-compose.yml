@@ -99,6 +99,7 @@ services:
       SPECTRA_WORKSPACE_MAX_RUNNING: ${SPECTRA_WORKSPACE_MAX_RUNNING:-2}
       SPECTRA_WORKER_METRICS_ADDR: 0.0.0.0:9100 # /health and Prometheus /metrics, private network only
       SPECTRA_ACTIVITY_PURGE: ${SPECTRA_ACTIVITY_PURGE:-off}
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-} # M34 fundamentals refreshes; SEC requires name and contact email
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - artifacts:/var/lib/spectra/artifacts

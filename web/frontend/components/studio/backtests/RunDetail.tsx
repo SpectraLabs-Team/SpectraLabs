@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Beaker, Copy, Download, ExternalLink, FileText, Fingerprint, GitFork, Layers, Pencil, Scale, Square } from 'lucide-react';
+import { Beaker, Copy, Download, ExternalLink, FileText, Fingerprint, GitFork, Layers, Lock, Pencil, Scale, Square } from 'lucide-react';
 import { ApiError, request } from '@/lib/api';
 import {
   cancelBacktest,
@@ -42,6 +42,7 @@ import { downloadTearSheetPdf, getTearSheet, type TearSheetResponse } from '@/li
 import { StatusBadge } from './RunList';
 import { AttributionPanel } from './AttributionCard';
 import { SurvivalLabPanel } from '../SurvivalLabPanel';
+import type { HoldoutEvaluationItem } from '../RunDetail';
 import { BacktestToPaperGap } from '../BacktestToPaperGap';
 import { TearSheetModal } from '../TearSheetModal';
 import { BacktestReportPanel } from '../ReportPanel';
@@ -856,6 +857,7 @@ export function RunDetail({
   const [tearSheetOpen, setTearSheetOpen] = useState(false);
   const [tearSheet, setTearSheet] = useState<TearSheetResponse | null>(null);
   const [reportsRefresh, setReportsRefresh] = useState(0);
+  const [holdoutHistory, setHoldoutHistory] = useState<HoldoutEvaluationItem[]>([]);
 
   useEffect(() => {
     if (!tearSheetOpen) return;
@@ -921,6 +923,21 @@ export function RunDetail({
     return () => ctl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only when the selection changes
   }, [backtestId]);
+
+  useEffect(() => {
+    if (b?.status !== 'succeeded') {
+      setHoldoutHistory([]);
+      return;
+    }
+    const targetId = b.run_id || b.id;
+    request<{ holdout_history?: HoldoutEvaluationItem[] }>(`/api/v1/runs/${encodeURIComponent(targetId)}`)
+      .then((res) => {
+        if (Array.isArray(res?.holdout_history)) {
+          setHoldoutHistory(res.holdout_history);
+        }
+      })
+      .catch(() => setHoldoutHistory([]));
+  }, [b?.status, b?.run_id, b?.id]);
 
   const cancel = useCallback(async () => {
     try {
@@ -1062,6 +1079,51 @@ export function RunDetail({
         </GlassCard>
       )}
       {b.status === 'succeeded' && b.summary && <BacktestReportPanel backtestId={backtestId} refreshKey={reportsRefresh} />}
+
+      {b.status === 'succeeded' && holdoutHistory.length > 0 && (
+        <GlassCard className="p-5" aria-label="Holdout Vault History">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-accent">
+              <Lock className="h-4 w-4" />
+              Holdout Vault History ({holdoutHistory.length} unlock{holdoutHistory.length === 1 ? '' : 's'})
+            </h3>
+            <span className="text-[11px] text-ink/50 font-sans">Audited holdout evaluations</span>
+          </div>
+          <p className="mt-1 text-xs text-ink/60">
+            Audited evaluations of sealed holdouts for this strategy and dataset. Each evaluation consumes permanent budget and penalizes DSR.
+          </p>
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {holdoutHistory.map((evalItem) => (
+              <div key={evalItem.id} className="rounded-xl border border-ink/[0.08] bg-surface p-3.5 text-xs shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-ink">{evalItem.holdout_name}</span>
+                  <span className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[10px] text-accent">
+                    Unlock #{evalItem.evaluation_num}
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-ink/60">
+                  <div>
+                    <span className="text-[10px] uppercase text-ink/40">Holdout Sharpe</span>
+                    <p className="font-mono font-medium text-ink">
+                      {typeof evalItem.metrics?.sharpe === 'number' ? evalItem.metrics.sharpe.toFixed(2) : '—'}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase text-ink/40">Deflated Sharpe</span>
+                    <p className="font-mono font-medium text-accent">
+                      {evalItem.dsr != null ? `${(evalItem.dsr * 100).toFixed(1)}%` : '—'}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center justify-between border-t border-ink/[0.04] pt-2 text-[10px] text-ink/45">
+                  <span>Evaluated</span>
+                  <span>{new Date(evalItem.evaluated_at).toLocaleDateString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      )}
 
       {b.status === 'succeeded' && b.summary && (
         <TearSheetModal

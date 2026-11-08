@@ -544,7 +544,7 @@ export function OptimizationLab() {
 
                 <div className="flex items-center justify-between">
                   <div className="text-xs text-ink/60">
-                    Sweep status: <span className="font-semibold text-ink">{selectedSweepDetail.sweep.status}</span> · Method: <span className="font-mono text-ink">{selectedSweepDetail.sweep.method}</span> · Trials: <span className="font-bold text-ink">{selectedSweepDetail.sweep.trial_count}</span>
+                    Sweep status: <span className="font-semibold text-ink">{selectedSweepDetail.sweep.status}</span> · Method: <span className="font-mono text-ink">{selectedSweepDetail.sweep.method}</span> · Trials: <span className="font-bold text-ink">{selectedSweepDetail.sweep.trial_count}</span> · Child runs: <span className="font-bold text-accent">{selectedSweepDetail.child_runs?.length ?? selectedSweepDetail.trials.length}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <a
@@ -704,6 +704,7 @@ export function OptimizationLab() {
                           <thead>
                             <tr className="border-b border-ink/[0.08] text-ink/50 text-[11px]">
                               <th className="py-2">#</th>
+                              <th className="py-2">Child Run</th>
                               <th className="py-2">Parameters</th>
                               <th className="py-2 text-right"><MetricLabel metric="sharpe_ratio" className="justify-end">Sharpe</MetricLabel></th>
                               <th className="py-2 text-right"><MetricLabel metric="total_return" className="justify-end">Return</MetricLabel></th>
@@ -712,32 +713,96 @@ export function OptimizationLab() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-ink/[0.04]">
-                            {filteredTrials.slice(0, 50).map((t) => (
-                              <tr key={t.id} className="hover:bg-ink/[0.02]">
-                                <td className="py-2 font-mono font-medium text-ink/80">{t.trial_num}</td>
-                                <td className="py-2 font-mono text-[11px] text-ink/70">
-                                  {Object.entries(t.params).map(([k, v]) => `${k}=${v}`).join(', ')}
-                                </td>
-                                <td className="py-2 text-right font-mono font-bold text-ink">
-                                  {t.objective_value != null ? t.objective_value.toFixed(2) : '—'}
-                                </td>
-                                <td className="py-2 text-right font-mono text-ink/70">
-                                  {t.metrics.total_return ? `${(t.metrics.total_return * 100).toFixed(1)}%` : '—'}
-                                </td>
-                                <td className="py-2 text-right font-mono text-rose-500">
-                                  {t.metrics.max_drawdown ? `-${(t.metrics.max_drawdown * 100).toFixed(1)}%` : '—'}
-                                </td>
-                                <td className="py-2 text-right font-mono text-ink/60">
-                                  {t.returns_mean != null ? `${(t.returns_mean * 100).toFixed(3)}%` : '—'}
-                                </td>
-                              </tr>
-                            ))}
+                            {filteredTrials.slice(0, 50).map((t) => {
+                              const childRun =
+                                selectedSweepDetail.child_runs?.[t.trial_num - 1] ||
+                                selectedSweepDetail.child_runs?.find(
+                                  (c) => c.params && JSON.stringify(c.params) === JSON.stringify(t.params)
+                                );
+                              return (
+                                <tr key={t.id} className="hover:bg-ink/[0.02]">
+                                  <td className="py-2 font-mono font-medium text-ink/80">{t.trial_num}</td>
+                                  <td className="py-2 font-mono text-[11px]">
+                                    {childRun ? (
+                                      <span className="inline-flex items-center gap-1.5" title={`Child run ID: ${childRun.id}`}>
+                                        <span className="font-medium text-accent">Run #{childRun.id.slice(0, 8)}</span>
+                                        <span className="rounded bg-emerald-500/10 px-1 py-0.5 text-[9px] text-emerald-600 font-sans">succeeded</span>
+                                      </span>
+                                    ) : (
+                                      <span className="text-ink/40">Trial #{t.trial_num}</span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 font-mono text-[11px] text-ink/70">
+                                    {Object.entries(t.params).map(([k, v]) => `${k}=${v}`).join(', ')}
+                                  </td>
+                                  <td className="py-2 text-right font-mono font-bold text-ink">
+                                    {t.objective_value != null ? t.objective_value.toFixed(2) : '—'}
+                                  </td>
+                                  <td className="py-2 text-right font-mono text-ink/70">
+                                    {t.metrics.total_return ? `${(t.metrics.total_return * 100).toFixed(1)}%` : '—'}
+                                  </td>
+                                  <td className="py-2 text-right font-mono text-rose-500">
+                                    {t.metrics.max_drawdown ? `-${(t.metrics.max_drawdown * 100).toFixed(1)}%` : '—'}
+                                  </td>
+                                  <td className="py-2 text-right font-mono text-ink/60">
+                                    {t.returns_mean != null ? `${(t.returns_mean * 100).toFixed(3)}%` : '—'}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
                     </div>
                   );
                 })()}
+
+                {/* Holdout History for this finished sweep */}
+                {selectedSweepDetail.holdout_history && selectedSweepDetail.holdout_history.length > 0 && (
+                  <div className="rounded-2xl border border-accent/30 bg-accent/5 p-5 shadow-xs" aria-label="Sweep Holdout History">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="flex items-center gap-2 text-sm font-semibold text-accent">
+                          <Lock className="h-4 w-4" />
+                          Holdout Vault History ({selectedSweepDetail.holdout_history.length} unlock{selectedSweepDetail.holdout_history.length === 1 ? '' : 's'})
+                        </h3>
+                        <p className="mt-0.5 text-xs text-ink/60">
+                          Audited out-of-sample holdout evaluations for this target dataset and strategy.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {selectedSweepDetail.holdout_history.map((evalItem) => (
+                        <div key={evalItem.id} className="rounded-xl border border-ink/[0.08] bg-surface p-3.5 text-xs shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold text-ink">Unlock #{evalItem.evaluation_num}</span>
+                            <span className="rounded bg-accent/10 px-1.5 py-0.5 font-mono text-[10px] text-accent">
+                              DSR: {evalItem.dsr != null ? `${(evalItem.dsr * 100).toFixed(1)}%` : '—'}
+                            </span>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-ink/60">
+                            <div>
+                              <span className="text-[10px] uppercase text-ink/40">Holdout Sharpe</span>
+                              <p className="font-mono font-medium text-ink">
+                                {typeof evalItem.metrics?.sharpe === 'number' ? evalItem.metrics.sharpe.toFixed(2) : '—'}
+                              </p>
+                            </div>
+                            <div>
+                              <span className="text-[10px] uppercase text-ink/40">Total Return</span>
+                              <p className="font-mono font-medium text-ink">
+                                {typeof evalItem.metrics?.total_return === 'number' ? `${(evalItem.metrics.total_return * 100).toFixed(1)}%` : '—'}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex items-center justify-between border-t border-ink/[0.04] pt-2 text-[10px] text-ink/45">
+                            <span>Evaluated</span>
+                            <span>{new Date(evalItem.evaluated_at).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             ) : (
               <div className="flex h-64 items-center justify-center rounded-2xl border border-dashed border-ink/[0.12] text-xs text-ink/40">

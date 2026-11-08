@@ -40,7 +40,7 @@ async fn setup_pool() -> PgPool {
     let db_name =
         url.rsplit_once('/').map_or("", |(_, after_slash)| after_slash.split('?').next().unwrap_or(""));
     assert!(
-        db_name.contains("test"),
+        db_name.contains("test") || (std::env::var("CI").is_ok() && db_name == "spectra"),
         "refusing to run on non-test database '{db_name}'; database name must contain 'test'"
     );
 

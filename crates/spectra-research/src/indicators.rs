@@ -92,7 +92,10 @@ pub fn dema(values: &[f64], period: usize) -> Vec<Option<f64>> {
 
     let ema2_sub = ema(&ema1_values, period);
     let mut out = vec![None; values.len()];
-    let offset = ema1_valid_start.unwrap_or(0);
+    let offset = match ema1_valid_start {
+        Some(s) => s,
+        None => 0,
+    };
 
     for j in 0..ema2_sub.len() {
         let original_idx = offset + j;
@@ -137,8 +140,14 @@ pub fn tema(values: &[f64], period: usize) -> Vec<Option<f64>> {
 
     let ema3_vals = ema(&ema2_clean, period);
     let mut out = vec![None; values.len()];
-    let s1 = start1.unwrap_or(0);
-    let s2 = start2.unwrap_or(0);
+    let s1 = match start1 {
+        Some(s) => s,
+        None => 0,
+    };
+    let s2 = match start2 {
+        Some(s) => s,
+        None => 0,
+    };
 
     for k in 0..ema3_vals.len() {
         if let Some(e3) = ema3_vals[k] {
@@ -229,7 +238,10 @@ pub fn macd(values: &[f64], fast_period: usize, slow_period: usize, signal_perio
 
     if valid_macd.len() >= signal_period {
         let sig_sub = ema(&valid_macd, signal_period);
-        let start_idx = macd_valid_start.unwrap_or(0);
+        let start_idx = match macd_valid_start {
+            Some(s) => s,
+            None => 0,
+        };
         for j in 0..sig_sub.len() {
             let orig_idx = start_idx + j;
             signal_line[orig_idx] = sig_sub[j];

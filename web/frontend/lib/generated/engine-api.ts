@@ -1224,6 +1224,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/paper/gap/digest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/paper/gap/digest */
+        get: operations["handle_get_gap_digest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/paper/gap/digest/dispatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /api/v1/paper/gap/digest/dispatch */
+        post: operations["handle_dispatch_gap_digest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/paper/gap/reports": {
         parameters: {
             query?: never;
@@ -3520,6 +3554,34 @@ export interface components {
             /** @description Base-currency units per unit of `currency`, exact decimal text. */
             rate: string;
         };
+        /** @description Result of dispatching gap digest to M27 email delivery channel. */
+        GapDigestDispatchResponse: {
+            breach_count: number;
+            channel: string;
+            digest: components["schemas"]["GapWarningDigest"];
+            period_end: string;
+            period_start: string;
+            status: string;
+            warning_count: number;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        /** @description Item in the daily gap warning digest. */
+        GapDigestWarningItem: {
+            /** Format: double */
+            actual_value: number;
+            code: string;
+            created_at: string;
+            message: string;
+            metric_name: string;
+            /** Format: uuid */
+            report_id: string;
+            severity: string;
+            /** Format: uuid */
+            strategy_id: string;
+            /** Format: double */
+            threshold: number;
+        };
         /** @description Detailed view of a gap report including attribution and trade matches. */
         GapReportDetailView: {
             alert_status: string;
@@ -3584,6 +3646,23 @@ export interface components {
             total_pnl_gap: number;
             /** Format: double */
             tracking_error_pct: number;
+            /** Format: uuid */
+            workspace_id: string;
+        };
+        /** @description Workspace-level daily digest of backtest-to-paper gap warnings and breaches (M10). */
+        GapWarningDigest: {
+            /** Format: double */
+            max_slippage_drift_bps: number;
+            /** Format: double */
+            max_timing_latency_ms: number;
+            /** Format: double */
+            max_tracking_error_pct: number;
+            period_end: string;
+            period_start: string;
+            total_breaches: number;
+            total_reports: number;
+            total_warnings: number;
+            warnings: components["schemas"]["GapDigestWarningItem"][];
             /** Format: uuid */
             workspace_id: string;
         };
@@ -9105,6 +9184,66 @@ export interface operations {
                 content?: never;
             };
             /** @description Database or execution error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    handle_get_gap_digest: {
+        parameters: {
+            query?: {
+                /** @description Lookback hours (default: 24). */
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Daily gap warning digest for workspace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapWarningDigest"];
+                };
+            };
+            /** @description Database error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    handle_dispatch_gap_digest: {
+        parameters: {
+            query?: {
+                /** @description Lookback hours (default: 24). */
+                hours?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Daily gap warning digest dispatched to M27 email channel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GapDigestDispatchResponse"];
+                };
+            };
+            /** @description Database error */
             500: {
                 headers: {
                     [name: string]: unknown;

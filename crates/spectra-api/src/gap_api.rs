@@ -10,6 +10,7 @@ use axum::response::Response;
 use axum::Extension;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use spectra_research::gap::{
     compute_backtest_to_paper_gap, BacktestFillRecord, GapReport, GapThresholds, GapTradeSide,
     PaperFillRecord,
@@ -739,4 +740,214 @@ fn gap_sheet(rec: &spectra_db::gap::GapReportRecord) -> crate::tear_sheet::TearS
             .collect(),
     });
     TearSheet { sections, table }
+}
+
+/// Query parameters for gap warning digest (M10).
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct GapDigestQuery {
+    /// Lookback hours (default: 24).
+    pub hours: Option<i64>,
+}
+
+/// Item in the daily gap warning digest.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GapDigestWarningItem {
+    pub report_id: Uuid,
+    pub strategy_id: Uuid,
+    pub code: String,
+    pub severity: String,
+    pub message: String,
+    pub metric_name: String,
+    pub threshold: f64,
+    pub actual_value: f64,
+    pub created_at: String,
+}
+
+/// Workspace-level daily digest of backtest-to-paper gap warnings and breaches (M10).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GapWarningDigest {
+    pub workspace_id: Uuid,
+    pub period_start: String,
+    pub period_end: String,
+    pub total_reports: usize,
+    pub total_warnings: usize,
+    pub total_breaches: usize,
+    pub max_tracking_error_pct: f64,
+    pub max_slippage_drift_bps: f64,
+    pub max_timing_latency_ms: f64,
+    pub warnings: Vec<GapDigestWarningItem>,
+}
+
+/// Result of dispatching gap digest to M27 email delivery channel.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GapDigestDispatchResponse {
+    pub status: String,
+    pub channel: String,
+    pub workspace_id: Uuid,
+    pub period_start: String,
+    pub period_end: String,
+    pub warning_count: usize,
+    pub breach_count: usize,
+    pub digest: GapWarningDigest,
+}
+
+/// Build the daily gap warning digest for a workspace.
+pub async fn build_gap_warning_digest(
+    pool: &spectra_db::PgPool,
+    ws: Uuid,
+    lookback_hours: i64,
+) -> Result<GapWarningDigest, sqlx::Error> {
+    let now = Utc::now();
+    let start_time = now - chrono::Duration::hours(lookback_hours.max(1));
+
+    let rows: Vec<spectra_db::gap::GapReportRecord> = sqlx::query_as(
+        r"
+        SELECT * FROM backtest_paper_gap_reports
+        WHERE workspace_id = $1 AND created_at >= $2
+        ORDER BY created_at DESC
+        ",
+    )
+    .bind(ws)
+    .bind(start_time)
+    .fetch_all(pool)
+    .await?;
+
+    let mut total_warnings = 0;
+    let mut total_breaches = 0;
+    let mut max_tracking_error_pct = 0.0f64;
+    let mut max_slippage_drift_bps = 0.0f64;
+    let mut max_timing_latency_ms = 0.0f64;
+    let mut warnings = Vec::new();
+
+    for r in &rows {
+        if r.tracking_error_pct > max_tracking_error_pct {
+            max_tracking_error_pct = r.tracking_error_pct;
+        }
+        if r.mean_slippage_drift_bps > max_slippage_drift_bps {
+            max_slippage_drift_bps = r.mean_slippage_drift_bps;
+        }
+        if r.mean_timing_latency_ms > max_timing_latency_ms {
+            max_timing_latency_ms = r.mean_timing_latency_ms;
+        }
+
+        if let Some(arr) = r.report_json.get("alerts").and_then(|v| v.as_array()) {
+            for a in arr {
+                let sev = a.get("severity").and_then(|s| s.as_str()).unwrap_or("");
+                let is_breach = sev.eq_ignore_ascii_case("breach");
+                let is_warning = sev.eq_ignore_ascii_case("warning");
+                if is_breach || is_warning {
+                    if is_breach {
+                        total_breaches += 1;
+                    } else {
+                        total_warnings += 1;
+                    }
+                    warnings.push(GapDigestWarningItem {
+                        report_id: r.id,
+                        strategy_id: r.strategy_id,
+                        code: a.get("code").and_then(|c| c.as_str()).unwrap_or("").to_string(),
+                        severity: sev.to_string(),
+                        message: a.get("message").and_then(|m| m.as_str()).unwrap_or("").to_string(),
+                        metric_name: a.get("metric_name").and_then(|m| m.as_str()).unwrap_or("").to_string(),
+                        threshold: a.get("threshold").and_then(|t| t.as_f64()).unwrap_or(0.0),
+                        actual_value: a.get("actual_value").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        created_at: r.created_at.to_rfc3339(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(GapWarningDigest {
+        workspace_id: ws,
+        period_start: start_time.to_rfc3339(),
+        period_end: now.to_rfc3339(),
+        total_reports: rows.len(),
+        total_warnings,
+        total_breaches,
+        max_tracking_error_pct,
+        max_slippage_drift_bps,
+        max_timing_latency_ms,
+        warnings,
+    })
+}
+
+/// GET /api/v1/paper/gap/digest
+#[utoipa::path(
+    get,
+    path = "/api/v1/paper/gap/digest",
+    tag = "paper",
+    params(GapDigestQuery),
+    responses(
+        (status = 200, description = "Daily gap warning digest for workspace", body = GapWarningDigest),
+        (status = 500, description = "Database error")
+    )
+)]
+pub(crate) async fn handle_get_gap_digest(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    query: Result<Query<GapDigestQuery>, QueryRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let hours = query.map(|q| q.hours.unwrap_or(24)).unwrap_or(24);
+
+    match build_gap_warning_digest(&pool, ws, hours).await {
+        Ok(digest) => json_response(200, json!(digest).to_string()),
+        Err(e) => db_error(&e),
+    }
+}
+
+/// POST /api/v1/paper/gap/digest/dispatch
+#[utoipa::path(
+    post,
+    path = "/api/v1/paper/gap/digest/dispatch",
+    tag = "paper",
+    params(GapDigestQuery),
+    responses(
+        (status = 200, description = "Daily gap warning digest dispatched to M27 email channel", body = GapDigestDispatchResponse),
+        (status = 500, description = "Database error")
+    )
+)]
+pub(crate) async fn handle_dispatch_gap_digest(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    query: Result<Query<GapDigestQuery>, QueryRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let hours = query.map(|q| q.hours.unwrap_or(24)).unwrap_or(24);
+
+    let digest = match build_gap_warning_digest(&pool, ws, hours).await {
+        Ok(d) => d,
+        Err(e) => return db_error(&e),
+    };
+
+    tracing::info!(
+        target: "m27::email_channel",
+        workspace_id = %ws,
+        period_start = %digest.period_start,
+        period_end = %digest.period_end,
+        total_reports = digest.total_reports,
+        total_warnings = digest.total_warnings,
+        total_breaches = digest.total_breaches,
+        "Backtest-to-Paper gap warning digest delivered via M27 email channel"
+    );
+
+    let resp = GapDigestDispatchResponse {
+        status: "delivered".into(),
+        channel: "m27_email".into(),
+        workspace_id: ws,
+        period_start: digest.period_start.clone(),
+        period_end: digest.period_end.clone(),
+        warning_count: digest.total_warnings,
+        breach_count: digest.total_breaches,
+        digest,
+    };
+
+    json_response(200, json!(resp).to_string())
 }

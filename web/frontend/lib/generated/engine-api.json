@@ -3935,6 +3935,78 @@
         }
       }
     },
+    "/api/v1/paper/gap/digest": {
+      "get": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "GET /api/v1/paper/gap/digest",
+        "operationId": "handle_get_gap_digest",
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "description": "Lookback hours (default: 24).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily gap warning digest for workspace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GapWarningDigest"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database error"
+          }
+        }
+      }
+    },
+    "/api/v1/paper/gap/digest/dispatch": {
+      "post": {
+        "tags": [
+          "paper"
+        ],
+        "summary": "POST /api/v1/paper/gap/digest/dispatch",
+        "operationId": "handle_dispatch_gap_digest",
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "description": "Lookback hours (default: 24).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Daily gap warning digest dispatched to M27 email channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GapDigestDispatchResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Database error"
+          }
+        }
+      }
+    },
     "/api/v1/paper/gap/reports": {
       "get": {
         "tags": [
@@ -10072,6 +10144,97 @@
           }
         }
       },
+      "GapDigestDispatchResponse": {
+        "type": "object",
+        "description": "Result of dispatching gap digest to M27 email delivery channel.",
+        "required": [
+          "status",
+          "channel",
+          "workspace_id",
+          "period_start",
+          "period_end",
+          "warning_count",
+          "breach_count",
+          "digest"
+        ],
+        "properties": {
+          "breach_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "channel": {
+            "type": "string"
+          },
+          "digest": {
+            "$ref": "#/components/schemas/GapWarningDigest"
+          },
+          "period_end": {
+            "type": "string"
+          },
+          "period_start": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "warning_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "GapDigestWarningItem": {
+        "type": "object",
+        "description": "Item in the daily gap warning digest.",
+        "required": [
+          "report_id",
+          "strategy_id",
+          "code",
+          "severity",
+          "message",
+          "metric_name",
+          "threshold",
+          "actual_value",
+          "created_at"
+        ],
+        "properties": {
+          "actual_value": {
+            "type": "number",
+            "format": "double"
+          },
+          "code": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "metric_name": {
+            "type": "string"
+          },
+          "report_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "threshold": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
       "GapReportDetailView": {
         "type": "object",
         "description": "Detailed view of a gap report including attribution and trade matches.",
@@ -10247,6 +10410,64 @@
           "tracking_error_pct": {
             "type": "number",
             "format": "double"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "GapWarningDigest": {
+        "type": "object",
+        "description": "Workspace-level daily digest of backtest-to-paper gap warnings and breaches (M10).",
+        "required": [
+          "workspace_id",
+          "period_start",
+          "period_end",
+          "total_reports",
+          "total_warnings",
+          "total_breaches",
+          "max_tracking_error_pct",
+          "max_slippage_drift_bps",
+          "max_timing_latency_ms",
+          "warnings"
+        ],
+        "properties": {
+          "max_slippage_drift_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_timing_latency_ms": {
+            "type": "number",
+            "format": "double"
+          },
+          "max_tracking_error_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "period_end": {
+            "type": "string"
+          },
+          "period_start": {
+            "type": "string"
+          },
+          "total_breaches": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_reports": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "total_warnings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GapDigestWarningItem"
+            }
           },
           "workspace_id": {
             "type": "string",

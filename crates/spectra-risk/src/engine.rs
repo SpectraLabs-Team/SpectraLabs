@@ -136,6 +136,8 @@ pub struct Simulation {
     pub backend_used: Backend,
     /// Paths simulated (fewer than requested if an adaptive run converged).
     pub simulations_run: u64,
+    /// Number of paths that produced NaN and were dropped.
+    pub dropped_nan_paths: u64,
     /// Batches run.
     pub batches: usize,
     /// Last convergence check (adaptive runs only).
@@ -185,9 +187,11 @@ pub fn simulate(portfolio: &Portfolio, config: &RiskConfig) -> Result<Simulation
     let first_task = task_for(0, batches[0]);
     let mut losses = Vec::with_capacity(usize::try_from(config.simulations).unwrap_or(0));
     let (mut compute_ms, mut run, mut done, mut convergence) = (0.0, 0u64, 0usize, None);
+    let mut dropped_nan_paths = 0u64;
     for (i, &paths) in batches.iter().enumerate() {
         let r = execute(backend, &task_for(i as u64, paths), config.threads)?;
         losses.extend_from_slice(&r.terminal_losses);
+        dropped_nan_paths += r.dropped_nan_paths;
         compute_ms += r.elapsed_ms;
         run += paths;
         done += 1;
@@ -223,6 +227,7 @@ pub fn simulate(portfolio: &Portfolio, config: &RiskConfig) -> Result<Simulation
         requested_backend: config.backend,
         backend_used: backend,
         simulations_run: run,
+        dropped_nan_paths,
         batches: done,
         convergence,
         first_task,

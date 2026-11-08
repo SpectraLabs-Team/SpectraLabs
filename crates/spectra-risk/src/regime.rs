@@ -63,6 +63,9 @@ impl RegimeModel {
                 "HMM regime detection requires at least 30 observations, got {t}"
             )));
         }
+        if returns.iter().any(|r| r.is_nan()) {
+            return Err(Error::InvalidArgument("Returns series contains NaN".into()));
+        }
 
         let overall_mean = mean(returns);
         let overall_var = variance(returns);
@@ -333,6 +336,59 @@ pub struct Regime3State {
 }
 
 impl Regime3State {
+    /// Initialise the three regimes from the data with a fixed, written rule.
+    ///
+    /// Rule:
+    /// 1. Validate that the series contains at least 30 observations, has no NaNs, and has variance > 1e-12.
+    /// 2. Compute the sample mean $\bar{r} = \frac{1}{T}\sum_{t=1}^T r_t$.
+    /// 3. Compute absolute deviations $d_t = |r_t - \bar{r}|$ and sort the observations into three tertiles:
+    ///    - Low volatility (Regime 0): bottom tertile $[0, \lfloor T/3 \rfloor)$ of deviations.
+    ///    - Medium volatility (Regime 1): middle tertile $[\lfloor T/3 \rfloor, \lfloor 2T/3 \rfloor)$.
+    ///    - High volatility (Regime 2): top tertile $[\lfloor 2T/3 \rfloor, T)$.
+    /// 4. For each tertile slice $k \in \{0, 1, 2\}$, initialize $\mu_k = \text{mean}(slice_k)$,
+    ///    $\sigma_k = \max(\text{std}(slice_k), 10^{-6})$, and $\text{volatility\_annualized}_k = \sigma_k \times \sqrt{252}$.
+    pub fn initialize_from_data(returns: &[f64]) -> Result<[RegimeState; 3]> {
+        let t = returns.len();
+        if t < 30 {
+            return Err(Error::InvalidArgument(format!(
+                "3-state HMM requires at least 30 observations, got {t}"
+            )));
+        }
+        if returns.iter().any(|r| r.is_nan()) {
+            return Err(Error::InvalidArgument("Returns series contains NaN".into()));
+        }
+
+        let total_mean = mean(returns);
+        let total_var = variance(returns);
+        if total_var <= 1e-12 {
+            return Err(Error::InvalidArgument("Returns series has zero variance".into()));
+        }
+
+        let mut indexed_devs: Vec<(usize, f64)> =
+            returns.iter().enumerate().map(|(idx, &r)| (idx, (r - total_mean).abs())).collect();
+        indexed_devs.sort_by(|a, b| a.1.total_cmp(&b.1));
+
+        let t1 = t / 3;
+        let t2 = (2 * t) / 3;
+
+        let compute_slice_state = |indices: &[(usize, f64)]| -> RegimeState {
+            let slice_returns: Vec<f64> = indices.iter().map(|&(idx, _)| returns[idx]).collect();
+            let slice_mean = mean(&slice_returns);
+            let slice_std = variance(&slice_returns).sqrt().max(1e-6);
+            RegimeState {
+                mu_daily: slice_mean,
+                sigma_daily: slice_std,
+                volatility_annualized: slice_std * TRADING_DAYS_PER_YEAR.sqrt(),
+            }
+        };
+
+        let s0 = compute_slice_state(&indexed_devs[0..t1]);
+        let s1 = compute_slice_state(&indexed_devs[t1..t2]);
+        let s2 = compute_slice_state(&indexed_devs[t2..t]);
+
+        Ok([s0, s1, s2])
+    }
+
     /// Fit a 3-state Gaussian HMM on historical returns using Baum-Welch EM.
     pub fn fit(returns: &[f64]) -> Result<Self> {
         let t = returns.len();
@@ -341,26 +397,53 @@ impl Regime3State {
                 "3-state HMM requires at least 30 observations, got {t}"
             )));
         }
+        if returns.iter().any(|r| r.is_nan()) {
+            return Err(Error::InvalidArgument("Returns series contains NaN".into()));
+        }
 
         let total_mean = mean(returns);
         let total_std = variance(returns).sqrt().max(1e-6);
 
-        // Initial state clusters: low, med, high volatility
-        let mut s0 = RegimeState {
+        let s0 = RegimeState {
             mu_daily: total_mean + 0.0003,
             sigma_daily: (total_std * 0.6).max(1e-6),
             volatility_annualized: (total_std * 0.6 * TRADING_DAYS_PER_YEAR.sqrt()).max(1e-6),
         };
-        let mut s1 = RegimeState {
+        let s1 = RegimeState {
             mu_daily: total_mean,
             sigma_daily: total_std.max(1e-6),
             volatility_annualized: (total_std * TRADING_DAYS_PER_YEAR.sqrt()).max(1e-6),
         };
-        let mut s2 = RegimeState {
+        let s2 = RegimeState {
             mu_daily: total_mean - 0.001,
             sigma_daily: (total_std * 2.0).max(1e-6),
             volatility_annualized: (total_std * 2.0 * TRADING_DAYS_PER_YEAR.sqrt()).max(1e-6),
         };
+
+        Self::fit_with_initial_states(returns, [s0, s1, s2])
+    }
+
+    /// Fit a 3-state Gaussian HMM on historical returns using data-initialized regimes.
+    pub fn fit_from_data(returns: &[f64]) -> Result<Self> {
+        let states = Self::initialize_from_data(returns)?;
+        Self::fit_with_initial_states(returns, states)
+    }
+
+    /// Fit a 3-state Gaussian HMM on historical returns using custom or data-derived initial states.
+    pub fn fit_with_initial_states(returns: &[f64], initial_states: [RegimeState; 3]) -> Result<Self> {
+        let t = returns.len();
+        if t < 30 {
+            return Err(Error::InvalidArgument(format!(
+                "3-state HMM requires at least 30 observations, got {t}"
+            )));
+        }
+        if returns.iter().any(|r| r.is_nan()) {
+            return Err(Error::InvalidArgument("Returns series contains NaN".into()));
+        }
+
+        let mut s0 = initial_states[0];
+        let mut s1 = initial_states[1];
+        let mut s2 = initial_states[2];
 
         let mut a = [[0.85, 0.12, 0.03], [0.10, 0.80, 0.10], [0.05, 0.15, 0.80]];
         let mut pi = [0.6, 0.3, 0.1];
@@ -996,5 +1079,53 @@ mod tests {
         assert!(sjm_high_penalty.jump_count <= sjm_low_penalty.jump_count);
         assert!(sjm_high_penalty.persistence_ratio >= sjm_low_penalty.persistence_ratio);
         assert_eq!(sjm_high_penalty.states.len(), 60);
+    }
+
+    #[test]
+    fn test_regime_3_state_initialization_on_known_series() {
+        // Construct a known 30-day series:
+        // 10 calm observations (0.001 +/- 0.0001)
+        // 10 moderate observations (0.001 +/- 0.005)
+        // 10 turbulent observations (0.001 +/- 0.030)
+        let mut known_series = Vec::with_capacity(30);
+        for i in 0..10 {
+            known_series.push(0.001 + 0.0001 * if i % 2 == 0 { 1.0 } else { -1.0 });
+        }
+        for i in 0..10 {
+            known_series.push(0.001 + 0.0050 * if i % 2 == 0 { 1.0 } else { -1.0 });
+        }
+        for i in 0..10 {
+            known_series.push(0.001 + 0.0300 * if i % 2 == 0 { 1.0 } else { -1.0 });
+        }
+
+        let states = Regime3State::initialize_from_data(&known_series).unwrap();
+        assert_eq!(states.len(), 3);
+        assert!(
+            states[0].sigma_daily < states[1].sigma_daily,
+            "Low vol state ({}) should be < medium vol state ({})",
+            states[0].sigma_daily,
+            states[1].sigma_daily
+        );
+        assert!(
+            states[1].sigma_daily < states[2].sigma_daily,
+            "Medium vol state ({}) should be < high vol state ({})",
+            states[1].sigma_daily,
+            states[2].sigma_daily
+        );
+
+        // Check known-answer order of magnitude:
+        assert!((states[0].sigma_daily - 0.0001).abs() < 1e-4);
+        assert!((states[1].sigma_daily - 0.0050).abs() < 1e-3);
+        assert!((states[2].sigma_daily - 0.0300).abs() < 1e-2);
+    }
+
+    #[test]
+    fn test_regime_models_reject_nan_inputs() {
+        let mut nan_series = vec![0.001; 40];
+        nan_series[15] = f64::NAN;
+
+        assert!(RegimeModel::fit(&nan_series).is_err());
+        assert!(Regime3State::initialize_from_data(&nan_series).is_err());
+        assert!(Regime3State::fit(&nan_series).is_err());
     }
 }

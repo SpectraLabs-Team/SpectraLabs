@@ -12,7 +12,8 @@
 //!  * [`risk_parity_weights_from_closes`]: equal risk contributions, from the annualized
 //!    covariance of the holdings' daily closes (the M15 follow-on to decision 1).
 //!
-//! Mean-variance is a later method (M15 decision 1) and is not here.
+//! Mean-variance weights (M4) are in [`crate::mean_variance`]; they share this module's
+//! [`PortfolioError`] and covariance checks.
 //! Everything in this module is pure: no I/O, no database, no clock.
 
 use std::collections::HashSet;
@@ -51,16 +52,30 @@ pub enum PortfolioError {
     InsufficientHistory { symbol: String, need: usize, have: usize },
     /// A close is not finite and strictly positive.
     InvalidPrice { symbol: String, value: f64 },
-    /// Risk parity needs every holding's closes on the same dates; this one has a different count.
+    /// Estimates from closes (risk parity, the shrunk mean and covariance) need every holding's
+    /// closes on the same dates; this one has a different count.
     UnequalHistory { symbol: String, need: usize, have: usize },
     /// The covariance matrix is singular: this holding's returns are (almost exactly) a fixed mix
-    /// of the holdings before it, or do not move at all, so equal risk contributions are not unique.
+    /// of the holdings before it, or do not move at all, so equal risk contributions (or the
+    /// mean-variance optimum) are not unique.
     SingularCovariance { symbol: String },
     /// A covariance matrix passed in is not square, symmetric and finite.
     InvalidCovariance(String),
     /// The risk parity solver did not reach [`RISK_PARITY_TOLERANCE`] within
     /// [`RISK_PARITY_MAX_SWEEPS`]; `residual` is how far the risk contributions still were from equal.
     NotConverged { sweeps: usize, residual: f64 },
+    /// The mean-variance risk aversion is not finite and strictly positive.
+    InvalidRiskAversion(f64),
+    /// An expected return for mean-variance weights is NaN or infinite.
+    InvalidExpectedReturn { symbol: String, value: f64 },
+    /// The mean-variance weight cap is NaN, infinite or above 1.
+    InvalidWeightCap(f64),
+    /// The mean-variance weight cap is below `1/N`: `holdings` weights of at most `cap` cannot sum to 1.
+    InfeasibleWeightCap { cap: f64, holdings: usize },
+    /// The mean-variance solver did not reach [`crate::mean_variance::MEAN_VARIANCE_TOLERANCE`]
+    /// within [`crate::mean_variance::MEAN_VARIANCE_MAX_ITERATIONS`]; `step` is the largest weight
+    /// change of the last projected gradient step.
+    MeanVarianceNotConverged { iterations: usize, step: f64 },
 }
 
 impl fmt::Display for PortfolioError {
@@ -89,17 +104,30 @@ impl fmt::Display for PortfolioError {
                 write!(f, "price {value} for {symbol} is not finite and positive")
             }
             Self::UnequalHistory { symbol, need, have } => {
-                write!(f, "risk parity needs closes on the same dates: {symbol} has {have}, expected {need}")
+                write!(f, "closes must be on the same dates for every holding: {symbol} has {have}, expected {need}")
             }
             Self::SingularCovariance { symbol } => write!(
                 f,
                 "the covariance of the holdings' returns is singular: {symbol} moves as a fixed mix of the \
-                 other holdings (or not at all), so risk parity weights are not defined"
+                 other holdings (or not at all), so the weights are not defined"
             ),
             Self::InvalidCovariance(why) => write!(f, "invalid covariance matrix: {why}"),
             Self::NotConverged { sweeps, residual } => write!(
                 f,
                 "risk parity did not converge in {sweeps} sweeps (risk contributions still differ by {residual:e})"
+            ),
+            Self::InvalidRiskAversion(v) => write!(f, "risk aversion must be finite and positive, got {v}"),
+            Self::InvalidExpectedReturn { symbol, value } => {
+                write!(f, "expected return for {symbol} must be a finite number, got {value}")
+            }
+            Self::InvalidWeightCap(v) => write!(f, "weight cap must be a finite number no greater than 1, got {v}"),
+            Self::InfeasibleWeightCap { cap, holdings } => write!(
+                f,
+                "weight cap {cap} is below 1/{holdings}: {holdings} holdings of at most {cap} each cannot sum to 1"
+            ),
+            Self::MeanVarianceNotConverged { iterations, step } => write!(
+                f,
+                "mean-variance did not converge in {iterations} iterations (last step moved a weight by {step:e})"
             ),
         }
     }
@@ -574,7 +602,7 @@ pub fn risk_parity_weights_from_closes(
 }
 
 /// At least one symbol, `values` inputs for them (one per symbol), and no symbol twice.
-fn check_symbols(symbols: &[String], values: usize) -> Result<(), PortfolioError> {
+pub(crate) fn check_symbols(symbols: &[String], values: usize) -> Result<(), PortfolioError> {
     if symbols.is_empty() {
         return Err(PortfolioError::Empty);
     }
@@ -592,7 +620,7 @@ fn check_symbols(symbols: &[String], values: usize) -> Result<(), PortfolioError
 
 /// Square, finite and symmetric, then positive definite: a Cholesky factorization whose every
 /// pivot stays above [`SINGULAR_PIVOT_TOLERANCE`] times its diagonal entry.
-fn check_covariance(symbols: &[String], cov: &[Vec<f64>]) -> Result<(), PortfolioError> {
+pub(crate) fn check_covariance(symbols: &[String], cov: &[Vec<f64>]) -> Result<(), PortfolioError> {
     let n = cov.len();
     for (i, row) in cov.iter().enumerate() {
         if row.len() != n {

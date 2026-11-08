@@ -37,11 +37,16 @@ export const listRunReports = (runKind: RunKind, runId: string) =>
     `/api/v1/reports?run_kind=${encodeURIComponent(runKind)}&run_id=${encodeURIComponent(runId)}`,
   );
 
-/** One gap report as GET /api/v1/paper/gap/reports lists it (only the fields the report panel uses). */
+/** One gap report as GET /api/v1/paper/gap/reports lists it (including the 4 drift metrics). */
 export interface GapReportRef {
   id: string;
   strategy_id: string;
   created_at: string;
+  mean_slippage_drift_bps?: number;
+  mean_timing_latency_ms?: number;
+  fill_ratio?: number;
+  total_pnl_gap?: number;
+  alert_status?: string;
 }
 
 /** A gap report and the stored versions of its exports. */

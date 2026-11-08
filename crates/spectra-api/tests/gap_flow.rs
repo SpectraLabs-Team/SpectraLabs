@@ -195,7 +195,7 @@ async fn test_backtest_to_paper_gap_analysis_flow() {
     // 3. Fetch specific report detail
     let detail_req =
         signed_req("GET", &format!("/api/v1/paper/gap/reports/{report_id}"), &user_id, &ws_id, Vec::new());
-    let res = app.oneshot(detail_req).await.unwrap();
+    let res = app.clone().oneshot(detail_req).await.unwrap();
     let (status, body) = response_json(res).await;
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["id"].as_str().unwrap(), report_id);
@@ -204,5 +204,27 @@ async fn test_backtest_to_paper_gap_analysis_flow() {
     assert!(body["report"]["thresholds"].is_object(), "saved report must record thresholds");
     assert_eq!(body["report"]["thresholds"]["max_slippage_drift_bps"].as_f64().unwrap(), 5.0);
     assert_eq!(body["report"]["thresholds"]["max_timing_latency_ms"].as_f64().unwrap(), 200.0);
-    eprintln!("CI: test_backtest_to_paper_gap_analysis_flow completed successfully with verified thresholds and attribution");
+
+    // 4. Test Daily Gap Warning Digest (GET /api/v1/paper/gap/digest)
+    let digest_req = signed_req("GET", "/api/v1/paper/gap/digest", &user_id, &ws_id, Vec::new());
+    let res = app.clone().oneshot(digest_req).await.unwrap();
+    let (status, body) = response_json(res).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["workspace_id"].as_str().unwrap(), ws_id.to_string());
+    assert!(body["total_reports"].as_u64().unwrap() >= 1);
+    assert!(body["total_warnings"].as_u64().unwrap() + body["total_breaches"].as_u64().unwrap() >= 1);
+    assert!(!body["warnings"].as_array().unwrap().is_empty());
+    assert!(body["max_slippage_drift_bps"].as_f64().unwrap() > 0.0);
+
+    // 5. Test M27 Email Dispatch of Digest (POST /api/v1/paper/gap/digest/dispatch)
+    let dispatch_req = signed_req("POST", "/api/v1/paper/gap/digest/dispatch", &user_id, &ws_id, Vec::new());
+    let res = app.oneshot(dispatch_req).await.unwrap();
+    let (status, body) = response_json(res).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["status"].as_str().unwrap(), "delivered");
+    assert_eq!(body["channel"].as_str().unwrap(), "m27_email");
+    assert_eq!(body["workspace_id"].as_str().unwrap(), ws_id.to_string());
+    assert!(body["warning_count"].as_u64().unwrap() + body["breach_count"].as_u64().unwrap() >= 1);
+
+    eprintln!("CI: test_backtest_to_paper_gap_analysis_flow completed successfully with verified thresholds, attribution, and M27 warning digest dispatch");
 }

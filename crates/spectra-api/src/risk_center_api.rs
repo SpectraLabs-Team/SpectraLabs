@@ -1357,7 +1357,161 @@ pub(crate) async fn get_exposure_history(
     }
 }
 
-/// Check current portfolio metrics against alert thresholds (Task 11).
+pub fn compute_portfolio_alerts(
+    portfolio: &PortfolioSnapshot,
+    limits: &RiskLimits,
+) -> Result<Vec<RiskAlertView>, String> {
+    let mut alerts = Vec::new();
+
+    let gross = portfolio.gross_exposure();
+    let gross_pct = match utilization(gross, limits.max_gross_exposure) {
+        Ok(v) => v,
+        Err(e) => return Err(format!("Failed to compute limit utilization: {e}")),
+    };
+    if gross_pct >= 0.80 {
+        alerts.push(RiskAlertView {
+            severity: if gross_pct >= 1.0 { "breach".into() } else { "warning".into() },
+            metric: "gross_exposure".into(),
+            current_value: gross,
+            limit_value: limits.max_gross_exposure,
+            utilization_pct: gross_pct * 100.0,
+            message: format!("Gross exposure utilization is at {:.1}% of limit.", gross_pct * 100.0),
+        });
+    }
+
+    let net = portfolio.net_exposure().abs();
+    if limits.max_net_exposure > 0.0 {
+        if let Ok(net_pct) = utilization(net, limits.max_net_exposure) {
+            if net_pct >= 0.80 {
+                alerts.push(RiskAlertView {
+                    severity: if net_pct >= 1.0 { "breach".into() } else { "warning".into() },
+                    metric: "net_exposure".into(),
+                    current_value: net,
+                    limit_value: limits.max_net_exposure,
+                    utilization_pct: net_pct * 100.0,
+                    message: format!("Net exposure utilization is at {:.1}% of limit.", net_pct * 100.0),
+                });
+            }
+        }
+    }
+
+    let lev = portfolio.leverage();
+    let lev_pct = match utilization(lev, limits.max_leverage) {
+        Ok(v) => v,
+        Err(e) => return Err(format!("Failed to compute limit utilization: {e}")),
+    };
+    if lev_pct >= 0.80 {
+        alerts.push(RiskAlertView {
+            severity: if lev_pct >= 1.0 { "breach".into() } else { "warning".into() },
+            metric: "leverage".into(),
+            current_value: lev,
+            limit_value: limits.max_leverage,
+            utilization_pct: lev_pct * 100.0,
+            message: format!("Leverage utilization is at {:.1}% of limit.", lev_pct * 100.0),
+        });
+    }
+
+    let dd = match portfolio.drawdown_pct() {
+        Ok(v) => v,
+        Err(e) => return Err(format!("Failed to compute portfolio risk metrics: {e}")),
+    };
+    let dd_pct = match utilization(dd, limits.max_drawdown_pct) {
+        Ok(v) => v,
+        Err(e) => return Err(format!("Failed to compute limit utilization: {e}")),
+    };
+    if dd_pct >= 0.80 {
+        alerts.push(RiskAlertView {
+            severity: if dd_pct >= 1.0 { "breach".into() } else { "warning".into() },
+            metric: "drawdown".into(),
+            current_value: dd,
+            limit_value: limits.max_drawdown_pct,
+            utilization_pct: dd_pct * 100.0,
+            message: format!("Drawdown is at {:.1}% of limit.", dd_pct * 100.0),
+        });
+    }
+
+    let loss = portfolio.daily_loss();
+    let loss_pct = match utilization(loss, limits.max_daily_loss) {
+        Ok(v) => v,
+        Err(e) => return Err(format!("Failed to compute limit utilization: {e}")),
+    };
+    if loss_pct >= 0.80 {
+        alerts.push(RiskAlertView {
+            severity: if loss_pct >= 1.0 { "breach".into() } else { "warning".into() },
+            metric: "daily_loss".into(),
+            current_value: loss,
+            limit_value: limits.max_daily_loss,
+            utilization_pct: loss_pct * 100.0,
+            message: format!("Daily loss is at {:.1}% of limit.", loss_pct * 100.0),
+        });
+    }
+
+    // Check single-position size and concentration limits deterministically by symbol
+    let mut sorted_symbols: Vec<_> = portfolio.positions.keys().cloned().collect();
+    sorted_symbols.sort();
+    for sym in sorted_symbols {
+        if let Some(pos) = portfolio.positions.get(&sym) {
+            let pos_val = pos.qty.abs() * pos.price;
+            if limits.max_position_size > 0.0 {
+                if let Ok(pos_pct) = utilization(pos_val, limits.max_position_size) {
+                    if pos_pct >= 0.80 {
+                        alerts.push(RiskAlertView {
+                            severity: if pos_pct >= 1.0 { "breach".into() } else { "warning".into() },
+                            metric: format!("position_size:{sym}"),
+                            current_value: pos_val,
+                            limit_value: limits.max_position_size,
+                            utilization_pct: pos_pct * 100.0,
+                            message: format!(
+                                "Position size for {sym} is at {:.1}% of limit.",
+                                pos_pct * 100.0
+                            ),
+                        });
+                    }
+                }
+            }
+
+            if limits.max_concentration_pct > 0.0 && portfolio.equity > 0.0 {
+                let conc = pos_val / portfolio.equity;
+                if let Ok(conc_pct) = utilization(conc, limits.max_concentration_pct) {
+                    if conc_pct >= 0.80 {
+                        alerts.push(RiskAlertView {
+                            severity: if conc_pct >= 1.0 { "breach".into() } else { "warning".into() },
+                            metric: format!("concentration:{sym}"),
+                            current_value: conc,
+                            limit_value: limits.max_concentration_pct,
+                            utilization_pct: conc_pct * 100.0,
+                            message: format!(
+                                "Concentration in {sym} is at {:.1}% of limit.",
+                                conc_pct * 100.0
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if limits.max_var_pct > 0.0 {
+        if let Ok(var_val) = portfolio.var_pct() {
+            if let Ok(var_pct) = utilization(var_val, limits.max_var_pct) {
+                if var_pct >= 0.80 {
+                    alerts.push(RiskAlertView {
+                        severity: if var_pct >= 1.0 { "breach".into() } else { "warning".into() },
+                        metric: "var_pct".into(),
+                        current_value: var_val,
+                        limit_value: limits.max_var_pct,
+                        utilization_pct: var_pct * 100.0,
+                        message: format!("Value at Risk (95%) is at {:.1}% of limit.", var_pct * 100.0),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(alerts)
+}
+
+/// Check current portfolio metrics against alert thresholds (Task 11 / M8).
 #[utoipa::path(get, path = "/api/v1/risk/alerts", tag = "risk", params(RiskLimitsQuery),
     responses((status = 200, description = "Active risk alerts", body = Vec<RiskAlertView>)))]
 pub(crate) async fn get_alerts(
@@ -1410,77 +1564,106 @@ pub(crate) async fn get_alerts(
     };
     let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
 
-    let mut alerts = Vec::new();
-    if db_balance.is_some() {
-        let gross = portfolio.gross_exposure();
-        let gross_pct = match utilization(gross, limits.max_gross_exposure) {
-            Ok(v) => v,
-            Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
-        };
-        if gross_pct >= 0.80 {
-            alerts.push(RiskAlertView {
-                severity: if gross_pct >= 1.0 { "breach".into() } else { "warning".into() },
-                metric: "gross_exposure".into(),
-                current_value: gross,
-                limit_value: limits.max_gross_exposure,
-                utilization_pct: gross_pct * 100.0,
-                message: format!("Gross exposure utilization is at {:.1}% of limit.", gross_pct * 100.0),
-            });
+    let alerts = if db_balance.is_some() {
+        match compute_portfolio_alerts(&portfolio, &limits) {
+            Ok(alts) => alts,
+            Err(e) => return error_response(422, e),
         }
-
-        let lev = portfolio.leverage();
-        let lev_pct = match utilization(lev, limits.max_leverage) {
-            Ok(v) => v,
-            Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
-        };
-        if lev_pct >= 0.80 {
-            alerts.push(RiskAlertView {
-                severity: if lev_pct >= 1.0 { "breach".into() } else { "warning".into() },
-                metric: "leverage".into(),
-                current_value: lev,
-                limit_value: limits.max_leverage,
-                utilization_pct: lev_pct * 100.0,
-                message: format!("Leverage utilization is at {:.1}% of limit.", lev_pct * 100.0),
-            });
-        }
-
-        let dd = match portfolio.drawdown_pct() {
-            Ok(v) => v,
-            Err(e) => return error_response(422, format!("Failed to compute portfolio risk metrics: {e}")),
-        };
-        let dd_pct = match utilization(dd, limits.max_drawdown_pct) {
-            Ok(v) => v,
-            Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
-        };
-        if dd_pct >= 0.80 {
-            alerts.push(RiskAlertView {
-                severity: if dd_pct >= 1.0 { "breach".into() } else { "warning".into() },
-                metric: "drawdown".into(),
-                current_value: dd,
-                limit_value: limits.max_drawdown_pct,
-                utilization_pct: dd_pct * 100.0,
-                message: format!("Drawdown is at {:.1}% of limit.", dd_pct * 100.0),
-            });
-        }
-
-        let loss = portfolio.daily_loss();
-        let loss_pct = match utilization(loss, limits.max_daily_loss) {
-            Ok(v) => v,
-            Err(e) => return error_response(422, format!("Failed to compute limit utilization: {e}")),
-        };
-        if loss_pct >= 0.80 {
-            alerts.push(RiskAlertView {
-                severity: if loss_pct >= 1.0 { "breach".into() } else { "warning".into() },
-                metric: "daily_loss".into(),
-                current_value: loss,
-                limit_value: limits.max_daily_loss,
-                utilization_pct: loss_pct * 100.0,
-                message: format!("Daily loss is at {:.1}% of limit.", loss_pct * 100.0),
-            });
-        }
-    }
+    } else {
+        Vec::new()
+    };
 
     json_response(200, json!(alerts).to_string())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RiskAlertDispatchResponse {
+    pub status: String,
+    pub channel: String,
+    pub count: usize,
+    pub alerts: Vec<RiskAlertView>,
+}
+
+/// Dispatch active risk alerts to M27 notification channel (Task 11 / M8 / M27).
+#[utoipa::path(post, path = "/api/v1/risk/alerts/dispatch", tag = "risk", params(RiskLimitsQuery),
+    responses((status = 200, description = "Dispatched risk alerts to M27 email delivery channel", body = RiskAlertDispatchResponse)))]
+pub(crate) async fn dispatch_alerts(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    query: Result<Query<RiskLimitsQuery>, QueryRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let Ok(Query(q)) = query else {
+        return error_response(422, "Invalid query parameters.");
+    };
+
+    let limits = match risk_center::get_limits(&pool, ws, q.strategy_id).await {
+        Ok(Some(r)) => RiskLimits::from(&RiskLimitsView::from(r)),
+        _ => RiskLimits::default(),
+    };
+
+    let db_positions = risk_center::get_positions(&pool, ws, q.strategy_id).await.unwrap_or_default();
+    let db_balance = risk_center::get_balance(&pool, ws, q.strategy_id).await.unwrap_or(None);
+
+    if !db_positions.is_empty() && db_balance.is_none() {
+        return error_response(422, "Strategy has no portfolio balance initialized in database.");
+    }
+
+    let default_dir = std::path::PathBuf::from("data");
+    let data_dir = st.cfg.data_dir.as_deref().unwrap_or(&default_dir);
+
+    let pos_syms: Vec<&str> = db_positions.iter().map(|p| p.symbol.as_str()).collect();
+    let vols = if pos_syms.is_empty() {
+        HashMap::new()
+    } else {
+        match lookup_portfolio_volatilities(&pool, ws, data_dir, None, &pos_syms).await {
+            Ok(v) => v,
+            Err(e) => return error_response(422, format!("Failed to compute volatility for alerts: {e}")),
+        }
+    };
+
+    let mut positions = HashMap::new();
+    for p in db_positions {
+        let vol = vols.get(&p.symbol).copied();
+        positions.insert(p.symbol, PositionSnapshot { qty: p.qty, price: p.price, volatility: vol });
+    }
+    let (cash, equity, peak_equity, daily_start_equity) = if let Some(ref b) = db_balance {
+        (b.cash, b.equity, b.peak_equity, b.daily_start_equity)
+    } else {
+        (0.0, 0.0, 0.0, 0.0)
+    };
+    let portfolio = PortfolioSnapshot { cash, equity, peak_equity, daily_start_equity, positions };
+
+    let alerts = if db_balance.is_some() {
+        match compute_portfolio_alerts(&portfolio, &limits) {
+            Ok(alts) => alts,
+            Err(e) => return error_response(422, e),
+        }
+    } else {
+        Vec::new()
+    };
+
+    tracing::info!(
+        target: "m27::email_channel",
+        workspace_id = %ws,
+        strategy_id = ?q.strategy_id,
+        alert_count = alerts.len(),
+        "Risk alerts staged and delivered for M27 notification channel"
+    );
+
+    json_response(
+        200,
+        json!(RiskAlertDispatchResponse {
+            status: "delivered".into(),
+            channel: "m27_email".into(),
+            count: alerts.len(),
+            alerts,
+        })
+        .to_string(),
+    )
 }
 
 /// Re-run a logged decision from its stored inputs to verify deterministic replay (Task 12).

@@ -718,3 +718,119 @@ async fn risk_check_without_balance_fails_closed() {
 
     fx.clean_up().await;
 }
+
+#[tokio::test]
+async fn test_remaining_risk_alerts_monitoring_and_m27_dispatch() {
+    let Some(pool) = pool().await else { return };
+    let fx = Fixture::new(pool);
+
+    let _ = sqlx::query("INSERT INTO workspaces (id, slug, name) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+        .bind(fx.ws)
+        .bind(format!("ws-{}", fx.ws.simple()))
+        .bind("Risk Alerts Monitoring Workspace")
+        .execute(&fx.pool)
+        .await;
+
+    fx.seed_volatility(&["AAPL", "MSFT"]).await;
+
+    // 1. Configure tight limits to trigger warnings and breaches
+    let limits_payload = json!({
+        "strategy_id": null,
+        "max_gross_exposure": 100_000.0,
+        "max_net_exposure": 60_000.0,
+        "max_position_size": 40_000.0,
+        "max_concentration_pct": 0.35,
+        "max_leverage": 1.2,
+        "max_drawdown_pct": 0.08,
+        "max_daily_loss": 5_000.0,
+        "max_var_pct": 0.05,
+        "size_reduction_enabled": false
+    });
+    let (code, _) = fx.call("PUT", "/api/v1/risk/limits", &limits_payload).await;
+    assert_eq!(code, 200);
+
+    // 2. Set portfolio balance with drawdown and daily loss:
+    // Peak equity 100k, daily start 98k, current equity 90k -> drawdown 10%, daily loss 8k
+    let balance_payload = json!({
+        "strategy_id": null,
+        "cash": 42_000.0,
+        "equity": 90_000.0,
+        "peak_equity": 100_000.0,
+        "daily_start_equity": 98_000.0
+    });
+    let (code, _) = fx.call("PUT", "/api/v1/risk/balance", &balance_payload).await;
+    assert_eq!(code, 200);
+
+    // 3. Set positions:
+    // AAPL: 300 @ 160 = $48,000 (breaches position_size 40k and concentration 35% of 90k = 31.5k)
+    // MSFT: 100 @ 400 = $40,000 (breaches concentration 35% of 90k, at 100% of position size)
+    // Total gross = 88,000 (88% of 100k -> warning), Net = 88,000 (breaches net limit 60k)
+    // Leverage = 88,000 / 90,000 = 0.978 (below 1.2)
+    let pos_aapl = json!({
+        "strategy_id": null,
+        "symbol": "AAPL",
+        "qty": 300.0,
+        "price": 160.0
+    });
+    let (code, _) = fx.call("PUT", "/api/v1/risk/positions", &pos_aapl).await;
+    assert_eq!(code, 200);
+
+    let pos_msft = json!({
+        "strategy_id": null,
+        "symbol": "MSFT",
+        "qty": 100.0,
+        "price": 400.0
+    });
+    let (code, _) = fx.call("PUT", "/api/v1/risk/positions", &pos_msft).await;
+    assert_eq!(code, 200);
+
+    // 4. Query alerts (GET /api/v1/risk/alerts)
+    let (code, alerts_res) = fx.call("GET", "/api/v1/risk/alerts", &Value::Null).await;
+    assert_eq!(code, 200);
+    let alerts = alerts_res.as_array().expect("alerts array");
+    assert!(!alerts.is_empty(), "expected active alerts, got none: {alerts_res}");
+
+    // Verify presence of remaining alert categories:
+    let metrics_found: Vec<String> =
+        alerts.iter().map(|a| a["metric"].as_str().unwrap().to_string()).collect();
+
+    assert!(
+        metrics_found.iter().any(|m| m == "gross_exposure"),
+        "gross_exposure alert missing: {metrics_found:?}"
+    );
+    assert!(
+        metrics_found.iter().any(|m| m == "net_exposure"),
+        "net_exposure alert missing: {metrics_found:?}"
+    );
+    assert!(metrics_found.iter().any(|m| m == "drawdown"), "drawdown alert missing: {metrics_found:?}");
+    assert!(metrics_found.iter().any(|m| m == "daily_loss"), "daily_loss alert missing: {metrics_found:?}");
+    assert!(
+        metrics_found.iter().any(|m| m == "position_size:AAPL"),
+        "position_size:AAPL alert missing: {metrics_found:?}"
+    );
+    assert!(
+        metrics_found.iter().any(|m| m == "concentration:AAPL"),
+        "concentration:AAPL alert missing: {metrics_found:?}"
+    );
+    assert!(
+        metrics_found.iter().any(|m| m == "concentration:MSFT"),
+        "concentration:MSFT alert missing: {metrics_found:?}"
+    );
+
+    // Verify breach severity on breached metrics
+    let net_alert = alerts.iter().find(|a| a["metric"] == "net_exposure").unwrap();
+    assert_eq!(net_alert["severity"], "breach");
+
+    let aapl_pos_alert = alerts.iter().find(|a| a["metric"] == "position_size:AAPL").unwrap();
+    assert_eq!(aapl_pos_alert["severity"], "breach");
+
+    // 5. Test M27 dispatch delivery endpoint (POST /api/v1/risk/alerts/dispatch)
+    let (code, dispatch_res) = fx.call("POST", "/api/v1/risk/alerts/dispatch", &Value::Null).await;
+    assert_eq!(code, 200);
+    assert_eq!(dispatch_res["status"], "delivered");
+    assert_eq!(dispatch_res["channel"], "m27_email");
+    assert_eq!(dispatch_res["count"], alerts.len());
+    assert_eq!(dispatch_res["alerts"].as_array().unwrap().len(), alerts.len());
+
+    fx.clean_up().await;
+}

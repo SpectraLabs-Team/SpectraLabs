@@ -534,10 +534,25 @@ pub(crate) async fn get_run(
     body["workspace_trial_count"] = json!(trials);
 
     let holdout_history = if let Some(ref pool) = st.db {
-        if !is_succeeded {
+        let ws = identity.workspace.unwrap_or_default();
+        let is_viewer = if let Ok(uid) = Uuid::parse_str(&identity.user) {
+            let role: Option<(String,)> =
+                sqlx::query_as("SELECT role FROM workspace_members WHERE workspace_id = $1 AND user_id = $2")
+                    .bind(ws)
+                    .bind(uid)
+                    .fetch_optional(pool)
+                    .await
+                    .ok()
+                    .flatten();
+            role.is_some_and(|(r,)| r == "viewer")
+        } else {
+            false
+        };
+
+        // Only a succeeded run shows holdout history (#299), and never to a viewer.
+        if !is_succeeded || is_viewer {
             Value::Array(Vec::new())
         } else {
-            let ws = identity.workspace.unwrap_or_default();
             let evals = sqlx::query(
                 "SELECT e.id, h.name as holdout_name, e.evaluation_num, e.metrics, e.dsr, e.warnings, e.evaluated_at \
                  FROM holdout_evaluations e \

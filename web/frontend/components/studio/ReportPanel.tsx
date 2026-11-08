@@ -121,6 +121,33 @@ export function PaperReportPanel({ strategyId }: { strategyId?: string }) {
               Gap report <span className="font-mono text-ink/60">{gap.id.slice(0, 8)}</span>
               <span className="text-ink/50"> · {new Date(gap.created_at).toLocaleString()}</span>
             </p>
+            {/* 4 Agreed Drift Metrics (M16) */}
+            <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-xl bg-ink/[0.02] border border-ink/[0.06] p-2.5 text-[11px]">
+              <div>
+                <span className="text-ink/50 block text-[10px] uppercase">Realized Slippage Drift</span>
+                <span className="font-mono font-medium text-ink">
+                  {gap.mean_slippage_drift_bps !== undefined ? `${gap.mean_slippage_drift_bps.toFixed(2)} bps` : '—'}
+                </span>
+              </div>
+              <div>
+                <span className="text-ink/50 block text-[10px] uppercase">Fill Latency</span>
+                <span className="font-mono font-medium text-ink">
+                  {gap.mean_timing_latency_ms !== undefined ? `${gap.mean_timing_latency_ms.toFixed(1)} ms` : '—'}
+                </span>
+              </div>
+              <div>
+                <span className="text-ink/50 block text-[10px] uppercase">Rejection / Cancel Rate</span>
+                <span className="font-mono font-medium text-ink">
+                  {gap.fill_ratio !== undefined ? `${((1 - gap.fill_ratio) * 100).toFixed(1)}%` : '—'}
+                </span>
+              </div>
+              <div>
+                <span className="text-ink/50 block text-[10px] uppercase">Equity Drift</span>
+                <span className={`font-mono font-medium ${gap.total_pnl_gap !== undefined && gap.total_pnl_gap < 0 ? 'text-loss' : 'text-ink'}`}>
+                  {gap.total_pnl_gap !== undefined ? `${gap.total_pnl_gap >= 0 ? '+$' : '-$'}${Math.abs(gap.total_pnl_gap).toFixed(2)}` : '—'}
+                </span>
+              </div>
+            </div>
             <ReportVersionList versions={versions} />
           </div>
         ))

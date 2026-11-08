@@ -72,6 +72,13 @@ time and answers 503 to further compute requests instead of queueing them.
 - **M2 Strategy sharing scope:** Strategy sharing is restricted to internal workspace members (governed by workspace RBAC). Public, unauthenticated, and cross-workspace sharing links are disabled until the M32 isolated execution sandbox lands.
 - **M32 Execution Sandbox limits:** Prior to enabling public code sharing or untrusted user code execution, M32 will enforce hard limits: wall-clock execution limits, memory quotas, and network sandboxing (no outbound network access).
 
+## User & Security (M19)
+
+- **Passkeys (FIDO2/WebAuthn) and Enterprise SSO (SAML 2.0 / Okta):**
+  - **Status:** Deferred by owner decision (not a launch blocker).
+  - **Target Milestone:** Enterprise Tier (Target Date: Q2 2027).
+  - **Trigger:** Activation of enterprise workspace licensing and organization domain-level authentication requirements. Password + TOTP 2FA and Google OAuth are active and verified on `main`. Formal deferral record is documented in `docs/gaps/m19-passkeys-sso-deferral.md`.
+
 ## Platform ops (M20) & Admin Console (M21)
 
 M20 is implemented on branch `m20/finish` and reaches `main` when it is merged. Status by step is in

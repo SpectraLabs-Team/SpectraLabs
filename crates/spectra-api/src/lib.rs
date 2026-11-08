@@ -995,6 +995,7 @@ fn risk_center_routes() -> Router<AppState> {
         )
         .route("/api/v1/risk/exposure-history", only(get(risk_center_api::get_exposure_history)))
         .route("/api/v1/risk/alerts", only(get(risk_center_api::get_alerts)))
+        .route("/api/v1/risk/alerts/dispatch", only(post(risk_center_api::dispatch_alerts)))
         .route("/api/v1/risk/replay/{decision_id}", only(post(risk_center_api::replay_decision)))
 }
 
@@ -1032,6 +1033,8 @@ fn paper_routes() -> Router<AppState> {
         .route("/api/v1/paper/gap/reports", only(get(gap_api::handle_list_gap_reports)))
         .route("/api/v1/paper/gap/reports/{id}", only(get(gap_api::handle_get_gap_report)))
         .route("/api/v1/paper/gap/reports/{id}/export", only(get(gap_api::handle_export_gap_report)))
+        .route("/api/v1/paper/gap/digest", only(get(gap_api::handle_get_gap_digest)))
+        .route("/api/v1/paper/gap/digest/dispatch", only(post(gap_api::handle_dispatch_gap_digest)))
 }
 
 /// M15: saved portfolios with target weights.

@@ -90,7 +90,7 @@ export const strategies: Lesson[] = [
     title: 'Breakout Trading',
     level: 'Intermediate',
     summary: 'Buy when price closes above the recent range, betting that the move continues. Written in the Strategy Studio rule language.',
-    keywords: ['breakout', 'donchian', 'channel', 'range', 'new high'],
+    keywords: ['breakout', 'donchian', 'channel', 'range breakout', 'new high'],
     blocks: [
       { type: 'p', text: 'A breakout strategy waits for price to leave a range (for example, close above the highest high of the last N bars) and enters in the direction of the break. Classic versions use 20- or 55-bar channels.' },
       { type: 'formula', tex: String.raw`\text{Enter long when } \text{Close}_t > \max(\text{High}_{t-1}, \dots, \text{High}_{t-N})` },
@@ -148,7 +148,7 @@ export const strategies: Lesson[] = [
     title: 'Buy-and-Hold & Equal Weight',
     level: 'Beginner',
     summary: 'Two built-in benchmark strategies: buy once and never trade, or keep every instrument at the same weight with periodic rebalancing.',
-    keywords: ['buy and hold', 'equal weight', 'rebalancing', 'benchmark', 'passive'],
+    keywords: ['buy and hold', 'equal weight', 'equal weight rebalancing', 'passive benchmark', 'passive'],
     blocks: [
       { type: 'p', text: 'Every active strategy should be compared with doing almost nothing. Spectra ships two built-in baselines.' },
       { type: 'h', text: 'Buy and hold' },

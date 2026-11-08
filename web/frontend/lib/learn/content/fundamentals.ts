@@ -10,7 +10,7 @@ export const fundamentals: Lesson[] = [
     level: 'Beginner',
     featured: true,
     summary: 'Trading is buying and selling financial instruments to profit from price changes. This lesson covers the core ideas every other lesson builds on.',
-    keywords: ['introduction', 'basics', 'investing', 'long', 'short'],
+    keywords: ['trading basics', 'investing', 'long position', 'trading overview'],
     blocks: [
       { type: 'p', text: 'Trading means buying and selling financial instruments (shares, ETFs, futures, currencies) with the aim of profiting from changes in their price. Where investing usually means holding for years, trading focuses on shorter horizons and on *when* to enter and exit.' },
       { type: 'h', text: 'Long and short' },
@@ -80,7 +80,7 @@ export const fundamentals: Lesson[] = [
     title: 'Buy and Sell Orders',
     level: 'Beginner',
     summary: 'What happens to your position, cash and buying power when you buy, sell, short or cover.',
-    keywords: ['buy', 'sell', 'short', 'cover', 'position'],
+    keywords: ['buy orders', 'sell orders', 'short selling', 'cover', 'open position'],
     blocks: [
       { type: 'p', text: 'Every order has a **side** (buy or sell), a **quantity** and a **type**. What it does depends on the position you already hold.' },
       { type: 'table', head: ['Current position', 'Buy order', 'Sell order'], rows: [
@@ -100,7 +100,7 @@ export const fundamentals: Lesson[] = [
     title: 'Bid Price and Ask Price',
     level: 'Beginner',
     summary: 'The bid is the highest price a buyer will pay right now; the ask is the lowest price a seller will accept.',
-    keywords: ['bid', 'ask', 'offer', 'quote', 'nbbo'],
+    keywords: ['bid', 'ask price', 'offer', 'quote', 'nbbo'],
     blocks: [
       { type: 'p', text: 'At any moment a stock has two prices, not one. The **bid** is the best (highest) price someone is willing to pay; the **ask** (or offer) is the best (lowest) price someone is willing to sell at. The “last price” you see on a chart is simply where the most recent trade happened.' },
       { type: 'list', items: ['You **buy at the ask** with a market order.', 'You **sell at the bid** with a market order.', 'The **mid price** is halfway between them.'] },
@@ -135,7 +135,7 @@ export const fundamentals: Lesson[] = [
     title: 'Liquidity',
     level: 'Beginner',
     summary: 'How easily you can trade a size without moving the price. Liquid markets have tight spreads and deep order books.',
-    keywords: ['liquidity', 'volume', 'adv', 'capacity', 'participation'],
+    keywords: ['liquidity', 'market liquidity', 'adv', 'capacity', 'market participation'],
     blocks: [
       { type: 'p', text: 'A market is **liquid** when large quantities can be bought or sold quickly at prices close to the current one. Large-cap stocks such as major index members are very liquid; small caps and thinly traded ETFs are not.' },
       { type: 'h', text: 'Signs of liquidity' },
@@ -171,7 +171,7 @@ export const fundamentals: Lesson[] = [
     title: 'Slippage',
     level: 'Beginner',
     summary: 'The difference between the price you expected and the price you actually got.',
-    keywords: ['slippage', 'execution', 'market impact', 'fill price'],
+    keywords: ['slippage', 'execution slippage', 'market impact', 'fill price'],
     blocks: [
       { type: 'p', text: 'You see a stock at $50.00, send a market buy, and get filled at $50.03. The three cents are **slippage**. It comes from crossing the spread, from the price moving between your decision and the fill, and from your own order consuming the order book.' },
       { type: 'h', text: 'Sources of slippage' },
@@ -187,7 +187,7 @@ export const fundamentals: Lesson[] = [
     title: 'Market Depth',
     level: 'Intermediate',
     summary: 'How much quantity is waiting at each price level of the order book, and what it tells you about the cost of larger orders.',
-    keywords: ['depth', 'level 2', 'order book', 'size', 'impact'],
+    keywords: ['depth of book', 'level 2 quotes', 'market depth book', 'size', 'market depth impact'],
     blocks: [
       { type: 'p', text: 'The best bid and ask show only the top of the book. **Market depth** (level 2 data) shows the quantity resting at the next prices as well. Deep books absorb large orders with little price change; thin books do not.' },
       { type: 'diagram', id: 'order-book' },
@@ -204,7 +204,7 @@ export const fundamentals: Lesson[] = [
     title: 'Order Execution',
     level: 'Intermediate',
     summary: 'What happens between sending an order and seeing a fill: routing, matching, partial fills and confirmations.',
-    keywords: ['execution', 'routing', 'fill', 'partial fill', 'confirmation'],
+    keywords: ['execution', 'routing', 'order fill', 'partial fill', 'confirmation'],
     blocks: [
       { type: 'list', ordered: true, items: [
         '**Submit**: your order goes to the broker, which checks buying power and risk rules.',
@@ -224,7 +224,7 @@ export const fundamentals: Lesson[] = [
     title: 'Trading Sessions',
     level: 'Beginner',
     summary: 'US stocks trade in a regular session from 9:30 to 16:00 Eastern time, with thinner pre-market and after-hours sessions around it.',
-    keywords: ['market hours', 'pre market', 'after hours', 'session', 'open', 'close', 'eastern time'],
+    keywords: ['market hours', 'pre market', 'after hours', 'session', 'session open', 'close', 'eastern time'],
     blocks: [
       { type: 'table', head: ['Session', 'Time (US Eastern)', 'Character'], rows: [
         ['Pre-market', '4:00 – 9:30', 'Thin volume, wide spreads, reacts to overnight news'],

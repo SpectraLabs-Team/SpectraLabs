@@ -446,7 +446,7 @@ describe('Search', () => {
     for (const l of LESSONS) {
       for (const k of l.keywords ?? []) {
         const rank = top(k, 10).indexOf(key(l));
-        assert.ok(rank >= 0 && rank < 3, `keyword "${k}" ranks ${key(l)} ${rank < 0 ? 'outside the top 10' : `#${rank + 1}`}: make it more specific or drop it`);
+        assert.equal(rank, 0, `keyword "${k}" ranks ${key(l)} #${rank + 1} instead of #1: make it more specific or drop it`);
       }
     }
   });

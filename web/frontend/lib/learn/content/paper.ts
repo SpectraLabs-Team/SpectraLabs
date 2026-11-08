@@ -14,7 +14,7 @@ export const paper: Lesson[] = [
     level: 'Beginner',
     featured: true,
     summary: 'Trading live markets with a simulated account: real prices, real order types, no real money.',
-    keywords: ['paper trading', 'demo account', 'simulated', 'practice', 'forward test'],
+    keywords: ['paper trading', 'demo account', 'paper simulation', 'practice', 'forward test'],
     blocks: [
       { type: 'p', text: 'Paper trading lets you place orders in a simulated brokerage account that tracks real market prices. You learn the mechanics (order tickets, statuses, positions, buying power) and you can forward-test a strategy on data it has never seen, without risking capital.' },
       { type: 'callout', tone: 'warning', title: 'Simulated funds', text: DISCLAIMER },
@@ -32,7 +32,7 @@ export const paper: Lesson[] = [
     title: 'How Alpaca Paper Trading Works',
     level: 'Beginner',
     summary: 'Alpaca runs a simulated brokerage account against live market data. Spectra connects to it with your paper API keys and routes orders through its risk checks.',
-    keywords: ['alpaca', 'broker', 'paper api', 'iex', 'market data'],
+    keywords: ['alpaca', 'paper broker', 'paper api', 'iex', 'alpaca market data'],
     blocks: [
       { type: 'p', text: 'Alpaca is a US broker with an API-first design. Every Alpaca account comes with a **paper** environment (`paper-api.alpaca.markets`) that has its own keys, its own simulated balance and its own order history, completely separate from any live account.' },
       { type: 'list', ordered: true, items: [
@@ -127,7 +127,7 @@ export const paper: Lesson[] = [
     title: 'Placing Buy and Sell Orders',
     level: 'Beginner',
     summary: 'Use the order ticket to choose side, type and quantity, review the order, then submit it to your Alpaca paper account.',
-    keywords: ['order ticket', 'buy', 'sell', 'limit', 'submit', 'review'],
+    keywords: ['order ticket', 'paper buy', 'paper sell', 'paper limit', 'submit', 'review'],
     blocks: [
       { type: 'list', ordered: true, items: [
         'Pick a symbol from search or your watchlist.',
@@ -150,7 +150,7 @@ export const paper: Lesson[] = [
     title: 'Understanding Order Statuses',
     level: 'Beginner',
     summary: 'What new, accepted, partially filled, filled, canceled, expired and rejected mean for a paper order, and what to do about each.',
-    keywords: ['order status', 'filled', 'partially filled', 'canceled', 'rejected', 'expired', 'accepted', 'pending'],
+    keywords: ['order status', 'paper filled', 'paper partially filled', 'canceled', 'paper rejected', 'paper expired', 'accepted', 'paper pending'],
     blocks: [
       { type: 'table', head: ['Alpaca status', 'Meaning', 'What to do'], rows: [
         ['new / accepted / pending_new', 'Received and working (or queued until the market opens)', 'Wait, or cancel it'],
@@ -172,7 +172,7 @@ export const paper: Lesson[] = [
     title: 'Monitoring Positions',
     level: 'Beginner',
     summary: 'The positions table shows each holding’s quantity, average entry, current price, market value and unrealized P&L.',
-    keywords: ['positions', 'holdings', 'unrealized', 'average entry', 'close position'],
+    keywords: ['positions', 'holdings', 'paper unrealized', 'average entry', 'close position'],
     blocks: [
       { type: 'table', head: ['Column', 'Meaning'], rows: [
         ['Side', 'Long or short'],
@@ -203,7 +203,7 @@ export const paper: Lesson[] = [
     title: 'Equity, Cash & Buying Power',
     level: 'Beginner',
     summary: 'Equity is what the account is worth; cash is what is not invested; buying power is how much more you can buy, including margin.',
-    keywords: ['equity', 'cash', 'buying power', 'margin', 'regt', 'last equity'],
+    keywords: ['account equity', 'cash', 'buying power', 'account margin', 'regt', 'last equity'],
     blocks: [
       { type: 'table', head: ['Figure', 'Meaning'], rows: [
         ['Total equity', 'Cash + market value of all positions'],

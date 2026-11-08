@@ -10,7 +10,7 @@ export const riskMetrics = [
     level: 'Intermediate',
     featured: true,
     summary: 'Risk-adjusted return: the average excess return per unit of volatility, annualized.',
-    keywords: ['sharpe', 'risk adjusted', 'reward to risk', 'sr'],
+    keywords: ['sharpe', 'sharpe risk adjusted', 'sharpe reward to risk', 'sr'],
     what: [
       'The Sharpe ratio divides the strategy’s average return above the risk-free rate by the standard deviation of its returns. It asks how much extra return you earned for each unit of variability you accepted.',
       'Spectra computes it on the period returns of the equity curve and annualizes it with the run’s periods-per-year setting.',
@@ -142,7 +142,7 @@ export const riskMetrics = [
     level: 'Beginner',
     featured: true,
     summary: 'How much returns vary from period to period, expressed as an annual standard deviation.',
-    keywords: ['standard deviation', 'annualized volatility', 'sigma', 'vol'],
+    keywords: ['return standard deviation', 'annualized volatility', 'sigma', 'vol'],
     what: [
       'Volatility measures the spread of returns around their average. In a backtest it is the standard deviation of the equity curve’s period returns, scaled to a year. In the Risk & Stress Lab it is the model volatility used for the Monte Carlo simulation.',
     ],
@@ -330,7 +330,7 @@ export const riskMetrics = [
     title: 'EVT VaR (Extreme Value Theory)',
     level: 'Advanced',
     summary: 'A tail estimate that fits a Generalized Pareto distribution to the largest simulated losses instead of relying on the normal shape.',
-    keywords: ['evt', 'extreme value theory', 'gpd', 'peaks over threshold', 'fat tails'],
+    keywords: ['evt', 'extreme value theory', 'gpd', 'peaks over threshold', 'evt fat tails'],
     what: [
       'Extreme Value Theory models only the extreme part of a distribution. The peaks-over-threshold method takes every loss beyond a high threshold (the 85th percentile in the Risk & Stress Lab) and fits a Generalized Pareto distribution (GPD) to the excesses. VaR and expected shortfall are then read from the fitted tail.',
     ],
@@ -407,7 +407,7 @@ export const riskMetrics = [
     title: 'Gross Leverage',
     level: 'Intermediate',
     summary: 'The total size of all positions, long and short, as a multiple of equity.',
-    keywords: ['leverage', 'gross exposure', 'margin', 'buying power'],
+    keywords: ['leverage', 'gross exposure', 'margin', 'leverage buying power'],
     what: [
       'Gross leverage adds up the absolute market value of every position and divides it by equity. 1.0× means positions are worth as much as the account; 2.0× means they are worth twice as much, financed by borrowing or shorting.',
       'The Studio sidebar shows the paper account’s gross leverage against its limit.',
@@ -432,7 +432,7 @@ export const riskMetrics = [
     title: 'Concentration (HHI)',
     level: 'Intermediate',
     summary: 'How much of the portfolio sits in a few positions: the Herfindahl index of its gross weights, and the effective number of holdings it implies.',
-    keywords: ['hhi', 'herfindahl', 'concentration', 'diversification', 'effective n', 'position weight'],
+    keywords: ['hhi', 'herfindahl', 'concentration', 'hhi diversification', 'effective n', 'position weight'],
     what: [
       'The Herfindahl–Hirschman index (HHI) squares each position’s share of the portfolio’s gross exposure and adds the squares. It is 1 when one position holds everything and falls toward 0 as the exposure spreads over more positions.',
       'The Portfolio Studio shows HHI in points (HHI × 10,000) and the effective number of holdings, 1 / HHI.',

@@ -64,9 +64,11 @@ fn company_facts(version: u8) -> String {
 struct Mock {
     version: AtomicU8,
     user_agents: Mutex<Vec<String>>,
+    request_times: Mutex<Vec<std::time::Instant>>,
 }
 
 async fn tickers(State(m): State<Arc<Mock>>, headers: HeaderMap) -> String {
+    m.request_times.lock().unwrap().push(std::time::Instant::now());
     m.user_agents.lock().unwrap().push(headers["user-agent"].to_str().unwrap().to_string());
     json!({
         "0": {"cik_str": 1, "ticker": "EXA", "title": "Example Inc."},
@@ -76,6 +78,7 @@ async fn tickers(State(m): State<Arc<Mock>>, headers: HeaderMap) -> String {
 }
 
 async fn facts(State(m): State<Arc<Mock>>, Path(file): Path<String>) -> Result<String, StatusCode> {
+    m.request_times.lock().unwrap().push(std::time::Instant::now());
     match file.as_str() {
         "CIK0000000001.json" => Ok(company_facts(m.version.load(Ordering::SeqCst))),
         _ => Err(StatusCode::NOT_FOUND),
@@ -319,4 +322,53 @@ async fn a_schedule_queues_refreshes_when_due() {
     let (status, _) = fix.call(fix.editor, "DELETE", path, "").await;
     assert_eq!(status, 404);
     fix.clear_jobs().await;
+}
+
+#[tokio::test]
+async fn concurrent_refresh_jobs_respect_sec_rate_limit_spacing() {
+    let Some(pool) = pool().await else { return };
+    let fix1 = Fixture::new(pool.clone()).await;
+    let fix2 = Fixture::new(pool).await;
+    let (edgar, mock) = mock_edgar().await;
+
+    // Queue a refresh job in workspace 1
+    let (status1, queued1) = fix1
+        .call(fix1.editor, "POST", "/api/v1/fundamentals/refresh", &json!({ "symbols": ["EXA"] }).to_string())
+        .await;
+    assert_eq!(status1, 202);
+    let job_id1 = Uuid::parse_str(queued1["job_id"].as_str().unwrap()).unwrap();
+
+    // Queue a refresh job in workspace 2
+    let (status2, queued2) = fix2
+        .call(fix2.editor, "POST", "/api/v1/fundamentals/refresh", &json!({ "symbols": ["EXA"] }).to_string())
+        .await;
+    assert_eq!(status2, 202);
+    let job_id2 = Uuid::parse_str(queued2["job_id"].as_str().unwrap()).unwrap();
+
+    // Clear request times recorded during setup/mock startup if any
+    mock.request_times.lock().unwrap().clear();
+
+    // Run both jobs concurrently
+    let (res1, res2) = tokio::join!(fix1.run(job_id1, Ok(&edgar)), fix2.run(job_id2, Ok(&edgar)),);
+    assert!(matches!(res1, RefreshOutcome::Done(_)));
+    assert!(matches!(res2, RefreshOutcome::Done(_)));
+
+    fix1.clear_jobs().await;
+    fix2.clear_jobs().await;
+
+    let mut times = mock.request_times.lock().unwrap().clone();
+    // Two jobs each fetching ticker map + EXA Company Facts = 4 requests
+    assert_eq!(times.len(), 4, "expected 4 requests to mock EDGAR across both jobs: {times:?}");
+    times.sort();
+
+    // Measure the spacing between consecutive requests
+    for i in 1..times.len() {
+        let gap = times[i].duration_since(times[i - 1]);
+        // MIN_REQUEST_GAP is 125ms; allow 120ms to tolerate OS clock/scheduling jitter
+        assert!(
+            gap >= std::time::Duration::from_millis(120),
+            "request {i} occurred {gap:?} after request {}, violating SEC 125ms rate limit",
+            i - 1
+        );
+    }
 }

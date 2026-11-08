@@ -63,6 +63,18 @@ pub const METRICS: &[MetricConcepts] = &[
         unit: "USD",
     },
     MetricConcepts { metric: "gross_profit", taxonomy: "us-gaap", concepts: &["GrossProfit"], unit: "USD" },
+    MetricConcepts {
+        metric: "operating_expenses",
+        taxonomy: "us-gaap",
+        concepts: &["OperatingExpenses"],
+        unit: "USD",
+    },
+    MetricConcepts {
+        metric: "interest_expense",
+        taxonomy: "us-gaap",
+        concepts: &["InterestExpense", "InterestAndDebtExpense"],
+        unit: "USD",
+    },
     MetricConcepts { metric: "total_assets", taxonomy: "us-gaap", concepts: &["Assets"], unit: "USD" },
     MetricConcepts {
         metric: "total_liabilities",
@@ -80,6 +92,12 @@ pub const METRICS: &[MetricConcepts] = &[
         metric: "current_assets",
         taxonomy: "us-gaap",
         concepts: &["AssetsCurrent"],
+        unit: "USD",
+    },
+    MetricConcepts {
+        metric: "inventory",
+        taxonomy: "us-gaap",
+        concepts: &["InventoryNet", "InventoriesNet"],
         unit: "USD",
     },
     MetricConcepts {

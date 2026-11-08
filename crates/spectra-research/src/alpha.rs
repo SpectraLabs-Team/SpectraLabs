@@ -365,7 +365,7 @@ pub struct QuantileAnalysis {
 /// Owner configurable gate threshold for signal validation (M12 Task 7).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SignalGateThreshold {
-    /// Minimum acceptable mean Information Coefficient (e.g. 0.03).
+    /// Minimum acceptable mean Information Coefficient (e.g. 0.05).
     pub min_mean_ic: Option<f64>,
     /// Minimum acceptable t-statistic (e.g. 2.0).
     pub min_t_stat: Option<f64>,
@@ -373,9 +373,23 @@ pub struct SignalGateThreshold {
     pub max_turnover: Option<f64>,
     /// Minimum signal half-life in days (e.g. 3.0).
     pub min_half_life_days: Option<f64>,
+    /// Maximum acceptable signal half-life in days (e.g. 20.0).
+    pub max_half_life_days: Option<f64>,
 }
 
 impl SignalGateThreshold {
+    /// Default gate thresholds approved by the owner:
+    /// Mean IC >= 0.05, t-statistic >= 2.0, Half-life <= 20.0 days.
+    pub fn owner_default() -> Self {
+        Self {
+            min_mean_ic: Some(0.05),
+            min_t_stat: Some(2.0),
+            max_turnover: None,
+            min_half_life_days: None,
+            max_half_life_days: Some(20.0),
+        }
+    }
+
     /// Evaluates if the signal test passes the threshold criteria.
     pub fn evaluate(&self, mean_ic: f64, t_stat: f64, turnover: f64, half_life: f64) -> (bool, Vec<String>) {
         let mut passed = true;
@@ -395,6 +409,7 @@ impl SignalGateThreshold {
         }
         if let Some(max_turn) = self.max_turnover {
             if turnover > max_turn {
+                passed = false;
                 let turn_pct = turnover * 100.0;
                 let max_pct = max_turn * 100.0;
                 reasons.push(format!("Top-quantile turnover {turn_pct:.2}% above limit {max_pct:.2}%"));
@@ -402,7 +417,16 @@ impl SignalGateThreshold {
         }
         if let Some(min_hl) = self.min_half_life_days {
             if half_life < min_hl {
+                passed = false;
                 reasons.push(format!("Half-life {half_life:.1} days below required {min_hl:.1} days"));
+            }
+        }
+        if let Some(max_hl) = self.max_half_life_days {
+            if half_life > max_hl {
+                passed = false;
+                reasons.push(format!(
+                    "Half-life {half_life:.1} days exceeds maximum threshold {max_hl:.1} days"
+                ));
             }
         }
 

@@ -27,12 +27,24 @@ import {
   Layers,
   Play,
   RotateCcw,
+  BookmarkPlus,
+  BookmarkCheck,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
   TrendingUp,
 } from 'lucide-react';
-import { exportSignalTest, getSignalTest, listSignalTests, runSignalTest, type SignalTestDetailView, type SignalTestSummaryView } from '@/lib/alpha';
+import {
+  exportSignalTest,
+  getSignalTest,
+  listSignalTests,
+  runSignalTest,
+  listSignals,
+  saveSignal,
+  type SavedSignalView,
+  type SignalTestDetailView,
+  type SignalTestSummaryView,
+} from '@/lib/alpha';
 import { chartColors, useTheme } from '@/lib/theme';
 import { cn } from '@/lib/utils';
 import { SignalTestReportPanel } from './ReportPanel';
@@ -71,9 +83,18 @@ export function AlphaWorkbench() {
   const [datasetVersionId, setDatasetVersionId] = useState('');
   const [primaryHorizon, setPrimaryHorizon] = useState(5);
   const [quantileCount, setQuantileCount] = useState(5);
-  const [minMeanIc, setMinMeanIc] = useState('0.03');
+  // Owner approved default gate thresholds: Mean IC >= 0.05, t-stat >= 2.0, Half-life <= 20 days.
+  const [minMeanIc, setMinMeanIc] = useState('0.05');
   const [minTStat, setMinTStat] = useState('2.0');
-  const [maxHalfLife, setMaxHalfLife] = useState('');
+  const [maxHalfLife, setMaxHalfLife] = useState('20.0');
+
+  // Signal Library State
+  const [savedSignals, setSavedSignals] = useState<SavedSignalView[]>([]);
+  const [selectedSignalId, setSelectedSignalId] = useState<string>('');
+  const [signalSaveName, setSignalSaveName] = useState('');
+  const [signalSaveDesc, setSignalSaveDesc] = useState('');
+  const [savingSignal, setSavingSignal] = useState(false);
+  const [saveSuccessMessage, setSaveSuccessMessage] = useState<string | null>(null);
 
   const effectiveSignalName = signalType === 'custom' ? customSignalName.trim() || 'custom_signal' : signalType;
 
@@ -96,8 +117,18 @@ export function AlphaWorkbench() {
     }
   };
 
+  const loadSavedSignals = async () => {
+    try {
+      const list = await listSignals();
+      setSavedSignals(list);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     loadTests();
+    loadSavedSignals();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -120,6 +151,71 @@ export function AlphaWorkbench() {
     };
   }, [selectedId, reportsRefresh]);
 
+  const handleSaveToLibrary = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signalSaveName.trim()) return;
+    try {
+      setSavingSignal(true);
+      setError(null);
+      const parsedMinIc = minMeanIc ? parseFloat(minMeanIc) : null;
+      const parsedMinT = minTStat ? parseFloat(minTStat) : null;
+      const parsedMaxHalf = maxHalfLife ? parseFloat(maxHalfLife) : null;
+
+      const res = await saveSignal({
+        name: signalSaveName.trim(),
+        description: signalSaveDesc.trim() || undefined,
+        signal_type: effectiveSignalName,
+        parameters: {
+          universe,
+          datasetVersionId,
+          primaryHorizon,
+          quantileCount,
+        },
+        threshold: {
+          min_mean_ic: parsedMinIc,
+          min_t_stat: parsedMinT,
+          max_half_life_days: parsedMaxHalf,
+        },
+      });
+
+      setSaveSuccessMessage(`Saved version ${res.version} to Signal Library!`);
+      setTimeout(() => setSaveSuccessMessage(null), 4000);
+      setSignalSaveName('');
+      setSignalSaveDesc('');
+      await loadSavedSignals();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save signal to library');
+    } finally {
+      setSavingSignal(false);
+    }
+  };
+
+  const handleReloadSavedSignal = (sig: SavedSignalView) => {
+    setSelectedSignalId(sig.id);
+    if (['momentum_5d', 'mean_reversion_5d', 'sma_crossover_10_30', 'sentiment'].includes(sig.signal_type)) {
+      setSignalType(sig.signal_type as typeof signalType);
+    } else {
+      setSignalType('custom');
+      setCustomSignalName(sig.signal_type);
+    }
+    const params = sig.parameters as Record<string, unknown>;
+    if (typeof params?.universe === 'string') setUniverse(params.universe);
+    if (typeof params?.datasetVersionId === 'string') setDatasetVersionId(params.datasetVersionId);
+    if (typeof params?.primaryHorizon === 'number') setPrimaryHorizon(params.primaryHorizon);
+    if (typeof params?.quantileCount === 'number') setQuantileCount(params.quantileCount);
+    if (sig.threshold) {
+      if (sig.threshold.min_mean_ic !== undefined && sig.threshold.min_mean_ic !== null) {
+        setMinMeanIc(sig.threshold.min_mean_ic.toString());
+      }
+      if (sig.threshold.min_t_stat !== undefined && sig.threshold.min_t_stat !== null) {
+        setMinTStat(sig.threshold.min_t_stat.toString());
+      }
+      if (sig.threshold.max_half_life_days !== undefined && sig.threshold.max_half_life_days !== null) {
+        setMaxHalfLife(sig.threshold.max_half_life_days.toString());
+      }
+    }
+  };
+
   const handleRunTest = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -136,6 +232,7 @@ export function AlphaWorkbench() {
 
       const res = await runSignalTest({
         signal_name: effectiveSignalName,
+        signal_id: selectedSignalId || undefined,
         symbols: symbols.length > 0 ? symbols : undefined,
         dataset_version_id: datasetVersionId.trim() || undefined,
         primary_horizon: primaryHorizon,
@@ -145,7 +242,7 @@ export function AlphaWorkbench() {
             ? {
                 min_mean_ic: parsedMinIc,
                 min_t_stat: parsedMinT,
-                min_half_life_days: parsedMaxHalf,
+                max_half_life_days: parsedMaxHalf,
               }
             : null,
       });
@@ -237,6 +334,27 @@ export function AlphaWorkbench() {
             <p className="mt-1 text-xs text-ink/50">Run multi-horizon rank IC and decay metrics against point-in-time data.</p>
 
             <form onSubmit={handleRunTest} className="mt-4 space-y-4">
+              {savedSignals.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-ink">Reload Saved Signal (Signal Library)</label>
+                  <select
+                    value={selectedSignalId}
+                    onChange={(e) => {
+                      const found = savedSignals.find((s) => s.id === e.target.value);
+                      if (found) handleReloadSavedSignal(found);
+                    }}
+                    className="mt-1.5 block w-full rounded-lg border border-accent/40 bg-accent/[0.04] px-3 py-2 text-xs font-medium text-ink focus:border-accent focus:outline-none"
+                  >
+                    <option value="">-- Choose saved signal to reload --</option>
+                    {savedSignals.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} (v{s.latest_version} · {s.signal_type})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-medium text-ink">Signal Generator</label>
                 <select
@@ -316,26 +434,36 @@ export function AlphaWorkbench() {
               </div>
 
               <div className="border-t border-ink/[0.06] pt-3">
-                <p className="font-mono text-[10px] uppercase tracking-wider text-ink/50">Owner Gate Thresholds</p>
-                <div className="mt-2 grid grid-cols-2 gap-3">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-ink/50">Owner Gate Thresholds (M12)</p>
+                <div className="mt-2 grid grid-cols-3 gap-2">
                   <div>
-                    <label className="block text-[11px] text-ink/70">Min Mean IC</label>
+                    <label className="block text-[10px] text-ink/70">Min Mean IC</label>
                     <input
                       type="number"
                       step="0.005"
                       value={minMeanIc}
                       onChange={(e) => setMinMeanIc(e.target.value)}
-                      className="mt-1 block w-full rounded-lg border border-ink/[0.12] bg-canvas px-2.5 py-1.5 text-xs text-ink"
+                      className="mt-1 block w-full rounded-lg border border-ink/[0.12] bg-canvas px-2 py-1.5 text-xs text-ink"
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] text-ink/70">Min t-statistic</label>
+                    <label className="block text-[10px] text-ink/70">Min t-stat</label>
                     <input
                       type="number"
                       step="0.1"
                       value={minTStat}
                       onChange={(e) => setMinTStat(e.target.value)}
-                      className="mt-1 block w-full rounded-lg border border-ink/[0.12] bg-canvas px-2.5 py-1.5 text-xs text-ink"
+                      className="mt-1 block w-full rounded-lg border border-ink/[0.12] bg-canvas px-2 py-1.5 text-xs text-ink"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-ink/70">Max Half-Life (d)</label>
+                    <input
+                      type="number"
+                      step="1.0"
+                      value={maxHalfLife}
+                      onChange={(e) => setMaxHalfLife(e.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-ink/[0.12] bg-canvas px-2 py-1.5 text-xs text-ink"
                     />
                   </div>
                 </div>
@@ -358,6 +486,38 @@ export function AlphaWorkbench() {
                   </>
                 )}
               </button>
+
+              <div className="border-t border-ink/[0.06] pt-3">
+                <p className="font-mono text-[10px] uppercase tracking-wider text-ink/50">Save Signal to Library (M12)</p>
+                <div className="mt-2 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Signal Name (e.g. momentum_v1)"
+                    value={signalSaveName}
+                    onChange={(e) => setSignalSaveName(e.target.value)}
+                    className="block w-full rounded-lg border border-ink/[0.12] bg-canvas px-2.5 py-1.5 text-xs text-ink"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Description / Hypothesis"
+                    value={signalSaveDesc}
+                    onChange={(e) => setSignalSaveDesc(e.target.value)}
+                    className="block w-full rounded-lg border border-ink/[0.12] bg-canvas px-2.5 py-1.5 text-xs text-ink"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveToLibrary}
+                    disabled={savingSignal || !signalSaveName.trim()}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-ink/[0.12] bg-canvas px-3 py-1.5 text-xs font-medium text-ink hover:bg-ink/[0.04] disabled:opacity-50"
+                  >
+                    <BookmarkPlus className="h-3.5 w-3.5 text-accent" />
+                    {savingSignal ? 'Saving...' : 'Save New Version to Library'}
+                  </button>
+                  {saveSuccessMessage && (
+                    <p className="text-[11px] text-profit font-medium">{saveSuccessMessage}</p>
+                  )}
+                </div>
+              </div>
             </form>
           </div>
 

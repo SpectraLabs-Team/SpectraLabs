@@ -255,6 +255,8 @@ pub struct HoldoutEvaluationView {
     pub holdout_id: Uuid,
     pub workspace_id: Uuid,
     pub strategy_version_id: Option<Uuid>,
+    pub run_id: Option<Uuid>,
+    pub status: String,
     pub evaluation_num: i32,
     pub metrics: serde_json::Value,
     pub dsr: Option<f64>,
@@ -265,11 +267,15 @@ pub struct HoldoutEvaluationView {
 
 impl From<HoldoutEvaluation> for HoldoutEvaluationView {
     fn from(e: HoldoutEvaluation) -> Self {
+        let is_valid = e.metrics.get("valid").and_then(serde_json::Value::as_bool).unwrap_or(true);
+        let status = if is_valid { "succeeded".to_string() } else { "failed".to_string() };
         Self {
             id: e.id,
             holdout_id: e.holdout_id,
             workspace_id: e.workspace_id,
             strategy_version_id: e.strategy_version_id,
+            run_id: Some(e.id),
+            status,
             evaluation_num: e.evaluation_num,
             metrics: e.metrics,
             dsr: e.dsr,
@@ -640,6 +646,16 @@ pub(crate) async fn export_sweep(
         return store_and_send(&pool, ws, &id, &sweep, "pdf", "application/pdf", filename, pdf_bytes).await;
     }
 
+    let csv = generate_validation_csv(&sweep, &trials, holdout_eval.as_ref());
+    let filename = format!("sweep-{}-validation-report.csv", sweep.id);
+    store_and_send(&pool, ws, &id, &sweep, "csv", "text/csv; charset=utf-8", filename, csv.into_bytes()).await
+}
+
+pub fn generate_validation_csv(
+    sweep: &OptimizationSweep,
+    trials: &[OptimizationTrial],
+    holdout_eval: Option<&HoldoutEvaluation>,
+) -> String {
     let mut csv = String::new();
     csv.push_str("# SpectraLabs M4 Optimization & Validation Report\n");
     csv.push_str(&format!("# Sweep ID: {}\n", sweep.id));
@@ -662,6 +678,9 @@ pub(crate) async fn export_sweep(
         "# Probabilistic Sharpe Ratio (PSR): {}\n",
         sweep.psr.map_or("-".to_string(), |v| format!("{v:.4}"))
     ));
+    csv.push_str(
+        "# PSR assumption: serially independent returns, normal distribution, and independent trials\n",
+    );
     csv.push_str(&format!(
         "# Minimum Track Record Length (MinTRL): {}\n",
         sweep.min_trl.map_or("-".to_string(), |v| format!("{v:.2}"))
@@ -675,7 +694,7 @@ pub(crate) async fn export_sweep(
         csv.push_str("# Holdout Evaluation: None\n");
     }
     csv.push_str("\ntrial_num,objective_value,returns_mean,returns_vol,params\n");
-    for t in &trials {
+    for t in trials {
         let p_str = serde_json::to_string(&t.params).unwrap_or_default().replace('"', "\"\"");
         csv.push_str(&format!(
             "{},{},{},{},\"{}\"\n",
@@ -686,9 +705,7 @@ pub(crate) async fn export_sweep(
             p_str
         ));
     }
-
-    let filename = format!("sweep-{}-validation-report.csv", sweep.id);
-    store_and_send(&pool, ws, &id, &sweep, "csv", "text/csv; charset=utf-8", filename, csv.into_bytes()).await
+    csv
 }
 
 /// Stores an export as the next version of the sweep's validation report (M16), then sends it.
@@ -1596,6 +1613,10 @@ pub(crate) async fn evaluate_holdout(
         );
     };
     let cfg = spectra_engine::BacktestConfig::default();
+    let strat_name = match &strategy_source {
+        StrategySource::Builtin { builtin, .. } => builtin.name.to_string(),
+        StrategySource::Dsl { .. } => "dsl".to_string(),
+    };
     // The DSR needs the variance of the trials in the experiment, which is not wired into holdout
     // evaluation yet, so it is reported as not defined (None), not as a fixed 0.05 (M26 task 5).
     let (metrics_json, dsr_val): (serde_json::Value, Option<f64>) = {
@@ -1638,7 +1659,25 @@ pub(crate) async fn evaluate_holdout(
     )
     .await
     {
-        Ok(eval) => to_json(200, &HoldoutEvaluationView::from(eval)),
+        Ok(eval) => {
+            let _ = sqlx::query(
+                "INSERT INTO runs (id, workspace_id, strategy_version_id, dataset_version_id, kind, status, params, metrics, counts_as_trial, strategy, dataset_id, finished_at) \
+                 VALUES ($1, $2, $3, $4, 'holdout_evaluation', 'succeeded', $5, $6, true, $7, $8, now()) \
+                 ON CONFLICT (id) DO NOTHING",
+            )
+            .bind(eval.id)
+            .bind(ws)
+            .bind(resolved_version_id)
+            .bind(version.id)
+            .bind(req.parameters.clone().unwrap_or(json!({})))
+            .bind(&metrics_json)
+            .bind(&strat_name)
+            .bind(&version.checksum)
+            .execute(&pool)
+            .await;
+
+            to_json(200, &HoldoutEvaluationView::from(eval))
+        }
         Err(e) => db_error(&e),
     }
 }
@@ -1746,5 +1785,14 @@ mod tests {
         let ascii = "x".repeat(50);
         assert_eq!(prefix_within(&ascii, 35), &ascii[..35], "ASCII input is cut at byte 35 as before");
         assert_eq!(prefix_within("short", 35), "short");
+    }
+
+    #[test]
+    fn validation_csv_contains_psr_assumption() {
+        let csv = generate_validation_csv(&sweep(), &trials(), Some(&holdout()));
+        assert!(csv.contains(
+            "# PSR assumption: serially independent returns, normal distribution, and independent trials\n"
+        ));
+        assert!(csv.contains("# Holdout Evaluation Num: 1\n"));
     }
 }

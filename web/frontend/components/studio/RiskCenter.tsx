@@ -18,6 +18,7 @@ import {
   ArrowRight,
   TrendingDown,
   Info,
+  Mail,
 } from 'lucide-react';
 import {
   LineChart,
@@ -40,6 +41,7 @@ import {
   getPositions,
   getExposureHistory,
   getRiskAlerts,
+  dispatchRiskAlerts,
   replayDecision,
   type RiskLimits,
   type KillSwitch,
@@ -245,6 +247,22 @@ export function RiskCenter() {
     }
   };
 
+  const [dispatchingAlerts, setDispatchingAlerts] = useState(false);
+  const [dispatchResult, setDispatchResult] = useState<string | null>(null);
+
+  const handleDispatchAlerts = async () => {
+    setDispatchingAlerts(true);
+    setDispatchResult(null);
+    try {
+      const res = await dispatchRiskAlerts();
+      setDispatchResult(`Delivered ${res.count} alerts via M27 email channel`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to dispatch alerts');
+    } finally {
+      setDispatchingAlerts(false);
+    }
+  };
+
   const isHalted = metrics?.kill_switch_active ?? false;
 
   return (
@@ -421,12 +439,23 @@ export function RiskCenter() {
       {/* Tab 1: Live Metrics Gauges */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          {/* Active Alerts Banner (Task 11) */}
+          {/* Active Alerts Banner (Task 11 / M8) */}
           {alerts.length > 0 && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 dark:border-amber-500/20 dark:bg-amber-950/20">
-              <div className="flex items-center gap-2 font-semibold text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="h-5 w-5 shrink-0" />
-                <span>Active Risk Warnings & Threshold Alerts ({alerts.length})</span>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2 font-semibold text-amber-600 dark:text-amber-400">
+                  <AlertTriangle className="h-5 w-5 shrink-0" />
+                  <span>Active Risk Warnings & Threshold Alerts ({alerts.length})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDispatchAlerts}
+                  disabled={dispatchingAlerts}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-surface/80 px-2.5 py-1 text-xs font-medium text-amber-700 shadow-xs hover:bg-surface disabled:opacity-50 dark:text-amber-300"
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  <span>{dispatchResult ? dispatchResult : dispatchingAlerts ? 'Delivering...' : 'Deliver via M27 Email'}</span>
+                </button>
               </div>
               <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
                 {alerts.map((a, idx) => (

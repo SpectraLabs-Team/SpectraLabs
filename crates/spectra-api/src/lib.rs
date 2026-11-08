@@ -995,6 +995,7 @@ fn risk_center_routes() -> Router<AppState> {
         )
         .route("/api/v1/risk/exposure-history", only(get(risk_center_api::get_exposure_history)))
         .route("/api/v1/risk/alerts", only(get(risk_center_api::get_alerts)))
+        .route("/api/v1/risk/alerts/dispatch", only(post(risk_center_api::dispatch_alerts)))
         .route("/api/v1/risk/replay/{decision_id}", only(post(risk_center_api::replay_decision)))
 }
 

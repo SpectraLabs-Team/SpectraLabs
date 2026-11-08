@@ -267,6 +267,20 @@ export const getRiskAlerts = (strategyId?: string): Promise<RiskAlertView[]> => 
   return request<RiskAlertView[]>(`/api/v1/risk/alerts${q}`);
 };
 
+export interface RiskAlertDispatchResponse {
+  status: string;
+  channel: string;
+  count: number;
+  alerts: RiskAlertView[];
+}
+
+export const dispatchRiskAlerts = (strategyId?: string): Promise<RiskAlertDispatchResponse> => {
+  const q = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
+  return request<RiskAlertDispatchResponse>(`/api/v1/risk/alerts/dispatch${q}`, {
+    method: 'POST',
+  });
+};
+
 export const replayDecision = (decisionId: string): Promise<ReplayDecisionView> =>
   request<ReplayDecisionView>(`/api/v1/risk/replay/${encodeURIComponent(decisionId)}`, {
     method: 'POST',

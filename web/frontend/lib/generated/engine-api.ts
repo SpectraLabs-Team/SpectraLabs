@@ -1701,10 +1701,27 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Check current portfolio metrics against alert thresholds (Task 11). */
+        /** Check current portfolio metrics against alert thresholds (Task 11 / M8). */
         get: operations["get_alerts"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/risk/alerts/dispatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dispatch active risk alerts to M27 notification channel (Task 11 / M8 / M27). */
+        post: operations["dispatch_alerts"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4728,6 +4745,12 @@ export interface components {
             resolved_symbol: string;
             /** @description Original constituent symbol. */
             symbol: string;
+        };
+        RiskAlertDispatchResponse: {
+            alerts: components["schemas"]["RiskAlertView"][];
+            channel: string;
+            count: number;
+            status: string;
         };
         RiskAlertView: {
             /** Format: double */
@@ -10257,6 +10280,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RiskAlertView"][];
+                };
+            };
+        };
+    };
+    dispatch_alerts: {
+        parameters: {
+            query?: {
+                strategy_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Dispatched risk alerts to M27 email delivery channel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskAlertDispatchResponse"];
                 };
             };
         };

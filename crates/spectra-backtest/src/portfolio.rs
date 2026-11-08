@@ -481,23 +481,12 @@ pub fn annualized_covariance(
     closes: &[Vec<f64>],
     periods_per_year: f64,
 ) -> Result<Vec<Vec<f64>>, PortfolioError> {
-    check_symbols(symbols, closes.len())?;
-    let mut returns: Vec<Vec<f64>> = Vec::with_capacity(symbols.len());
-    for (symbol, series) in symbols.iter().zip(closes) {
-        check_periods(symbol, periods_per_year)?;
-        let mut r = log_returns(symbol, series)?;
-        if series.len() != closes[0].len() {
-            return Err(PortfolioError::UnequalHistory {
-                symbol: symbol.clone(),
-                need: closes[0].len(),
-                have: series.len(),
-            });
-        }
+    let mut returns = aligned_log_returns(symbols, closes, periods_per_year)?;
+    for r in &mut returns {
         let mean = r.iter().sum::<f64>() / r.len() as f64;
-        for x in &mut r {
+        for x in r.iter_mut() {
             *x -= mean;
         }
-        returns.push(r);
     }
     let scale = periods_per_year / (returns[0].len() as f64 - 1.0);
     let n = returns.len();
@@ -510,6 +499,35 @@ pub fn annualized_covariance(
         }
     }
     Ok(cov)
+}
+
+/// The daily log returns of every holding, after the history checks shared by the price-based
+/// estimates (risk parity here, the shrunk mean and covariance in [`crate::shrinkage`]): at least one
+/// unique symbol with one close series each, a valid `periods_per_year`, at least
+/// [`MIN_VOLATILITY_PRICES`] finite positive closes per holding, and every series the same length.
+///
+/// # Errors
+/// As [`annualized_covariance`].
+pub(crate) fn aligned_log_returns(
+    symbols: &[String],
+    closes: &[Vec<f64>],
+    periods_per_year: f64,
+) -> Result<Vec<Vec<f64>>, PortfolioError> {
+    check_symbols(symbols, closes.len())?;
+    let mut returns: Vec<Vec<f64>> = Vec::with_capacity(symbols.len());
+    for (symbol, series) in symbols.iter().zip(closes) {
+        check_periods(symbol, periods_per_year)?;
+        let r = log_returns(symbol, series)?;
+        if series.len() != closes[0].len() {
+            return Err(PortfolioError::UnequalHistory {
+                symbol: symbol.clone(),
+                need: closes[0].len(),
+                have: series.len(),
+            });
+        }
+        returns.push(r);
+    }
+    Ok(returns)
 }
 
 /// Risk parity (equal risk contribution) weights for a covariance matrix: `w_i >= 0`,

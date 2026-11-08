@@ -28,6 +28,17 @@ export interface OverlaySeries {
   visible?: boolean;
 }
 
+export interface SubPaneSeries {
+  id?: string;
+  indicator: IndicatorName | string;
+  name?: string;
+  color?: string;
+  values?: (number | null)[];
+  series?: Record<string, (number | null)[]>;
+  visible?: boolean;
+  params?: Record<string, number>;
+}
+
 export interface TradingChartProps {
   symbol: string;
   bars: CandleBar[];
@@ -40,6 +51,7 @@ export interface TradingChartProps {
   className?: string;
   priceFlash?: 'up' | 'down' | null;
   overlays?: OverlaySeries[];
+  subpanes?: SubPaneSeries[];
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -75,6 +87,7 @@ export function TradingChart({
   className = '',
   priceFlash = null,
   overlays = [],
+  subpanes = [],
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -198,9 +211,16 @@ export function TradingChart({
     // Layout dimensions
     const priceScaleWidth = 65;
     const timeScaleHeight = 24;
-    const volumeHeight = Math.floor(height * 0.18);
-    const chartHeight = height - timeScaleHeight;
-    const candleChartHeight = chartHeight - volumeHeight - 10;
+    const activeSubpanes = (subpanes || []).filter((sp) => sp.visible !== false);
+    const subCount = activeSubpanes.length;
+    const totalUsableHeight = height - timeScaleHeight;
+    const subPaneHeight =
+      subCount > 0 ? Math.min(110, Math.max(65, Math.floor((totalUsableHeight * 0.45) / subCount))) : 0;
+    const totalSubHeight = subCount * subPaneHeight;
+    const mainChartHeight = totalUsableHeight - totalSubHeight;
+    const volumeHeight = Math.floor(mainChartHeight * 0.18);
+    const chartHeight = totalUsableHeight;
+    const candleChartHeight = mainChartHeight - volumeHeight - 10;
     const chartWidth = width - priceScaleWidth;
 
     // Clear background
@@ -333,7 +353,7 @@ export function TradingChart({
     ctx.setLineDash([]);
 
     // Draw Volume Bars
-    const volBaseY = chartHeight;
+    const volBaseY = mainChartHeight;
     const volHeightMax = volumeHeight - 10;
 
     for (let i = 0; i < count; i++) {
@@ -658,6 +678,316 @@ export function TradingChart({
       }
     }
 
+    // Draw Sub-Panes (RSI, MACD, Stochastic, ATR, ADX, OBV, CCI, Williams %R, MFI, CMF, etc.)
+    if (activeSubpanes && activeSubpanes.length > 0) {
+      activeSubpanes.forEach((sp, sIdx) => {
+        const spTop = mainChartHeight + sIdx * subPaneHeight;
+        const spBottom = spTop + subPaneHeight;
+        const spInnerTop = spTop + 16;
+        const spInnerBottom = spBottom - 6;
+        const spInnerH = spInnerBottom - spInnerTop;
+
+        // Sub-pane top border separator
+        ctx.strokeStyle = inkA(0.12);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, spTop);
+        ctx.lineTo(width, spTop);
+        ctx.stroke();
+
+        // Determine min and max for this sub-pane in visible range
+        let minVal = Infinity;
+        let maxVal = -Infinity;
+        const ind = String(sp.indicator).toUpperCase();
+
+        if (ind === 'RSI' || ind === 'STOCH' || ind === 'MFI') {
+          minVal = 0;
+          maxVal = 100;
+        } else if (ind === 'WILLR') {
+          minVal = -100;
+          maxVal = 0;
+        } else if (ind === 'CMF') {
+          minVal = -0.5;
+          maxVal = 0.5;
+        } else if (ind === 'MACD') {
+          let absMax = 0.5;
+          for (let i = 0; i < count; i++) {
+            const idx = start + i;
+            for (const key of ['macd', 'signal', 'histogram']) {
+              const v = sp.series?.[key]?.[idx];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                if (Math.abs(v) > absMax) absMax = Math.abs(v);
+              }
+            }
+          }
+          minVal = -absMax * 1.15;
+          maxVal = absMax * 1.15;
+        } else if (ind === 'ATR') {
+          // ATR is strictly positive volatility
+          minVal = 0;
+          if (sp.values) {
+            for (let i = 0; i < count; i++) {
+              const v = sp.values[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                if (v > maxVal) maxVal = v;
+              }
+            }
+          }
+          maxVal = (maxVal > 0 ? maxVal : 1) * 1.15;
+        } else if (ind === 'OBV') {
+          // On-Balance Volume auto-scaling
+          if (sp.values) {
+            for (let i = 0; i < count; i++) {
+              const v = sp.values[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                if (v < minVal) minVal = v;
+                if (v > maxVal) maxVal = v;
+              }
+            }
+          }
+          const span = maxVal - minVal || 1000;
+          minVal -= span * 0.05;
+          maxVal += span * 0.05;
+        } else {
+          if (sp.values) {
+            for (let i = 0; i < count; i++) {
+              const v = sp.values[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                if (v < minVal) minVal = v;
+                if (v > maxVal) maxVal = v;
+              }
+            }
+          }
+          if (sp.series) {
+            for (const line of Object.values(sp.series)) {
+              for (let i = 0; i < count; i++) {
+                const v = line[start + i];
+                if (v !== null && v !== undefined && !isNaN(v)) {
+                  if (v < minVal) minVal = v;
+                  if (v > maxVal) maxVal = v;
+                }
+              }
+            }
+          }
+          if (!isFinite(minVal) || !isFinite(maxVal)) {
+            minVal = 0;
+            maxVal = 100;
+          }
+          const valRange = maxVal - minVal || 1;
+          minVal = minVal - valRange * 0.08;
+          maxVal = maxVal + valRange * 0.08;
+        }
+
+        const spRange = maxVal - minVal || 1;
+        const spValueToY = (v: number) => {
+          return spInnerBottom - ((v - minVal) / spRange) * spInnerH;
+        };
+        const spYToValue = (y: number) => {
+          const norm = (spInnerBottom - y) / spInnerH;
+          return minVal + norm * spRange;
+        };
+
+        // Reference lines
+        const drawRefLine = (refVal: number, labelText?: string) => {
+          if (refVal < minVal || refVal > maxVal) return;
+          const refY = Math.round(spValueToY(refVal));
+          ctx.setLineDash([3, 3]);
+          ctx.strokeStyle = inkA(0.12);
+          ctx.beginPath();
+          ctx.moveTo(0, refY);
+          ctx.lineTo(chartWidth, refY);
+          ctx.stroke();
+          ctx.setLineDash([]);
+
+          ctx.fillStyle = inkA(0.4);
+          ctx.font = '9px monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText(labelText || refVal.toFixed(0), chartWidth + 6, refY + 3);
+        };
+
+        if (ind === 'RSI') {
+          drawRefLine(70);
+          drawRefLine(30);
+        } else if (ind === 'STOCH' || ind === 'MFI') {
+          drawRefLine(80);
+          drawRefLine(20);
+        } else if (ind === 'WILLR') {
+          drawRefLine(-20);
+          drawRefLine(-80);
+        } else if (ind === 'MACD' || ind === 'CMF' || ind === 'CCI') {
+          drawRefLine(0);
+        } else if (ind === 'ADX') {
+          drawRefLine(25);
+        }
+
+        // Sub-pane top-left label
+        const activeIdx = hoveredIdx !== null ? hoveredIdx : (bars.length > 0 ? bars.length - 1 : null);
+        ctx.fillStyle = inkA(0.85);
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'left';
+
+        const label = sp.name || sp.indicator;
+        let readout = label;
+        if (activeIdx !== null) {
+          if (sp.values) {
+            const v = sp.values[activeIdx];
+            readout += `: ${v !== null && v !== undefined ? v.toFixed(2) : '–'}`;
+          } else if (sp.series) {
+            const parts = Object.entries(sp.series).map(([k, line]) => {
+              const v = line[activeIdx];
+              return `${k}: ${v !== null && v !== undefined ? v.toFixed(2) : '–'}`;
+            });
+            readout += ` (${parts.join('  ')})`;
+          }
+        }
+        ctx.fillText(readout, 8, spTop + 11);
+
+        // Draw data elements
+        if (ind === 'MACD') {
+          // Histogram bars
+          const hist = sp.series?.histogram;
+          const zeroY = spValueToY(0);
+          if (hist) {
+            for (let i = 0; i < count; i++) {
+              const v = hist[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                const x = xOffset + i * candleSlotWidth + (candleSlotWidth - bodyWidth) / 2;
+                const y = spValueToY(v);
+                ctx.fillStyle = v >= 0 ? 'rgba(16, 185, 129, 0.7)' : 'rgba(239, 68, 68, 0.7)';
+                const bH = Math.max(1, Math.abs(y - zeroY));
+                const top = Math.min(y, zeroY);
+                ctx.fillRect(x, top, bodyWidth, bH);
+              }
+            }
+          }
+          // MACD and Signal lines
+          const macdLines = [
+            { key: 'macd', stroke: '#3B82F6', width: 1.4 },
+            { key: 'signal', stroke: '#F59E0B', width: 1.4 },
+          ];
+          for (const line of macdLines) {
+            const sData = sp.series?.[line.key];
+            if (!sData) continue;
+            ctx.strokeStyle = line.stroke;
+            ctx.lineWidth = line.width;
+            ctx.beginPath();
+            let drawing = false;
+            for (let i = 0; i < count; i++) {
+              const v = sData[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const y = spValueToY(v);
+                if (!drawing) {
+                  ctx.moveTo(x, y);
+                  drawing = true;
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              } else {
+                drawing = false;
+              }
+            }
+            ctx.stroke();
+          }
+        } else if (ind === 'STOCH') {
+          const stochLines = [
+            { key: 'k', stroke: '#10B981', width: 1.4 },
+            { key: 'd', stroke: '#F59E0B', width: 1.4 },
+          ];
+          for (const line of stochLines) {
+            const sData = sp.series?.[line.key];
+            if (!sData) continue;
+            ctx.strokeStyle = line.stroke;
+            ctx.lineWidth = line.width;
+            ctx.beginPath();
+            let drawing = false;
+            for (let i = 0; i < count; i++) {
+              const v = sData[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const y = spValueToY(v);
+                if (!drawing) {
+                  ctx.moveTo(x, y);
+                  drawing = true;
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              } else {
+                drawing = false;
+              }
+            }
+            ctx.stroke();
+          }
+        } else if (ind === 'ADX') {
+          const adxLines = [
+            { key: 'adx', stroke: '#F59E0B', width: 1.5 },
+            { key: 'plus_di', stroke: '#10B981', width: 1.2 },
+            { key: 'minus_di', stroke: '#EF4444', width: 1.2 },
+          ];
+          for (const line of adxLines) {
+            const sData = sp.series?.[line.key];
+            if (!sData) continue;
+            ctx.strokeStyle = line.stroke;
+            ctx.lineWidth = line.width;
+            ctx.beginPath();
+            let drawing = false;
+            for (let i = 0; i < count; i++) {
+              const v = sData[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const y = spValueToY(v);
+                if (!drawing) {
+                  ctx.moveTo(x, y);
+                  drawing = true;
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              } else {
+                drawing = false;
+              }
+            }
+            ctx.stroke();
+          }
+        } else {
+          // Single-line sub-pane (RSI, ATR, OBV, CCI, WILLR, CMF, MOM, ROC, MFI, STDDEV)
+          const pts = sp.values || sp.series?.values;
+          if (pts) {
+            ctx.strokeStyle = sp.color || '#8B5CF6';
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            let drawing = false;
+            for (let i = 0; i < count; i++) {
+              const v = pts[start + i];
+              if (v !== null && v !== undefined && !isNaN(v)) {
+                const x = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+                const y = spValueToY(v);
+                if (!drawing) {
+                  ctx.moveTo(x, y);
+                  drawing = true;
+                } else {
+                  ctx.lineTo(x, y);
+                }
+              } else {
+                drawing = false;
+              }
+            }
+            ctx.stroke();
+          }
+        }
+
+        // Sub-pane crosshair readout on right scale
+        if (crosshair && crosshair.y >= spTop && crosshair.y <= spBottom) {
+          const spYVal = spYToValue(crosshair.y);
+          ctx.fillStyle = inkSolid;
+          ctx.fillRect(chartWidth + 1, crosshair.y - 9, priceScaleWidth - 2, 18);
+          ctx.fillStyle = panelBg;
+          ctx.font = '10px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(spYVal.toFixed(2), chartWidth + priceScaleWidth / 2, crosshair.y + 3.5);
+        }
+      });
+    }
+
     // Scale border separators
     ctx.strokeStyle = inkA(0.1);
     ctx.lineWidth = 1;
@@ -669,7 +999,7 @@ export function TradingChart({
     ctx.stroke();
 
     ctx.restore();
-  }, [bars, viewWindow, crosshair, hoveredIdx, loading, symbol, timeframe, plotSize, theme, overlays]);
+  }, [bars, viewWindow, crosshair, hoveredIdx, loading, symbol, timeframe, plotSize, theme, overlays, subpanes]);
 
   // Mouse interaction handlers
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -932,20 +1262,30 @@ export function TradingChart({
 
       <p className="pb-1 text-right text-[10px] text-ink/40">Drag to pan · Ctrl/⌘ + scroll to zoom</p>
       {/* Chart Canvas */}
-      <div
-        ref={plotRef}
-        style={{ minHeight: '340px', height: 'clamp(320px, 48vh, 480px)' }}
-        className="relative min-h-[340px] h-[clamp(320px,48vh,480px)] w-full flex-1 cursor-crosshair select-none"
-      >
-        <canvas
-          ref={canvasRef}
-          onMouseMove={handleMouseMove}
-          onMouseDown={handleMouseDown}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseLeave}
-          className="absolute inset-0 block h-full w-full rounded-lg"
-        />
-      </div>
+      {(() => {
+        const subCount = (subpanes || []).filter((s) => s.visible !== false).length;
+        const dynamicH =
+          subCount > 0
+            ? `clamp(${320 + subCount * 90}px, ${48 + subCount * 12}vh, ${480 + subCount * 120}px)`
+            : 'clamp(320px, 48vh, 480px)';
+        const dynamicMinH = subCount > 0 ? `${340 + subCount * 90}px` : '340px';
+        return (
+          <div
+            ref={plotRef}
+            style={{ minHeight: dynamicMinH, height: dynamicH }}
+            className="relative w-full flex-1 cursor-crosshair select-none"
+          >
+            <canvas
+              ref={canvasRef}
+              onMouseMove={handleMouseMove}
+              onMouseDown={handleMouseDown}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
+              className="absolute inset-0 block h-full w-full rounded-lg"
+            />
+          </div>
+        );
+      })()}
     </div>
   );
 }

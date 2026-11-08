@@ -11,6 +11,7 @@ pub mod datastore;
 pub mod fundamentals;
 mod records;
 pub mod report;
+pub mod security;
 pub mod settings;
 pub mod time;
 pub mod timezone;
@@ -30,6 +31,10 @@ pub use fundamentals::{
     PointInTimeFundamentalsStore, QuarantinedFundamental, SymbolMaster, SymbolMetadata,
 };
 pub use report::{preview_json, quality_report_json};
+pub use security::{
+    escape_csv_cell, escape_csv_row, validate_finite, validate_text_upload, SecurityError,
+    DEFAULT_MAX_FIELD_LENGTH, DEFAULT_MAX_FILE_SIZE, DEFAULT_MAX_ROWS,
+};
 pub use settings::{parse_settings, settings_json, suggest, SettingsError, Suggestions};
 pub use time::{format_timestamp, parse_fixed, parse_timestamp, ParsedTime, TimeFormat, TimeOptions};
 pub use timezone::Timezone;

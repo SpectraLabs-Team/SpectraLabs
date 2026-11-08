@@ -11,8 +11,24 @@ import { int } from './format';
 
 const tick = { fill: '#64748B', fontSize: 11 };
 
+export interface PriceChartOverlay {
+  name: string;
+  color: string;
+  values: (number | null)[];
+}
+
 /** Close (with the high–low range shaded) and volume for one symbol of a dataset version. */
-export function PriceChart({ versionId, symbols, chartable }: { versionId: string; symbols: string[]; chartable: boolean }) {
+export function PriceChart({
+  versionId,
+  symbols,
+  chartable,
+  overlays,
+}: {
+  versionId: string;
+  symbols: string[];
+  chartable: boolean;
+  overlays?: PriceChartOverlay[];
+}) {
   const cc = chartColors(useTheme().theme);
   const [symbol, setSymbol] = useState(symbols[0] ?? '');
   const [bars, setBars] = useState<Bars | null>(null);
@@ -35,8 +51,26 @@ export function PriceChart({ versionId, symbols, chartable }: { versionId: strin
     };
   }, [versionId, symbol, chartable]);
 
-  const rows = useMemo(() => (bars?.points ?? []).map((p) => ({ t: p.t, close: p.close, band: [p.low, p.high] as [number, number], volume: p.volume })), [bars]);
-  const span = rows.length > 1 ? rows[rows.length - 1].t - rows[0].t : 0;
+  const rows = useMemo(() => {
+    const pts = bars?.points ?? [];
+    return pts.map((p, idx) => {
+      const row: Record<string, unknown> = {
+        t: p.t,
+        close: p.close,
+        band: [p.low, p.high] as [number, number],
+        volume: p.volume,
+      };
+      if (overlays) {
+        for (const o of overlays) {
+          if (o.values && o.values[idx] !== null && o.values[idx] !== undefined) {
+            row[o.name] = o.values[idx];
+          }
+        }
+      }
+      return row;
+    });
+  }, [bars, overlays]);
+  const span = rows.length > 1 ? Number(rows[rows.length - 1].t) - Number(rows[0].t) : 0;
 
   if (!chartable) {
     return (
@@ -91,6 +125,18 @@ export function PriceChart({ versionId, symbols, chartable }: { versionId: strin
               <Bar yAxisId="v" dataKey="volume" fill={cc.muted} opacity={0.35} isAnimationActive={false} />
               <Area yAxisId="p" dataKey="band" stroke="none" fill={cc.accent} fillOpacity={0.12} isAnimationActive={false} />
               <Line yAxisId="p" dataKey="close" stroke={cc.accent} strokeWidth={1.6} dot={false} isAnimationActive={false} />
+              {overlays &&
+                overlays.map((o) => (
+                  <Line
+                    key={o.name}
+                    yAxisId="p"
+                    dataKey={o.name}
+                    stroke={o.color}
+                    strokeWidth={1.4}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                ))}
             </ComposedChart>
           </ResponsiveContainer>
         </div>

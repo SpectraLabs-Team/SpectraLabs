@@ -87,6 +87,7 @@ export function OptimizationLab() {
   const [sealName, setSealName] = useState<string>('');
   const [sealBudget, setSealBudget] = useState<number>(5);
   const [sealNotes, setSealNotes] = useState<string>('');
+  const [holdoutSucceededOnly, setHoldoutSucceededOnly] = useState<boolean>(true);
 
   const sweepDatasetSelectId = useId();
   const sweepStrategySelectId = useId();
@@ -1219,23 +1220,98 @@ export function OptimizationLab() {
 
                 {/* Audit trail */}
                 <div className="rounded-2xl border border-ink/[0.08] bg-surface p-5 shadow-xs">
-                  <h4 className="text-xs font-semibold text-ink uppercase tracking-wider">Evaluation Audit Trail</h4>
-                  <div className="mt-3 space-y-2">
-                    {selectedHoldoutDetail.evaluations.length === 0 ? (
-                      <p className="text-xs text-ink/40">No evaluations run yet. Holdout remains pristine.</p>
-                    ) : (
-                      selectedHoldoutDetail.evaluations.map((ev) => (
-                        <div key={ev.id} className="rounded-xl border border-ink/[0.06] bg-ink/[0.02] p-3 text-xs flex items-center justify-between">
-                          <div>
-                            <span className="font-semibold text-ink">Evaluation #{ev.evaluation_num}</span>
-                            <span className="ml-2 text-[11px] text-ink/40">{new Date(ev.evaluated_at).toLocaleString()}</span>
-                          </div>
-                          <div className="font-mono text-xs">
-                            Sharpe: <strong className="text-ink">{typeof (ev.metrics as Record<string, unknown>)?.sharpe === 'number' ? ((ev.metrics as Record<string, unknown>).sharpe as number).toFixed(2) : '—'}</strong>
-                          </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-semibold text-ink uppercase tracking-wider">Evaluation Audit Trail</h4>
+                      <p className="text-[11px] text-ink/50 mt-0.5">Audited access history and run telemetry for this sealed holdout.</p>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={holdoutSucceededOnly}
+                        onChange={(e) => setHoldoutSucceededOnly(e.target.checked)}
+                        className="rounded border-ink/20 text-accent focus:ring-accent"
+                      />
+                      <span>Filter succeeded runs only</span>
+                    </label>
+                  </div>
+                  <div className="mt-3">
+                    {(() => {
+                      const displayedEvals = selectedHoldoutDetail.evaluations.filter((ev) => {
+                        const m = (ev.metrics as Record<string, unknown>) ?? {};
+                        const status = ev.status ?? (m.valid !== false ? 'succeeded' : 'failed');
+                        if (holdoutSucceededOnly && status !== 'succeeded') return false;
+                        return true;
+                      });
+
+                      if (displayedEvals.length === 0) {
+                        return (
+                          <p className="text-xs text-ink/40 py-3">
+                            {selectedHoldoutDetail.evaluations.length === 0
+                              ? 'No evaluations run yet. Holdout remains pristine.'
+                              : 'No evaluations match the succeeded filter.'}
+                          </p>
+                        );
+                      }
+
+                      return (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="border-b border-ink/[0.08] text-ink/50 text-[11px]">
+                                <th className="py-2">#</th>
+                                <th className="py-2">Status</th>
+                                <th className="py-2">Evaluated At</th>
+                                <th className="py-2 text-right"><MetricLabel metric="sharpe_ratio" className="justify-end">Sharpe</MetricLabel></th>
+                                <th className="py-2 text-right"><MetricLabel metric="total_return" className="justify-end">Return</MetricLabel></th>
+                                <th className="py-2 text-right"><MetricLabel metric="max_drawdown" className="justify-end">Max DD</MetricLabel></th>
+                                <th className="py-2 text-right">Run Link</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-ink/[0.04]">
+                              {displayedEvals.map((ev) => {
+                                const m = (ev.metrics as Record<string, unknown>) ?? {};
+                                const status = ev.status ?? (m.valid !== false ? 'succeeded' : 'failed');
+                                const runId = ev.run_id ?? ev.id;
+                                return (
+                                  <tr key={ev.id} className="hover:bg-ink/[0.02]">
+                                    <td className="py-2 font-mono font-medium text-ink/80">#{ev.evaluation_num}</td>
+                                    <td className="py-2">
+                                      <span className={cn(
+                                        'px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider',
+                                        status === 'succeeded' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-rose-500/10 text-rose-600'
+                                      )}>
+                                        {status}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 text-ink/60 text-[11px]">
+                                      {new Date(ev.evaluated_at).toLocaleString()}
+                                    </td>
+                                    <td className="py-2 text-right font-mono font-bold text-ink">
+                                      {typeof m.sharpe === 'number' ? m.sharpe.toFixed(2) : '—'}
+                                    </td>
+                                    <td className="py-2 text-right font-mono text-ink/70">
+                                      {typeof m.total_return === 'number' ? `${(m.total_return * 100).toFixed(1)}%` : '—'}
+                                    </td>
+                                    <td className="py-2 text-right font-mono text-rose-500">
+                                      {typeof m.max_drawdown === 'number' ? `-${(m.max_drawdown * 100).toFixed(1)}%` : '—'}
+                                    </td>
+                                    <td className="py-2 text-right">
+                                      <a
+                                        href={`/studio?tab=registry&runId=${runId}`}
+                                        className="text-accent hover:underline text-[11px] font-mono inline-flex items-center gap-1"
+                                      >
+                                        View Run →
+                                      </a>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
                         </div>
-                      ))
-                    )}
+                      );
+                    })()}
                   </div>
                 </div>
               </div>

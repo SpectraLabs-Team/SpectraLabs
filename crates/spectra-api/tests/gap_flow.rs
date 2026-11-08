@@ -213,7 +213,7 @@ async fn test_backtest_to_paper_gap_analysis_flow() {
     assert_eq!(body["workspace_id"].as_str().unwrap(), ws_id.to_string());
     assert!(body["total_reports"].as_u64().unwrap() >= 1);
     assert!(body["total_warnings"].as_u64().unwrap() + body["total_breaches"].as_u64().unwrap() >= 1);
-    assert!(body["warnings"].as_array().unwrap().len() >= 1);
+    assert!(!body["warnings"].as_array().unwrap().is_empty());
     assert!(body["max_slippage_drift_bps"].as_f64().unwrap() > 0.0);
 
     // 5. Test M27 Email Dispatch of Digest (POST /api/v1/paper/gap/digest/dispatch)

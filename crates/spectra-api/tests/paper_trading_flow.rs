@@ -927,3 +927,120 @@ async fn an_order_whose_decision_cannot_be_recorded_is_not_placed() {
 
     f.clean_up().await;
 }
+
+/// M9 Paper Trading gap verification:
+/// Places one paper order through the Alpaca paper brokerage proxy, taking it through:
+/// 1. Pre-trade check and fill (captures order ID and audit decision ID).
+/// 2. Cancellation path (`DELETE /api/v1/alpaca/v2/orders/{id}`).
+/// 3. Kill-switch enforcement (rejection of opening orders, approval of closing orders).
+/// 4. Records the run ID / decision ID evidence.
+#[tokio::test]
+async fn test_m9_alpaca_paper_flow_fill_cancel_killswitch_evidence() {
+    let Some(pool) = pool().await else { return };
+    let f = TestFixture::setup(pool).await;
+    common::seed_volatility_dataset(&f.pool, f.ws, &f.dir.join("data"), &["AAPL"]).await;
+
+    // Seed initial position and balance for price resolution and pre-trade checks
+    spectra_db::risk_center::upsert_position(&f.pool, f.ws, None, "AAPL", 10.0, 150.0).await.unwrap();
+    spectra_db::risk_center::upsert_balance(&f.pool, f.ws, None, 100_000.0, 101_500.0, 101_500.0, 101_500.0)
+        .await
+        .unwrap();
+
+    // 1. STEP 1: Place paper order through Alpaca paper proxy (Fill path)
+    let fill_order = json!({
+        "symbol": "AAPL",
+        "qty": "5",
+        "side": "buy",
+        "type": "market"
+    });
+    let (status, body) = call(&f, "POST", "/api/v1/alpaca/v2/orders", &fill_order).await;
+    assert_eq!(status, 201, "Paper order fill must succeed: {body}");
+    assert_eq!(body["symbol"], "AAPL");
+    assert_eq!(body["qty"], "5");
+    assert_eq!(body["status"], "filled");
+    assert_eq!(body["pre_trade_verdict"], "approved");
+
+    let order_id = body["id"].as_str().expect("valid order ID in Alpaca paper fill response");
+    assert!(!order_id.is_empty(), "order ID must not be empty");
+
+    // Verify decision was recorded in risk decisions / audit trail
+    let (audit_status, audit) = call(&f, "GET", "/api/v1/risk/audit", &Value::Null).await;
+    assert_eq!(audit_status, 200, "{audit}");
+    let audit_arr = audit.as_array().expect("audit entries array");
+    let fill_decision = audit_arr
+        .iter()
+        .find(|d| d["symbol"] == "AAPL" && d["verdict"] == "approved")
+        .expect("Approved decision for AAPL buy must be recorded in audit");
+    let fill_decision_id = fill_decision["id"].as_str().expect("valid decision ID");
+
+    // 2. STEP 2: Cancel path
+    let cancel_path = format!("/api/v1/alpaca/v2/orders/{order_id}");
+    let (cancel_status, _) = call(&f, "DELETE", &cancel_path, &Value::Null).await;
+    assert!(
+        cancel_status == 204 || cancel_status == 200,
+        "Cancel order must return 204 or 200, got: {cancel_status}"
+    );
+
+    // 3. STEP 3: Kill-switch path
+    // Activate kill switch
+    let ks_payload = json!({
+        "active": true,
+        "reason": "M9 paper trading verification kill-switch trigger"
+    });
+    let (ks_status, ks_body) = call(&f, "POST", "/api/v1/risk/kill-switch", &ks_payload).await;
+    assert_eq!(ks_status, 200, "Kill switch activation failed: {ks_body}");
+
+    // Attempt an opening order while kill switch is active -> must be rejected
+    let opening_order = json!({
+        "symbol": "AAPL",
+        "qty": "2",
+        "side": "buy",
+        "type": "market"
+    });
+    let (rej_status, rej_body) = call(&f, "POST", "/api/v1/alpaca/v2/orders", &opening_order).await;
+    assert_eq!(
+        rej_status, 422,
+        "Opening order while kill-switch active must be rejected with 422: {rej_body}"
+    );
+    assert_eq!(rej_body["verdict"], "rejected");
+    let default_breaches = vec![];
+    let breach_codes: Vec<&str> = rej_body["breaches"]
+        .as_array()
+        .unwrap_or(&default_breaches)
+        .iter()
+        .filter_map(|b| b["code"].as_str())
+        .collect();
+    assert!(
+        breach_codes.contains(&"kill_switch_active"),
+        "Breaches must contain kill_switch_active: {breach_codes:?}"
+    );
+
+    // Close path under kill switch -> must be permitted (selling existing position)
+    let closing_order = json!({
+        "symbol": "AAPL",
+        "qty": "5",
+        "side": "sell",
+        "type": "market"
+    });
+    let (close_status, close_body) = call(&f, "POST", "/api/v1/alpaca/v2/orders", &closing_order).await;
+    assert_eq!(close_status, 201, "Closing order while kill-switch active must be approved: {close_body}");
+    assert_eq!(close_body["status"], "filled");
+    assert_eq!(close_body["pre_trade_verdict"], "approved");
+    let close_order_id = close_body["id"].as_str().expect("valid close order ID");
+
+    // 4. STEP 4: Record run ID / decision ID evidence
+    println!("============================================================");
+    println!("M9 Alpaca Paper Flow Evidence Sign-off:");
+    println!("  Fill Order ID:     {}", order_id);
+    println!("  Audit Decision ID: {}", fill_decision_id);
+    println!("  Cancelled Order:   {}", order_id);
+    println!("  Kill-Switch Close: {}", close_order_id);
+    println!("  Workspace ID:      {}", f.ws);
+    println!("============================================================");
+
+    assert_eq!(order_id.len(), 36);
+    assert_eq!(fill_decision_id.len(), 36);
+    assert_eq!(close_order_id.len(), 36);
+
+    f.clean_up().await;
+}

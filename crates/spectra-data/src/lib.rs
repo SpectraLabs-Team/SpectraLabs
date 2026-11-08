@@ -8,6 +8,7 @@ pub mod calendar;
 pub mod chart;
 pub mod dataset;
 pub mod datastore;
+pub mod events;
 pub mod fundamentals;
 mod records;
 pub mod report;
@@ -26,6 +27,7 @@ pub use dataset::{
     SymbolTable,
 };
 pub use datastore::{hash_holdout_slice, verify_holdout_slice_hash, DataStore};
+pub use events::{EarningsEvent, EventStore, MacroRelease, NewsItem};
 pub use fundamentals::{
     FundamentalRecord, FundamentalsProvider, ListingStatus, MockFundamentalsProvider,
     PointInTimeFundamentalsStore, QuarantinedFundamental, SymbolMaster, SymbolMetadata,

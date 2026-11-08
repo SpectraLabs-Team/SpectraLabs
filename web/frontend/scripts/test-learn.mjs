@@ -73,8 +73,8 @@ function resolves(href) {
 }
 
 describe('Learning Center content', () => {
-  it('has the six categories, each with lessons, and unique lesson routes', () => {
-    assert.deepEqual(CATEGORIES.map((c) => c.id), ['fundamentals', 'engine', 'simulations', 'metrics', 'strategies', 'paper-trading']);
+  it('has the expected categories, each with lessons, and unique lesson routes', () => {
+    assert.deepEqual(CATEGORIES.map((c) => c.id), ['fundamentals', 'engine', 'simulations', 'metrics', 'strategies', 'paper-trading', 'indicators']);
     for (const c of CATEGORIES) assert.ok(learn.lessonsIn(c.id).length >= 6, `${c.id} has lessons`);
     const keys = LESSONS.map(key);
     assert.equal(new Set(keys).size, keys.length, 'no duplicate routes');
@@ -89,6 +89,7 @@ describe('Learning Center content', () => {
       metrics: ['total-return', 'net-profit', 'profit-and-loss', 'realized-unrealized-pnl', 'win-rate', 'sharpe-ratio', 'sortino-ratio', 'maximum-drawdown', 'volatility', 'profit-factor', 'average-trade-return', 'risk-reward-ratio', 'expectancy', 'equity-curve', 'annualized-return', 'cagr', 'exposure', 'number-of-trades', 'transaction-costs', 'slippage'],
       strategies: ['moving-average-crossover', 'momentum', 'mean-reversion', 'breakout-trading', 'trend-following', 'rsi-strategies'],
       'paper-trading': ['what-is-paper-trading', 'how-alpaca-paper-trading-works', 'connecting-alpaca', 'searching-for-stocks', 'reading-candlestick-charts', 'placing-orders', 'order-statuses', 'monitoring-positions', 'tracking-portfolio-performance'],
+      indicators: ['sma', 'ema', 'wma', 'dema', 'tema', 'bb', 'ichimoku', 'psar', 'donchian', 'keltner', 'vwap', 'typical', 'median', 'rsi', 'macd', 'stoch', 'cci', 'willr', 'mom', 'roc', 'atr', 'adx', 'obv', 'cmf', 'mfi'],
     };
     for (const [cat, slugs] of Object.entries(need)) for (const s of slugs) assert.ok(learn.getLesson(cat, s), `missing ${cat}/${s}`);
   });

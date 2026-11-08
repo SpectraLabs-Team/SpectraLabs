@@ -16,7 +16,7 @@ export const strategies: Lesson[] = [
     level: 'Beginner',
     featured: true,
     summary: 'Hold the instrument while a fast moving average is above a slow one; step aside (or go short) when it falls below. A built-in strategy in Backtests.',
-    keywords: ['sma', 'moving average', 'crossover', 'golden cross', 'sma_cross'],
+    keywords: ['sma crossover', 'moving average crossover', 'crossover', 'golden cross', 'sma_cross'],
     blocks: [
       { type: 'p', text: 'A simple moving average (SMA) is the mean of the last N closes. A short (fast) average reacts quickly to price; a long (slow) one reacts slowly. When the fast average is above the slow one, recent prices are higher than older ones: an uptrend.' },
       { type: 'diagram', id: 'sma-crossover', caption: 'Long while the fast average is above the slow one; flat when it is below.' },
@@ -43,7 +43,7 @@ export const strategies: Lesson[] = [
     title: 'Momentum',
     level: 'Intermediate',
     summary: 'Buy what has risen over a lookback window, on the evidence that recent winners tend to keep winning for a while.',
-    keywords: ['momentum', 'rate of change', 'roc', 'time series momentum', 'relative strength'],
+    keywords: ['momentum strategy', 'rate of change strategy', 'roc strategy', 'time series momentum', 'cross sectional momentum'],
     blocks: [
       { type: 'p', text: 'Momentum strategies rank or filter instruments by their past return. **Time-series** momentum holds an instrument while its own return over the lookback is positive; **cross-sectional** momentum holds the best performers relative to the others.' },
       { type: 'formula', tex: String.raw`\text{Momentum}_t = \frac{\text{Close}_t}{\text{Close}_{t-L}} - 1` },
@@ -63,7 +63,7 @@ export const strategies: Lesson[] = [
     title: 'Mean Reversion (Z-Score)',
     level: 'Intermediate',
     summary: 'Buy when price is unusually far below its recent average and exit when it returns. The built-in z-score reversion strategy does exactly this.',
-    keywords: ['mean reversion', 'z score', 'bollinger', 'zscore_reversion', 'statistical arbitrage'],
+    keywords: ['mean reversion', 'z score', 'bollinger bands reversion', 'zscore_reversion', 'statistical arbitrage'],
     blocks: [
       { type: 'p', text: 'Mean reversion assumes that prices oscillate around a moving centre and that large deviations tend to shrink. The z-score measures the deviation in standard deviations, so the same rule works across volatile and quiet instruments.' },
       { type: 'formula', tex: String.raw`z_t = \frac{\text{Close}_t - \mu_t}{\sigma_t}` },
@@ -90,7 +90,7 @@ export const strategies: Lesson[] = [
     title: 'Breakout Trading',
     level: 'Intermediate',
     summary: 'Buy when price closes above the recent range, betting that the move continues. Written in the Strategy Studio rule language.',
-    keywords: ['breakout', 'donchian', 'channel', 'range breakout', 'new high'],
+    keywords: ['breakout', 'donchian breakout', 'channel breakout', 'range breakout', 'new high'],
     blocks: [
       { type: 'p', text: 'A breakout strategy waits for price to leave a range (for example, close above the highest high of the last N bars) and enters in the direction of the break. Classic versions use 20- or 55-bar channels.' },
       { type: 'formula', tex: String.raw`\text{Enter long when } \text{Close}_t > \max(\text{High}_{t-1}, \dots, \text{High}_{t-N})` },
@@ -110,7 +110,7 @@ export const strategies: Lesson[] = [
     title: 'Trend Following',
     level: 'Intermediate',
     summary: 'Stay with the prevailing direction using long-term filters, accepting many small losses for a few large gains.',
-    keywords: ['trend following', 'ema', 'trend filter', 'cta', 'managed futures'],
+    keywords: ['trend following', 'ema trend', 'trend filter', 'cta', 'managed futures'],
     blocks: [
       { type: 'p', text: 'Trend following is a family of rules (moving-average crossovers, breakouts, momentum filters) that share one belief: large moves tend to continue. They do not predict; they react, and they cut positions when the trend ends.' },
       { type: 'formula', tex: String.raw`\text{EMA}_t = k\,\text{Close}_t + (1 - k)\,\text{EMA}_{t-1}, \quad k = \frac{2}{N+1}` },
@@ -129,7 +129,7 @@ export const strategies: Lesson[] = [
     title: 'RSI-Based Strategies',
     level: 'Intermediate',
     summary: 'The Relative Strength Index scales recent gains against losses from 0 to 100; low readings are often traded as oversold bounces.',
-    keywords: ['rsi', 'relative strength index', 'oversold', 'overbought', 'oscillator'],
+    keywords: ['rsi strategy', 'relative strength index strategy', 'oversold', 'overbought', 'rsi oscillator'],
     blocks: [
       { type: 'p', text: 'RSI compares the size of recent up-moves with recent down-moves. Readings below 30 are traditionally called oversold and above 70 overbought.' },
       { type: 'formula', tex: String.raw`\text{RSI} = 100 - \frac{100}{1 + RS}, \qquad RS = \frac{\text{average gain over } N}{\text{average loss over } N}` },

@@ -37,6 +37,18 @@ const SYNONYMS: Record<string, string[]> = {
   sma: ['moving average'],
   ema: ['exponential'],
   tif: ['time in force'],
+  rsi: ['relative strength index'],
+  macd: ['moving average convergence divergence'],
+  bb: ['bollinger bands'],
+  atr: ['average true range'],
+  adx: ['average directional index'],
+  vwap: ['volume weighted average price'],
+  psar: ['parabolic sar'],
+  cci: ['commodity channel index'],
+  obv: ['on balance volume'],
+  cmf: ['chaikin money flow'],
+  mfi: ['money flow index'],
+  stoch: ['stochastic'],
 };
 
 function terms(query: string): string[][] {

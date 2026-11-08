@@ -9,7 +9,7 @@
  * (Inline maths uses \( \) rather than $ so dollar amounts in the text stay plain text.)
  */
 
-export type CategoryId = 'fundamentals' | 'engine' | 'simulations' | 'metrics' | 'strategies' | 'paper-trading';
+export type CategoryId = 'fundamentals' | 'engine' | 'simulations' | 'metrics' | 'strategies' | 'paper-trading' | 'indicators';
 
 export type Level = 'Beginner' | 'Intermediate' | 'Advanced';
 
@@ -58,5 +58,5 @@ export interface Category {
   title: string;
   description: string;
   /** lucide-react icon name, resolved in components/learn/icons.tsx. */
-  icon: 'BookOpen' | 'Cpu' | 'FlaskConical' | 'Gauge' | 'Workflow' | 'TrendingUp';
+  icon: 'BookOpen' | 'Cpu' | 'FlaskConical' | 'Gauge' | 'Workflow' | 'TrendingUp' | 'Sliders';
 }

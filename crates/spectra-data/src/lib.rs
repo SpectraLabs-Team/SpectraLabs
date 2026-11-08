@@ -25,7 +25,7 @@ pub use dataset::{
     CsvOptions, CsvPreview, DataQualityReport, Dataset, DatasetInfo, InvalidRowPolicy, RowIssue, SymbolStats,
     SymbolTable,
 };
-pub use datastore::DataStore;
+pub use datastore::{hash_holdout_slice, verify_holdout_slice_hash, DataStore};
 pub use fundamentals::{
     FundamentalRecord, FundamentalsProvider, ListingStatus, MockFundamentalsProvider,
     PointInTimeFundamentalsStore, QuarantinedFundamental, SymbolMaster, SymbolMetadata,

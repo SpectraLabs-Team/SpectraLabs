@@ -5381,7 +5381,7 @@
         "tags": [
           "risk"
         ],
-        "summary": "Check current portfolio metrics against alert thresholds (Task 11).",
+        "summary": "Check current portfolio metrics against alert thresholds (Task 11 / M8).",
         "operationId": "get_alerts",
         "parameters": [
           {
@@ -5404,6 +5404,38 @@
                   "items": {
                     "$ref": "#/components/schemas/RiskAlertView"
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/risk/alerts/dispatch": {
+      "post": {
+        "tags": [
+          "risk"
+        ],
+        "summary": "Dispatch active risk alerts to M27 notification channel (Task 11 / M8 / M27).",
+        "operationId": "dispatch_alerts",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Dispatched risk alerts to M27 email delivery channel",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskAlertDispatchResponse"
                 }
               }
             }
@@ -13088,6 +13120,33 @@
           "symbol": {
             "type": "string",
             "description": "Original constituent symbol."
+          }
+        }
+      },
+      "RiskAlertDispatchResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "channel",
+          "count",
+          "alerts"
+        ],
+        "properties": {
+          "alerts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RiskAlertView"
+            }
+          },
+          "channel": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string"
           }
         }
       },

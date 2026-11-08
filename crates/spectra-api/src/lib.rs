@@ -1065,7 +1065,7 @@ fn report_routes() -> Router<AppState> {
         .route("/api/v1/reports/{report_id}/versions/{version}", only(get(reports_api::download_version)))
 }
 
-/// Module 12: Alpha Workbench signal tests and gate verification.
+/// Module 12: Alpha Workbench signal tests, signal library, and gate verification.
 fn alpha_routes() -> Router<AppState> {
     Router::new()
         .route(
@@ -1074,6 +1074,19 @@ fn alpha_routes() -> Router<AppState> {
         )
         .route("/api/v1/alpha/signal-tests/{id}", only(get(alpha_api::handle_get_signal_test)))
         .route("/api/v1/alpha/signal-tests/{id}/export", only(get(alpha_api::handle_export_signal_test)))
+        .route(
+            "/api/v1/alpha/signals",
+            only(get(alpha_api::handle_list_signals).post(alpha_api::handle_save_signal)),
+        )
+        .route("/api/v1/alpha/signals/{signal_id}", only(get(alpha_api::handle_get_signal)))
+        .route(
+            "/api/v1/alpha/signals/{signal_id}/versions",
+            only(get(alpha_api::handle_list_signal_versions)),
+        )
+        .route(
+            "/api/v1/alpha/signals/{signal_id}/versions/{version}",
+            only(get(alpha_api::handle_get_signal_version)),
+        )
         .route("/api/v1/alpha/m42/sentiment", only(get(alpha_api::handle_get_m42_sentiment)))
 }
 

@@ -255,3 +255,32 @@ fn test_determinism_same_inputs_same_outputs() {
 
     assert_eq!(json1, json2, "reports are not deterministic across runs!");
 }
+
+/// Task 7 Test: Owner default gate thresholds and reload reproducibility (M12 Gap Fix).
+#[test]
+fn test_m12_owner_gate_thresholds_and_reproducibility() {
+    let gate = SignalGateThreshold::owner_default();
+    assert_eq!(gate.min_mean_ic, Some(0.05));
+    assert_eq!(gate.min_t_stat, Some(2.0));
+    assert_eq!(gate.max_half_life_days, Some(20.0));
+
+    // Case 1: Passes all owner criteria (IC 0.06 >= 0.05, t 2.5 >= 2.0, half-life 12d <= 20d)
+    let (pass1, reasons1) = gate.evaluate(0.06, 2.5, 0.40, 12.0);
+    assert!(pass1);
+    assert_eq!(reasons1, vec!["Signal passed all owner gate thresholds"]);
+
+    // Case 2: Half-life exceeds 20 days -> fails
+    let (pass2, reasons2) = gate.evaluate(0.06, 2.5, 0.40, 25.0);
+    assert!(!pass2);
+    assert!(reasons2.iter().any(|r| r.contains("exceeds maximum threshold 20.0 days")));
+
+    // Case 3: Mean IC below 0.05 -> fails
+    let (pass3, reasons3) = gate.evaluate(0.03, 2.5, 0.40, 10.0);
+    assert!(!pass3);
+    assert!(reasons3.iter().any(|r| r.contains("below required threshold 0.0500")));
+
+    // Case 4: t-stat below 2.0 -> fails
+    let (pass4, reasons4) = gate.evaluate(0.06, 1.8, 0.40, 10.0);
+    assert!(!pass4);
+    assert!(reasons4.iter().any(|r| r.contains("below required threshold 2.00")));
+}

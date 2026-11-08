@@ -61,6 +61,10 @@ async fn ensure_can_edit(pool: &spectra_db::PgPool, ws: Uuid, user_id: Option<Uu
 pub struct RunSignalTestRequest {
     /// Signal identifier or name (e.g. "momentum_5d", "mean_reversion_5d", "sentiment").
     pub signal_name: String,
+    /// Optional saved signal id to reload.
+    pub signal_id: Option<Uuid>,
+    /// Optional saved signal version to reload.
+    pub signal_version: Option<i32>,
     /// Optional workspace dataset version id to bind the test universe and point-in-time data to.
     pub dataset_version_id: Option<Uuid>,
     /// Optional universe of symbols (e.g. `["AAPL", "MSFT", "GOOG"]`).
@@ -77,6 +81,44 @@ pub struct RunSignalTestRequest {
     pub custom_bars: Option<Vec<BarInputRecord>>,
     /// Optional owner threshold gate criteria.
     pub threshold: Option<GateThresholdInput>,
+}
+
+/// Request to save a signal to the workspace Signal Library.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SaveSignalRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub signal_type: String,
+    pub parameters: Option<serde_json::Value>,
+    pub threshold: Option<GateThresholdInput>,
+}
+
+/// Saved signal view with latest version information.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SavedSignalView {
+    pub id: Uuid,
+    pub workspace_id: Uuid,
+    pub name: String,
+    pub description: String,
+    pub latest_version: i32,
+    pub signal_type: String,
+    pub parameters: serde_json::Value,
+    pub threshold: Option<serde_json::Value>,
+    pub created_at: chrono::DateTime<Utc>,
+    pub updated_at: chrono::DateTime<Utc>,
+}
+
+/// Saved signal version view.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SavedSignalVersionView {
+    pub id: Uuid,
+    pub signal_id: Uuid,
+    pub workspace_id: Uuid,
+    pub version: i32,
+    pub signal_type: String,
+    pub parameters: serde_json::Value,
+    pub threshold: Option<serde_json::Value>,
+    pub created_at: chrono::DateTime<Utc>,
 }
 
 /// Signal observation input.
@@ -103,6 +145,7 @@ pub struct GateThresholdInput {
     pub min_t_stat: Option<f64>,
     pub max_turnover: Option<f64>,
     pub min_half_life_days: Option<f64>,
+    pub max_half_life_days: Option<f64>,
 }
 
 /// Query parameters for exporting a signal test report.
@@ -250,11 +293,46 @@ pub(crate) async fn handle_run_signal_test(
 
     bars.sort_by(|a, b| a.ts_ns.cmp(&b.ts_ns).then_with(|| a.symbol.cmp(&b.symbol)));
 
+    // If signal_id is provided, reload the signal version from the Signal Library
+    let mut signal_name = req.signal_name.clone();
+    let mut threshold_override = req.threshold.clone();
+
+    if let Some(sig_id) = req.signal_id {
+        let saved_ver = if let Some(v) = req.signal_version {
+            spectra_db::signals::get_signal_version(&pool, ws, sig_id, v).await
+        } else {
+            spectra_db::signals::get_signal_by_id(&pool, ws, sig_id).await.map(|opt| {
+                opt.map(|s| spectra_db::signals::SignalVersionRow {
+                    id: s.id,
+                    signal_id: s.id,
+                    workspace_id: s.workspace_id,
+                    version: s.latest_version,
+                    signal_type: s.signal_type,
+                    parameters: s.parameters,
+                    threshold: s.threshold,
+                    created_by: None,
+                    created_at: s.created_at,
+                })
+            })
+        };
+
+        if let Ok(Some(saved)) = saved_ver {
+            if signal_name.is_empty() || signal_name == "custom_signal" {
+                signal_name = saved.signal_type;
+            }
+            if threshold_override.is_none() {
+                if let Some(t_json) = saved.threshold {
+                    threshold_override = serde_json::from_value(t_json).ok();
+                }
+            }
+        }
+    }
+
     // 2. Gather signals
     let signals: Vec<SignalValue> = if let Some(cs) = req.custom_signals {
         cs.into_iter().map(|s| SignalValue::new(s.symbol, s.date, s.value)).collect()
     } else {
-        let builtin = match req.signal_name.as_str() {
+        let builtin = match signal_name.as_str() {
             "mean_reversion_5d" | "mean_reversion" => BuiltinSignal::MeanReversion { lookback_days: 5 },
             "sma_crossover" => BuiltinSignal::SmaCrossover { fast: 5, slow: 20 },
             _ => BuiltinSignal::Momentum { lookback_days: 5 },
@@ -272,23 +350,27 @@ pub(crate) async fn handle_run_signal_test(
             .unwrap_or(0);
     let tests_run_count = (prior_count as usize) + 1;
 
-    // 4. Threshold setup
-    let research_threshold = req.threshold.as_ref().map(|t| SignalGateThreshold {
-        min_mean_ic: t.min_mean_ic,
-        min_t_stat: t.min_t_stat,
-        max_turnover: t.max_turnover,
-        min_half_life_days: t.min_half_life_days,
-    });
+    // 4. Threshold setup: Owner default is Mean IC >= 0.05, t-stat >= 2.0, Half-life <= 20.0 days.
+    let research_threshold = match threshold_override.as_ref() {
+        Some(t) => SignalGateThreshold {
+            min_mean_ic: t.min_mean_ic,
+            min_t_stat: t.min_t_stat,
+            max_turnover: t.max_turnover,
+            min_half_life_days: t.min_half_life_days,
+            max_half_life_days: t.max_half_life_days,
+        },
+        None => SignalGateThreshold::owner_default(),
+    };
 
     // 5. Run signal analysis
     let report = match run_signal_test(
-        &req.signal_name,
+        &signal_name,
         &signals,
         &bars,
         &horizons,
         primary_horizon,
         quantile_count,
-        research_threshold.as_ref(),
+        Some(&research_threshold),
         req.dataset_version_id.map(|id| id.to_string()),
         tests_run_count,
     ) {
@@ -297,7 +379,13 @@ pub(crate) async fn handle_run_signal_test(
     };
 
     let report_val: serde_json::Value = serde_json::from_str(&report.to_json().dump()).unwrap_or_default();
-    let threshold_val = req.threshold.as_ref().and_then(|t| serde_json::to_value(t).ok());
+    let threshold_val = Some(serde_json::json!({
+        "min_mean_ic": research_threshold.min_mean_ic,
+        "min_t_stat": research_threshold.min_t_stat,
+        "max_turnover": research_threshold.max_turnover,
+        "min_half_life_days": research_threshold.min_half_life_days,
+        "max_half_life_days": research_threshold.max_half_life_days,
+    }));
 
     let new_rec = spectra_db::signal_tests::NewSignalTest {
         workspace_id: ws,
@@ -581,6 +669,257 @@ pub(crate) async fn handle_get_m42_sentiment(
     };
 
     json_response(200, serde_json::to_string(&resp).unwrap_or_default())
+}
+
+/// POST /api/v1/alpha/signals: Save a signal definition and version to the Signal Library (M12).
+#[utoipa::path(
+    post,
+    path = "/api/v1/alpha/signals",
+    tag = "alpha",
+    request_body = SaveSignalRequest,
+    responses(
+        (status = 201, description = "Signal version saved successfully", body = SavedSignalVersionView),
+        (status = 400, description = "Invalid request payload", body = crate::openapi::ErrorDoc),
+        (status = 403, description = "Viewers cannot save signals", body = crate::openapi::ErrorDoc),
+        (status = 422, description = "Validation error", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn handle_save_signal(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let user_id = user_of(&identity);
+    if let Err(e) = ensure_can_edit(&pool, ws, user_id).await {
+        return e;
+    }
+
+    let req: SaveSignalRequest = match parse_body(body) {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+
+    if req.name.trim().is_empty() {
+        return error_response(422, "Signal name cannot be empty");
+    }
+
+    let desc = req.description.unwrap_or_default();
+    let params = req.parameters.unwrap_or_else(|| serde_json::json!({}));
+    let threshold_val = req.threshold.as_ref().and_then(|t| serde_json::to_value(t).ok());
+
+    match spectra_db::signals::save_signal_version(
+        &pool,
+        ws,
+        &req.name,
+        &desc,
+        &req.signal_type,
+        &params,
+        threshold_val.as_ref(),
+        user_id,
+    )
+    .await
+    {
+        Ok(ver) => {
+            let view = SavedSignalVersionView {
+                id: ver.id,
+                signal_id: ver.signal_id,
+                workspace_id: ver.workspace_id,
+                version: ver.version,
+                signal_type: ver.signal_type,
+                parameters: ver.parameters,
+                threshold: ver.threshold,
+                created_at: ver.created_at,
+            };
+            json_response(201, serde_json::to_string(&view).unwrap_or_default())
+        }
+        Err(e) => error_response(500, format!("Failed to save signal: {e}")),
+    }
+}
+
+/// GET /api/v1/alpha/signals: List all saved signals in the workspace (M12).
+#[utoipa::path(
+    get,
+    path = "/api/v1/alpha/signals",
+    tag = "alpha",
+    responses(
+        (status = 200, description = "List of saved signals", body = Vec<SavedSignalView>),
+        (status = 400, description = "Invalid auth context", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn handle_list_signals(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+
+    match spectra_db::signals::list_signals(&pool, ws).await {
+        Ok(list) => {
+            let views: Vec<SavedSignalView> = list
+                .into_iter()
+                .map(|s| SavedSignalView {
+                    id: s.id,
+                    workspace_id: s.workspace_id,
+                    name: s.name,
+                    description: s.description,
+                    latest_version: s.latest_version,
+                    signal_type: s.signal_type,
+                    parameters: s.parameters,
+                    threshold: s.threshold,
+                    created_at: s.created_at,
+                    updated_at: s.updated_at,
+                })
+                .collect();
+            json_response(200, serde_json::to_string(&views).unwrap_or_default())
+        }
+        Err(e) => error_response(500, format!("Failed to list signals: {e}")),
+    }
+}
+
+/// GET /api/v1/alpha/signals/{signal_id}: Get saved signal details by ID (M12).
+#[utoipa::path(
+    get,
+    path = "/api/v1/alpha/signals/{signal_id}",
+    tag = "alpha",
+    params(
+        ("signal_id" = Uuid, Path, description = "Signal UUID")
+    ),
+    responses(
+        (status = 200, description = "Signal details", body = SavedSignalView),
+        (status = 404, description = "Signal not found", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn handle_get_signal(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    path: Result<Path<Uuid>, PathRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let Ok(Path(signal_id)) = path else {
+        return error_response(400, "Invalid signal UUID in path");
+    };
+
+    match spectra_db::signals::get_signal_by_id(&pool, ws, signal_id).await {
+        Ok(Some(s)) => {
+            let view = SavedSignalView {
+                id: s.id,
+                workspace_id: s.workspace_id,
+                name: s.name,
+                description: s.description,
+                latest_version: s.latest_version,
+                signal_type: s.signal_type,
+                parameters: s.parameters,
+                threshold: s.threshold,
+                created_at: s.created_at,
+                updated_at: s.updated_at,
+            };
+            json_response(200, serde_json::to_string(&view).unwrap_or_default())
+        }
+        Ok(None) => error_response(404, "Signal not found"),
+        Err(e) => error_response(500, format!("Failed to retrieve signal: {e}")),
+    }
+}
+
+/// GET /api/v1/alpha/signals/{signal_id}/versions: List all versions of a signal (M12).
+#[utoipa::path(
+    get,
+    path = "/api/v1/alpha/signals/{signal_id}/versions",
+    tag = "alpha",
+    params(
+        ("signal_id" = Uuid, Path, description = "Signal UUID")
+    ),
+    responses(
+        (status = 200, description = "List of signal versions", body = Vec<SavedSignalVersionView>),
+        (status = 404, description = "Signal not found", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn handle_list_signal_versions(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    path: Result<Path<Uuid>, PathRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let Ok(Path(signal_id)) = path else {
+        return error_response(400, "Invalid signal UUID in path");
+    };
+
+    match spectra_db::signals::list_signal_versions(&pool, ws, signal_id).await {
+        Ok(list) => {
+            let views: Vec<SavedSignalVersionView> = list
+                .into_iter()
+                .map(|v| SavedSignalVersionView {
+                    id: v.id,
+                    signal_id: v.signal_id,
+                    workspace_id: v.workspace_id,
+                    version: v.version,
+                    signal_type: v.signal_type,
+                    parameters: v.parameters,
+                    threshold: v.threshold,
+                    created_at: v.created_at,
+                })
+                .collect();
+            json_response(200, serde_json::to_string(&views).unwrap_or_default())
+        }
+        Err(e) => error_response(500, format!("Failed to list signal versions: {e}")),
+    }
+}
+
+/// GET /api/v1/alpha/signals/{signal_id}/versions/{version}: Get a specific signal version (M12).
+#[utoipa::path(
+    get,
+    path = "/api/v1/alpha/signals/{signal_id}/versions/{version}",
+    tag = "alpha",
+    params(
+        ("signal_id" = Uuid, Path, description = "Signal UUID"),
+        ("version" = i32, Path, description = "Version number")
+    ),
+    responses(
+        (status = 200, description = "Signal version details", body = SavedSignalVersionView),
+        (status = 404, description = "Signal version not found", body = crate::openapi::ErrorDoc),
+    )
+)]
+pub(crate) async fn handle_get_signal_version(
+    State(st): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    path: Result<Path<(Uuid, i32)>, PathRejection>,
+) -> Response {
+    let (pool, ws) = match context(&st, &identity) {
+        Ok(c) => c,
+        Err(r) => return r,
+    };
+    let Ok(Path((signal_id, version))) = path else {
+        return error_response(400, "Invalid path parameters");
+    };
+
+    match spectra_db::signals::get_signal_version(&pool, ws, signal_id, version).await {
+        Ok(Some(v)) => {
+            let view = SavedSignalVersionView {
+                id: v.id,
+                signal_id: v.signal_id,
+                workspace_id: v.workspace_id,
+                version: v.version,
+                signal_type: v.signal_type,
+                parameters: v.parameters,
+                threshold: v.threshold,
+                created_at: v.created_at,
+            };
+            json_response(200, serde_json::to_string(&view).unwrap_or_default())
+        }
+        Ok(None) => error_response(404, "Signal version not found"),
+        Err(e) => error_response(500, format!("Failed to retrieve signal version: {e}")),
+    }
 }
 
 /// Format signal test as CSV.

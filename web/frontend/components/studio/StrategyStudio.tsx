@@ -18,6 +18,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Share2,
   Sliders,
   Sparkles,
 } from 'lucide-react';
@@ -89,6 +90,16 @@ export function StrategyStudio() {
     return COMMON_STRATEGY_TEMPLATES.find((t) => t.code.trim() === code.trim());
   }, [code]);
 
+  const errorsByLine = useMemo(() => {
+    const map = new Map<number, ValidationErrorItem[]>();
+    for (const err of validationErrors) {
+      const arr = map.get(err.line) || [];
+      arr.push(err);
+      map.set(err.line, arr);
+    }
+    return map;
+  }, [validationErrors]);
+
   // Sub-tabs: 'code' | 'history' | 'diff' | 'presets'
   const [activeSubTab, setActiveSubTab] = useState<'code' | 'history' | 'diff' | 'presets'>('code');
 
@@ -115,11 +126,29 @@ export function StrategyStudio() {
 
   // Quick Run Backtest Modal
   const [showRunModal, setShowRunModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [datasets, setDatasets] = useState<DatasetVersion[]>([]);
   const [selectedDatasetId, setSelectedDatasetId] = useState('');
   const [selectedVersionForRun, setSelectedVersionForRun] = useState<string>('');
   const [isRunning, setIsRunning] = useState(false);
   const [runMessage, setRunMessage] = useState<string | null>(null);
+
+  // Jump to specific line in editor
+  const jumpToLine = useCallback(
+    (targetLine: number) => {
+      if (!textareaRef.current) return;
+      const lines = code.split('\n');
+      let charPos = 0;
+      for (let i = 0; i < Math.min(targetLine - 1, lines.length); i++) {
+        charPos += lines[i].length + 1;
+      }
+      textareaRef.current.focus();
+      textareaRef.current.setSelectionRange(charPos, charPos + (lines[targetLine - 1]?.length || 0));
+    },
+    [code]
+  );
 
   // Debounce ref for auto-saving drafts and validating
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -581,6 +610,14 @@ export function StrategyStudio() {
             >
               <Play className="h-4 w-4 fill-current" /> Run Backtest
             </button>
+
+            <button
+              type="button"
+              onClick={() => setShowShareModal(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-ink/15 bg-ink/5 px-3 py-2 text-xs font-semibold text-ink transition hover:bg-ink/10 active:scale-95"
+            >
+              <Share2 className="h-4 w-4" /> Share
+            </button>
           </div>
         </div>
 
@@ -702,19 +739,45 @@ export function StrategyStudio() {
 
               {/* Code input with line numbers */}
               <div className="flex min-h-[420px] font-mono text-xs">
-                {/* Line numbers gutter */}
+                {/* Line numbers gutter with inline error badges & tooltips */}
                 <div className="select-none border-r border-ink/10 bg-ink/[0.03] py-3 text-right text-ink/30">
                   {Array.from({ length: linesCount }).map((_, i) => {
                     const lineNo = i + 1;
-                    const hasErr = errorLineSet.has(lineNo);
+                    const lineErrors = errorsByLine.get(lineNo) || [];
+                    const hasErr = lineErrors.length > 0;
                     return (
                       <div
                         key={lineNo}
-                        className={`px-3 leading-5 ${
-                          hasErr ? 'bg-rose-500/20 font-bold text-rose-500' : ''
+                        title={
+                          hasErr
+                            ? lineErrors.map((e) => `Line ${e.line}:${e.col} — ${e.message}`).join('\n')
+                            : `Line ${lineNo}`
+                        }
+                        onClick={() => {
+                          if (hasErr) jumpToLine(lineNo);
+                        }}
+                        className={`group relative px-3 leading-5 transition select-none ${
+                          hasErr
+                            ? 'bg-rose-500/20 font-bold text-rose-500 cursor-pointer hover:bg-rose-500/30'
+                            : ''
                         }`}
                       >
-                        {hasErr ? '!' : lineNo}
+                        {hasErr ? (
+                          <>
+                            <span className="inline-flex items-center justify-end font-bold text-rose-500">!</span>
+                            {/* Hover tooltip */}
+                            <div className="pointer-events-none absolute left-full top-0 ml-1.5 z-30 hidden group-hover:flex flex-col whitespace-nowrap rounded-md bg-zinc-950 text-zinc-100 border border-rose-500/40 p-2 text-[11px] shadow-xl">
+                              <span className="font-semibold text-rose-400">Line {lineNo} error:</span>
+                              {lineErrors.map((e, idx) => (
+                                <span key={idx} className="font-mono text-zinc-300">
+                                  Col {e.col}: {e.message}
+                                </span>
+                              ))}
+                            </div>
+                          </>
+                        ) : (
+                          lineNo
+                        )}
                       </div>
                     );
                   })}
@@ -722,6 +785,7 @@ export function StrategyStudio() {
 
                 {/* Editor Textarea */}
                 <textarea
+                  ref={textareaRef}
                   value={code}
                   onChange={(e) => {
                     setCode(e.target.value);
@@ -735,6 +799,41 @@ export function StrategyStudio() {
                   rows={20}
                 />
               </div>
+
+              {/* Inline Editor Error Markers Banner */}
+              {!isValid && validationErrors.length > 0 && (
+                <div className="border-t border-rose-500/30 bg-rose-500/10 px-4 py-2.5">
+                  <div className="flex items-center justify-between text-xs font-semibold text-rose-600 dark:text-rose-400">
+                    <span className="flex items-center gap-1.5">
+                      <AlertCircle className="h-4 w-4 shrink-0" />
+                      Inline AST & Safety Diagnostics ({validationErrors.length})
+                    </span>
+                    <span className="text-[11px] font-mono text-rose-500/80">
+                      Click to jump directly to editor line
+                    </span>
+                  </div>
+                  <div className="mt-2 space-y-1 font-mono text-xs">
+                    {validationErrors.map((err, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => jumpToLine(err.line)}
+                        className="flex w-full items-center justify-between rounded px-2.5 py-1 text-left text-rose-700 hover:bg-rose-500/20 dark:text-rose-300 transition group"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="rounded bg-rose-500/25 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 dark:text-rose-200">
+                            Line {err.line}:{err.col}
+                          </span>
+                          <span>{err.message}</span>
+                        </div>
+                        <span className="text-[10px] font-sans text-rose-600 opacity-60 group-hover:opacity-100 underline dark:text-rose-400">
+                          Jump to code →
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Diagnostics Panel */}
@@ -1305,6 +1404,79 @@ export function StrategyStudio() {
               >
                 {isRunning ? <Spinner className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 fill-current" />}
                 Queue Run
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share Strategy Modal - Workspace scoped, public sharing deferred to M32 sandbox */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-ink/15 bg-white p-6 shadow-2xl dark:bg-zinc-900">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-ink">Strategy Sharing</h3>
+              <span className="rounded-full bg-accent/10 px-2.5 py-0.5 text-[11px] font-semibold text-accent">
+                Workspace Scope
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-ink/60">
+              Control strategy visibility and access. Workspace-internal team sharing is active; public external sharing links remain disabled pending the M32 isolated execution sandbox.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs">
+                <div className="flex items-center justify-between font-semibold text-emerald-700 dark:text-emerald-400">
+                  <span>Workspace Team Sharing</span>
+                  <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-bold">Active</span>
+                </div>
+                <p className="mt-1 text-[11px] text-ink/70">
+                  All members of this workspace can view, tune, or execute this strategy according to their assigned role.
+                </p>
+                <div className="mt-2.5 flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={typeof window !== 'undefined' ? `${window.location.origin}/studio/strategies?id=${selectedStrategy?.id || ''}` : ''}
+                    className="flex-1 rounded border border-ink/15 bg-ink/[0.03] px-2 py-1 text-[11px] font-mono text-ink/80 select-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window !== 'undefined') {
+                        navigator.clipboard.writeText(`${window.location.origin}/studio/strategies?id=${selectedStrategy?.id || ''}`);
+                        setCopiedLink(true);
+                        setTimeout(() => setCopiedLink(false), 2000);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded bg-ink/10 px-2.5 py-1 text-xs font-semibold text-ink hover:bg-ink/15 transition"
+                  >
+                    <Copy className="h-3 w-3" />
+                    {copiedLink ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-ink/15 bg-ink/[0.02] p-3 text-xs opacity-75">
+                <div className="flex items-center justify-between font-semibold text-ink/60">
+                  <span>Public & External Sharing</span>
+                  <span className="rounded bg-ink/10 px-1.5 py-0.5 text-[10px] font-bold text-ink/50">
+                    Deferred (M32)
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] text-ink/50">
+                  Public unauthenticated links and cross-workspace sharing are disabled pending M32 execution sandbox limits (wall-clock time, memory limits, and no-network isolation).
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowShareModal(false)}
+                className="rounded-lg border border-ink/15 px-3.5 py-1.5 text-xs font-medium text-ink/70 hover:bg-ink/5"
+              >
+                Close
               </button>
             </div>
           </div>

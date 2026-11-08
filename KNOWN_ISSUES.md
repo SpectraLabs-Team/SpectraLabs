@@ -67,6 +67,11 @@ rate-limiting are handled by the frontend. Terminate public TLS at the edge prox
 the engine listener directly to the internet. The API runs at most 32 engine computations at a
 time and answers 503 to further compute requests instead of queueing them.
 
+## Strategy Studio & Sandbox Limits (M2 / M32)
+
+- **M2 Strategy sharing scope:** Strategy sharing is restricted to internal workspace members (governed by workspace RBAC). Public, unauthenticated, and cross-workspace sharing links are disabled until the M32 isolated execution sandbox lands.
+- **M32 Execution Sandbox limits:** Prior to enabling public code sharing or untrusted user code execution, M32 will enforce hard limits: wall-clock execution limits, memory quotas, and network sandboxing (no outbound network access).
+
 ## Platform ops (M20)
 
 M20 is implemented on branch `m20/finish` and reaches `main` when it is merged. Status by step is in

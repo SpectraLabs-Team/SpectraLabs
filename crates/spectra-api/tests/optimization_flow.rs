@@ -199,6 +199,11 @@ async fn parameter_sweep_flow() {
     assert_eq!(status, 200);
     assert_eq!(detail["sweep"]["id"], sweep_id);
     assert!(detail["trials"].is_array());
+    assert!(detail["child_runs"].is_array(), "sweep detail must include child_runs array: {detail}");
+    assert!(
+        detail["holdout_history"].is_array(),
+        "sweep detail must include holdout_history array: {detail}"
+    );
     f.clean_up().await;
 }
 

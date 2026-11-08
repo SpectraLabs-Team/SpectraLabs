@@ -8,7 +8,7 @@ use axum::response::Response;
 use axum::Extension;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use spectra_db::datasets::{self, Access, Resolved};
 use spectra_db::jobs::{self, NewJob};
 use spectra_db::optimization::{
@@ -599,12 +599,86 @@ pub(crate) async fn get_sweep(
     let sensitivity = compute_sensitivity_matrix(&trials);
     let trial_views: Vec<SweepTrialView> = trials.into_iter().map(SweepTrialView::from).collect();
 
+    // Query child runs recorded for this sweep's trials
+    let child_runs = if let Some(job_id) = sweep.job_id {
+        sqlx::query(
+            "SELECT id, status, params, metrics, sharpe_per_period, finished_at, created_at \
+             FROM runs \
+             WHERE workspace_id = $1 AND (job_id = $2 OR (kind = 'sweep_trial' AND strategy_version_id IS NOT DISTINCT FROM $3)) \
+             ORDER BY created_at ASC",
+        )
+        .bind(ws)
+        .bind(job_id)
+        .bind(sweep.strategy_version_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default()
+    } else {
+        sqlx::query(
+            "SELECT id, status, params, metrics, sharpe_per_period, finished_at, created_at \
+             FROM runs \
+             WHERE workspace_id = $1 AND kind = 'sweep_trial' AND strategy_version_id IS NOT DISTINCT FROM $2 \
+             ORDER BY created_at ASC",
+        )
+        .bind(ws)
+        .bind(sweep.strategy_version_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default()
+    };
+
+    let child_run_views: Vec<Value> = child_runs
+        .into_iter()
+        .map(|r| {
+            use sqlx::Row;
+            json!({
+                "id": r.get::<Uuid, _>("id"),
+                "status": r.get::<String, _>("status"),
+                "params": r.get::<serde_json::Value, _>("params"),
+                "metrics": r.get::<serde_json::Value, _>("metrics"),
+                "sharpe_per_period": r.get::<Option<f64>, _>("sharpe_per_period"),
+                "finished_at": r.get::<Option<chrono::DateTime<chrono::Utc>>, _>("finished_at"),
+                "created_at": r.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
+            })
+        })
+        .collect();
+
+    let holdout_evals = if ensure_can_view_holdout(&pool, ws, user_of(&id)).await.is_err() {
+        Vec::new()
+    } else {
+        optimization::evaluations_for_run_target(
+            &pool,
+            ws,
+            sweep.strategy_version_id,
+            Some(sweep.dataset_version_id),
+        )
+        .await
+        .unwrap_or_default()
+    };
+
+    let holdout_history_views: Vec<Value> = holdout_evals
+        .into_iter()
+        .map(|h| {
+            json!({
+                "id": h.id,
+                "holdout_id": h.holdout_id,
+                "evaluation_num": h.evaluation_num,
+                "metrics": h.metrics,
+                "dsr": h.dsr,
+                "warnings": h.warnings,
+                "evaluated_at": h.evaluated_at,
+            })
+        })
+        .collect();
+
     to_json(
         200,
         &json!({
             "sweep": sweep,
             "trials": trial_views,
             "sensitivity": sensitivity,
+            "child_runs": child_run_views,
+            "holdout_history": holdout_history_views,
         }),
     )
 }

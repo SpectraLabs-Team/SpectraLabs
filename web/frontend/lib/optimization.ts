@@ -51,10 +51,37 @@ export interface SensitivityMatrix {
   matrix: (number | null)[][];
 }
 
+export interface SweepChildRun {
+  id: string;
+  status: string;
+  params: Record<string, unknown>;
+  metrics: Record<string, unknown>;
+  sharpe_per_period?: number | null;
+  finished_at?: string | null;
+  created_at: string;
+}
+
+export interface SweepHoldoutHistoryItem {
+  id: string;
+  holdout_id: string;
+  holdout_name?: string;
+  evaluation_num: number;
+  metrics: {
+    sharpe?: number;
+    total_return?: number;
+    max_drawdown?: number;
+  };
+  dsr?: number | null;
+  warnings?: string[];
+  evaluated_at: string;
+}
+
 export interface SweepDetail {
   sweep: OptimizationSweep;
   trials: SweepTrial[];
   sensitivity?: SensitivityMatrix;
+  child_runs?: SweepChildRun[];
+  holdout_history?: SweepHoldoutHistoryItem[];
 }
 
 export interface WalkForwardFold {

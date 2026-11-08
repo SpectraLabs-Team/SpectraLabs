@@ -381,4 +381,33 @@ impl DataStore {
         let raw = fs::read(&file).map_err(|_| data_err(format!("cannot open file: {}", file.display())))?;
         decode_dataset(&raw, id)
     }
+
+    /// Loads a dataset version from the store and verifies its integrity against an expected holdout slice hash.
+    ///
+    /// # Errors
+    /// [`Error::Data`] if the dataset is corrupt, tampered with, or does not match the expected holdout slice hash.
+    pub fn load_and_verify_holdout(&self, id: &str, expected_holdout_hash: &str) -> Result<Dataset> {
+        let dataset = self.get(id)?;
+        verify_holdout_slice_hash(&dataset.bars, expected_holdout_hash)?;
+        Ok(dataset)
+    }
+}
+
+/// Computes a standalone SHA-256 hash for a holdout slice of bars.
+pub fn hash_holdout_slice(bars: &[Bar]) -> String {
+    bars_sha256(bars)
+}
+
+/// Verifies that a holdout slice of bars matches its expected checksum hash.
+///
+/// # Errors
+/// [`Error::Data`] if the hash does not match, indicating the holdout data was tampered with or modified.
+pub fn verify_holdout_slice_hash(bars: &[Bar], expected_hash: &str) -> Result<()> {
+    let actual = hash_holdout_slice(bars);
+    if actual != expected_hash {
+        return Err(data_err(format!(
+            "holdout slice checksum mismatch: expected {expected_hash}, got {actual}. The holdout data has been tampered with or modified."
+        )));
+    }
+    Ok(())
 }

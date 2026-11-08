@@ -146,6 +146,16 @@ impl Fixture {
         run_refresh(&self.pool, edgar, &job, Arc::new(AtomicBool::new(false)), progress).await
     }
 
+    /// Removes the jobs this test queued. CI runs the SQL checks on the same database after the
+    /// tests, and its queue check claims the highest-priority queued job: it must be its own.
+    async fn clear_jobs(&self) {
+        sqlx::query("DELETE FROM jobs WHERE workspace_id = $1")
+            .bind(self.ws)
+            .execute(&self.pool)
+            .await
+            .unwrap();
+    }
+
     async fn revenue_q1(&self, as_of_ns: i64) -> Option<f64> {
         let as_of = chrono::DateTime::from_timestamp_nanos(as_of_ns);
         let rows = spectra_db::fundamentals::facts_as_of(&self.pool, self.ws, "EXA", as_of, Some("revenue"))
@@ -223,6 +233,7 @@ async fn refresh_loads_edgar_and_a_second_refresh_adds_the_restatement() {
     );
     let (status, _) = fix.call(fix.viewer, "GET", "/api/v1/fundamentals/loads?limit=0", "").await;
     assert_eq!(status, 422);
+    fix.clear_jobs().await;
 }
 
 #[tokio::test]
@@ -245,6 +256,7 @@ async fn refresh_without_sec_user_agent_fails_and_says_why() {
     if let Some(why) = why {
         assert!(why.contains("SEC_USER_AGENT"), "{why}");
     }
+    fix.clear_jobs().await;
 }
 
 #[tokio::test]
@@ -255,6 +267,7 @@ async fn refresh_requests_are_validated() {
         let (status, err) = fix.call(fix.editor, "POST", "/api/v1/fundamentals/refresh", body).await;
         assert_eq!(status, 422, "{body}: {err}");
     }
+    fix.clear_jobs().await;
 }
 
 #[tokio::test]
@@ -305,4 +318,5 @@ async fn a_schedule_queues_refreshes_when_due() {
     assert_eq!((status, deleted["deleted"].as_bool()), (200, Some(true)));
     let (status, _) = fix.call(fix.editor, "DELETE", path, "").await;
     assert_eq!(status, 404);
+    fix.clear_jobs().await;
 }

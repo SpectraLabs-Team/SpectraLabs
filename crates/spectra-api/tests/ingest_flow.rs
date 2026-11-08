@@ -386,7 +386,12 @@ async fn datasets_can_be_browsed_charted_renamed_and_deleted() {
     let Some(pool) = pool().await else { return };
     let f = Fixture::new(pool.clone(), 1 << 30);
     let v1 = registered(f.ingest(&f.upload(CSV).await, "spy-qqq daily", SETTINGS, false).await);
-    let more = format!("{CSV}2024-01-08,SPY,474.5,476,474,475,1000\n2024-01-08,QQQ,403,405,402,404,520\n");
+    // Version 2's bytes are unique to this run: dataset files are content-addressed and the database
+    // is shared, so another test (or an earlier run) ingesting the same bytes would keep its file
+    // referenced, and the delete below would rightly leave it in the store.
+    let volume = 1000 + spectra_db::new_id().as_u128() % 1_000_000;
+    let more =
+        format!("{CSV}2024-01-08,SPY,474.5,476,474,475,{volume}\n2024-01-08,QQQ,403,405,402,404,520\n");
     let v2 = registered(f.ingest(&f.upload(&more).await, "spy-qqq daily", SETTINGS, false).await);
     let (v1_id, v2_id) =
         (v1["dataset_version_id"].as_str().unwrap(), v2["dataset_version_id"].as_str().unwrap());

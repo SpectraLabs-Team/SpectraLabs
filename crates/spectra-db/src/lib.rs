@@ -22,6 +22,7 @@ pub mod activity;
 pub mod artifacts;
 pub mod corporate_actions;
 pub mod datasets;
+pub mod fundamentals;
 pub mod gap;
 pub mod identity;
 pub mod instruments;

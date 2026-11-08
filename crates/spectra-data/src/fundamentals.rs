@@ -210,6 +210,11 @@ impl PointInTimeFundamentalsStore {
         &self.quarantine
     }
 
+    /// The records that passed the quality checks, in the order they were ingested.
+    pub fn records(&self) -> &[FundamentalRecord] {
+        &self.records
+    }
+
     /// Returns total accepted records count.
     pub fn accepted_count(&self) -> usize {
         self.records.len()

@@ -409,7 +409,8 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
     // 1. SMA: period=3 on SYM_SMA
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_SMA&dataset_version_id={vid}&timeframe=1Day&indicator=SMA&period=3")).await;
     assert_eq!(s, StatusCode::OK, "SMA error: {j}");
-    let series = &j["series"]["value"];
+    assert!(j.get("series").is_none(), "single-output SMA has no `series`: {j}");
+    let series = &j["values"];
     assert_eq!(series[0], Value::Null);
     assert_eq!(series[1], Value::Null);
     assert_eq!(series[2].as_f64().unwrap(), 11.0);
@@ -420,7 +421,7 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
     // 2. EMA: period=3 on SYM_EMA
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_EMA&dataset_version_id={vid}&timeframe=1Day&indicator=EMA&period=3")).await;
     assert_eq!(s, StatusCode::OK, "EMA error: {j}");
-    let series = &j["series"]["value"];
+    let series = &j["values"];
     assert_eq!(series[2].as_f64().unwrap(), 11.0);
     assert_eq!(series[3].as_f64().unwrap(), 12.0);
     assert_eq!(series[4].as_f64().unwrap(), 13.0);
@@ -428,7 +429,7 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
     // 3. WMA: period=3 on SYM_WMA
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_WMA&dataset_version_id={vid}&timeframe=1Day&indicator=WMA&period=3")).await;
     assert_eq!(s, StatusCode::OK, "WMA error: {j}");
-    let series = &j["series"]["value"];
+    let series = &j["values"];
     let v2 = series[2].as_f64().unwrap();
     assert!((v2 - (14.0 / 6.0)).abs() < 1e-10);
     let v3 = series[3].as_f64().unwrap();
@@ -437,20 +438,20 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
     // 4. DEMA: period=3 on SYM_DEMA
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_DEMA&dataset_version_id={vid}&timeframe=1Day&indicator=DEMA&period=3")).await;
     assert_eq!(s, StatusCode::OK, "DEMA error: {j}");
-    let val = j["series"]["value"].as_array().unwrap().iter().rev().find_map(|x| x.as_f64()).unwrap();
+    let val = j["values"].as_array().unwrap().iter().rev().find_map(|x| x.as_f64()).unwrap();
     assert!(val > 10.0 && val <= 19.0);
 
     // 5. TEMA: period=3 on SYM_TEMA
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_TEMA&dataset_version_id={vid}&timeframe=1Day&indicator=TEMA&period=3")).await;
     assert_eq!(s, StatusCode::OK, "TEMA error: {j}");
-    let last = j["series"]["value"].as_array().unwrap().last().unwrap().as_f64().unwrap();
+    let last = j["values"].as_array().unwrap().last().unwrap().as_f64().unwrap();
     assert!((last - 20.0).abs() < 1.0);
 
     // 6. RSI: period=14 on SYM_RSI
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_RSI&dataset_version_id={vid}&timeframe=1Day&indicator=RSI&period=14")).await;
     assert_eq!(s, StatusCode::OK, "RSI error: {j}");
-    assert_eq!(j["series"]["value"][13], Value::Null);
-    let rsi_14 = j["series"]["value"][14].as_f64().unwrap();
+    assert_eq!(j["values"][13], Value::Null);
+    let rsi_14 = j["values"][14].as_f64().unwrap();
     assert!(rsi_14 >= 65.0 && rsi_14 <= 75.0, "RSI: {rsi_14}");
 
     // 7. MACD: fast=12, slow=26, signal=9 on SYM_MACD
@@ -463,6 +464,7 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
     // 8. BB: period=5, mult=2.0 on SYM_BB
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_BB&dataset_version_id={vid}&timeframe=1Day&indicator=BB&period=5&mult=2.0")).await;
     assert_eq!(s, StatusCode::OK, "BB error: {j}");
+    assert!(j.get("values").is_none(), "multi-output BB has no top-level `values`: {j}");
     let up = j["series"]["upper"][4].as_f64().unwrap();
     let mid = j["series"]["middle"][4].as_f64().unwrap();
     let low = j["series"]["lower"][4].as_f64().unwrap();
@@ -474,7 +476,7 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
     // 9. ATR: period=3 on SYM_ATR
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_ATR&dataset_version_id={vid}&timeframe=1Day&indicator=ATR&period=3")).await;
     assert_eq!(s, StatusCode::OK, "ATR error: {j}");
-    assert!(j["series"]["value"][2].as_f64().unwrap() > 0.0);
+    assert!(j["values"][2].as_f64().unwrap() > 0.0);
 
     // 10. STOCH: k=3, d=2, slow_d=2 on SYM_STOCH
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_STOCH&dataset_version_id={vid}&timeframe=1Day&indicator=STOCH&k=3&d=2&slow_d=2")).await;
@@ -495,9 +497,9 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
         ))
         .await;
     assert_eq!(s, StatusCode::OK, "OBV error: {j}");
-    assert_eq!(j["series"]["value"][0].as_f64().unwrap(), 100.0);
-    assert_eq!(j["series"]["value"][1].as_f64().unwrap(), 150.0);
-    assert_eq!(j["series"]["value"][2].as_f64().unwrap(), 120.0);
+    assert_eq!(j["values"][0].as_f64().unwrap(), 100.0);
+    assert_eq!(j["values"][1].as_f64().unwrap(), 150.0);
+    assert_eq!(j["values"][2].as_f64().unwrap(), 120.0);
 
     // 13. VWAP: on SYM_VWAP
     let (s, j) = fix
@@ -506,8 +508,8 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
         ))
         .await;
     assert_eq!(s, StatusCode::OK, "VWAP error: {j}");
-    assert_eq!(j["series"]["value"][0].as_f64().unwrap(), 10.0);
-    assert_eq!(j["series"]["value"][1].as_f64().unwrap(), 11.0);
+    assert_eq!(j["values"][0].as_f64().unwrap(), 10.0);
+    assert_eq!(j["values"][1].as_f64().unwrap(), 11.0);
 
     // 14. ICHIMOKU: tenkan=9, kijun=26, span_b=52 on SYM_ICHIMOKU
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_ICHIMOKU&dataset_version_id={vid}&timeframe=1Day&indicator=ICHIMOKU&tenkan=9&kijun=26&span_b=52")).await;
@@ -519,18 +521,18 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
     // 15. PSAR: start=0.02, step=0.02, max=0.2 on SYM_PSAR
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_PSAR&dataset_version_id={vid}&timeframe=1Day&indicator=PSAR&start=0.02&step=0.02&max=0.2")).await;
     assert_eq!(s, StatusCode::OK, "PSAR error: {j}");
-    assert!(j["series"]["value"][0].is_number());
-    assert!(j["series"]["value"][1].is_number());
+    assert!(j["values"][0].is_number());
+    assert!(j["values"][1].is_number());
 
     // 16. CCI: period=14 on SYM_CCI
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_CCI&dataset_version_id={vid}&timeframe=1Day&indicator=CCI&period=14")).await;
     assert_eq!(s, StatusCode::OK, "CCI error: {j}");
-    assert!(j["series"]["value"][13].is_number());
+    assert!(j["values"][13].is_number());
 
     // 17. WILLR: period=3 on SYM_WILLR
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_WILLR&dataset_version_id={vid}&timeframe=1Day&indicator=WILLR&period=3")).await;
     assert_eq!(s, StatusCode::OK, "WILLR error: {j}");
-    let wr = j["series"]["value"][2].as_f64().unwrap();
+    let wr = j["values"][2].as_f64().unwrap();
     assert!(wr >= -100.0 && wr <= 0.0);
 
     // 18. DONCHIAN: period=3 on SYM_DONCHIAN
@@ -549,35 +551,35 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
     // 20. CMF: period=3 on SYM_CMF
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_CMF&dataset_version_id={vid}&timeframe=1Day&indicator=CMF&period=3")).await;
     assert_eq!(s, StatusCode::OK, "CMF error: {j}");
-    let cmf = j["series"]["value"][2].as_f64().unwrap();
+    let cmf = j["values"][2].as_f64().unwrap();
     assert!(cmf >= -1.0 && cmf <= 1.0);
 
     // 21. MOM: period=2 on SYM_MOM
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_MOM&dataset_version_id={vid}&timeframe=1Day&indicator=MOM&period=2")).await;
     assert_eq!(s, StatusCode::OK, "MOM error: {j}");
-    assert_eq!(j["series"]["value"][0], Value::Null);
-    assert_eq!(j["series"]["value"][1], Value::Null);
-    assert_eq!(j["series"]["value"][2].as_f64().unwrap(), 5.0);
-    assert_eq!(j["series"]["value"][3].as_f64().unwrap(), 2.0);
-    assert_eq!(j["series"]["value"][4].as_f64().unwrap(), 3.0);
+    assert_eq!(j["values"][0], Value::Null);
+    assert_eq!(j["values"][1], Value::Null);
+    assert_eq!(j["values"][2].as_f64().unwrap(), 5.0);
+    assert_eq!(j["values"][3].as_f64().unwrap(), 2.0);
+    assert_eq!(j["values"][4].as_f64().unwrap(), 3.0);
 
     // 22. ROC: period=2 on SYM_ROC
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_ROC&dataset_version_id={vid}&timeframe=1Day&indicator=ROC&period=2")).await;
     assert_eq!(s, StatusCode::OK, "ROC error: {j}");
-    assert_eq!(j["series"]["value"][0], Value::Null);
-    assert_eq!(j["series"]["value"][1], Value::Null);
-    assert_eq!(j["series"]["value"][2].as_f64().unwrap(), 20.0);
+    assert_eq!(j["values"][0], Value::Null);
+    assert_eq!(j["values"][1], Value::Null);
+    assert_eq!(j["values"][2].as_f64().unwrap(), 20.0);
 
     // 23. MFI: period=14 on SYM_MFI
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_MFI&dataset_version_id={vid}&timeframe=1Day&indicator=MFI&period=14")).await;
     assert_eq!(s, StatusCode::OK, "MFI error: {j}");
-    let m = j["series"]["value"][14].as_f64().unwrap();
+    let m = j["values"][14].as_f64().unwrap();
     assert!(m >= 0.0 && m <= 100.0);
 
     // 24. STDDEV: period=5 on SYM_STDDEV
     let (s, j) = fix.call_api(&format!("/api/v1/indicators?symbol=SYM_STDDEV&dataset_version_id={vid}&timeframe=1Day&indicator=STDDEV&period=5")).await;
     assert_eq!(s, StatusCode::OK, "STDDEV error: {j}");
-    assert!(j["series"]["value"][4].as_f64().unwrap() > 0.0);
+    assert!(j["values"][4].as_f64().unwrap() > 0.0);
 
     // 25. TYPICAL and MEDIAN: on SYM_TYPICAL
     let (s, j) = fix
@@ -586,7 +588,7 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
         ))
         .await;
     assert_eq!(s, StatusCode::OK, "TYPICAL error: {j}");
-    assert_eq!(j["series"]["value"][0].as_f64().unwrap(), (14.0 + 8.0 + 11.0) / 3.0);
+    assert_eq!(j["values"][0].as_f64().unwrap(), (14.0 + 8.0 + 11.0) / 3.0);
 
     let (s, j) = fix
         .call_api(&format!(
@@ -594,7 +596,7 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
         ))
         .await;
     assert_eq!(s, StatusCode::OK, "MEDIAN error: {j}");
-    assert_eq!(j["series"]["value"][0].as_f64().unwrap(), (14.0 + 8.0) / 2.0);
+    assert_eq!(j["values"][0].as_f64().unwrap(), (14.0 + 8.0) / 2.0);
 }
 
 #[tokio::test]
@@ -653,6 +655,18 @@ async fn test_validation_errors() {
     assert!(errs
         .iter()
         .any(|e| e["field"] == "timeframe" && e["message"].as_str().unwrap().contains("does not match")));
+
+    // 6. "1ns" is a test-only timeframe: the production route refuses it as unsupported
+    let (s, j) = fix
+        .call_api(&format!(
+            "/api/v1/indicators?symbol=SYM_SMA&dataset_version_id={vid}&timeframe=1ns&indicator=SMA"
+        ))
+        .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY, "{j}");
+    let errs = j["details"]["errors"].as_array().unwrap();
+    assert!(errs.iter().any(
+        |e| e["field"] == "timeframe" && e["message"].as_str().unwrap().contains("unsupported timeframe")
+    ));
 }
 
 #[tokio::test]
@@ -671,7 +685,7 @@ async fn test_warmup_exact_contract() {
         ))
         .await;
     assert_eq!(s, StatusCode::OK);
-    let sma = j["series"]["value"].as_array().unwrap();
+    let sma = j["values"].as_array().unwrap();
     for i in 0..19 {
         assert_eq!(sma[i], Value::Null, "SMA warmup null expected at {i}");
     }
@@ -755,6 +769,9 @@ async fn test_warmup_exact_contract() {
     assert!(chikou[0].is_number(), "Chikou first value expected at index 0");
 }
 
+/// Latency budget: p95 of one pass over 5 indicators on 10,000 bars.
+const P95_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
+
 #[tokio::test]
 async fn test_latency_p95_benchmark_10k_bars() {
     let Some(pool) = setup_pool().await else {
@@ -800,5 +817,11 @@ async fn test_latency_p95_benchmark_10k_bars() {
         durations[0].as_secs_f64() * 1000.0,
         durations[iterations / 2].as_secs_f64() * 1000.0,
         durations[iterations - 1].as_secs_f64() * 1000.0
+    );
+    assert!(
+        p95 <= P95_BUDGET,
+        "p95 for 5 indicators on 10,000 bars is {:.3} ms, over the {} ms budget",
+        p95.as_secs_f64() * 1000.0,
+        P95_BUDGET.as_millis()
     );
 }

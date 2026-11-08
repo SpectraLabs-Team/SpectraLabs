@@ -78,12 +78,20 @@ pub struct IndicatorSeriesView {
     pub total_bars: usize,
     /// Bar start timestamps (nanoseconds UTC) aligned with the output series.
     pub timestamps: Vec<i64>,
-    /// Every output series under its own name. Multi-output indicators include
-    /// each sub-series; single-output indicators include `"value"` and the indicator name.
-    pub series: BTreeMap<String, Vec<Option<f64>>>,
-    /// Convenience field for single-output indicators.
+    /// Multi-output indicators (BB, ICHIMOKU, MACD, STOCH, ADX, DONCHIAN, KELTNER): one
+    /// series per output, under its name (e.g. `upper`, `middle`, `lower`). Absent for
+    /// single-output indicators.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub series: Option<BTreeMap<String, Vec<Option<f64>>>>,
+    /// Single-output indicators: the one output series. Absent for multi-output indicators.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub values: Option<Vec<Option<f64>>>,
+}
+
+/// What an indicator computes: one series, or several named ones.
+enum IndicatorOutput {
+    Single(Vec<Option<f64>>),
+    Multi(BTreeMap<String, Vec<Option<f64>>>),
 }
 
 fn upper_median(mut v: Vec<f64>) -> f64 {
@@ -103,7 +111,8 @@ fn check_timeframe(tf: &str, median_ns: i64) -> Result<(), String> {
     let is_15min_tf = matches!(s.as_str(), "15m" | "15min");
     let is_1hour_tf = matches!(s.as_str(), "1h" | "1hour" | "hour");
     let is_1sec_tf = matches!(s.as_str(), "1s" | "1sec" | "second");
-    let is_1ns_tf = matches!(s.as_str(), "1ns" | "ns");
+    // Nanosecond bars exist only in unit-test fixtures; the route refuses "1ns" as unsupported.
+    let is_1ns_tf = cfg!(test) && matches!(s.as_str(), "1ns" | "ns");
 
     if !is_daily_tf && !is_1min_tf && !is_5min_tf && !is_15min_tf && !is_1hour_tf && !is_1sec_tf && !is_1ns_tf
     {
@@ -180,13 +189,13 @@ fn parse_f64_param(
     default
 }
 
-/// Compute the indicator output series mapping.
+/// Compute the indicator's output: a single series, or named series for multi-output indicators.
 fn compute_indicator(
     indicator: &str,
     bars: &[Bar],
     params: &HashMap<String, String>,
     errors: &mut Vec<(String, String)>,
-) -> Option<BTreeMap<String, Vec<Option<f64>>>> {
+) -> Option<IndicatorOutput> {
     let ind = indicator.trim().to_uppercase();
     let closes: Vec<f64> = bars.iter().map(|b| b.close.to_f64()).collect();
     let mut out = BTreeMap::new();
@@ -197,45 +206,35 @@ fn compute_indicator(
             if !errors.is_empty() {
                 return None;
             }
-            let s = sma(&closes, period);
-            out.insert("sma".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(sma(&closes, period)));
         }
         "EMA" => {
             let period = parse_usize_param(params, &["period"], 20, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = ema(&closes, period);
-            out.insert("ema".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(ema(&closes, period)));
         }
         "WMA" => {
             let period = parse_usize_param(params, &["period"], 20, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = wma(&closes, period);
-            out.insert("wma".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(wma(&closes, period)));
         }
         "DEMA" => {
             let period = parse_usize_param(params, &["period"], 20, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = dema(&closes, period);
-            out.insert("dema".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(dema(&closes, period)));
         }
         "TEMA" => {
             let period = parse_usize_param(params, &["period"], 20, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = tema(&closes, period);
-            out.insert("tema".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(tema(&closes, period)));
         }
         "BB" | "BOLLINGER" | "BOLLINGER_BANDS" => {
             let period = parse_usize_param(params, &["period"], 20, errors);
@@ -274,9 +273,7 @@ fn compute_indicator(
             if !errors.is_empty() {
                 return None;
             }
-            let s = parabolic_sar(bars, start, step, max);
-            out.insert("psar".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(parabolic_sar(bars, start, step, max)));
         }
         "DONCHIAN" | "DONCHIAN_CHANNELS" => {
             let period = parse_usize_param(params, &["period"], 20, errors);
@@ -300,28 +297,20 @@ fn compute_indicator(
             out.insert("lower".to_string(), res.lower);
         }
         "VWAP" => {
-            let s = vwap(bars);
-            out.insert("vwap".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(vwap(bars)));
         }
         "TYPICAL" | "TYPICAL_PRICE" => {
-            let s: Vec<Option<f64>> = typical_price(bars).into_iter().map(Some).collect();
-            out.insert("typical".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(typical_price(bars).into_iter().map(Some).collect()));
         }
         "MEDIAN" | "MEDIAN_PRICE" => {
-            let s: Vec<Option<f64>> = median_price(bars).into_iter().map(Some).collect();
-            out.insert("median".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(median_price(bars).into_iter().map(Some).collect()));
         }
         "RSI" => {
             let period = parse_usize_param(params, &["period"], 14, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = rsi(&closes, period);
-            out.insert("rsi".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(rsi(&closes, period)));
         }
         "MACD" => {
             let fast = parse_usize_param(params, &["fast", "fast_period"], 12, errors);
@@ -358,45 +347,35 @@ fn compute_indicator(
             if !errors.is_empty() {
                 return None;
             }
-            let s = cci(bars, period);
-            out.insert("cci".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(cci(bars, period)));
         }
         "WILLR" | "WILLIAMS_R" => {
             let period = parse_usize_param(params, &["period"], 14, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = williams_r(bars, period);
-            out.insert("willr".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(williams_r(bars, period)));
         }
         "MOM" | "MOMENTUM" => {
             let period = parse_usize_param(params, &["period"], 10, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = momentum(&closes, period);
-            out.insert("mom".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(momentum(&closes, period)));
         }
         "ROC" | "RATE_OF_CHANGE" => {
             let period = parse_usize_param(params, &["period"], 12, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = rate_of_change(&closes, period);
-            out.insert("roc".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(rate_of_change(&closes, period)));
         }
         "ATR" => {
             let period = parse_usize_param(params, &["period"], 14, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = atr(bars, period);
-            out.insert("atr".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(atr(bars, period)));
         }
         "ADX" => {
             let period = parse_usize_param(params, &["period"], 14, errors);
@@ -409,36 +388,28 @@ fn compute_indicator(
             out.insert("minus_di".to_string(), res.minus_di);
         }
         "OBV" => {
-            let s = obv(bars);
-            out.insert("obv".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(obv(bars)));
         }
         "CMF" | "CHAIKIN_MONEY_FLOW" => {
             let period = parse_usize_param(params, &["period"], 20, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = chaikin_money_flow(bars, period);
-            out.insert("cmf".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(chaikin_money_flow(bars, period)));
         }
         "MFI" | "MONEY_FLOW_INDEX" => {
             let period = parse_usize_param(params, &["period"], 14, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = mfi(bars, period);
-            out.insert("mfi".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(mfi(bars, period)));
         }
         "STDDEV" | "STD_DEV" => {
             let period = parse_usize_param(params, &["period"], 20, errors);
             if !errors.is_empty() {
                 return None;
             }
-            let s = std_dev(&closes, period);
-            out.insert("stddev".to_string(), s.clone());
-            out.insert("value".to_string(), s);
+            return Some(IndicatorOutput::Single(std_dev(&closes, period)));
         }
         _ => {
             errors.push(("indicator".to_string(), format!("unknown indicator '{indicator}'")));
@@ -446,7 +417,7 @@ fn compute_indicator(
         }
     }
 
-    Some(out)
+    Some(IndicatorOutput::Multi(out))
 }
 
 /// Calculate and retrieve aligned technical indicator series for a symbol.
@@ -583,13 +554,13 @@ pub(crate) async fn indicators_handler(
     }
 
     // Compute indicator series
-    let series = match compute_indicator(&indicator, &sym_bars, &params, &mut errors) {
-        Some(s) if errors.is_empty() => s,
+    let (series, values) = match compute_indicator(&indicator, &sym_bars, &params, &mut errors) {
+        Some(IndicatorOutput::Single(v)) if errors.is_empty() => (None, Some(v)),
+        Some(IndicatorOutput::Multi(m)) if errors.is_empty() => (Some(m), None),
         _ => return invalid_fields(&errors),
     };
 
     let timestamps: Vec<i64> = sym_bars.iter().map(|b| b.ts_ns).collect();
-    let values = series.get("value").cloned();
 
     to_json(
         200,
@@ -603,4 +574,18 @@ pub(crate) async fn indicators_handler(
             values,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nanosecond_timeframe_is_accepted_only_in_tests() {
+        // Under cfg(test) "1ns" matches nanosecond-spaced fixture bars; production builds refuse it
+        // (see indicator_series_flow's 422 test).
+        assert!(check_timeframe("1ns", 1).is_ok());
+        assert!(check_timeframe("1ns", 86_400_000_000_000).is_err());
+        assert!(check_timeframe("1Day", 86_400_000_000_000).is_ok());
+    }
 }

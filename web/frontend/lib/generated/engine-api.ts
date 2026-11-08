@@ -670,6 +670,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/indicators": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Calculate and retrieve aligned technical indicator series for a symbol. */
+        get: operations["indicators_handler"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instruments": {
         parameters: {
             query?: never;
@@ -3750,6 +3767,27 @@ export interface components {
         ImportRequest: {
             data: Record<string, never>;
             import_key: string;
+        };
+        /** @description Aligned indicator series response view. */
+        IndicatorSeriesView: {
+            /** @description The indicator name requested. */
+            indicator: string;
+            /** @description Multi-output indicators (BB, ICHIMOKU, MACD, STOCH, ADX, DONCHIAN, KELTNER): one
+             *     series per output, under its name (e.g. `upper`, `middle`, `lower`). Absent for
+             *     single-output indicators. */
+            series?: {
+                [key: string]: (number | null)[];
+            } | null;
+            /** @description The symbol charted. */
+            symbol: string;
+            /** @description The confirmed timeframe. */
+            timeframe: string;
+            /** @description Bar start timestamps (nanoseconds UTC) aligned with the output series. */
+            timestamps: number[];
+            /** @description Total number of bars in the aligned series. */
+            total_bars: number;
+            /** @description Single-output indicators: the one output series. Absent for multi-output indicators. */
+            values?: (number | null)[] | null;
         };
         /** @description Header names (matched without regard to case). */
         IngestColumns: {
@@ -7878,6 +7916,108 @@ export interface operations {
                 };
             };
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    indicators_handler: {
+        parameters: {
+            query?: {
+                /** @description Symbol name (e.g. `AAPL`, `SPY`). */
+                symbol?: string;
+                /** @description Dataset version id (UUID). */
+                dataset_version_id?: string;
+                /** @description Timeframe matching dataset native interval (e.g. `1Day`, `1m`, `1h`). */
+                timeframe?: string;
+                /** @description Indicator name (e.g. `SMA`, `EMA`, `BB`, `MACD`, `RSI`). */
+                indicator?: string;
+                /** @description Look-back period for single-period indicators. */
+                period?: number;
+                /** @description Fast period for MACD (default 12). */
+                fast_period?: number;
+                /** @description Slow period for MACD (default 26). */
+                slow_period?: number;
+                /** @description Signal period for MACD (default 9). */
+                signal_period?: number;
+                /** @description Multiplier for Bollinger Bands (default 2.0) or Keltner (default 1.5). */
+                multiplier?: number;
+                /** @description %K period for Stochastic (default 14). */
+                k_period?: number;
+                /** @description %D period for Stochastic (default 3). */
+                d_period?: number;
+                /** @description Slow %D period for Stochastic (default 3). */
+                slow_period_stoch?: number;
+                /** @description Tenkan-sen period for Ichimoku (default 9). */
+                tenkan_period?: number;
+                /** @description Kijun-sen period for Ichimoku (default 26). */
+                kijun_period?: number;
+                /** @description Senkou Span B period for Ichimoku (default 52). */
+                span_b_period?: number;
+                /** @description Acceleration factor start for Parabolic SAR (default 0.02). */
+                af_start?: number;
+                /** @description Acceleration factor step for Parabolic SAR (default 0.02). */
+                af_step?: number;
+                /** @description Acceleration factor max for Parabolic SAR (default 0.20). */
+                af_max?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Aligned indicator series */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IndicatorSeriesView"];
+                };
+            };
+            /** @description No workspace (code `no_workspace`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Dataset version or symbol not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Bars not reachable or sealed holdout */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Invalid request parameters (`details.errors`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Database or storage unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

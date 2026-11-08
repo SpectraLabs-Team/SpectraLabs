@@ -7,6 +7,7 @@ pub mod alpha;
 pub mod attribution;
 pub mod benchmark;
 pub mod gap;
+pub mod indicators;
 pub mod pbo;
 pub mod stats;
 pub mod survival;

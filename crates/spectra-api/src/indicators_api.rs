@@ -13,7 +13,11 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use spectra_core::Bar;
-use spectra_research::indicators::*;
+use spectra_research::indicators::{
+    adx, atr, bollinger_bands, cci, chaikin_money_flow, dema, donchian_channels, ema, ichimoku,
+    keltner_channels, macd, median_price, mfi, momentum, obv, parabolic_sar, rate_of_change, rsi, sma,
+    std_dev, stochastic, tema, typical_price, vwap, williams_r, wma,
+};
 
 use crate::datasets_api::load_for_chart;
 use crate::jobs_api::{context, db_error, to_json};
@@ -130,9 +134,9 @@ fn check_timeframe(tf: &str, median_ns: i64) -> Result<(), String> {
         (is_1min_tf, "1Min")
     } else if (250_000_000_000..=350_000_000_000).contains(&median_ns) {
         (is_5min_tf, "5Min")
-    } else if (800_000_000_000..=1000_000_000_000).contains(&median_ns) {
+    } else if (800_000_000_000..=1_000_000_000_000).contains(&median_ns) {
         (is_15min_tf, "15Min")
-    } else if (3000_000_000_000..=4200_000_000_000).contains(&median_ns) {
+    } else if (3_000_000_000_000..=4_200_000_000_000).contains(&median_ns) {
         (is_1hour_tf, "1Hour")
     } else if (900_000_000..=1_100_000_000).contains(&median_ns) {
         (is_1sec_tf, "1s")
@@ -447,45 +451,41 @@ pub(crate) async fn indicators_handler(
     let mut errors = Vec::new();
 
     // Required parameter 1: symbol
-    let symbol = match params.get("symbol").map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        Some(s) => s.to_string(),
-        None => {
-            errors.push(("symbol".to_string(), "symbol is required".to_string()));
-            String::new()
-        }
+    let symbol = if let Some(s) = params.get("symbol").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        s.to_string()
+    } else {
+        errors.push(("symbol".to_string(), "symbol is required".to_string()));
+        String::new()
     };
 
     // Required parameter 2: dataset_version_id
-    let version_id = match params.get("dataset_version_id").map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        Some(s) => match Uuid::parse_str(s) {
-            Ok(u) => Some(u),
-            Err(_) => {
+    let version_id =
+        if let Some(s) = params.get("dataset_version_id").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+            if let Ok(u) = Uuid::parse_str(s) {
+                Some(u)
+            } else {
                 errors.push(("dataset_version_id".to_string(), "must be a valid UUID".to_string()));
                 None
             }
-        },
-        None => {
+        } else {
             errors.push(("dataset_version_id".to_string(), "dataset_version_id is required".to_string()));
             None
-        }
-    };
+        };
 
     // Required parameter 3: timeframe
-    let timeframe = match params.get("timeframe").map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        Some(s) => s.to_string(),
-        None => {
-            errors.push(("timeframe".to_string(), "timeframe is required".to_string()));
-            String::new()
-        }
+    let timeframe = if let Some(s) = params.get("timeframe").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        s.to_string()
+    } else {
+        errors.push(("timeframe".to_string(), "timeframe is required".to_string()));
+        String::new()
     };
 
     // Required parameter 4: indicator
-    let indicator = match params.get("indicator").map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        Some(s) => s.to_string(),
-        None => {
-            errors.push(("indicator".to_string(), "indicator is required".to_string()));
-            String::new()
-        }
+    let indicator = if let Some(s) = params.get("indicator").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        s.to_string()
+    } else {
+        errors.push(("indicator".to_string(), "indicator is required".to_string()));
+        String::new()
     };
 
     if !errors.is_empty() {
@@ -546,7 +546,7 @@ pub(crate) async fn indicators_handler(
     let median_ns = if !interval_deltas.is_empty() {
         upper_median(interval_deltas) as i64
     } else {
-        dataset.quality.symbols.iter().find(|s| s.symbol == symbol).map(|s| s.median_interval_ns).unwrap_or(0)
+        dataset.quality.symbols.iter().find(|s| s.symbol == symbol).map_or(0, |s| s.median_interval_ns)
     };
 
     if let Err(tf_err) = check_timeframe(&timeframe, median_ns) {

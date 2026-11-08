@@ -28,12 +28,26 @@ use tower::ServiceExt;
 
 const SECRET: &str = "test-secret-test-secret-test-secret!";
 
-async fn setup_pool() -> Option<PgPool> {
-    let url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://amoghrgowda@localhost:5432/spectralabs".to_string());
-    let pool = connect(&PoolConfig::new(url)).await.ok()?;
-    migrate(&pool).await.ok()?;
-    Some(pool)
+async fn setup_pool() -> PgPool {
+    let url = std::env::var("TEST_DATABASE_URL")
+        .or_else(|_| std::env::var("DATABASE_URL"))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| {
+            panic!("set TEST_DATABASE_URL to a disposable Postgres; these tests write fixtures")
+        });
+
+    let db_name =
+        url.rsplit_once('/').map_or("", |(_, after_slash)| after_slash.split('?').next().unwrap_or(""));
+    assert!(
+        db_name.contains("test"),
+        "refusing to run on non-test database '{db_name}'; database name must contain 'test'"
+    );
+
+    let pool =
+        connect(&PoolConfig::new(url)).await.expect("TEST_DATABASE_URL is set but database is unreachable");
+    migrate(&pool).await.expect("migrations failed");
+    pool
 }
 
 struct TestFixture {
@@ -399,10 +413,7 @@ impl Drop for TestFixture {
 
 #[tokio::test]
 async fn test_all_25_indicators_reference_fixtures_parity() {
-    let Some(pool) = setup_pool().await else {
-        eprintln!("skipping indicator tests: database unavailable");
-        return;
-    };
+    let pool = setup_pool().await;
     let fix = TestFixture::new(pool).await;
     let vid = fix.version_id;
 
@@ -601,9 +612,7 @@ async fn test_all_25_indicators_reference_fixtures_parity() {
 
 #[tokio::test]
 async fn test_validation_errors() {
-    let Some(pool) = setup_pool().await else {
-        return;
-    };
+    let pool = setup_pool().await;
     let fix = TestFixture::new(pool).await;
     let vid = fix.version_id;
 
@@ -671,9 +680,7 @@ async fn test_validation_errors() {
 
 #[tokio::test]
 async fn test_warmup_exact_contract() {
-    let Some(pool) = setup_pool().await else {
-        return;
-    };
+    let pool = setup_pool().await;
     let fix = TestFixture::new(pool).await;
     let vid = fix.version_id;
 
@@ -774,9 +781,7 @@ const P95_BUDGET: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[tokio::test]
 async fn test_latency_p95_benchmark_10k_bars() {
-    let Some(pool) = setup_pool().await else {
-        return;
-    };
+    let pool = setup_pool().await;
     let fix = TestFixture::new(pool).await;
     let vid = fix.version_id;
 

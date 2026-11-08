@@ -8,6 +8,7 @@ pub mod calendar;
 pub mod chart;
 pub mod dataset;
 pub mod datastore;
+pub mod edgar;
 pub mod events;
 pub mod fundamentals;
 mod records;

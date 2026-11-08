@@ -64,7 +64,7 @@ impl SymbolMaster {
             .filter(|e| {
                 e.status == ListingStatus::Active
                     && e.effective_from_ns <= as_of_ns
-                    && e.effective_to_ns.map_or(true, |to| as_of_ns < to)
+                    && e.effective_to_ns.is_none_or(|to| as_of_ns < to)
             })
             .collect()
     }
@@ -80,7 +80,7 @@ impl SymbolMaster {
             e.symbol.eq_ignore_ascii_case(symbol)
                 && e.status == ListingStatus::Active
                 && e.effective_from_ns <= as_of_ns
-                && e.effective_to_ns.map_or(true, |to| as_of_ns < to)
+                && e.effective_to_ns.is_none_or(|to| as_of_ns < to)
         })
     }
 }
@@ -230,6 +230,10 @@ impl PointInTimeFundamentalsStore {
 
 /// Interface for market data fundamentals providers.
 pub trait FundamentalsProvider {
+    /// Fetch fundamentals for the given symbol.
+    ///
+    /// # Errors
+    /// Returns `Err(String)` if fundamentals cannot be fetched.
     fn fetch_fundamentals(&self, symbol: &str) -> Result<Vec<FundamentalRecord>, String>;
 }
 

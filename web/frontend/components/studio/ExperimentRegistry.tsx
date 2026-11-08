@@ -3,7 +3,21 @@
 import { MetricLabel } from '@/components/ui/MetricInfo';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Activity, Beaker, CircleAlert, CircleCheck, GitFork, LoaderCircle, Plus, RefreshCw, Square } from 'lucide-react';
+import {
+  Activity,
+  ArrowUpDown,
+  Beaker,
+  CircleAlert,
+  CircleCheck,
+  Columns,
+  GitFork,
+  LoaderCircle,
+  Plus,
+  RefreshCw,
+  Search,
+  Square,
+  X,
+} from 'lucide-react';
 import { RunDetail } from './RunDetail';
 import { ApiError, request } from '@/lib/api';
 import { cancelJob, waitForJob, type Job } from '@/lib/jobs';
@@ -100,6 +114,14 @@ export function ExperimentRegistry() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
+  // Search, filter, and comparison state (M5)
+  const [searchQuery, setSearchQuery] = useState('');
+  const [strategyFilter, setStrategyFilter] = useState('');
+  const [minSharpe, setMinSharpe] = useState('');
+  const [onlyProfitable, setOnlyProfitable] = useState(false);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [showCompareModal, setShowCompareModal] = useState(false);
+
   const selectedExperiment = useMemo(() => items.find((item) => item.id === selected) ?? null, [items, selected]);
   const childExperiments = useMemo(
     () => (selected ? items.filter((item) => item.parent_id === selected) : []),
@@ -114,6 +136,69 @@ export function ExperimentRegistry() {
     setMessage(`Ready to create a child experiment branched from "${exp.name}".`);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
+
+  const reproduceRun = useCallback(
+    (r: Run) => {
+      if (r.params?.fast !== undefined) setFast(r.params.fast);
+      if (r.params?.slow !== undefined) setSlow(r.params.slow);
+      if (!csv) setCsv(SAMPLE_CSV);
+      if (r.experiment_id && items.some((i) => i.id === r.experiment_id)) {
+        setSelected(r.experiment_id);
+      }
+      setMessage(
+        `Forked config from run ${r.id.slice(0, 8)} (${Object.entries(r.params ?? {})
+          .map(([k, v]) => `${k}=${v}`)
+          .join(', ')}). Ready to reproduce.`
+      );
+      window.scrollTo({ top: 380, behavior: 'smooth' });
+    },
+    [csv, items]
+  );
+
+  const toggleCompare = useCallback((id: string) => {
+    setCompareIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((x) => x !== id);
+      }
+      if (prev.length >= 2) {
+        return [prev[1], id];
+      }
+      return [...prev, id];
+    });
+  }, []);
+
+  const filteredRuns = useMemo(() => {
+    return runs.filter((r) => {
+      if (strategyFilter && r.strategy !== strategyFilter) return false;
+      if (onlyProfitable && (r.metrics?.total_return ?? 0) <= 0) return false;
+      if (
+        minSharpe &&
+        Number.isFinite(parseFloat(minSharpe)) &&
+        (r.metrics?.sharpe ?? -Infinity) < parseFloat(minSharpe)
+      ) {
+        return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchesId = r.id.toLowerCase().includes(q);
+        const matchesStrat = r.strategy.toLowerCase().includes(q);
+        const matchesDataset = (r.dataset_id || '').toLowerCase().includes(q);
+        const matchesParams = Object.entries(r.params ?? {}).some(([k, v]) =>
+          `${k}=${v}`.toLowerCase().includes(q)
+        );
+        const exp = items.find((i) => i.id === r.experiment_id);
+        const matchesTags = (exp?.tags ?? []).some((t) => t.toLowerCase().includes(q));
+        if (!matchesId && !matchesStrat && !matchesDataset && !matchesParams && !matchesTags) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [runs, strategyFilter, onlyProfitable, minSharpe, searchQuery, items]);
+
+  const compareRuns = useMemo(() => {
+    return compareIds.map((id) => runs.find((r) => r.id === id)).filter((r): r is Run => Boolean(r));
+  }, [compareIds, runs]);
 
   const selectExperiment = useCallback((expId: string) => {
     setSelected(expId);
@@ -497,39 +582,132 @@ export function ExperimentRegistry() {
           </div>
 
           <div className="rounded-2xl border border-ink/10 bg-ink/[0.025] p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-ink">
-                {myRunsOnly ? 'My runs' : 'Runs'}{' '}
-                {(myRunsOnly || selectedExperiment) && <span className="font-mono text-xs text-ink/40">· {runs.length}</span>}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setMyRunsOnly((prev) => !prev)}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
-                  myRunsOnly
-                    ? 'border-accent bg-accent/10 text-accent'
-                    : 'border-ink/10 bg-ink/[0.03] text-ink/70 hover:bg-ink/[0.06]'
-                }`}
-                aria-pressed={myRunsOnly}
-              >
-                {myRunsOnly ? 'Show all runs' : 'My runs'}
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold text-ink">
+                  {myRunsOnly ? 'My runs' : 'Runs'}{' '}
+                  {(myRunsOnly || selectedExperiment) && (
+                    <span className="font-mono text-xs text-ink/40">· {filteredRuns.length} of {runs.length}</span>
+                  )}
+                </h2>
+                {compareIds.length > 0 && (
+                  <span className="rounded-full bg-accent/10 px-2 py-0.5 font-mono text-[11px] text-accent font-semibold">
+                    {compareIds.length}/2 selected
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {compareIds.length === 2 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCompareModal(true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1 text-xs font-semibold text-onaccent shadow-sm hover:brightness-110 transition active:scale-95"
+                  >
+                    <Columns className="h-3.5 w-3.5" /> Compare 2 Runs
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setMyRunsOnly((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+                    myRunsOnly
+                      ? 'border-accent bg-accent/10 text-accent'
+                      : 'border-ink/10 bg-ink/[0.03] text-ink/70 hover:bg-ink/[0.06]'
+                  }`}
+                  aria-pressed={myRunsOnly}
+                >
+                  {myRunsOnly ? 'Show all runs' : 'My runs'}
+                </button>
+              </div>
             </div>
+
+            {/* Search & Filter Bar */}
+            <div className="mt-3.5 flex flex-wrap items-center gap-2 rounded-xl border border-ink/10 bg-white/60 p-2.5 dark:bg-black/20">
+              <div className="relative min-w-[200px] flex-1">
+                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-ink/40" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search by strategy, dataset, params (fast=10), tags..."
+                  className="w-full rounded-lg border border-ink/10 bg-transparent pl-8 pr-7 py-1 text-xs text-ink placeholder:text-ink/40 focus:border-accent/50 focus:outline-none"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 top-2 text-ink/40 hover:text-ink"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              <select
+                value={strategyFilter}
+                onChange={(e) => setStrategyFilter(e.target.value)}
+                className="rounded-lg border border-ink/10 bg-transparent px-2.5 py-1 text-xs text-ink/80 focus:border-accent/50 focus:outline-none"
+              >
+                <option value="">All Strategies</option>
+                {Array.from(new Set(runs.map((r) => r.strategy))).filter(Boolean).map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+
+              <input
+                type="number"
+                step="0.1"
+                value={minSharpe}
+                onChange={(e) => setMinSharpe(e.target.value)}
+                placeholder="Min Sharpe..."
+                className="w-24 rounded-lg border border-ink/10 bg-transparent px-2.5 py-1 text-xs text-ink placeholder:text-ink/40 focus:border-accent/50 focus:outline-none"
+              />
+
+              <label className="flex items-center gap-1.5 text-xs text-ink/70 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={onlyProfitable}
+                  onChange={(e) => setOnlyProfitable(e.target.checked)}
+                  className="rounded border-ink/20 accent-accent"
+                />
+                Profitable only
+              </label>
+            </div>
+
             <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-xs">
+              <table className="w-full min-w-[760px] text-left text-xs">
                 <thead className="border-b border-ink/10 text-ink/45"><tr>
-                  <th className="py-2 pr-3 font-medium">Status / ID</th><th className="py-2 pr-3 font-medium">Strategy</th>
-                  <th className="py-2 pr-3 font-medium">Parameters</th><th className="py-2 pr-3 font-medium">Dataset</th>
-                  <th className="py-2 pr-3 font-medium"><MetricLabel metric="sharpe_ratio">Sharpe</MetricLabel></th><th className="py-2 pr-3 font-medium"><MetricLabel metric="total_return">Return</MetricLabel></th>
-                  <th className="py-2 pr-3 font-medium"><MetricLabel metric="max_drawdown">Drawdown</MetricLabel></th><th className="py-2 pr-3 font-medium">Date</th>
-                  <th className="py-2 text-right font-medium">Action</th>
+                  <th className="py-2 pl-2 pr-2 w-8 text-center">
+                    <span className="sr-only">Compare</span>
+                  </th>
+                  <th className="py-2 pr-3 font-medium">Status / ID</th>
+                  <th className="py-2 pr-3 font-medium">Strategy</th>
+                  <th className="py-2 pr-3 font-medium">Parameters</th>
+                  <th className="py-2 pr-3 font-medium">Dataset</th>
+                  <th className="py-2 pr-3 font-medium"><MetricLabel metric="sharpe_ratio">Sharpe</MetricLabel></th>
+                  <th className="py-2 pr-3 font-medium"><MetricLabel metric="total_return">Return</MetricLabel></th>
+                  <th className="py-2 pr-3 font-medium"><MetricLabel metric="max_drawdown">Drawdown</MetricLabel></th>
+                  <th className="py-2 pr-3 font-medium">Date</th>
+                  <th className="py-2 text-right font-medium pr-2">Action</th>
                 </tr></thead>
                 <tbody className="divide-y divide-ink/[0.06]">
-                  {runs.map((run) => {
+                  {filteredRuns.map((run) => {
                     const done = run.status === 'succeeded';
+                    const isComparing = compareIds.includes(run.id);
                     return (
                       <tr key={run.id} onClick={() => selectRun(run.id)} aria-selected={openRun === run.id}
                         className={`cursor-pointer transition hover:bg-ink/[0.03] ${openRun === run.id ? 'bg-accent/[0.06]' : ''}`}>
+                        <td className="py-3 pl-2 pr-2 text-center" onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={isComparing}
+                            onChange={() => toggleCompare(run.id)}
+                            title="Select run for side-by-side comparison (up to 2)"
+                            className="rounded border-ink/20 accent-accent cursor-pointer"
+                          />
+                        </td>
                         <td className="py-3 pr-3">
                           <button type="button" onClick={(event) => { event.stopPropagation(); selectRun(run.id); }} className="text-left">
                             <span className={`block font-medium ${run.status === 'failed' ? 'text-loss' : 'text-ink'}`}>{run.status}</span>
@@ -543,27 +721,42 @@ export function ExperimentRegistry() {
                         <td className="py-3 pr-3 font-mono text-ink">{done && Number.isFinite(run.metrics?.total_return) ? pct(run.metrics.total_return) : '—'}</td>
                         <td className="py-3 pr-3 font-mono text-ink">{done && Number.isFinite(run.metrics?.max_drawdown) ? pct(run.metrics.max_drawdown) : '—'}</td>
                         <td className="py-3 pr-3 text-ink/50">{new Date(run.recorded_ts / 1e6).toLocaleDateString()}</td>
-                        <td className="py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void hideRun(run.id);
-                            }}
-                            className="rounded border border-ink/10 px-2 py-0.5 text-[11px] text-ink/60 hover:bg-ink/[0.05] hover:text-ink"
-                            title="Hide run"
-                          >
-                            Hide
-                          </button>
+                        <td className="py-3 text-right pr-2">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                reproduceRun(run);
+                              }}
+                              className="rounded border border-accent/30 bg-accent/10 px-2 py-0.5 text-[11px] font-semibold text-accent transition hover:bg-accent/20"
+                              title="Fork parameters and reproduce run"
+                            >
+                              Fork &amp; Run
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void hideRun(run.id);
+                              }}
+                              className="rounded border border-ink/10 px-2 py-0.5 text-[11px] text-ink/60 hover:bg-ink/[0.05] hover:text-ink transition"
+                              title="Hide run"
+                            >
+                              Hide
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
-              {!runs.length && (
+              {!filteredRuns.length && (
                 <p className="py-6 text-center text-sm text-ink/45">
-                  {myRunsOnly
+                  {runs.length > 0
+                    ? 'No runs match the current search / filter criteria.'
+                    : myRunsOnly
                     ? 'No runs recorded by you yet.'
                     : selected
                     ? 'No backtest runs recorded for this experiment yet.'
@@ -584,6 +777,108 @@ export function ExperimentRegistry() {
               onClose={() => selectRun('')}
               onChanged={() => { if (selected || myRunsOnly) void loadRuns(selected, undefined, myRunsOnly).catch(() => undefined); }}
             />
+          )}
+
+          {/* Side-by-Side Run Comparison Modal (M5) */}
+          {showCompareModal && compareRuns.length === 2 && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+              <div className="w-full max-w-3xl rounded-2xl border border-ink/15 bg-white p-6 shadow-2xl dark:bg-zinc-900">
+                <div className="flex items-center justify-between border-b border-ink/10 pb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-ink">Side-by-Side Run Comparison</h3>
+                    <p className="text-xs text-ink/55">Comparing two backtest runs across parameters and key risk-adjusted metrics.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCompareModal(false)}
+                    className="rounded-lg p-1.5 text-ink/40 hover:bg-ink/5 hover:text-ink"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-4">
+                  {compareRuns.map((r, idx) => {
+                    const other = compareRuns[1 - idx];
+                    const higherSharpe = (r.metrics?.sharpe ?? -Infinity) > (other.metrics?.sharpe ?? -Infinity);
+                    const higherReturn = (r.metrics?.total_return ?? -Infinity) > (other.metrics?.total_return ?? -Infinity);
+                    const lowerDD = (r.metrics?.max_drawdown ?? Infinity) < (other.metrics?.max_drawdown ?? Infinity);
+                    return (
+                      <div key={r.id} className="rounded-xl border border-ink/10 bg-ink/[0.02] p-4 text-xs space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono font-semibold text-accent">Run {idx + 1}</span>
+                          <span className="rounded bg-ink/5 px-2 py-0.5 font-mono text-[10px] text-ink/60">{r.id.slice(0, 12)}</span>
+                        </div>
+
+                        <div className="space-y-1.5 border-t border-ink/10 pt-2 font-mono text-[11px]">
+                          <div className="flex justify-between text-ink/70">
+                            <span>Strategy:</span>
+                            <span className="font-semibold text-ink">{r.strategy}</span>
+                          </div>
+                          <div className="flex justify-between text-ink/70">
+                            <span>Dataset:</span>
+                            <span className="truncate max-w-[140px]" title={r.dataset_id}>{r.dataset_id ? r.dataset_id.slice(0, 10) : '—'}</span>
+                          </div>
+                          <div className="flex justify-between text-ink/70">
+                            <span>Recorded:</span>
+                            <span>{new Date(r.recorded_ts / 1e6).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-ink/10 pt-2">
+                          <div className="font-semibold text-ink/60 uppercase tracking-wider text-[10px] mb-1">Parameters</div>
+                          <div className="space-y-1 font-mono text-[11px]">
+                            {Object.entries(r.params ?? {}).map(([k, v]) => (
+                              <div key={k} className="flex justify-between">
+                                <span className="text-ink/60">{k}:</span>
+                                <span className="font-semibold text-ink">{v}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="border-t border-ink/10 pt-2 space-y-1.5 font-mono">
+                          <div className="font-semibold text-ink/60 uppercase tracking-wider text-[10px] mb-1">Performance</div>
+                          <div className={`flex justify-between p-1.5 rounded ${higherSharpe ? 'bg-emerald-500/10 font-bold text-emerald-600 dark:text-emerald-400' : 'text-ink/70'}`}>
+                            <span>Sharpe:</span>
+                            <span>{Number.isFinite(r.metrics?.sharpe) ? r.metrics.sharpe.toFixed(3) : '—'} {higherSharpe && '★'}</span>
+                          </div>
+                          <div className={`flex justify-between p-1.5 rounded ${higherReturn ? 'bg-emerald-500/10 font-bold text-emerald-600 dark:text-emerald-400' : 'text-ink/70'}`}>
+                            <span>Total Return:</span>
+                            <span>{Number.isFinite(r.metrics?.total_return) ? pct(r.metrics.total_return) : '—'} {higherReturn && '★'}</span>
+                          </div>
+                          <div className={`flex justify-between p-1.5 rounded ${lowerDD ? 'bg-emerald-500/10 font-bold text-emerald-600 dark:text-emerald-400' : 'text-ink/70'}`}>
+                            <span>Max Drawdown:</span>
+                            <span>{Number.isFinite(r.metrics?.max_drawdown) ? pct(r.metrics.max_drawdown) : '—'} {lowerDD && '★'}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCompareModal(false);
+                            reproduceRun(r);
+                          }}
+                          className="w-full mt-2 rounded-lg bg-accent/10 hover:bg-accent/20 text-accent font-semibold py-1.5 text-xs transition"
+                        >
+                          Fork &amp; Reproduce Run {idx + 1}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-5 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowCompareModal(false)}
+                    className="rounded-lg border border-ink/15 px-4 py-1.5 text-xs font-medium text-ink/70 hover:bg-ink/5"
+                  >
+                    Close Comparison
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </section>
       </div>

@@ -101,6 +101,11 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/datasets/versions/{id}/runs': { method: 'GET', minRole: 'viewer', timeoutMs: 10_000 },
   'api/v1/datasets/versions/{id}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   'api/v1/indicators': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
+  // Point-in-time fundamentals from SEC EDGAR (M34): reads are viewer, refreshes and schedules editor.
+  'api/v1/fundamentals/refresh': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
+  'api/v1/fundamentals/loads': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/fundamentals/quarantine': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/fundamentals/schedule': { method: ['GET', 'PUT', 'DELETE'], minRole: 'viewer', methodRoles: { PUT: 'editor', DELETE: 'editor' }, timeoutMs: 15_000 },
   // Corporate actions & backward adjustments (M1b)
   'api/v1/corporate-actions': { method: ['GET', 'POST'], minRole: 'viewer', methodRoles: { POST: 'editor' }, timeoutMs: 20_000 },
   'api/v1/corporate-actions/{id}': { method: ['GET', 'DELETE'], minRole: 'viewer', methodRoles: { DELETE: 'editor' }, timeoutMs: 20_000 },

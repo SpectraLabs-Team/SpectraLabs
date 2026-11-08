@@ -650,6 +650,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/fundamentals/loads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recent fundamentals loads, newest first. */
+        get: operations["list_loads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fundamentals/quarantine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rows that failed the quality checks, newest first. They are never served as fundamentals. */
+        get: operations["list_quarantine"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fundamentals/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Queue a fundamentals refresh from SEC EDGAR (editor). */
+        post: operations["refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fundamentals/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The workspace's fundamentals refresh schedule. */
+        get: operations["get_schedule"];
+        /** Create or replace the workspace's fundamentals refresh schedule (editor). */
+        put: operations["put_schedule"];
+        post?: never;
+        /** Remove the workspace's fundamentals refresh schedule (editor). */
+        delete: operations["delete_schedule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/fx-rates": {
         parameters: {
             query?: never;
@@ -3977,6 +4047,32 @@ export interface components {
             /** Format: uuid */
             workspace_id: string;
         };
+        /** @description `{ "items": [...] }`. */
+        LoadList: {
+            items: components["schemas"]["LoadView"][];
+        };
+        /** @description One refresh of one symbol. */
+        LoadView: {
+            /** Format: int32 */
+            accepted: number;
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            job_id?: string | null;
+            /** Format: date-time */
+            loaded_at: string;
+            /**
+             * Format: int32
+             * @description Accepted records not stored before: new values and new revisions.
+             */
+            new_rows: number;
+            /** Format: int32 */
+            quarantined: number;
+            source: string;
+            symbol: string;
+            /** @description Content-addressed version (`fund_v_…`) of the accepted records. */
+            version_id: string;
+        };
         /** @description Response view for M42 sentiment score. */
         M42SentimentResponse: {
             message: string;
@@ -4718,6 +4814,30 @@ export interface components {
              */
             stale_run?: number | null;
         };
+        /** @description `{ "items": [...] }`. */
+        QuarantineList: {
+            items: components["schemas"]["QuarantineView"][];
+        };
+        /** @description A row that failed the quality checks; it is never served as a fundamental. */
+        QuarantineView: {
+            category: string;
+            filing_ref: string;
+            /** Format: date-time */
+            known_at: string;
+            metric: string;
+            period: string;
+            reason: string;
+            /** Format: date-time */
+            recorded_at: string;
+            symbol: string;
+            /**
+             * Format: double
+             * @description The value, or null when it is not finite (see `value_text`).
+             */
+            value?: number | null;
+            /** @description The value as text, e.g. `NaN` or `-5`. */
+            value_text: string;
+        };
         /** @description One rebalance: why, how much it traded and cost, and the weights around it. */
         RebalanceView: {
             /**
@@ -4743,6 +4863,19 @@ export interface components {
             reconciled: boolean;
             source: string;
             timestamp: string;
+        };
+        /** @description A queued refresh. */
+        RefreshQueuedView: {
+            /** Format: uuid */
+            job_id: string;
+            status: string;
+            /** @description The symbols as they will be refreshed: trimmed, upper-case, without duplicates. */
+            symbols: string[];
+        };
+        /** @description Body of `POST /api/v1/fundamentals/refresh`. */
+        RefreshRequest: {
+            /** @description Tickers to refresh (1 to 100); case and surrounding spaces are ignored. */
+            symbols: string[];
         };
         /** @description Refresh schedule view. */
         RefreshScheduleView: {
@@ -5199,6 +5332,32 @@ export interface components {
         SavedVersion: {
             created: boolean;
             version: components["schemas"]["StrategyVersionView"];
+        };
+        /** @description `{ "deleted": true }`. */
+        ScheduleDeleted: {
+            deleted: boolean;
+        };
+        /** @description Body of `PUT /api/v1/fundamentals/schedule`. */
+        ScheduleRequest: {
+            /**
+             * Format: int32
+             * @description Hours between refreshes, 1 to 720. The first refresh is queued within a minute.
+             */
+            interval_hours: number;
+            /** @description Tickers to refresh (1 to 100). */
+            symbols: string[];
+        };
+        /** @description The workspace's refresh schedule. */
+        ScheduleView: {
+            /** Format: int32 */
+            interval_hours: number;
+            /** Format: date-time */
+            last_enqueued_at?: string | null;
+            /** Format: date-time */
+            next_run_at: string;
+            symbols: string[];
+            /** Format: date-time */
+            updated_at: string;
         };
         SealHoldoutRequest: {
             /** Format: int32 */
@@ -7867,6 +8026,217 @@ export interface operations {
             };
             /** @description Invalid dataset or request */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_loads: {
+        parameters: {
+            query?: {
+                /** @description Only this symbol. */
+                symbol?: string;
+                /** @description Rows to return, 1 to 500 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoadList"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    list_quarantine: {
+        parameters: {
+            query?: {
+                /** @description Only this symbol. */
+                symbol?: string;
+                /** @description Rows to return, 1 to 500 (default 50). */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuarantineList"];
+                };
+            };
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    refresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Refresh queued as a fundamentals_refresh job */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RefreshQueuedView"];
+                };
+            };
+            /** @description Viewers cannot refresh (code `viewer_read_only`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description No symbols, too many, or one that is not a ticker */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    get_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleView"];
+                };
+            };
+            /** @description No schedule */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    put_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleView"];
+                };
+            };
+            /** @description Viewers cannot schedule (code `viewer_read_only`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description Bad symbols or interval */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+        };
+    };
+    delete_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDeleted"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorDoc"];
+                };
+            };
+            /** @description No schedule */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

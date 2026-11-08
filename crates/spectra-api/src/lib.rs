@@ -49,6 +49,8 @@ pub mod corporate_actions_api;
 pub mod dataset_prices;
 pub mod datasets_api;
 pub mod engine;
+pub mod fundamentals;
+pub mod fundamentals_api;
 pub mod gap_api;
 pub mod identity;
 pub mod indicators_api;
@@ -1094,6 +1096,21 @@ fn alpha_routes() -> Router<AppState> {
         .route("/api/v1/alpha/m42/sentiment", only(get(alpha_api::handle_get_m42_sentiment)))
 }
 
+fn fundamentals_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/v1/fundamentals/refresh", only(post(fundamentals_api::refresh)))
+        .route("/api/v1/fundamentals/loads", only(get(fundamentals_api::list_loads)))
+        .route("/api/v1/fundamentals/quarantine", only(get(fundamentals_api::list_quarantine)))
+        .route(
+            "/api/v1/fundamentals/schedule",
+            only(
+                get(fundamentals_api::get_schedule)
+                    .put(fundamentals_api::put_schedule)
+                    .delete(fundamentals_api::delete_schedule),
+            ),
+        )
+}
+
 fn indicator_routes() -> Router<AppState> {
     Router::new().route("/api/v1/indicators", only(get(indicators_api::indicators_handler)))
 }
@@ -1123,6 +1140,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(alpha_routes())
         .merge(user_state_routes())
         .merge(indicator_routes())
+        .merge(fundamentals_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .merge(upload_routes())

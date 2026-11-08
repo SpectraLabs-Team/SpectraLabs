@@ -316,6 +316,12 @@ pub struct StressRequest {
         crate::user_state_api::transact_sandbox,
         crate::user_state_api::import,
         crate::indicators_api::indicators_handler,
+        crate::fundamentals_api::refresh,
+        crate::fundamentals_api::list_loads,
+        crate::fundamentals_api::list_quarantine,
+        crate::fundamentals_api::get_schedule,
+        crate::fundamentals_api::put_schedule,
+        crate::fundamentals_api::delete_schedule,
     ),
     components(schemas(
         ErrorDoc,
@@ -529,6 +535,15 @@ pub struct StressRequest {
         crate::alpha_api::SignalTestDetailView,
         crate::alpha_api::M42SentimentResponse,
         crate::indicators_api::IndicatorSeriesView,
+        crate::fundamentals_api::RefreshRequest,
+        crate::fundamentals_api::RefreshQueuedView,
+        crate::fundamentals_api::LoadView,
+        crate::fundamentals_api::LoadList,
+        crate::fundamentals_api::QuarantineView,
+        crate::fundamentals_api::QuarantineList,
+        crate::fundamentals_api::ScheduleRequest,
+        crate::fundamentals_api::ScheduleView,
+        crate::fundamentals_api::ScheduleDeleted,
     )),
     tags(
         (name = "system", description = "System observability, probes and metrics"),
@@ -552,6 +567,7 @@ pub struct StressRequest {
         (name = "user-state", description = "Per-user saved state, sandbox orders and run history (M25)"),
         (name = "alpha", description = "Alpha Workbench: signal tests, IC decay, quantile spread, and sentiment gate (M12)"),
         (name = "indicators", description = "Technical indicator engine series calculations (M35)"),
+        (name = "fundamentals", description = "Point-in-time company fundamentals from SEC EDGAR (M34)"),
     )
 )]
 pub struct ApiDoc;
@@ -646,6 +662,10 @@ mod tests {
             "/api/v1/paper/gap/reports",
             "/api/v1/paper/gap/reports/{id}",
             "/api/v1/indicators",
+            "/api/v1/fundamentals/refresh",
+            "/api/v1/fundamentals/loads",
+            "/api/v1/fundamentals/quarantine",
+            "/api/v1/fundamentals/schedule",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

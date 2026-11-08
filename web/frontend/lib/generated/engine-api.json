@@ -2214,6 +2214,280 @@
         }
       }
     },
+    "/api/v1/fundamentals/loads": {
+      "get": {
+        "tags": [
+          "fundamentals"
+        ],
+        "summary": "Recent fundamentals loads, newest first.",
+        "operationId": "list_loads",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "description": "Only this symbol.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Rows to return, 1 to 500 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoadList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/fundamentals/quarantine": {
+      "get": {
+        "tags": [
+          "fundamentals"
+        ],
+        "summary": "Rows that failed the quality checks, newest first. They are never served as fundamentals.",
+        "operationId": "list_quarantine",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "description": "Only this symbol.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Rows to return, 1 to 500 (default 50).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuarantineList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/fundamentals/refresh": {
+      "post": {
+        "tags": [
+          "fundamentals"
+        ],
+        "summary": "Queue a fundamentals refresh from SEC EDGAR (editor).",
+        "operationId": "refresh",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Refresh queued as a fundamentals_refresh job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefreshQueuedView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot refresh (code `viewer_read_only`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No symbols, too many, or one that is not a ticker",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/fundamentals/schedule": {
+      "get": {
+        "tags": [
+          "fundamentals"
+        ],
+        "summary": "The workspace's fundamentals refresh schedule.",
+        "operationId": "get_schedule",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "fundamentals"
+        ],
+        "summary": "Create or replace the workspace's fundamentals refresh schedule (editor).",
+        "operationId": "put_schedule",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Viewers cannot schedule (code `viewer_read_only`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Bad symbols or interval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "fundamentals"
+        ],
+        "summary": "Remove the workspace's fundamentals refresh schedule (editor).",
+        "operationId": "delete_schedule",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleDeleted"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/fx-rates": {
       "get": {
         "tags": [
@@ -11485,6 +11759,75 @@
           }
         }
       },
+      "LoadList": {
+        "type": "object",
+        "description": "`{ \"items\": [...] }`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LoadView"
+            }
+          }
+        }
+      },
+      "LoadView": {
+        "type": "object",
+        "description": "One refresh of one symbol.",
+        "required": [
+          "id",
+          "symbol",
+          "source",
+          "version_id",
+          "accepted",
+          "new_rows",
+          "quarantined",
+          "loaded_at"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "job_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "loaded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "new_rows": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Accepted records not stored before: new values and new revisions."
+          },
+          "quarantined": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "source": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "version_id": {
+            "type": "string",
+            "description": "Content-addressed version (`fund_v_…`) of the accepted records."
+          }
+        }
+      },
       "M42SentimentResponse": {
         "type": "object",
         "description": "Response view for M42 sentiment score.",
@@ -13346,6 +13689,76 @@
         },
         "additionalProperties": false
       },
+      "QuarantineList": {
+        "type": "object",
+        "description": "`{ \"items\": [...] }`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuarantineView"
+            }
+          }
+        }
+      },
+      "QuarantineView": {
+        "type": "object",
+        "description": "A row that failed the quality checks; it is never served as a fundamental.",
+        "required": [
+          "symbol",
+          "period",
+          "metric",
+          "value_text",
+          "known_at",
+          "filing_ref",
+          "category",
+          "reason",
+          "recorded_at"
+        ],
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "filing_ref": {
+            "type": "string"
+          },
+          "known_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metric": {
+            "type": "string"
+          },
+          "period": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recorded_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "symbol": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The value, or null when it is not finite (see `value_text`)."
+          },
+          "value_text": {
+            "type": "string",
+            "description": "The value as text, e.g. `NaN` or `-5`."
+          }
+        }
+      },
       "RebalanceView": {
         "type": "object",
         "description": "One rebalance: why, how much it traded and cost, and the weights around it.",
@@ -13421,6 +13834,47 @@
           },
           "timestamp": {
             "type": "string"
+          }
+        }
+      },
+      "RefreshQueuedView": {
+        "type": "object",
+        "description": "A queued refresh.",
+        "required": [
+          "job_id",
+          "status",
+          "symbols"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The symbols as they will be refreshed: trimmed, upper-case, without duplicates."
+          }
+        }
+      },
+      "RefreshRequest": {
+        "type": "object",
+        "description": "Body of `POST /api/v1/fundamentals/refresh`.",
+        "required": [
+          "symbols"
+        ],
+        "properties": {
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tickers to refresh (1 to 100); case and surrounding spaces are ignored."
           }
         }
       },
@@ -14569,6 +15023,77 @@
           },
           "version": {
             "$ref": "#/components/schemas/StrategyVersionView"
+          }
+        }
+      },
+      "ScheduleDeleted": {
+        "type": "object",
+        "description": "`{ \"deleted\": true }`.",
+        "required": [
+          "deleted"
+        ],
+        "properties": {
+          "deleted": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ScheduleRequest": {
+        "type": "object",
+        "description": "Body of `PUT /api/v1/fundamentals/schedule`.",
+        "required": [
+          "symbols",
+          "interval_hours"
+        ],
+        "properties": {
+          "interval_hours": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hours between refreshes, 1 to 720. The first refresh is queued within a minute."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tickers to refresh (1 to 100)."
+          }
+        }
+      },
+      "ScheduleView": {
+        "type": "object",
+        "description": "The workspace's refresh schedule.",
+        "required": [
+          "symbols",
+          "interval_hours",
+          "next_run_at",
+          "updated_at"
+        ],
+        "properties": {
+          "interval_hours": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "last_enqueued_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "next_run_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -16895,6 +17420,10 @@
     {
       "name": "indicators",
       "description": "Technical indicator engine series calculations (M35)"
+    },
+    {
+      "name": "fundamentals",
+      "description": "Point-in-time company fundamentals from SEC EDGAR (M34)"
     }
   ]
 }

@@ -18,6 +18,7 @@ import {
   TrendingUp,
   X,
   Zap,
+  LayoutTemplate,
 } from 'lucide-react';
 import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import type { CandleBar } from '@/lib/alpaca';
@@ -27,8 +28,28 @@ import {
   computeIndicatorSeries,
   type IndicatorName,
 } from '@/lib/indicators';
+import {
+  type ChartDrawing,
+  type ChartDrawingPoint,
+  type ChartDrawingStyle,
+  type ChartTemplate,
+  type DrawingToolType,
+  FIBONACCI_LEVELS,
+} from '@/lib/chart-drawings';
 import { IndicatorPickerModal } from './indicators/IndicatorPickerModal';
 import { IndicatorSettingsModal } from './indicators/IndicatorSettingsModal';
+import { DrawingToolbar } from './charts/DrawingToolbar';
+import { ComparisonModal } from './charts/ComparisonModal';
+import { TemplateModal } from './charts/TemplateModal';
+
+export type { ChartDrawing, DrawingToolType, ChartTemplate } from '@/lib/chart-drawings';
+
+export interface ComparisonSeries {
+  symbol: string;
+  values: (number | null)[];
+  color?: string;
+  basePrice?: number;
+}
 
 export interface OverlaySeries {
   id?: string;
@@ -69,6 +90,18 @@ export interface TradingChartProps {
   onRemoveIndicator?: (idOrName: string) => void;
   onToggleVisibility?: (idOrName: string) => void;
   onUpdateParams?: (idOrName: string, params: Record<string, number>, color: string) => void;
+  drawings?: ChartDrawing[];
+  onDrawingsChange?: (drawings: ChartDrawing[]) => void;
+  onSaveDrawing?: (drawing: Omit<ChartDrawing, 'id'>) => Promise<ChartDrawing | void>;
+  onDeleteDrawing?: (id: string) => Promise<void>;
+  comparisons?: ComparisonSeries[];
+  onAddComparison?: (symbol: string, color?: string) => void;
+  onRemoveComparison?: (symbol: string) => void;
+  templates?: ChartTemplate[];
+  onSaveTemplate?: (name: string) => Promise<void>;
+  onLoadTemplate?: (template: ChartTemplate) => void;
+  onDeleteTemplate?: (id: string) => Promise<void>;
+  isViewer?: boolean;
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -109,12 +142,136 @@ export function TradingChart({
   onRemoveIndicator,
   onToggleVisibility,
   onUpdateParams,
+  drawings = [],
+  onDrawingsChange,
+  onSaveDrawing,
+  onDeleteDrawing,
+  comparisons = [],
+  onAddComparison,
+  onRemoveComparison,
+  templates = [],
+  onSaveTemplate,
+  onLoadTemplate,
+  onDeleteTemplate,
+  isViewer = false,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const plotRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
   const [plotSize, setPlotSize] = useState({ w: 0, h: 0 });
+
+  // M36: Drawing & Comparison State
+  const [activeDrawingTool, setActiveDrawingTool] = useState<DrawingToolType | null>(null);
+  const [drawingColor, setDrawingColor] = useState<string>('#2962FF');
+  const [localDrawings, setLocalDrawings] = useState<ChartDrawing[]>(drawings);
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+  const [inProgressDrawing, setInProgressDrawing] = useState<{
+    tool: DrawingToolType;
+    points: ChartDrawingPoint[];
+    style?: ChartDrawingStyle;
+  } | null>(null);
+  const [undoStack, setUndoStack] = useState<ChartDrawing[][]>([]);
+  const [redoStack, setRedoStack] = useState<ChartDrawing[][]>([]);
+
+  useEffect(() => {
+    setLocalDrawings(drawings);
+  }, [drawings]);
+
+  // Comparison & Templates Modals State
+  const [isComparisonModalOpen, setIsComparisonModalOpen] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [localComparisons, setLocalComparisons] = useState<ComparisonSeries[]>(comparisons);
+
+  useEffect(() => {
+    setLocalComparisons(comparisons);
+  }, [comparisons]);
+
+  // Undo / Redo helpers
+  const pushToUndo = useCallback(
+    (newDrawings: ChartDrawing[]) => {
+      setUndoStack((prev) => [...prev.slice(-30), localDrawings]);
+      setRedoStack([]);
+      setLocalDrawings(newDrawings);
+      onDrawingsChange?.(newDrawings);
+    },
+    [localDrawings, onDrawingsChange]
+  );
+
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const previous = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    setRedoStack((prev) => [...prev, localDrawings]);
+    setLocalDrawings(previous);
+    onDrawingsChange?.(previous);
+  }, [undoStack, localDrawings, onDrawingsChange]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    setRedoStack((prev) => prev.slice(0, -1));
+    setUndoStack((prev) => [...prev, localDrawings]);
+    setLocalDrawings(next);
+    onDrawingsChange?.(next);
+  }, [redoStack, localDrawings, onDrawingsChange]);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (!selectedDrawingId) return;
+    const updated = localDrawings.filter((d) => d.id !== selectedDrawingId);
+    pushToUndo(updated);
+    onDeleteDrawing?.(selectedDrawingId);
+    setSelectedDrawingId(null);
+  }, [selectedDrawingId, localDrawings, pushToUndo, onDeleteDrawing]);
+
+  const handleClearAll = useCallback(() => {
+    if (localDrawings.length === 0) return;
+    pushToUndo([]);
+    setSelectedDrawingId(null);
+  }, [localDrawings, pushToUndo]);
+
+  const handleAddComparison = (sym: string, color?: string) => {
+    if (onAddComparison) {
+      onAddComparison(sym, color);
+    } else {
+      const newComp: ComparisonSeries = {
+        symbol: sym,
+        color: color || '#9C27B0',
+        values: bars.map(() => null),
+      };
+      setLocalComparisons((prev) => [...prev, newComp]);
+    }
+  };
+
+  const handleRemoveComparison = (sym: string) => {
+    if (onRemoveComparison) {
+      onRemoveComparison(sym);
+    } else {
+      setLocalComparisons((prev) => prev.filter((c) => c.symbol !== sym));
+    }
+  };
+
+  const handleSaveTemplate = async (name: string) => {
+    if (onSaveTemplate) {
+      await onSaveTemplate(name);
+    }
+  };
+
+  const handleApplyTemplate = (tmpl: ChartTemplate) => {
+    if (onLoadTemplate) {
+      onLoadTemplate(tmpl);
+    } else {
+      if (Array.isArray(tmpl.drawings)) {
+        setLocalDrawings(tmpl.drawings);
+      }
+    }
+  };
+
+  const handleDeleteTemplate = async (id: string) => {
+    if (onDeleteTemplate) {
+      await onDeleteTemplate(id);
+    }
+  };
 
   // Internal indicator state
   const [internalOverlays, setInternalOverlays] = useState<OverlaySeries[]>(overlays);
@@ -141,6 +298,7 @@ export function TradingChart({
 
   const effectiveOverlays = internalOverlays;
   const effectiveSubpanes = internalSubpanes;
+  const effectiveComps = comparisons.length > 0 ? comparisons : localComparisons;
 
   const handleSelectIndicator = useCallback(
     (indicatorId: IndicatorName) => {
@@ -1155,6 +1313,171 @@ export function TradingChart({
       });
     }
 
+    // -------------------------------------------------------------------------
+    // M36: Render Symbol Comparisons (rebased to 100 on first bar of full dataset)
+    // -------------------------------------------------------------------------
+    const effectiveComps = comparisons.length > 0 ? comparisons : localComparisons;
+    if (effectiveComps && effectiveComps.length > 0) {
+      for (const comp of effectiveComps) {
+        if (!comp.values || comp.values.length === 0) continue;
+        const baseP = comp.basePrice || visibleBars[0]?.c || 100;
+        const compColor = comp.color || '#9C27B0';
+        ctx.strokeStyle = compColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let hasPoint = false;
+        for (let i = 0; i < count; i++) {
+          const val = comp.values[start + i];
+          if (val === null || val === undefined || isNaN(val)) {
+            hasPoint = false;
+            continue;
+          }
+          const impliedPrice = baseP * (val / 100);
+          const cx = xOffset + i * candleSlotWidth + candleSlotWidth / 2;
+          const cy = 10 + candleChartHeight - ((impliedPrice - minPrice) / priceRange) * candleChartHeight;
+          if (!hasPoint) {
+            ctx.moveTo(cx, cy);
+            hasPoint = true;
+          } else {
+            ctx.lineTo(cx, cy);
+          }
+        }
+        ctx.stroke();
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // M36: Render Chart Drawings (Trendline, Horizontal Level, Fibonacci, Text)
+    // -------------------------------------------------------------------------
+    const getYForPrice = (p: number) => {
+      const norm = (p - minPrice) / (priceRange || 1);
+      return 10 + candleChartHeight - norm * candleChartHeight;
+    };
+
+    const getXForTime = (timeOrTs: number) => {
+      if (bars.length === 0) return 0;
+      const t = timeOrTs > 1e12 ? timeOrTs : timeOrTs * 1000;
+      let bestIdx = 0;
+      let bestDiff = Infinity;
+      for (let i = 0; i < bars.length; i++) {
+        const barTime = typeof bars[i].t === 'string' ? new Date(bars[i].t).getTime() : Number(bars[i].t);
+        const diff = Math.abs(barTime - t);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestIdx = i;
+        }
+      }
+      const localIdx = bestIdx - start;
+      return xOffset + localIdx * candleSlotWidth + candleSlotWidth / 2;
+    };
+
+    const allDrawingsToDraw = [...localDrawings];
+    if (inProgressDrawing && crosshair) {
+      const livePrice = minPrice + ((10 + candleChartHeight - crosshair.y) / candleChartHeight) * priceRange;
+      const liveLocalIdx = Math.floor((crosshair.x - xOffset) / candleSlotWidth);
+      const liveActualIdx = Math.min(bars.length - 1, Math.max(0, start + Math.max(0, liveLocalIdx)));
+      const liveTime = typeof bars[liveActualIdx]?.t === 'string'
+        ? new Date(bars[liveActualIdx].t).getTime()
+        : Number(bars[liveActualIdx]?.t || Date.now());
+
+      allDrawingsToDraw.push({
+        id: '__in_progress__',
+        tool: inProgressDrawing.tool,
+        points: [inProgressDrawing.points[0], { time: liveTime, price: livePrice }],
+        style: inProgressDrawing.style,
+      });
+    }
+
+    for (const d of allDrawingsToDraw) {
+      const isSelected = d.id === selectedDrawingId;
+      const drawColor = d.style?.color || '#2962FF';
+      const drawWidth = d.style?.lineWidth || 2;
+
+      if (d.tool === 'trendline' && d.points.length >= 2) {
+        const x1 = getXForTime(d.points[0].time || d.points[0].ts_ns || 0);
+        const y1 = getYForPrice(d.points[0].price || 0);
+        const x2 = getXForTime(d.points[1].time || d.points[1].ts_ns || 0);
+        const y2 = getYForPrice(d.points[1].price || 0);
+
+        ctx.strokeStyle = drawColor;
+        ctx.lineWidth = drawWidth;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        if (isSelected) {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.strokeStyle = drawColor;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(x1, y1, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.beginPath(); ctx.arc(x2, y2, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+      } else if (d.tool === 'horizontal_level' && d.points.length >= 1) {
+        const priceVal = d.points[0].price || 0;
+        const y = getYForPrice(priceVal);
+
+        ctx.strokeStyle = drawColor;
+        ctx.lineWidth = isSelected ? drawWidth + 1 : drawWidth;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(chartWidth, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Right scale badge
+        ctx.fillStyle = drawColor;
+        ctx.fillRect(chartWidth + 1, y - 8, priceScaleWidth - 2, 16);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(formatCurrency(priceVal), chartWidth + priceScaleWidth / 2, y + 3.5);
+      } else if (d.tool === 'fibonacci' && d.points.length >= 2) {
+        const p1 = d.points[0].price || 0;
+        const p2 = d.points[1].price || 0;
+        const pDiff = p2 - p1;
+
+        for (const lvl of FIBONACCI_LEVELS) {
+          const pLvl = p1 + lvl.ratio * pDiff;
+          const yLvl = getYForPrice(pLvl);
+
+          ctx.strokeStyle = lvl.color;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(0, yLvl);
+          ctx.lineTo(chartWidth, yLvl);
+          ctx.stroke();
+
+          ctx.fillStyle = lvl.color;
+          ctx.font = '10px monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText(`${lvl.label} ($${pLvl.toFixed(2)})`, 10, yLvl - 3);
+        }
+      } else if (d.tool === 'text' && d.points.length >= 1) {
+        const p = d.points[0];
+        const tx = getXForTime(p.time || p.ts_ns || 0);
+        const ty = getYForPrice(p.price || 0);
+        const textStr = d.style?.text || 'Note';
+
+        ctx.font = '12px sans-serif';
+        const textMetrics = ctx.measureText(textStr);
+        const padding = 6;
+        const boxW = textMetrics.width + padding * 2;
+        const boxH = 22;
+
+        ctx.fillStyle = panelBg;
+        ctx.strokeStyle = drawColor;
+        ctx.lineWidth = isSelected ? 2 : 1;
+        ctx.fillRect(tx, ty - boxH / 2, boxW, boxH);
+        ctx.strokeRect(tx, ty - boxH / 2, boxW, boxH);
+
+        ctx.fillStyle = inkSolid;
+        ctx.textAlign = 'left';
+        ctx.fillText(textStr, tx + padding, ty + 4);
+      }
+    }
+
     // Scale border separators
     ctx.strokeStyle = inkA(0.1);
     ctx.lineWidth = 1;
@@ -1166,7 +1489,199 @@ export function TradingChart({
     ctx.stroke();
 
     ctx.restore();
-  }, [bars, viewWindow, crosshair, hoveredIdx, loading, symbol, timeframe, plotSize, theme, effectiveOverlays, effectiveSubpanes]);
+  }, [
+    bars,
+    viewWindow,
+    crosshair,
+    hoveredIdx,
+    loading,
+    symbol,
+    timeframe,
+    plotSize,
+    theme,
+    effectiveOverlays,
+    effectiveSubpanes,
+    localDrawings,
+    inProgressDrawing,
+    selectedDrawingId,
+    comparisons,
+    localComparisons,
+  ]);
+
+  // Drawing tool click handler
+  const handleCanvasClickForDrawing = useCallback(
+    (x: number, y: number) => {
+      if (bars.length === 0 || !activeDrawingTool) return false;
+
+      const { start, end } = viewWindow;
+      const visibleBars = bars.slice(start, end + 1);
+      let minP = Infinity;
+      let maxP = -Infinity;
+      for (const b of visibleBars) {
+        if (b.l < minP) minP = b.l;
+        if (b.h > maxP) maxP = b.h;
+      }
+      const pRange = maxP - minP || 1;
+      const priceScaleWidth = 65;
+      const timeScaleHeight = 24;
+      const container = plotRef.current;
+      const rect = container?.getBoundingClientRect();
+      const height = Math.floor(rect?.height || plotSize.h || 360);
+      const subCount = (effectiveSubpanes || []).filter((s) => s.visible !== false).length;
+      const totalUsableHeight = height - timeScaleHeight;
+      const subPaneHeight =
+        subCount > 0 ? Math.min(110, Math.max(65, Math.floor((totalUsableHeight * 0.45) / subCount))) : 0;
+      const mainChartHeight = totalUsableHeight - subCount * subPaneHeight;
+      const volumeHeight = Math.floor(mainChartHeight * 0.18);
+      const candleChartHeight = mainChartHeight - volumeHeight - 10;
+      const chartWidth = (rect?.width || plotSize.w || 600) - priceScaleWidth;
+
+      if (x > chartWidth || y > mainChartHeight) return false;
+
+      const count = end - start + 1;
+      const minSlots = 30;
+      const effectiveSlots = Math.max(count, minSlots);
+      const candleSlotWidth = chartWidth / effectiveSlots;
+      const xOffset = count < minSlots ? Math.max(0, chartWidth - count * candleSlotWidth - 10) : 0;
+      const localIdx = Math.floor((x - xOffset) / candleSlotWidth);
+      const actualIdx = Math.min(bars.length - 1, Math.max(0, start + Math.max(0, localIdx)));
+      const clickedTime =
+        typeof bars[actualIdx]?.t === 'string'
+          ? new Date(bars[actualIdx].t).getTime()
+          : Number(bars[actualIdx]?.t || Date.now());
+      const clickedPrice = minP + ((10 + candleChartHeight - y) / candleChartHeight) * pRange;
+
+      if (activeDrawingTool === 'trendline') {
+        if (!inProgressDrawing) {
+          setInProgressDrawing({
+            tool: 'trendline',
+            points: [{ time: clickedTime, price: clickedPrice }],
+            style: { color: drawingColor, lineWidth: 2 },
+          });
+        } else {
+          const pt1 = inProgressDrawing.points[0];
+          const newD: ChartDrawing = {
+            id: `draw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            tool: 'trendline',
+            points: [pt1, { time: clickedTime, price: clickedPrice }],
+            style: { color: drawingColor, lineWidth: 2 },
+          };
+          pushToUndo([...localDrawings, newD]);
+          onSaveDrawing?.(newD);
+          setInProgressDrawing(null);
+        }
+        return true;
+      } else if (activeDrawingTool === 'horizontal_level') {
+        const newD: ChartDrawing = {
+          id: `draw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          tool: 'horizontal_level',
+          points: [{ time: clickedTime, price: clickedPrice }],
+          style: { color: drawingColor, lineWidth: 1.5 },
+        };
+        pushToUndo([...localDrawings, newD]);
+        onSaveDrawing?.(newD);
+        return true;
+      } else if (activeDrawingTool === 'fibonacci') {
+        if (!inProgressDrawing) {
+          setInProgressDrawing({
+            tool: 'fibonacci',
+            points: [{ time: clickedTime, price: clickedPrice }],
+            style: { color: drawingColor, lineWidth: 1.5 },
+          });
+        } else {
+          const pt1 = inProgressDrawing.points[0];
+          const newD: ChartDrawing = {
+            id: `draw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            tool: 'fibonacci',
+            points: [pt1, { time: clickedTime, price: clickedPrice }],
+            style: { color: drawingColor, lineWidth: 1.5 },
+          };
+          pushToUndo([...localDrawings, newD]);
+          onSaveDrawing?.(newD);
+          setInProgressDrawing(null);
+        }
+        return true;
+      } else if (activeDrawingTool === 'text') {
+        const textVal = 'Key Level';
+        const newD: ChartDrawing = {
+          id: `draw_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          tool: 'text',
+          points: [{ time: clickedTime, price: clickedPrice }],
+          style: { color: drawingColor, text: textVal, fontSize: 12 },
+        };
+        pushToUndo([...localDrawings, newD]);
+        onSaveDrawing?.(newD);
+        return true;
+      } else if (activeDrawingTool === 'select') {
+        let hitId: string | null = null;
+        for (let i = localDrawings.length - 1; i >= 0; i--) {
+          const d = localDrawings[i];
+          if (d.tool === 'horizontal_level' && d.points.length >= 1) {
+            const dy = 10 + candleChartHeight - (((d.points[0].price || 0) - minP) / pRange) * candleChartHeight;
+            if (Math.abs(y - dy) < 12) {
+              hitId = d.id;
+              break;
+            }
+          } else if (d.tool === 'trendline' || d.tool === 'fibonacci' || d.tool === 'text') {
+            hitId = d.id;
+            break;
+          }
+        }
+        setSelectedDrawingId(hitId);
+        return true;
+      }
+      return false;
+    },
+    [
+      bars,
+      activeDrawingTool,
+      viewWindow,
+      effectiveSubpanes,
+      plotSize,
+      drawingColor,
+      inProgressDrawing,
+      pushToUndo,
+      localDrawings,
+      onSaveDrawing,
+    ]
+  );
+
+  // Keyboard shortcut listener
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === 'Escape') {
+        setInProgressDrawing(null);
+        setSelectedDrawingId(null);
+        setActiveDrawingTool(null);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedDrawingId) {
+          handleDeleteSelected();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        handleRedo();
+      } else if (e.key.toLowerCase() === 'v') {
+        setActiveDrawingTool('select');
+      } else if (e.key.toLowerCase() === 't') {
+        setActiveDrawingTool('trendline');
+      } else if (e.key.toLowerCase() === 'h') {
+        setActiveDrawingTool('horizontal_level');
+      } else if (e.key.toLowerCase() === 'f') {
+        setActiveDrawingTool('fibonacci');
+      } else if (e.key.toLowerCase() === 'a') {
+        setActiveDrawingTool('text');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedDrawingId, handleDeleteSelected, handleUndo, handleRedo]);
 
   // Mouse interaction handlers
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1210,12 +1725,84 @@ export function TradingChart({
 
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (bars.length === 0) return;
+    const canvas = canvasRef.current;
+    if (canvas && activeDrawingTool) {
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (handleCanvasClickForDrawing(x, y)) {
+        return;
+      }
+    }
     setIsDragging(true);
     dragStartRef.current = {
       x: e.clientX,
       startIdx: viewWindow.start,
       endIdx: viewWindow.end,
     };
+  };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const canvas = canvasRef.current;
+      if (!canvas || bars.length === 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      if (activeDrawingTool) {
+        if (handleCanvasClickForDrawing(x, y)) {
+          return;
+        }
+      }
+      setIsDragging(true);
+      dragStartRef.current = {
+        x: touch.clientX,
+        startIdx: viewWindow.start,
+        endIdx: viewWindow.end,
+      };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      const canvas = canvasRef.current;
+      if (!canvas || bars.length === 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+
+      const priceScaleWidth = 65;
+      const chartWidth = rect.width - priceScaleWidth;
+
+      if (x <= chartWidth && x >= 0) {
+        const { start, end } = viewWindow;
+        const count = end - start + 1;
+        const minSlots = 30;
+        const effectiveSlots = Math.max(count, minSlots);
+        const candleSlotWidth = chartWidth / effectiveSlots;
+        const xOffset = count < minSlots ? Math.max(0, chartWidth - count * candleSlotWidth - 10) : 0;
+        const localIdx = Math.floor((x - xOffset) / candleSlotWidth);
+        const actualIdx = Math.min(bars.length - 1, Math.max(0, start + Math.max(0, localIdx)));
+
+        setHoveredIdx(actualIdx);
+        setCrosshair({ x, y, price: 0 });
+
+        if (isDragging && dragStartRef.current) {
+          const dx = touch.clientX - dragStartRef.current.x;
+          const indexShift = Math.round(dx / candleSlotWidth);
+          const newStart = Math.max(0, Math.min(bars.length - count, dragStartRef.current.startIdx - indexShift));
+          const newEnd = Math.min(bars.length - 1, newStart + count - 1);
+          setViewWindow({ start: newStart, end: newEnd });
+        }
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+    dragStartRef.current = null;
   };
 
   const handleMouseUp = () => {
@@ -1312,6 +1899,38 @@ export function TradingChart({
           {(effectiveOverlays.length > 0 || effectiveSubpanes.length > 0) && (
             <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white">
               {effectiveOverlays.length + effectiveSubpanes.length}
+            </span>
+          )}
+        </button>
+
+        {/* Compare Symbols Button */}
+        <button
+          type="button"
+          onClick={() => setIsComparisonModalOpen(true)}
+          className="flex items-center gap-1.5 rounded-xl border border-ink/15 bg-ink/[0.04] px-2.5 py-1 text-xs font-semibold text-ink/80 hover:bg-ink/[0.08] hover:text-ink transition shadow-sm"
+          title="Compare performance against other symbols"
+        >
+          <TrendingUp className="h-3.5 w-3.5 text-purple-500" />
+          <span>Compare</span>
+          {effectiveComps.length > 0 && (
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 text-[10px] font-bold text-white">
+              {effectiveComps.length}
+            </span>
+          )}
+        </button>
+
+        {/* Layout Templates Button */}
+        <button
+          type="button"
+          onClick={() => setIsTemplateModalOpen(true)}
+          className="flex items-center gap-1.5 rounded-xl border border-ink/15 bg-ink/[0.04] px-2.5 py-1 text-xs font-semibold text-ink/80 hover:bg-ink/[0.08] hover:text-ink transition shadow-sm"
+          title="Saved chart layout templates"
+        >
+          <LayoutTemplate className="h-3.5 w-3.5 text-cyan-500" />
+          <span>Templates</span>
+          {templates.length > 0 && (
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-cyan-500/20 text-[10px] font-bold text-cyan-500">
+              {templates.length}
             </span>
           )}
         </button>
@@ -1571,11 +2190,30 @@ export function TradingChart({
               </div>
             );
           })}
+
+          {/* Active Comparisons in Legend */}
+          {effectiveComps.map((c) => (
+            <div
+              key={c.symbol}
+              className="group flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 px-2 py-0.5 text-xs text-ink"
+            >
+              <span className="inline-block h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: c.color || '#9C27B0' }} />
+              <span className="font-semibold text-ink">{c.symbol}</span>
+              <button
+                type="button"
+                onClick={() => handleRemoveComparison(c.symbol)}
+                className="text-ink/40 hover:text-rose-500 transition-colors ml-0.5"
+                title={`Remove ${c.symbol} comparison`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
         </div>
       )}
 
-      <p className="pb-1 text-right text-[10px] text-ink/40">Drag to pan · Ctrl/⌘ + scroll to zoom</p>
-      {/* Chart Canvas */}
+      <p className="pb-1 text-right text-[10px] text-ink/40">Drag to pan · Ctrl/⌘ + scroll to zoom · V/T/H/F/A for tools</p>
+      {/* Chart Canvas Area with Drawing Toolbar */}
       {(() => {
         const subCount = (effectiveSubpanes || []).filter((s) => s.visible !== false).length;
         const dynamicH =
@@ -1584,22 +2222,75 @@ export function TradingChart({
             : 'clamp(320px, 48vh, 480px)';
         const dynamicMinH = subCount > 0 ? `${340 + subCount * 90}px` : '340px';
         return (
-          <div
-            ref={plotRef}
-            style={{ minHeight: dynamicMinH, height: dynamicH }}
-            className="relative w-full flex-1 cursor-crosshair select-none"
-          >
-            <canvas
-              ref={canvasRef}
-              onMouseMove={handleMouseMove}
-              onMouseDown={handleMouseDown}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseLeave}
-              className="absolute inset-0 block h-full w-full rounded-lg"
+          <div className="relative flex flex-1 w-full gap-2">
+            {/* Left Drawing Toolbar */}
+            <DrawingToolbar
+              activeTool={activeDrawingTool}
+              onSelectTool={setActiveDrawingTool}
+              currentColor={drawingColor}
+              onSelectColor={setDrawingColor}
+              canUndo={undoStack.length > 0}
+              canRedo={redoStack.length > 0}
+              hasSelection={selectedDrawingId !== null}
+              drawingCount={localDrawings.length}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              onDeleteSelected={handleDeleteSelected}
+              onClearAll={handleClearAll}
+              className="shrink-0"
             />
+
+            <div
+              ref={plotRef}
+              style={{ minHeight: dynamicMinH, height: dynamicH }}
+              className={cn(
+                'relative flex-1 select-none',
+                activeDrawingTool ? 'cursor-crosshair' : 'cursor-default'
+              )}
+            >
+              <canvas
+                ref={canvasRef}
+                onMouseMove={handleMouseMove}
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseLeave}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                className="absolute inset-0 block h-full w-full rounded-lg"
+              />
+            </div>
           </div>
         );
       })()}
+
+      {/* Comparison Modal */}
+      <ComparisonModal
+        isOpen={isComparisonModalOpen}
+        onClose={() => setIsComparisonModalOpen(false)}
+        baseSymbol={symbol}
+        activeComparisons={effectiveComps.map((c) => ({
+          symbol: c.symbol,
+          color: c.color,
+          visible: true,
+        }))}
+        onAddComparison={handleAddComparison}
+        onRemoveComparison={handleRemoveComparison}
+      />
+
+      {/* Template Modal */}
+      <TemplateModal
+        isOpen={isTemplateModalOpen}
+        onClose={() => setIsTemplateModalOpen(false)}
+        templates={templates}
+        currentIndicatorCount={effectiveOverlays.length + effectiveSubpanes.length}
+        currentDrawingCount={localDrawings.length}
+        currentComparisonCount={effectiveComps.length}
+        isViewer={isViewer}
+        onSaveTemplate={handleSaveTemplate}
+        onLoadTemplate={handleApplyTemplate}
+        onDeleteTemplate={handleDeleteTemplate}
+      />
 
       {/* Indicator Picker Modal */}
       <IndicatorPickerModal

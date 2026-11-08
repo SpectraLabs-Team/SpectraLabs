@@ -51,6 +51,7 @@ pub mod datasets_api;
 pub mod engine;
 pub mod gap_api;
 pub mod identity;
+pub mod indicators_api;
 pub mod ingest;
 pub mod instruments_api;
 pub mod jobs_api;
@@ -1093,6 +1094,10 @@ fn alpha_routes() -> Router<AppState> {
         .route("/api/v1/alpha/m42/sentiment", only(get(alpha_api::handle_get_m42_sentiment)))
 }
 
+fn indicator_routes() -> Router<AppState> {
+    Router::new().route("/api/v1/indicators", only(get(indicators_api::indicators_handler)))
+}
+
 /// The application. `db` is checked by `/ready`; pass `None` where there is
 /// no database (unit tests), and `/ready` reports 503.
 pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
@@ -1117,6 +1122,7 @@ pub fn router(cfg: ApiConfig, db: Option<PgPool>) -> Router {
         .merge(portfolio_routes())
         .merge(alpha_routes())
         .merge(user_state_routes())
+        .merge(indicator_routes())
         .route_layer(middleware::from_fn_with_state(st.clone(), require_signature));
     Router::new()
         .merge(upload_routes())

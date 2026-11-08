@@ -2275,6 +2275,256 @@
         }
       }
     },
+    "/api/v1/indicators": {
+      "get": {
+        "tags": [
+          "indicators"
+        ],
+        "summary": "Calculate and retrieve aligned technical indicator series for a symbol.",
+        "operationId": "indicators_handler",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "description": "Symbol name (e.g. `AAPL`, `SPY`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dataset_version_id",
+            "in": "query",
+            "description": "Dataset version id (UUID).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "timeframe",
+            "in": "query",
+            "description": "Timeframe matching dataset native interval (e.g. `1Day`, `1m`, `1h`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "indicator",
+            "in": "query",
+            "description": "Indicator name (e.g. `SMA`, `EMA`, `BB`, `MACD`, `RSI`).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Look-back period for single-period indicators.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "fast_period",
+            "in": "query",
+            "description": "Fast period for MACD (default 12).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "slow_period",
+            "in": "query",
+            "description": "Slow period for MACD (default 26).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "signal_period",
+            "in": "query",
+            "description": "Signal period for MACD (default 9).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "multiplier",
+            "in": "query",
+            "description": "Multiplier for Bollinger Bands (default 2.0) or Keltner (default 1.5).",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          {
+            "name": "k_period",
+            "in": "query",
+            "description": "%K period for Stochastic (default 14).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "d_period",
+            "in": "query",
+            "description": "%D period for Stochastic (default 3).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "slow_period_stoch",
+            "in": "query",
+            "description": "Slow %D period for Stochastic (default 3).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "tenkan_period",
+            "in": "query",
+            "description": "Tenkan-sen period for Ichimoku (default 9).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "kijun_period",
+            "in": "query",
+            "description": "Kijun-sen period for Ichimoku (default 26).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "span_b_period",
+            "in": "query",
+            "description": "Senkou Span B period for Ichimoku (default 52).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "af_start",
+            "in": "query",
+            "description": "Acceleration factor start for Parabolic SAR (default 0.02).",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          {
+            "name": "af_step",
+            "in": "query",
+            "description": "Acceleration factor step for Parabolic SAR (default 0.02).",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          {
+            "name": "af_max",
+            "in": "query",
+            "description": "Acceleration factor max for Parabolic SAR (default 0.20).",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Aligned indicator series",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndicatorSeriesView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No workspace (code `no_workspace`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Dataset version or symbol not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Bars not reachable or sealed holdout",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid request parameters (`details.errors`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database or storage unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/instruments": {
       "get": {
         "tags": [
@@ -10723,6 +10973,78 @@
           }
         }
       },
+      "IndicatorSeriesView": {
+        "type": "object",
+        "description": "Aligned indicator series response view.",
+        "required": [
+          "symbol",
+          "indicator",
+          "timeframe",
+          "total_bars",
+          "timestamps"
+        ],
+        "properties": {
+          "indicator": {
+            "type": "string",
+            "description": "The indicator name requested."
+          },
+          "series": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Multi-output indicators (BB, ICHIMOKU, MACD, STOCH, ADX, DONCHIAN, KELTNER): one\nseries per output, under its name (e.g. `upper`, `middle`, `lower`). Absent for\nsingle-output indicators.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "double"
+              }
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "symbol": {
+            "type": "string",
+            "description": "The symbol charted."
+          },
+          "timeframe": {
+            "type": "string",
+            "description": "The confirmed timeframe."
+          },
+          "timestamps": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Bar start timestamps (nanoseconds UTC) aligned with the output series."
+          },
+          "total_bars": {
+            "type": "integer",
+            "description": "Total number of bars in the aligned series.",
+            "minimum": 0
+          },
+          "values": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "double"
+            },
+            "description": "Single-output indicators: the one output series. Absent for multi-output indicators."
+          }
+        }
+      },
       "IngestColumns": {
         "type": "object",
         "description": "Header names (matched without regard to case).",
@@ -16569,6 +16891,10 @@
     {
       "name": "alpha",
       "description": "Alpha Workbench: signal tests, IC decay, quantile spread, and sentiment gate (M12)"
+    },
+    {
+      "name": "indicators",
+      "description": "Technical indicator engine series calculations (M35)"
     }
   ]
 }

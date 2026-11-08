@@ -315,6 +315,7 @@ pub struct StressRequest {
         crate::user_state_api::clear_sandbox_orders,
         crate::user_state_api::transact_sandbox,
         crate::user_state_api::import,
+        crate::indicators_api::indicators_handler,
     ),
     components(schemas(
         ErrorDoc,
@@ -527,6 +528,7 @@ pub struct StressRequest {
         crate::alpha_api::SignalTestSummaryView,
         crate::alpha_api::SignalTestDetailView,
         crate::alpha_api::M42SentimentResponse,
+        crate::indicators_api::IndicatorSeriesView,
     )),
     tags(
         (name = "system", description = "System observability, probes and metrics"),
@@ -549,6 +551,7 @@ pub struct StressRequest {
         (name = "reports", description = "Versioned, run-linked reports (M16)"),
         (name = "user-state", description = "Per-user saved state, sandbox orders and run history (M25)"),
         (name = "alpha", description = "Alpha Workbench: signal tests, IC decay, quantile spread, and sentiment gate (M12)"),
+        (name = "indicators", description = "Technical indicator engine series calculations (M35)"),
     )
 )]
 pub struct ApiDoc;
@@ -642,6 +645,7 @@ mod tests {
             "/api/v1/paper/gap/analyze",
             "/api/v1/paper/gap/reports",
             "/api/v1/paper/gap/reports/{id}",
+            "/api/v1/indicators",
         ] {
             assert!(spec.contains(&format!("\"{path}\"")), "missing {path}");
         }

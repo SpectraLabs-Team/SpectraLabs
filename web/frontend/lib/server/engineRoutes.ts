@@ -102,6 +102,8 @@ export const ENGINE_ROUTES: Record<string, EngineRoute> = {
   'api/v1/datasets/versions/{id}/bars': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   'api/v1/indicators': { method: 'GET', minRole: 'viewer', timeoutMs: 30_000 },
   // Point-in-time fundamentals from SEC EDGAR (M34): reads are viewer, refreshes and schedules editor.
+  'api/v1/fundamentals': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
+  'api/v1/fundamentals/statement': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/fundamentals/refresh': { method: 'POST', minRole: 'editor', timeoutMs: 20_000 },
   'api/v1/fundamentals/loads': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },
   'api/v1/fundamentals/quarantine': { method: 'GET', minRole: 'viewer', timeoutMs: 15_000 },

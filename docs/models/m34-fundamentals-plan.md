@@ -1,10 +1,13 @@
 # M34: Fundamentals Data & Point-in-Time Store Specification
 
-**Status**: In progress. The in-memory store, symbol master and quality checks are done (PR #284).
-Loading real data (M34a) and the point-in-time checks on what reads it (M34b) are being built; see
-section 6.
-**Implementation**: `crates/spectra-data/src/fundamentals.rs`
-**Tests**: `crates/spectra-data/tests/m34_fundamentals_reference.rs`
+**Status**: Done (2026-11-09). M34a, loading from SEC EDGAR, and M34b, the point-in-time checks on
+what reads the data, are built and tested; see section 6.
+**Implementation**: `crates/spectra-data/src/{fundamentals,edgar}.rs` (store, EDGAR parsing),
+`crates/spectra-db/src/fundamentals.rs` (storage), `crates/spectra-api/src/{fundamentals,fundamentals_api}.rs`
+(refresh job and endpoints), `crates/spectra-research/src/company_research.rs` (`statement_as_of`)
+**Tests**: `crates/spectra-data/tests/m34_{fundamentals,edgar}_reference.rs`,
+`crates/spectra-db/tests/fundamentals_store.rs`,
+`crates/spectra-api/tests/fundamentals_{refresh_flow,point_in_time}.rs`
 
 ## 1. Provider Decision (DL-1)
 
@@ -54,17 +57,21 @@ with tickers mapped to CIKs from `www.sec.gov/files/company_tickers.json`. Decid
 | 5 | Readers in scope for M34b | An as-of fundamentals API, and M37 company research statements built from the store |
 | 6 | User-uploaded fundamentals files | Out of scope for M34 (so M29 upload limits are not a dependency) |
 
-M34a, provider and loading:
-1. **EDGAR parser** (`spectra-data`): Company Facts JSON and the ticker map to `FundamentalRecord`s
-   with known-at times and restatement indices. Fixture tests, no network.
-2. **Storage** (`spectra-db`): append-only fact, quarantine and load tables; as-of queries.
-3. **Refresh job** (`spectra-api`): an EDGAR client, a `fundamentals_refresh` job, a refresh endpoint
-   and refresh schedules swept by the worker. A refresh adds new revisions and keeps the old ones.
+M34a, provider and loading (all done):
+1. **Provider decision (DL-1)**: SEC EDGAR, recorded in section 1 (#314).
+2. **EDGAR parser** (`spectra-data`): Company Facts JSON and the ticker map to `FundamentalRecord`s
+   with known-at times and restatement indices. Fixture tests, no network (#315).
+3. **Storage** (`spectra-db`): append-only fact, quarantine and load tables; as-of queries (#317).
+4. **Refresh job** (`spectra-api`): an EDGAR client, a `fundamentals_refresh` job, a refresh endpoint
+   and refresh schedules swept by the worker. A refresh adds new revisions and keeps the old ones
+   (#319).
 
-M34b, point-in-time checks:
-4. **As-of reads**: `GET /api/v1/fundamentals` and the M37 statement endpoint return only values
+M34b, point-in-time checks (all done):
+5. **As-of reads**: `GET /api/v1/fundamentals` and the M37 statement endpoint return only values
    known at `as_of`; tests read before a revision's known-at time and get nothing.
-5. **Quarantine coverage**: quarantined rows are stored apart and never reach a reader or a screen.
+6. **Quarantine coverage**: quarantined rows are stored apart and never reach a reader or a screen;
+   a test runs an M36 screen on data loaded from the database and checks a quarantined NaN cannot
+   let a symbol through.
 
 ## 7. EDGAR Mapping
 
@@ -82,7 +89,9 @@ dropped. Balance-sheet values (instants) take the label of their first filing.
 is revision 0; a later filing that reports a different value adds the next revision; a later filing
 that repeats the same value adds nothing.
 
-**Metrics.** The first listed XBRL concept that a company reports is used:
+**Metrics.** A metric's concepts are merged value by value: when two concepts report the same value
+in the same filing, the one listed first wins, and a concept listed later fills periods the others do
+not report (companies move from `Revenues` to `RevenueFromContract…` over the years).
 
 | Metric | Concepts | Unit |
 |---|---|---|
@@ -106,9 +115,10 @@ that repeats the same value adds nothing.
 
 Loaded values live in Postgres, per workspace:
 
-- **`fundamental_facts`**: one row per symbol, period, metric and revision, with its value, known-at
-  time and filing accession number. Rows are never updated or deleted (a trigger refuses both), so a
-  refresh can only add revisions.
+- **`fundamental_facts`**: one row per symbol, period, metric and filing, with its value, known-at
+  time, revision and filing accession number. Rows are never updated (a trigger refuses it) and are
+  deleted only with their workspace, so a refresh can only add revisions; reloading a filing adds
+  nothing.
 - **`fundamental_quarantine`**: rows that failed the quality checks, with the reason. Readers never
   query this table.
 - **`fundamental_loads`**: one row per symbol per refresh: the content-addressed `fund_v_` version of
@@ -119,3 +129,26 @@ Loaded values live in Postgres, per workspace:
 M1's `dataset_versions` hold price-bar datasets (bars, checksums, Parquet files), so fundamentals get
 their own tables instead. Reproducibility comes from the same two properties: loaded data never
 changes, and every load has a content-addressed version a run can cite.
+
+## 9. Reading Fundamentals
+
+All reads are per workspace and need any member role; refreshes and schedules need an editor.
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/v1/fundamentals?symbol=&as_of=&metric=` | Each value's latest revision with `known_at <= as_of` |
+| `GET /api/v1/fundamentals/statement?symbol=&as_of=&period=` | An M37 statement from those values; lines with no value are `null` and listed in `missing` |
+| `POST /api/v1/fundamentals/refresh` | Queues a `fundamentals_refresh` job for 1 to 100 symbols |
+| `GET /api/v1/fundamentals/loads`, `/quarantine` | Loads with their `fund_v_` versions; quarantined rows |
+| `GET\|PUT\|DELETE /api/v1/fundamentals/schedule` | The workspace's refresh schedule (1 to 720 hours) |
+
+- **`as_of`** is a `YYYY-MM-DD` date, read as the end of that day in UTC, or an RFC 3339 time; it
+  defaults to now. A value filed on day D is known from 12:00 UTC on D+1, so `as_of=D` does not
+  see it and `as_of=D+1` does.
+- **Statements** map loaded metrics to M37 line items. Derived when both inputs are known:
+  `cost_of_goods_sold`, `free_cash_flow`, `diluted_shares_outstanding` (net income over diluted EPS).
+  `total_debt` is long-term debt. Operating expenses, interest expense and inventory are not loaded
+  from EDGAR, so they are always `null`. M37 ratios are not served from these statements, because
+  missing lines would be read as zero.
+- **Screens** (M36 `run_screen`) take a store built from `facts_known_by`, which returns accepted
+  rows known at the screen's time only.

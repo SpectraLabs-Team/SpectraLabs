@@ -2214,6 +2214,66 @@
         }
       }
     },
+    "/api/v1/fundamentals": {
+      "get": {
+        "tags": [
+          "fundamentals"
+        ],
+        "summary": "The latest revision of each value of a symbol known at `as_of`. Values published later, and\nquarantined rows, are never returned.",
+        "operationId": "facts",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "description": "Ticker (required).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "as_of",
+            "in": "query",
+            "description": "What was known at this time: `YYYY-MM-DD` (the end of that day, UTC) or an RFC 3339 time.\nDefault: now.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "metric",
+            "in": "query",
+            "description": "Only this metric, e.g. `revenue`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FactsView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No symbol, or a bad as_of",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/fundamentals/loads": {
       "get": {
         "tags": [
@@ -2477,6 +2537,76 @@
           },
           "404": {
             "description": "No schedule",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/fundamentals/statement": {
+      "get": {
+        "tags": [
+          "fundamentals"
+        ],
+        "summary": "A company statement (M37 line items) built from the values known at `as_of`. Lines with no\nvalue known then are null and listed in `missing`; they are never reported as zero.",
+        "operationId": "statement",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "query",
+            "description": "Ticker (required).",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "as_of",
+            "in": "query",
+            "description": "As in `GET /api/v1/fundamentals`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "description": "Period, e.g. `2024-Q1` or `2024-FY`. Default: the latest period with a value known at `as_of`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatementView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing for that symbol and period was known at as_of",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDoc"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "No symbol, or a bad as_of or period",
             "content": {
               "application/json": {
                 "schema": {
@@ -10623,6 +10753,87 @@
         },
         "additionalProperties": false
       },
+      "FactView": {
+        "type": "object",
+        "description": "One value: its latest revision known at the requested time.",
+        "required": [
+          "period",
+          "fiscal_year",
+          "fiscal_quarter",
+          "metric",
+          "value",
+          "currency",
+          "known_at",
+          "revision",
+          "filing_ref",
+          "source"
+        ],
+        "properties": {
+          "currency": {
+            "type": "string",
+            "description": "`USD`, or empty for share counts."
+          },
+          "filing_ref": {
+            "type": "string"
+          },
+          "fiscal_quarter": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1 to 4, or 0 for a full year."
+          },
+          "fiscal_year": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "known_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this revision became public."
+          },
+          "metric": {
+            "type": "string"
+          },
+          "period": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32",
+            "description": "0 for the first filing, then one per restatement."
+          },
+          "source": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "FactsView": {
+        "type": "object",
+        "description": "Values of a symbol known at `as_of`.",
+        "required": [
+          "symbol",
+          "as_of",
+          "items"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FactView"
+            }
+          },
+          "symbol": {
+            "type": "string"
+          }
+        }
+      },
       "FxRateListView": {
         "type": "object",
         "description": "FX rates against the workspace's base currency.",
@@ -15488,6 +15699,191 @@
             "type": "object"
           },
           "message": {
+            "type": "string"
+          }
+        }
+      },
+      "StatementLines": {
+        "type": "object",
+        "description": "Statement lines (M37 `FinancialStatementItems`); null when no value was known.",
+        "properties": {
+          "capital_expenditures": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "cash_and_equivalents": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "cost_of_goods_sold": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "current_assets": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "current_liabilities": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "diluted_shares_outstanding": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "free_cash_flow": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "gross_profit": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "interest_expense": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "inventory": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "net_income": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "operating_cash_flow": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "operating_expenses": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "operating_income": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "revenue": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "stockholders_equity": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "total_assets": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "total_debt": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Long-term debt."
+          },
+          "total_liabilities": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
+      "StatementView": {
+        "type": "object",
+        "description": "A company statement as it was known at `as_of`.",
+        "required": [
+          "symbol",
+          "period",
+          "fiscal_year",
+          "as_of",
+          "known_at",
+          "lines",
+          "missing"
+        ],
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fiscal_year": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "known_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The latest known-at time among the values used."
+          },
+          "lines": {
+            "$ref": "#/components/schemas/StatementLines"
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Lines with no value known at `as_of`."
+          },
+          "period": {
+            "type": "string"
+          },
+          "symbol": {
             "type": "string"
           }
         }

@@ -34,8 +34,9 @@ pub use attribution::{
 };
 pub use benchmark::{aligned_returns, benchmark_returns, compute_benchmark_metrics, BenchmarkMetrics};
 pub use company_research::{
-    compute_ratios, evaluate_health_scorecard, multiple_percentile, CompanyRatios, FinancialHealthScorecard,
-    FinancialStatementItems, HealthScoreCheck, StatementTieOut,
+    compute_ratios, evaluate_health_scorecard, latest_period, multiple_percentile, statement_as_of,
+    CompanyRatios, FinancialHealthScorecard, FinancialStatementItems, HealthScoreCheck, StatementAsOf,
+    StatementTieOut, STATEMENT_FIELDS,
 };
 pub use formula::{
     evaluate_formula, parse_formula, run_idea_scanner, BinaryOp, Expr, FormulaError, IdeaSignal, SeriesField,

@@ -1098,6 +1098,8 @@ fn alpha_routes() -> Router<AppState> {
 
 fn fundamentals_routes() -> Router<AppState> {
     Router::new()
+        .route("/api/v1/fundamentals", only(get(fundamentals_api::facts)))
+        .route("/api/v1/fundamentals/statement", only(get(fundamentals_api::statement)))
         .route("/api/v1/fundamentals/refresh", only(post(fundamentals_api::refresh)))
         .route("/api/v1/fundamentals/loads", only(get(fundamentals_api::list_loads)))
         .route("/api/v1/fundamentals/quarantine", only(get(fundamentals_api::list_quarantine)))

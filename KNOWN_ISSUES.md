@@ -79,12 +79,15 @@ time and answers 503 to further compute requests instead of queueing them.
   - **Target Milestone:** Enterprise Tier (Target Date: Q2 2027).
   - **Trigger:** Activation of enterprise workspace licensing and organization domain-level authentication requirements. Password + TOTP 2FA and Google OAuth are active and verified on `main`. Formal deferral record is documented in `docs/gaps/m19-passkeys-sso-deferral.md`.
 
-## Platform ops (M20)
+## Platform ops (M20) & Admin Console (M21)
 
 M20 is implemented on branch `m20/finish` and reaches `main` when it is merged. Status by step is in
-[M20-COMPLETE.md](M20-COMPLETE.md); deployment is in [docs/operations.md](docs/operations.md) and
+[M20-COMPLETE.md](M20-COMPLETE.md); deployment is in [docs/operations.md](docs/operations.md),
+the operational administration guide is in [docs/admin-runbook.md](docs/admin-runbook.md), and
 scaling in [docs/scaling-guide.md](docs/scaling-guide.md).
 
+- **Sentry production verification:** Sentry reporting infrastructure is active and verified via `/api/v1/observability/sentry`. In production environments with a configured `SENTRY_DSN`, operators execute `POST /api/v1/observability/sentry/verify` to emit a synthetic `SpectraSentryVerificationTestEvent` test event to confirm remote receipt and telemetry flush before live traffic routing.
+- **Admin Runbook:** Operational procedures for platform and workspace role gates (`ensure_can_edit` / `viewer_read_only`), 400-day user activity purge, unreferenced artifact reclamation, and cryptographic audit log chain verification (`npm run audit:verify`) are formalized in [docs/admin-runbook.md](docs/admin-runbook.md).
 - **`Cargo.lock` must be regenerated once.** Steps 12 and 13 add the optional `object_store`
   dependency (the `s3` feature). Optional dependencies are recorded in the lock file, so the first
   `cargo check` with crates.io access updates `Cargo.lock`; commit it. Until then

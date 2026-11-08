@@ -478,7 +478,7 @@ impl RequestInstruments {
     pub fn parse(doc: &Json, errors: &mut Vec<FieldError>) -> Option<Self> {
         let before = errors.len();
         let mut out = Self::default();
-        match doc.find("base_currency") {
+        match doc.find("base_currency").or_else(|| doc.find("currency")) {
             None | Some(Json::Null) => {}
             Some(Json::String(s)) if is_currency_code(s.trim()) => out.base_currency = Some(s.trim().into()),
             Some(_) => {
@@ -690,9 +690,8 @@ impl RequestInstruments {
     /// # Errors
     /// Never for a parsed request (numbers are written as strings).
     pub fn write_into(&self, mut doc: Json) -> Result<Json> {
-        if let Some(b) = &self.base_currency {
-            doc = doc.with("base_currency", Json::string(b.clone()));
-        }
+        let b = self.base_currency.as_deref().unwrap_or("USD");
+        doc = doc.with("base_currency", Json::string(b)).with("currency", Json::string(b));
         if let Some(q) = self.bond_quote {
             doc = doc.with("bond_quote", Json::string(q.as_str()));
         }

@@ -716,6 +716,8 @@ pub fn run_registry_backtest(payload: &Json) -> Reply {
     Ok(Json::object()
         .with("experiment_id", Json::string(experiment_id))
         .with("dataset_id", Json::string(dataset.info.id))
+        .with("currency", Json::string("USD"))
+        .with("base_currency", Json::string("USD"))
         .with("strategy", Json::string("sma_cross"))
         .with("strategy_sha256", Json::string(strategy_sha256))
         .with("params", params_json)

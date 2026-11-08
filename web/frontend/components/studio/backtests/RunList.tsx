@@ -232,7 +232,12 @@ export function RunList({
                     <StatusBadge status={it.status} cancelling={it.cancel_requested && !isFinishedStatus(it.status)} />
                   </div>
                   <div className="num mt-1 flex items-center justify-between gap-2 text-[11px] text-ink/50">
-                    <span>{ago(it.created_at)}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span>{ago(it.created_at)}</span>
+                      <span className="rounded bg-ink/5 px-1 py-0.5 text-[9.5px] font-mono text-ink/60">
+                        {it.request.currency ?? it.request.base_currency ?? 'USD'}
+                      </span>
+                    </span>
                     {it.status === 'succeeded' && h ? (
                       <span className="flex gap-2.5">
                         <span className={cn(tone(h.total_return) === 'profit' ? 'text-profit' : tone(h.total_return) === 'loss' ? 'text-loss' : '')}>{signedPct(h.total_return)}</span>

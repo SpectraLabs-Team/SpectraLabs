@@ -327,7 +327,8 @@ pub(crate) async fn create_backtest(
         payload["as_of"] = a;
     }
     if let Some(b) = req.base_currency {
-        payload["base_currency"] = serde_json::Value::String(b);
+        payload["base_currency"] = serde_json::Value::String(b.clone());
+        payload["currency"] = serde_json::Value::String(b);
     }
     if let Some(list) = req.instruments {
         payload["instruments"] = serde_json::Value::Array(list);

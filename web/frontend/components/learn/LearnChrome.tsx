@@ -1,14 +1,14 @@
 'use client';
 
 import Link from 'next/link';
-import { BookOpen, ChevronRight, ChevronsLeft, ChevronsRight, Clock, Cpu, FlaskConical, Gauge, PanelLeftClose, PanelLeftOpen, TrendingUp, Workflow } from 'lucide-react';
+import { BookOpen, ChevronRight, ChevronsLeft, ChevronsRight, Clock, Cpu, FlaskConical, Gauge, PanelLeftClose, PanelLeftOpen, Sliders, TrendingUp, Workflow } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Footer } from '@/components/landing/Footer';
 import { Header } from '@/components/landing/Header';
 import { CATEGORIES, lessonPath, lessonsIn, readingMinutes, type Category, type CategoryId, type Lesson, type Level } from '@/lib/learn';
 import { cn } from '@/lib/utils';
 
-export const CATEGORY_ICONS = { BookOpen, Cpu, FlaskConical, Gauge, Workflow, TrendingUp } satisfies Record<Category['icon'], unknown>;
+export const CATEGORY_ICONS = { BookOpen, Cpu, FlaskConical, Gauge, Workflow, TrendingUp, Sliders } satisfies Record<Category['icon'], unknown>;
 
 export function CategoryIcon({ category, className }: { category: Category; className?: string }) {
   const Icon = CATEGORY_ICONS[category.icon];

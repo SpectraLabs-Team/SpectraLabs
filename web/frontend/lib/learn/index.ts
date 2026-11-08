@@ -1,5 +1,6 @@
 import { engine } from './content/engine';
 import { fundamentals } from './content/fundamentals';
+import { indicators } from './content/indicators';
 import { benchmarkMetrics } from './content/metrics-benchmark';
 import { modelMetrics } from './content/metrics-models';
 import { returnMetrics } from './content/metrics-returns';
@@ -19,6 +20,7 @@ export const CATEGORIES: Category[] = [
   { id: 'metrics', title: 'Performance Metrics', description: 'Every metric in your results, with its exact formula, an example and how to read it.', icon: 'Gauge' },
   { id: 'strategies', title: 'Trading Strategies', description: 'The logic, assumptions and limits of the strategies you can run on the platform.', icon: 'Workflow' },
   { id: 'paper-trading', title: 'Paper Trading', description: 'Practise on live markets with an Alpaca paper account and simulated funds.', icon: 'TrendingUp' },
+  { id: 'indicators', title: 'Technical Indicators', description: 'All 25 technical indicators and overlays, formulas, default parameters and how to interpret them.', icon: 'Sliders' },
 ];
 
 /** Every lesson, grouped by category in reading order. */
@@ -33,6 +35,7 @@ export const LESSONS: Lesson[] = [
   ...modelMetrics,
   ...strategies,
   ...paper,
+  ...indicators,
 ];
 
 export const lessonKey = (l: Pick<Lesson, 'category' | 'slug'>) => `${l.category}/${l.slug}`;

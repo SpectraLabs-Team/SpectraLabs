@@ -202,8 +202,14 @@ pub fn compute_rebalance_trades(
 
     for item in &basket.items {
         let sym = item.symbol.to_uppercase();
-        let price = prices.get(&sym).copied().unwrap_or(1.0);
-        let curr_qty = holding_map.get(&sym).map_or(0.0, |h| h.quantity);
+        let price = match prices.get(&sym).copied() {
+            Some(p) => p,
+            None => 1.0,
+        };
+        let curr_qty = match holding_map.get(&sym) {
+            Some(h) => h.quantity,
+            None => 0.0,
+        };
         let curr_val = curr_qty * price;
         let curr_weight = curr_val / total_val;
         let target_weight = item.target_weight;

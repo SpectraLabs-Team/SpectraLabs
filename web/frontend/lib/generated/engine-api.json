@@ -10226,6 +10226,13 @@
         "type": "object",
         "description": "Owner configurable gate threshold input.",
         "properties": {
+          "max_half_life_days": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
           "max_turnover": {
             "type": [
               "number",
@@ -13820,9 +13827,25 @@
             "description": "Number of quantiles for spread and turnover (default: 5).",
             "minimum": 0
           },
+          "signal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Optional saved signal id to reload."
+          },
           "signal_name": {
             "type": "string",
             "description": "Signal identifier or name (e.g. \"momentum_5d\", \"mean_reversion_5d\", \"sentiment\")."
+          },
+          "signal_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Optional saved signal version to reload."
           },
           "symbols": {
             "type": [

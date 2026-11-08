@@ -129,6 +129,8 @@ export interface HoldoutEvaluation {
   warnings: string[];
   evaluated_by?: string | null;
   evaluated_at: string;
+  status?: string;
+  run_id?: string | null;
 }
 
 export interface HoldoutDetail {

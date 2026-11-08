@@ -528,6 +528,7 @@ pub(crate) async fn get_run(
         Ok(count) => count,
         Err(error) => return fail(&error),
     };
+    let is_succeeded = item.status == "succeeded";
     let mut body = run_json(item);
     body["artifacts"] = Value::Array(artifacts.iter().map(artifact_json).collect());
     body["workspace_trial_count"] = json!(trials);
@@ -548,7 +549,8 @@ pub(crate) async fn get_run(
             false
         };
 
-        if is_viewer {
+        // Only a succeeded run shows holdout history (#299), and never to a viewer.
+        if !is_succeeded || is_viewer {
             Value::Array(Vec::new())
         } else {
             let evals = sqlx::query(

@@ -209,7 +209,9 @@ It writes `registry-heads-<time>.txt` (workspace, seq, hash per line) and append
 separate git repository or a release asset all work. To audit later, compare a past heads file
 with the hashes at those sequence numbers in the database.
 
-## Admin accounts
+## Admin accounts and Runbook (M21)
+
+Full operational details for platform and workspace role gates, activity and artifact purge routines, and cryptographic audit log inspections are documented in the [Admin Runbook](admin-runbook.md).
 
 Platform admins are set from the command line, against the database the app uses. From
 `web/frontend`, with `DATABASE_URL` pointing at that database:

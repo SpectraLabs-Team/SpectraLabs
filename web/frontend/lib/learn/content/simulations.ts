@@ -11,7 +11,7 @@ export const simulations: Lesson[] = [
     level: 'Beginner',
     featured: true,
     summary: 'A simulation replays a strategy’s rules against market data to see what would have happened, without risking money.',
-    keywords: ['simulation', 'backtest', 'introduction'],
+    keywords: ['trading simulation', 'simulation backtest', 'simulation basics'],
     blocks: [
       { type: 'p', text: 'A trading simulation runs a strategy’s rules against market data and an imitation of the market’s execution, then records every order, fill and change in the account. The output is a full history of what the strategy would have done and how the account would have moved.' },
       { type: 'p', text: 'Spectra has three kinds of simulation:' },
@@ -32,7 +32,7 @@ export const simulations: Lesson[] = [
     title: 'Why Simulations Are Useful',
     level: 'Beginner',
     summary: 'Simulations let you reject bad ideas cheaply, size risk before it is real, and understand how a strategy behaves in different markets.',
-    keywords: ['benefits', 'testing', 'research'],
+    keywords: ['benefits', 'simulation testing', 'research'],
     blocks: [
       { type: 'list', items: [
         '**Cheap failure**: most trading ideas do not work. Finding that out in a backtest costs seconds, not money.',
@@ -53,7 +53,7 @@ export const simulations: Lesson[] = [
     title: 'How Simulated Trades Are Executed',
     level: 'Intermediate',
     summary: 'Orders placed on one bar fill on a later bar, at prices the bar actually traded, after costs.',
-    keywords: ['fill model', 'simulated execution', 'next bar', 'look ahead', 'costs'],
+    keywords: ['fill model', 'simulated execution', 'next bar', 'look ahead', 'simulated costs'],
     blocks: [
       { type: 'p', text: 'The Spectra backtester follows a strict timing contract so results never use information the strategy could not have had.' },
       { type: 'list', ordered: true, items: [
@@ -75,7 +75,7 @@ export const simulations: Lesson[] = [
     title: 'Historical vs Real-Time Simulations',
     level: 'Beginner',
     summary: 'Historical simulations replay the past quickly and reproducibly; real-time simulations run forward on live data and cannot be rerun.',
-    keywords: ['historical', 'real time', 'live', 'forward test', 'out of sample'],
+    keywords: ['historical', 'real time', 'live', 'historical forward testing', 'historical out of sample'],
     blocks: [
       { type: 'table', head: ['', 'Historical (backtest)', 'Real-time (paper trading)'], rows: [
         ['Data', 'Stored bars you uploaded', 'Live market data'],
@@ -97,7 +97,7 @@ export const simulations: Lesson[] = [
     level: 'Intermediate',
     featured: true,
     summary: 'Costs, fills, data quality, annualization and leverage settings can each turn a winning backtest into a losing one.',
-    keywords: ['assumptions', 'cost assumptions', 'sensitivity', 'bias', 'survivorship', 'look ahead'],
+    keywords: ['assumptions', 'cost assumptions', 'assumption sensitivity', 'assumption bias', 'survivorship', 'lookahead bias'],
     blocks: [
       { type: 'p', text: 'Every simulation embeds assumptions. The important ones, and where you set them in a Spectra backtest:' },
       { type: 'table', head: ['Assumption', 'Setting', 'Effect if too optimistic'], rows: [
@@ -147,7 +147,7 @@ export const simulations: Lesson[] = [
     level: 'Intermediate',
     featured: true,
     summary: 'A step-by-step way to read a backtest’s results, from the headline numbers to the details that tell you whether to trust them.',
-    keywords: ['results', 'interpretation', 'checklist', 'metrics', 'dashboard'],
+    keywords: ['simulation results', 'interpretation', 'checklist', 'metrics', 'dashboard'],
     blocks: [
       { type: 'p', text: 'Every metric on the results page has an ⓘ icon: hover or tap it for a short definition and a link to its full lesson. Read the results in this order:' },
       { type: 'list', ordered: true, items: [
@@ -171,7 +171,7 @@ export const simulations: Lesson[] = [
     level: 'Beginner',
     featured: true,
     summary: 'Simulation is the umbrella term; backtesting replays history; paper trading runs forward in real time with simulated money.',
-    keywords: ['difference', 'comparison', 'backtest', 'paper trade', 'forward test'],
+    keywords: ['difference', 'comparison', 'backtest comparison', 'paper trade', 'forward test comparison'],
     blocks: [
       { type: 'table', head: ['', 'Simulation (general)', 'Backtesting', 'Paper trading'], rows: [
         ['What it is', 'Any model of trading outcomes', 'Replaying rules on past data', 'Trading live markets with simulated funds'],
@@ -192,7 +192,7 @@ export const simulations: Lesson[] = [
     title: 'Monte Carlo Risk Simulation',
     level: 'Intermediate',
     summary: 'The Risk & Stress Lab draws thousands of possible horizon outcomes for the portfolio and reads VaR and expected shortfall off the distribution.',
-    keywords: ['monte carlo', 'gbm', 'risk lab', 'paths', 'stress test'],
+    keywords: ['monte carlo', 'gbm', 'risk lab', 'paths', 'monte carlo stress'],
     blocks: [
       { type: 'p', text: 'Instead of replaying the past, a Monte Carlo simulation samples many possible futures from a model. Each path gives one loss over the horizon; with enough paths, the histogram of losses approximates the model’s loss distribution.' },
       { type: 'formula', tex: String.raw`L = V - V\exp\!\left(\left(\mu - \tfrac{\sigma^2}{2}\right)T + \sigma\sqrt{T}\,Z\right), \quad Z \sim N(0,1)` },
@@ -249,7 +249,7 @@ export const simulations: Lesson[] = [
     title: 'Overfitting and Validation',
     level: 'Advanced',
     summary: 'Why the best backtest from a search is usually too good, and the tools Spectra gives you to measure by how much.',
-    keywords: ['overfitting', 'curve fitting', 'data snooping', 'validation', 'dsr', 'pbo'],
+    keywords: ['overfitting', 'curve fitting', 'data snooping', 'validation', 'validation dsr', 'validation pbo'],
     blocks: [
       { type: 'p', text: '**Overfitting** is tuning a strategy so closely to past data that it captures noise instead of a repeatable pattern. The more parameters and variants you try, the better the best one will look by chance.' },
       { type: 'h', text: 'Spectra’s validation toolkit' },

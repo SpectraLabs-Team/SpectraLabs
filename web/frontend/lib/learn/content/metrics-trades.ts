@@ -11,7 +11,7 @@ export const tradeMetrics = [
     title: 'Number of Trades',
     level: 'Beginner',
     summary: 'How many completed round trips the strategy made, alongside its order and fill counts.',
-    keywords: ['trades', 'round trips', 'trade count', 'sample size', 'open positions'],
+    keywords: ['trades', 'round trips', 'trade count', 'sample size', 'open positions count'],
     what: [TRADE_DEF, 'The Trades card in the backtest results shows the round-trip count with the win rate and the number of fills beneath it.'],
     why: [
       'Every trade statistic is an average over trades, so the count is its sample size. A 70% win rate from 10 trades tells you almost nothing; from 1,000 trades it is meaningful.',
@@ -118,7 +118,7 @@ export const tradeMetrics = [
     title: 'Expectancy',
     level: 'Intermediate',
     summary: 'The average net P&L per closed trade: what you expect to make, in dollars, each time the strategy trades.',
-    keywords: ['expectancy', 'expected value', 'average trade', 'edge'],
+    keywords: ['expectancy', 'expected value', 'expectancy average trade', 'edge'],
     what: [TRADE_DEF, 'Expectancy is the total net P&L of all closed trades divided by the number of trades.'],
     why: ['It is the edge per trade. A positive expectancy that survives realistic costs is the minimum requirement for a trading strategy; comparing it with the costs per trade shows how much room there is for slippage.'],
     formulas: [
@@ -189,7 +189,7 @@ export const tradeMetrics = [
     level: 'Beginner',
     featured: true,
     summary: 'Commissions and fees charged on every fill. In backtests they are deducted from cash as each fill happens.',
-    keywords: ['fees', 'commission', 'costs', 'trading costs', 'bps'],
+    keywords: ['fees', 'commission', 'costs', 'trading costs', 'transaction cost bps'],
     what: [
       'Transaction costs are what you pay to trade. Spectra separates **explicit** costs (commission, shown as Fees) from **implicit** costs (slippage and half the bid-ask spread, which move the fill price) and from **financing** (interest and borrow fees).',
     ],
@@ -217,7 +217,7 @@ export const tradeMetrics = [
     title: 'Slippage Cost',
     level: 'Intermediate',
     summary: 'The difference between the price you expected and the price you got. Backtests model it as an adverse price move on market and stop fills.',
-    keywords: ['slippage', 'market impact', 'execution cost', 'spread cost', 'volume slippage'],
+    keywords: ['realized slippage', 'slippage impact', 'execution cost', 'spread cost', 'volume slippage'],
     what: [
       'When a market order executes, it rarely fills at exactly the last price: it crosses the spread, and large orders push the price. In a Spectra backtest, market and stop fills are moved against the trader by the configured slippage; limit orders fill at their limit or better with no slippage.',
     ],
@@ -295,7 +295,7 @@ export const tradeMetrics = [
     title: 'Exposure & Time in Market',
     level: 'Intermediate',
     summary: 'How much of the account is invested, long minus short, and how often the strategy holds any position at all.',
-    keywords: ['gross exposure', 'net exposure', 'time in market', 'invested'],
+    keywords: ['portfolio gross exposure', 'net exposure', 'time in market', 'invested'],
     what: [
       '**Average gross** exposure is the mean of (sum of absolute position values ÷ equity). **Average net** is the mean of (long value − short value) ÷ equity. **Time in market** is the share of bars on which the strategy held any position.',
     ],
@@ -322,7 +322,7 @@ export const tradeMetrics = [
     title: 'Orders, Fills & Open Positions',
     level: 'Beginner',
     summary: 'Orders are instructions, fills are executions, and open positions are what remains at the end of the run.',
-    keywords: ['orders', 'fills', 'executions', 'order states', 'open positions'],
+    keywords: ['orders', 'fills', 'executions', 'metric order states', 'open positions'],
     what: [
       'An **order** is a request to buy or sell. A **fill** is an execution of some or all of it. One order can produce several fills (partial fills under a participation cap), and some orders never fill (cancelled, rejected or expired).',
       '**Open positions** are instruments still held at the last bar; they are marked to market but not counted as closed trades.',

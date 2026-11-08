@@ -9,7 +9,7 @@ export const returnMetrics = [
     level: 'Beginner',
     featured: true,
     summary: 'How much the account grew or shrank over the whole simulation, as a percentage of where it started.',
-    keywords: ['return', 'performance', 'percent gain', 'growth'],
+    keywords: ['return', 'total performance', 'percent gain', 'capital growth'],
     what: [
       'Total return compares the final equity of a run with its starting equity. Equity is cash plus the market value of every open position, marked at each bar’s close, so total return includes gains that have not been realized yet.',
       'It answers the simplest question about a strategy: if you had run it over this period, how much richer or poorer would the account be?',
@@ -44,7 +44,7 @@ export const returnMetrics = [
     title: 'Net Profit & Final Equity',
     level: 'Beginner',
     summary: 'The dollar result of a run: final equity minus the starting cash, after every cost the engine charged.',
-    keywords: ['final equity', 'profit', 'dollars', 'net p&l'],
+    keywords: ['final equity', 'net dollar profit', 'dollars', 'net profit loss'],
     what: [
       '**Final equity** is the value of the account on the last bar: cash plus every open position marked at that bar’s close. **Net profit** is the change from the starting cash to that final equity.',
       'The Backtests results show final equity with the starting cash beneath it (“from $100,000”), so the net profit is the difference between the two.',
@@ -118,7 +118,7 @@ export const returnMetrics = [
     title: 'Realized and Unrealized P&L',
     level: 'Beginner',
     summary: 'Realized P&L is profit locked in by closing a position; unrealized P&L is the gain or loss on positions that are still open.',
-    keywords: ['realized', 'unrealized', 'open p&l', 'closed p&l', 'mark to market', 'average cost'],
+    keywords: ['realized', 'unrealized', 'open p&l', 'closed p&l', 'mtm pnl', 'average cost basis'],
     what: [
       '**Realized P&L** is booked when you sell shares you own (or buy back shares you are short). It no longer depends on the market.',
       '**Unrealized P&L** (also called open P&L) is what an open position would make or lose if it were closed at the current price. It changes with every price move.',
@@ -191,7 +191,7 @@ export const returnMetrics = [
     title: 'CAGR (Compound Annual Growth Rate)',
     level: 'Intermediate',
     summary: 'The yearly growth rate implied by compounding every period return of the run.',
-    keywords: ['compound annual growth rate', 'annualized', 'geometric mean'],
+    keywords: ['compound annual growth rate', 'compound annualized', 'geometric mean'],
     what: [
       'CAGR is the steady yearly rate that, compounded, produces the same growth as the strategy’s actual period returns. It is shown on the CAGR card of a backtest, with the run’s annualized volatility beneath it.',
     ],

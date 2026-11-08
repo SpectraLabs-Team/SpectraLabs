@@ -10,7 +10,7 @@ export const engine: Lesson[] = [
     level: 'Beginner',
     featured: true,
     summary: 'The software that turns strategy decisions into orders, fills, positions and accounting, consistently and without peeking into the future.',
-    keywords: ['engine', 'backtester', 'architecture', 'rust', 'event driven'],
+    keywords: ['engine architecture', 'backtester', 'architecture', 'rust', 'event driven'],
     blocks: [
       { type: 'p', text: 'A trading engine is the machinery between a strategy’s decision (“buy 100 AAPL”) and the account’s books. It receives market data, asks strategies what they want to do, manages orders through their lifecycle, simulates or routes executions, updates positions and cash, enforces risk limits, and records everything.' },
       { type: 'diagram', id: 'engine-pipeline', caption: 'The main components of the Spectra engine and how data flows between them.' },
@@ -35,7 +35,7 @@ export const engine: Lesson[] = [
     level: 'Beginner',
     featured: true,
     summary: 'Every order moves through a small set of states, from pending to filled, cancelled, rejected or expired.',
-    keywords: ['order states', 'pending', 'filled', 'partially filled', 'cancelled', 'rejected', 'expired'],
+    keywords: ['engine order states', 'pending', 'filled', 'partially filled', 'cancelled', 'rejected', 'expired'],
     blocks: [
       { type: 'diagram', id: 'order-lifecycle', caption: 'Order states in the Spectra backtester.' },
       { type: 'table', head: ['State', 'Meaning'], rows: [
@@ -74,7 +74,7 @@ export const engine: Lesson[] = [
     title: 'Order Book Fundamentals',
     level: 'Intermediate',
     summary: 'The order book lists resting buy and sell orders by price. Its shape tells you about liquidity and likely price impact.',
-    keywords: ['order book', 'level 2', 'bids', 'asks', 'depth', 'top of book'],
+    keywords: ['order book', 'l2 order book', 'bids', 'asks', 'order book depth', 'top of book'],
     blocks: [
       { type: 'diagram', id: 'order-book' },
       { type: 'list', items: ['**Bids** (buy orders) are sorted from highest price down; the top bid is the best bid.', '**Asks** (sell orders) are sorted from lowest price up; the top ask is the best ask.', 'The **spread** is the gap between them; the **mid** is halfway.', '**Depth** is the quantity at each level.'] },
@@ -89,7 +89,7 @@ export const engine: Lesson[] = [
     title: 'The Order Execution Engine',
     level: 'Intermediate',
     summary: 'The part of the engine that decides when and at what price an order fills, applying costs and participation limits.',
-    keywords: ['execution engine', 'fill rules', 'delay', 'participation', 'costs'],
+    keywords: ['execution engine', 'fill rules', 'delay', 'volume participation', 'engine execution costs'],
     blocks: [
       { type: 'p', text: 'At each timestamp T, the Spectra backtester runs the execution step **before** the strategy sees the bar:' },
       { type: 'list', ordered: true, items: [
@@ -181,7 +181,7 @@ export const engine: Lesson[] = [
     title: 'Portfolio Management',
     level: 'Intermediate',
     summary: 'Combining positions and strategies into one account: allocation, rebalancing, exposure and concentration.',
-    keywords: ['portfolio', 'allocation', 'rebalancing', 'multi strategy', 'concentration', 'hhi'],
+    keywords: ['portfolio', 'allocation', 'rebalancing', 'multi strategy', 'portfolio concentration', 'portfolio hhi'],
     blocks: [
       { type: 'p', text: 'Portfolio management decides how capital is split across instruments and strategies and keeps the split on target as prices move.' },
       { type: 'h', text: 'In Spectra' },

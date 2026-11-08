@@ -43,7 +43,7 @@ use crate::portfolios_api::ensure_can_edit;
 use crate::{error_response, AppState, Identity};
 
 const RUN_NOT_FOUND: &str = "Portfolio run not found.";
-const DAY_NS: i64 = 86_400_000_000_000;
+pub(crate) const DAY_NS: i64 = 86_400_000_000_000;
 /// Largest starting cash a run accepts, to keep every amount well inside `f64` precision.
 const MAX_INITIAL_CASH: f64 = 1e12;
 /// The name recorded for a cost config given as values rather than by name.
@@ -285,7 +285,7 @@ fn list_item(row: PortfolioRunRow) -> Result<PortfolioRunListItem, Response> {
     })
 }
 
-fn parse_date(text: &str) -> Option<Date> {
+pub(crate) fn parse_date(text: &str) -> Option<Date> {
     let d = NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d").ok()?;
     Some(Date::new(d.year(), d.month(), d.day()))
 }

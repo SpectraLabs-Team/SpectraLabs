@@ -27,7 +27,7 @@ pub struct PortfolioRow {
     pub id: Uuid,
     pub workspace_id: Uuid,
     pub name: String,
-    /// `fixed`, `equal` or `inverse_volatility`.
+    /// `fixed`, `equal`, `inverse_volatility` or `risk_parity`.
     pub method: String,
     pub created_by: Option<Uuid>,
     pub created_at: DateTime<Utc>,
@@ -63,7 +63,8 @@ pub async fn create_portfolio(
     create_portfolio_with_method(pool, workspace_id, name, FIXED_METHOD, holdings, created_by).await
 }
 
-/// The method a portfolio was built with, as stored: `fixed`, `equal` or `inverse_volatility`.
+/// The method a portfolio was built with, as stored: `fixed`, `equal`, `inverse_volatility` or
+/// `risk_parity`.
 pub const FIXED_METHOD: &str = "fixed";
 
 /// As [`create_portfolio`], recording how the weights were built (`method`).

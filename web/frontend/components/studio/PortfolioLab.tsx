@@ -45,7 +45,15 @@ const METHODS: { id: PortfolioMethod; label: string }[] = [
   { id: 'fixed', label: 'Fixed weights' },
   { id: 'equal', label: 'Equal weight' },
   { id: 'inverse_volatility', label: 'Inverse volatility' },
+  { id: 'risk_parity', label: 'Risk parity' },
 ];
+
+const METHOD_HINT: Record<PortfolioMethod, string> = {
+  fixed: 'Weights must add up to 100%.',
+  equal: 'Each holding gets 1/N.',
+  inverse_volatility: 'Weights proportional to 1 / annualized volatility.',
+  risk_parity: 'Equal risk contributions, from the covariance of daily closes in a dataset version up to the as-of date (at least 60 closes each).',
+};
 
 /** The message for a panel that is not showing data: loading, error, running or empty. */
 function StateNote({ state, error, empty }: { state: PanelState; error?: string | null; empty: string }) {
@@ -202,7 +210,23 @@ function PortfolioEditor({ initial, onCancel, onSaved }: { initial: Portfolio | 
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [datasets, setDatasets] = useState<DatasetVersion[] | null>(null);
+  const [datasetError, setDatasetError] = useState<string | null>(null);
+  const [datasetId, setDatasetId] = useState('');
+  const [asOf, setAsOf] = useState(today());
   const total = weightTotal(rows);
+  const fromPrices = method === 'risk_parity';
+
+  // Risk parity reads closes from a dataset version: list them the first time it is picked.
+  useEffect(() => {
+    if (!fromPrices || datasets !== null) return;
+    listDatasets()
+      .then((d) => {
+        setDatasets(d);
+        if (d[0]) setDatasetId((cur) => cur || d[0].id);
+      })
+      .catch((e: unknown) => setDatasetError(errorText(e, 'Could not list dataset versions.')));
+  }, [fromPrices, datasets]);
 
   const set = (i: number, patch: Partial<HoldingInput>) => setRows((r) => r.map((row, k) => (k === i ? { ...row, ...patch } : row)));
   const save = async () => {
@@ -214,7 +238,7 @@ function PortfolioEditor({ initial, onCancel, onSaved }: { initial: Portfolio | 
       ...(method === 'inverse_volatility' ? { volatility: r.volatility } : {}),
     }));
     try {
-      const body = { name: name.trim(), method, holdings };
+      const body = { name: name.trim(), method, holdings, ...(fromPrices ? { dataset_version_id: datasetId, as_of: asOf } : {}) };
       onSaved(initial ? await updatePortfolio(initial.id, body) : await createPortfolio(body));
     } catch (e) {
       setError(errorText(e, 'Could not save the portfolio.'));
@@ -229,7 +253,7 @@ function PortfolioEditor({ initial, onCancel, onSaved }: { initial: Portfolio | 
         <Field label="name">
           <input className="input py-1.5 text-[13px]" value={name} maxLength={120} onChange={(e) => setName(e.target.value)} />
         </Field>
-        <Field label="method" hint={method === 'equal' ? 'Each holding gets 1/N.' : method === 'inverse_volatility' ? 'Weights proportional to 1 / annualized volatility.' : 'Weights must add up to 100%.'}>
+        <Field label="method" hint={METHOD_HINT[method]}>
           <select className="input py-1.5 text-[13px]" value={method} onChange={(e) => setMethod(e.target.value as PortfolioMethod)}>
             {METHODS.map((m) => (
               <option key={m.id} value={m.id}>
@@ -238,7 +262,25 @@ function PortfolioEditor({ initial, onCancel, onSaved }: { initial: Portfolio | 
             ))}
           </select>
         </Field>
+        {fromPrices && (
+          <>
+            <Field label="dataset version" hint="The daily closes the covariance is estimated from.">
+              <select className="input py-1.5 text-[13px]" value={datasetId} onChange={(e) => setDatasetId(e.target.value)} disabled={!datasets?.length}>
+                {(datasets ?? []).map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.dataset_name} v{d.version}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="as of" hint="Only closes on or before this day are used.">
+              <input type="date" className="input py-1.5 text-[13px]" value={asOf} max={today()} onChange={(e) => setAsOf(e.target.value)} />
+            </Field>
+          </>
+        )}
       </div>
+      {fromPrices && datasetError && <ErrorNote>{datasetError}</ErrorNote>}
+      {fromPrices && datasets && datasets.length === 0 && <p className="text-xs text-ink/50">Add a dataset in the Data tab to build risk parity weights.</p>}
       <div className="space-y-2">
         {rows.map((r, i) => (
           <div key={i} className="flex items-end gap-2">
@@ -272,7 +314,7 @@ function PortfolioEditor({ initial, onCancel, onSaved }: { initial: Portfolio | 
         <button type="button" className="btn-secondary px-3 py-1.5 text-xs" onClick={onCancel} disabled={busy}>
           Cancel
         </button>
-        <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={save} disabled={busy || !name.trim()}>
+        <button type="button" className="btn-primary px-3 py-1.5 text-xs" onClick={save} disabled={busy || !name.trim() || (fromPrices && !datasetId)}>
           {busy ? 'Saving…' : 'Save'}
         </button>
       </div>

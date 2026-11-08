@@ -20,6 +20,7 @@ pub mod config;
 pub mod corporate;
 pub mod instruments;
 pub mod job;
+pub mod mean_variance;
 pub mod output;
 pub mod portfolio;
 pub mod portfolio_backtest;

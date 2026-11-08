@@ -142,10 +142,10 @@ impl SimulationTask {
                 "Monte Carlo volatility must be non-negative and finite".into(),
             ));
         }
-        if self.initial_value <= 0.0 || !self.initial_value.is_finite() {
-            return Err(Error::InvalidArgument(
-                "Monte Carlo initial_value must be positive and finite".into(),
-            ));
+        // Zero and negative values (an empty or net-short book) are valid: the C++ reference kernel
+        // takes them and parity_risk checks them path by path.
+        if !self.initial_value.is_finite() {
+            return Err(Error::InvalidArgument("Monte Carlo initial_value must be finite".into()));
         }
         if self.horizon_years <= 0.0 || !self.horizon_years.is_finite() {
             return Err(Error::InvalidArgument(
@@ -267,7 +267,8 @@ pub fn run_parallel(task: &SimulationTask, threads: usize) -> Result<SimulationR
                     lane_dropped
                 }));
             }
-            handles.into_iter().map(|h| h.join().unwrap_or(0)).collect()
+            // A worker that panicked leaves its chunks unfilled: re-raise, as an unjoined scope would.
+            handles.into_iter().map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e))).collect()
         });
         dropped_total = dropped_counts.into_iter().sum();
     }
@@ -346,6 +347,30 @@ mod tests {
         let mut nan_horizon = base_task;
         nan_horizon.horizon_years = f64::NAN;
         assert!(nan_horizon.validate().is_err());
+    }
+
+    #[test]
+    fn test_simulation_accepts_zero_and_negative_initial_value() {
+        // The parity_risk kernel cases: a net-short book and an empty one, as in the C++ reference.
+        for (seed, num_paths, volatility, initial_value) in
+            [(123_456_789, 6, 1.5, -5_000.0), (1, 3, 0.2, 0.0)]
+        {
+            let task =
+                SimulationTask { num_paths, seed, drift: 0.0, volatility, initial_value, horizon_years: 1.0 };
+            assert!(task.validate().is_ok());
+            assert_eq!(run_reference(&task).unwrap().terminal_losses.len(), num_paths as usize);
+            assert_eq!(run_parallel(&task, 2).unwrap().terminal_losses.len(), num_paths as usize);
+        }
+        let mut infinite = SimulationTask {
+            num_paths: 3,
+            seed: 1,
+            drift: 0.0,
+            volatility: 0.2,
+            initial_value: 0.0,
+            horizon_years: 1.0,
+        };
+        infinite.initial_value = f64::INFINITY;
+        assert!(infinite.validate().is_err());
     }
 
     #[test]

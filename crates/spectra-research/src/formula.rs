@@ -605,8 +605,8 @@ impl<'a> Evaluator<'a> {
 
                 let lag = (-offset_int) as usize;
                 let mut out = vec![None; n];
-                for i in lag..n {
-                    out[i] = series[i - lag];
+                if lag < n {
+                    out[lag..n].copy_from_slice(&series[..(n - lag)]);
                 }
                 Ok(out)
             }

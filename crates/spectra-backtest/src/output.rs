@@ -358,7 +358,9 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
     } else {
         run.with("corporate_actions", crate::corporate::actions_to_json(&req.corporate_actions)?)
     };
-    let run = run.with("base_currency", Json::string(out.setup.base_currency.clone()));
+    let base_ccy =
+        if out.setup.base_currency.is_empty() { "USD".to_string() } else { out.setup.base_currency.clone() };
+    let run = run.with("base_currency", Json::string(&base_ccy)).with("currency", Json::string(&base_ccy));
     let run = if out.setup.is_trivial() {
         run
     } else {
@@ -372,6 +374,7 @@ pub fn summary_json(out: &BacktestOutput) -> Result<Json> {
     };
     let summary = Json::object()
         .with("schema", Json::string(SUMMARY_SCHEMA))
+        .with("currency", Json::string(&base_ccy))
         .with("run", run)
         .with("metrics", metrics)
         .with("performance", performance_json(out))

@@ -672,13 +672,15 @@ pub(crate) async fn embed_instruments(
     ws: uuid::Uuid,
     payload: &mut serde_json::Value,
 ) -> Result<(), spectra_db::Error> {
-    let base = if let Some(b) = payload.get("base_currency").and_then(serde_json::Value::as_str) {
+    let base = if let Some(b) =
+        payload.get("base_currency").or_else(|| payload.get("currency")).and_then(serde_json::Value::as_str)
+    {
         b.to_string()
     } else {
-        let b = spectra_db::instruments::base_currency(pool, ws).await?;
-        payload["base_currency"] = serde_json::Value::String(b.clone());
-        b
+        spectra_db::instruments::base_currency(pool, ws).await?
     };
+    payload["base_currency"] = serde_json::Value::String(base.clone());
+    payload["currency"] = serde_json::Value::String(base.clone());
     if payload.get("instruments").is_none() {
         let rows = spectra_db::instruments::list_instruments(pool, ws).await?;
         let effective: Vec<&Instrument> =

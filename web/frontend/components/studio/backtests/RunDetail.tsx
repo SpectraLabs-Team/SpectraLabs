@@ -503,6 +503,7 @@ function Results({
             {(
               [
                 ['Engine', b.fingerprints?.engine_version ?? summary.run.engine_version],
+                ['Currency', summary.currency ?? summary.run.currency ?? summary.run.base_currency ?? 'USD'],
                 ['Dataset', b.fingerprints?.dataset_sha256 ?? summary.run.dataset_sha256],
                 ['Config', b.fingerprints?.config_sha256 ?? summary.run.config_sha256],
                 ['Strategy', b.fingerprints?.strategy_sha256 ?? summary.run.strategy_sha256],

@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::{engine, ingest, observability};
 
 /// Heartbeat interval for running jobs.
-pub const HEARTBEAT: Duration = Duration::from_secs(5);
+pub const HEARTBEAT: Duration = Duration::from_secs(1);
 
 /// Environment needed to run a backtest job.
 #[derive(Debug, Clone)]
@@ -244,7 +244,7 @@ pub async fn run_backtest_job(
                 limits,
                 cancel: Some(&*cancel),
                 progress: Some(&mut report),
-                progress_every: 1000,
+                progress_every: 1, // Stream bar-by-bar progress for long runs
             };
             run_job_from_store(&data_dir, &checksum, &bt, &mut ctl)
         })

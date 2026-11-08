@@ -275,9 +275,11 @@ export interface InstrumentSummary {
 /** The run's summary document. Money is a decimal string (exact); ratios are numbers. */
 export interface Summary {
   schema: string;
+  currency?: string;
   run: {
     /** M24: the currency the books are kept in; absent before multi-currency. */
     base_currency?: string;
+    currency?: string;
     /** M24: currencies converted to the base during the run. */
     fx_currencies?: string[];
     engine_version: string;
@@ -362,6 +364,8 @@ export interface StoredRequest {
   params?: ParamValues;
   strategies?: StrategyAllocation[];
   config?: UserConfig;
+  base_currency?: string;
+  currency?: string;
 }
 
 export interface Backtest {

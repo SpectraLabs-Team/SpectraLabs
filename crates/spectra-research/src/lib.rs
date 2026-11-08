@@ -6,6 +6,7 @@
 pub mod alpha;
 pub mod attribution;
 pub mod benchmark;
+pub mod company_research;
 pub mod gap;
 pub mod indicators;
 pub mod pbo;
@@ -27,6 +28,10 @@ pub use attribution::{
     InstrumentAttribution, PnlAttribution, WaterfallStep,
 };
 pub use benchmark::{aligned_returns, benchmark_returns, compute_benchmark_metrics, BenchmarkMetrics};
+pub use company_research::{
+    compute_ratios, evaluate_health_scorecard, multiple_percentile, CompanyRatios, FinancialHealthScorecard,
+    FinancialStatementItems, HealthScoreCheck, StatementTieOut,
+};
 pub use gap::{
     compute_backtest_to_paper_gap, BacktestFillRecord, GapAlert, GapAlertStatus, GapAttribution, GapMetrics,
     GapReport, GapThresholds, GapTradeSide, MatchedTradeGap, PaperFillRecord,

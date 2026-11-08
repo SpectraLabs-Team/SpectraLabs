@@ -103,31 +103,64 @@ impl std::fmt::Display for FetchError {
 }
 
 /// An EDGAR client that keeps [`MIN_REQUEST_GAP`] between its requests.
-#[derive(Debug)]
+///
+/// Outbound requests share a process-wide rate limiter by default so that concurrent refresh
+/// jobs within the same process do not exceed SEC's limit of 10 requests per second.
+///
+/// # Multi-worker behavior
+///
+/// - **Within a single process** (e.g. concurrent jobs on the same tokio runtime):
+///   All [`EdgarClient`] instances share a process-wide mutex limiter. Outbound HTTP requests
+///   across all concurrent refresh jobs are strictly serialized and spaced by at least
+///   [`MIN_REQUEST_GAP`] (125 ms, i.e. at most 8 req/s).
+///
+/// - **Across multiple worker processes** (separate OS processes or containers):
+///   Separate OS address spaces have their own in-process limiters. To enforce a global rate
+///   limit across multiple independent worker processes, an external coordination mechanism
+///   is required (such as a shared egress proxy, a distributed token bucket, or PostgreSQL
+///   advisory locks). In SpectraLabs, schedule sweeps claim due schedules using
+///   `FOR UPDATE SKIP LOCKED`, ensuring that distinct worker processes handle disjoint schedules
+///   and do not duplicate refreshes.
+static PROCESS_EDGAR_LIMITER: std::sync::LazyLock<Arc<Mutex<Option<tokio::time::Instant>>>> =
+    std::sync::LazyLock::new(|| Arc::new(Mutex::new(None)));
+
+/// An EDGAR client that keeps [`MIN_REQUEST_GAP`] between its requests.
+#[derive(Debug, Clone)]
 pub struct EdgarClient {
     http: reqwest::Client,
     cfg: EdgarConfig,
-    last_request: Mutex<Option<tokio::time::Instant>>,
+    limiter: Arc<Mutex<Option<tokio::time::Instant>>>,
 }
 
 impl EdgarClient {
-    /// A client for `cfg`.
+    /// A client for `cfg` using the shared in-process rate limiter.
     ///
     /// # Errors
     /// If the HTTP client cannot be built.
     pub fn new(cfg: EdgarConfig) -> Result<Self, FetchError> {
+        Self::with_limiter(cfg, PROCESS_EDGAR_LIMITER.clone())
+    }
+
+    /// A client for `cfg` with an explicit rate limiter (e.g. for testing isolated pacing).
+    ///
+    /// # Errors
+    /// If the HTTP client cannot be built.
+    pub fn with_limiter(
+        cfg: EdgarConfig,
+        limiter: Arc<Mutex<Option<tokio::time::Instant>>>,
+    ) -> Result<Self, FetchError> {
         let http = reqwest::Client::builder()
             .timeout(REQUEST_TIMEOUT)
             .user_agent(cfg.user_agent.clone())
             .no_proxy()
             .build()
             .map_err(|e| FetchError::Permanent(format!("cannot build the HTTP client: {e}")))?;
-        Ok(Self { http, cfg, last_request: Mutex::new(None) })
+        Ok(Self { http, cfg, limiter })
     }
 
     async fn get(&self, url: &str) -> Result<String, FetchError> {
         {
-            let mut last = self.last_request.lock().await;
+            let mut last = self.limiter.lock().await;
             if let Some(t) = *last {
                 tokio::time::sleep_until(t + MIN_REQUEST_GAP).await;
             }

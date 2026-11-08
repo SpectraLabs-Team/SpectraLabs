@@ -166,3 +166,81 @@ fn parsing_is_deterministic() {
     sb.ingest(b);
     assert_eq!(sa.dataset_version_id(), sb.dataset_version_id());
 }
+
+#[test]
+fn reference_test_interest_expense_is_loaded_from_sec_company_facts() {
+    let facts = r#"{
+      "cik": 320193,
+      "entityName": "Example Inc.",
+      "facts": {
+        "us-gaap": {
+          "InterestExpense": {"units": {
+            "USD": [
+              {"start":"2023-10-01","end":"2023-12-30","val":1500000,"accn":"A-Q1-24","fy":2024,"fp":"Q1","form":"10-Q","filed":"2024-02-02"}
+            ]
+          }}
+        }
+      }
+    }"#;
+    let records = parse_company_facts(facts, "EXAMPLE").unwrap();
+    assert_eq!(records.len(), 1);
+    let r = &records[0];
+    assert_eq!(
+        (r.metric.as_str(), r.period.as_str(), r.value, r.currency.as_str(), r.fiscal_year, r.fiscal_quarter),
+        ("interest_expense", "2024-Q1", 1_500_000.0, "USD", 2024, 1)
+    );
+    assert_eq!(r.filing_ref, "A-Q1-24");
+    assert_eq!(r.publication_ts_ns, at("2024-02-02"));
+}
+
+#[test]
+fn reference_test_operating_expenses_is_loaded_from_sec_company_facts() {
+    let facts = r#"{
+      "cik": 320193,
+      "entityName": "Example Inc.",
+      "facts": {
+        "us-gaap": {
+          "OperatingExpenses": {"units": {
+            "USD": [
+              {"start":"2023-10-01","end":"2023-12-30","val":14500000,"accn":"A-Q1-24","fy":2024,"fp":"Q1","form":"10-Q","filed":"2024-02-02"}
+            ]
+          }}
+        }
+      }
+    }"#;
+    let records = parse_company_facts(facts, "EXAMPLE").unwrap();
+    assert_eq!(records.len(), 1);
+    let r = &records[0];
+    assert_eq!(
+        (r.metric.as_str(), r.period.as_str(), r.value, r.currency.as_str(), r.fiscal_year, r.fiscal_quarter),
+        ("operating_expenses", "2024-Q1", 14_500_000.0, "USD", 2024, 1)
+    );
+    assert_eq!(r.filing_ref, "A-Q1-24");
+    assert_eq!(r.publication_ts_ns, at("2024-02-02"));
+}
+
+#[test]
+fn reference_test_inventory_net_is_loaded_from_sec_company_facts() {
+    let facts = r#"{
+      "cik": 320193,
+      "entityName": "Example Inc.",
+      "facts": {
+        "us-gaap": {
+          "InventoryNet": {"units": {
+            "USD": [
+              {"end":"2023-12-30","val":6500000,"accn":"A-Q1-24","fy":2024,"fp":"Q1","form":"10-Q","filed":"2024-02-02"}
+            ]
+          }}
+        }
+      }
+    }"#;
+    let records = parse_company_facts(facts, "EXAMPLE").unwrap();
+    assert_eq!(records.len(), 1);
+    let r = &records[0];
+    assert_eq!(
+        (r.metric.as_str(), r.period.as_str(), r.value, r.currency.as_str(), r.fiscal_year, r.fiscal_quarter),
+        ("inventory", "2024-Q1", 6_500_000.0, "USD", 2024, 1)
+    );
+    assert_eq!(r.filing_ref, "A-Q1-24");
+    assert_eq!(r.publication_ts_ns, at("2024-02-02"));
+}

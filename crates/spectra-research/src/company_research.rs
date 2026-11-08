@@ -361,8 +361,7 @@ pub fn latest_period(
 /// Loaded metrics map to fields by name; three fields are derived when their inputs are known:
 /// `cost_of_goods_sold = revenue - gross_profit`, `free_cash_flow = operating_cash_flow -
 /// capital_expenditures`, `diluted_shares_outstanding = net_income / eps_diluted`. `total_debt` is
-/// long-term debt. Operating expenses, interest expense and inventory are not loaded, so they are
-/// always missing.
+/// long-term debt. Operating expenses, interest expense and inventory are loaded from the store.
 pub fn statement_as_of(
     store: &spectra_data::fundamentals::PointInTimeFundamentalsStore,
     symbol: &str,
@@ -378,13 +377,16 @@ pub fn statement_as_of(
     let mut items =
         FinancialStatementItems { period: period.to_string(), ..FinancialStatementItems::default() };
     let mut found = Vec::new();
-    let loaded: [(&'static str, &str, &mut f64); 12] = [
+    let loaded: [(&'static str, &str, &mut f64); 15] = [
         ("revenue", "revenue", &mut items.revenue),
         ("gross_profit", "gross_profit", &mut items.gross_profit),
+        ("operating_expenses", "operating_expenses", &mut items.operating_expenses),
         ("operating_income", "operating_income", &mut items.operating_income),
+        ("interest_expense", "interest_expense", &mut items.interest_expense),
         ("net_income", "net_income", &mut items.net_income),
         ("cash_and_equivalents", "cash_and_equivalents", &mut items.cash_and_equivalents),
         ("current_assets", "current_assets", &mut items.current_assets),
+        ("inventory", "inventory", &mut items.inventory),
         ("total_assets", "total_assets", &mut items.total_assets),
         ("current_liabilities", "current_liabilities", &mut items.current_liabilities),
         ("total_debt", "long_term_debt", &mut items.total_debt),
@@ -562,5 +564,31 @@ mod tests {
         assert_eq!(latest_period(&store, "EXA", 5), None);
         assert_eq!(latest_period(&store, "EXA", 10).as_deref(), Some("2024-Q4"));
         assert_eq!(latest_period(&store, "EXA", 30).as_deref(), Some("2024-FY"));
+    }
+
+    #[test]
+    fn statement_loads_operating_expenses_interest_expense_and_inventory_for_m37_ratios() {
+        let mut store = spectra_data::PointInTimeFundamentalsStore::new();
+        store.ingest(vec![
+            fact("revenue", "2024-Q1", 1, 100_000_000.0, 10, 0),
+            fact("operating_expenses", "2024-Q1", 1, 15_000_000.0, 10, 0),
+            fact("operating_income", "2024-Q1", 1, 25_000_000.0, 10, 0),
+            fact("interest_expense", "2024-Q1", 1, 2_500_000.0, 10, 0),
+            fact("current_assets", "2024-Q1", 1, 50_000_000.0, 10, 0),
+            fact("inventory", "2024-Q1", 1, 10_000_000.0, 10, 0),
+            fact("current_liabilities", "2024-Q1", 1, 20_000_000.0, 10, 0),
+            fact("net_income", "2024-Q1", 1, 18_000_000.0, 10, 0),
+        ]);
+
+        let stmt = statement_as_of(&store, "EXA", "2024-Q1", 10).unwrap();
+        assert_eq!(stmt.get("operating_expenses"), Some(15_000_000.0));
+        assert_eq!(stmt.get("interest_expense"), Some(2_500_000.0));
+        assert_eq!(stmt.get("inventory"), Some(10_000_000.0));
+
+        let ratios = compute_ratios(&stmt.items, 100.0);
+        // Interest coverage = operating_income (25M) / interest_expense (2.5M) = 10.0
+        assert_eq!(ratios.interest_coverage, Some(10.0));
+        // Quick ratio = (current_assets (50M) - inventory (10M)) / current_liabilities (20M) = 40M / 20M = 2.0
+        assert_eq!(ratios.quick_ratio, Some(2.0));
     }
 }

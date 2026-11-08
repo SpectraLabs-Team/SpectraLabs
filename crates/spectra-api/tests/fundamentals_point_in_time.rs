@@ -113,6 +113,33 @@ impl Fixture {
         Self { app, pool, ws, user }
     }
 
+    async fn empty(pool: PgPool) -> Self {
+        let (ws, user) = (spectra_db::new_id(), spectra_db::new_id());
+        spectra_db::identity::ensure_identity(&pool, Some(user), ws).await.unwrap();
+        let app = router(ApiConfig::new(Secret::new(SECRET)), Some(pool.clone()));
+        Self { app, pool, ws, user }
+    }
+
+    async fn ingest_load(&self, symbol: &'static str, records: Vec<FundamentalRecord>) {
+        let mut store = PointInTimeFundamentalsStore::new();
+        store.ingest(records);
+        record_load(
+            &self.pool,
+            &NewLoad {
+                workspace_id: self.ws,
+                symbol,
+                source: "edgar",
+                version_id: &store.dataset_version_id(),
+                accepted: store.records(),
+                quarantined: store.quarantined_records(),
+                job_id: None,
+                created_by: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
     async fn get(&self, path: &str) -> (u16, Value) {
         let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs().to_string();
         let (user, ws, req_id) =
@@ -258,4 +285,66 @@ async fn quarantined_rows_never_reach_a_reader_or_a_screen() {
     let symbols: Vec<&str> = result.matches.iter().map(|m| m.symbol.as_str()).collect();
     assert_eq!(symbols, ["EXA"], "EXA's margin is 10 / 105; BAD has no known net income");
     assert_eq!(result.fundamentals_version_id, store.dataset_version_id());
+}
+
+#[tokio::test]
+async fn restatement_arrival_does_not_change_past_point_in_time_reads() {
+    let Some(pool) = pool().await else { return };
+    let fix = Fixture::empty(pool).await;
+
+    // 1. Ingest initial filing: EXA Q1 2024 revenue 100 filed 2024-02-02 (known 2024-02-03 12:00 UTC)
+    fix.ingest_load(
+        "EXA",
+        vec![
+            rec("EXA", "revenue", 100.0, 0, "2024-02-02", "E-Q1"),
+            rec("EXA", "net_income", 10.0, 0, "2024-02-02", "E-Q1"),
+        ],
+    )
+    .await;
+
+    // Read the fundamentals at a past date (2024-02-15), before the restatement exists
+    let past_as_of = "2024-02-15";
+    let (status_before, items_before) =
+        fix.get(&format!("/api/v1/fundamentals?symbol=EXA&as_of={past_as_of}")).await;
+    let (stmt_status_before, stmt_before) =
+        fix.get(&format!("/api/v1/fundamentals/statement?symbol=EXA&as_of={past_as_of}")).await;
+
+    assert_eq!(status_before, 200);
+    assert_eq!(stmt_status_before, 200);
+    let rev_before =
+        items_before["items"].as_array().unwrap().iter().find(|i| i["metric"] == "revenue").unwrap();
+    assert_eq!(rev_before["value"], 100.0);
+    assert_eq!(rev_before["revision"], 0);
+    assert_eq!(stmt_before["lines"]["revenue"], 100.0);
+
+    // 2. Later in time, a restatement arrives: EXA Q1 revenue restated to 105, filed 2024-03-15 (known 2024-03-16 12:00 UTC)
+    fix.ingest_load("EXA", vec![rec("EXA", "revenue", 105.0, 1, "2024-03-15", "E-Q1-AMEND")]).await;
+
+    // 3. Read the EXACT SAME past date (2024-02-15) again, after the restatement arrived
+    let (status_after, items_after) =
+        fix.get(&format!("/api/v1/fundamentals?symbol=EXA&as_of={past_as_of}")).await;
+    let (stmt_status_after, stmt_after) =
+        fix.get(&format!("/api/v1/fundamentals/statement?symbol=EXA&as_of={past_as_of}")).await;
+
+    // Point-in-time immutability: past answers must NOT change when new restatements arrive
+    assert_eq!(status_after, status_before);
+    assert_eq!(stmt_status_after, stmt_status_before);
+    assert_eq!(
+        items_after, items_before,
+        "fundamentals items for past as_of must not change after a restatement"
+    );
+    assert_eq!(stmt_after, stmt_before, "statement lines for past as_of must not change after a restatement");
+
+    // 4. Query after the restatement was published (e.g. 2024-03-20): now reflects the restated figure
+    let (status_later, items_later) = fix.get("/api/v1/fundamentals?symbol=EXA&as_of=2024-03-20").await;
+    let (stmt_status_later, stmt_later) =
+        fix.get("/api/v1/fundamentals/statement?symbol=EXA&as_of=2024-03-20").await;
+    assert_eq!(status_later, 200);
+    assert_eq!(stmt_status_later, 200);
+
+    let rev_item =
+        items_later["items"].as_array().unwrap().iter().find(|i| i["metric"] == "revenue").unwrap();
+    assert_eq!(rev_item["value"], 105.0);
+    assert_eq!(rev_item["revision"], 1);
+    assert_eq!(stmt_later["lines"]["revenue"], 105.0);
 }

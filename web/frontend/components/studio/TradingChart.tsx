@@ -4,19 +4,31 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart2,
   Calendar,
+  Eye,
+  EyeOff,
+  HelpCircle,
   Maximize2,
   Minus,
   Plus,
   RefreshCw,
   RotateCcw,
+  Settings,
+  Sliders,
   TrendingDown,
   TrendingUp,
+  X,
   Zap,
 } from 'lucide-react';
 import { cn, formatCurrency, formatPercent } from '@/lib/utils';
 import type { CandleBar } from '@/lib/alpaca';
 import { useTheme } from '@/lib/theme';
-import type { IndicatorName } from '@/lib/indicators';
+import {
+  INDICATOR_REGISTRY,
+  computeIndicatorSeries,
+  type IndicatorName,
+} from '@/lib/indicators';
+import { IndicatorPickerModal } from './indicators/IndicatorPickerModal';
+import { IndicatorSettingsModal } from './indicators/IndicatorSettingsModal';
 
 export interface OverlaySeries {
   id?: string;
@@ -26,6 +38,7 @@ export interface OverlaySeries {
   values?: (number | null)[];
   series?: Record<string, (number | null)[]>;
   visible?: boolean;
+  params?: Record<string, number>;
 }
 
 export interface SubPaneSeries {
@@ -52,6 +65,10 @@ export interface TradingChartProps {
   priceFlash?: 'up' | 'down' | null;
   overlays?: OverlaySeries[];
   subpanes?: SubPaneSeries[];
+  onAddIndicator?: (indicator: IndicatorName) => void;
+  onRemoveIndicator?: (idOrName: string) => void;
+  onToggleVisibility?: (idOrName: string) => void;
+  onUpdateParams?: (idOrName: string, params: Record<string, number>, color: string) => void;
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -88,12 +105,160 @@ export function TradingChart({
   priceFlash = null,
   overlays = [],
   subpanes = [],
+  onAddIndicator,
+  onRemoveIndicator,
+  onToggleVisibility,
+  onUpdateParams,
 }: TradingChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const plotRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
   const [plotSize, setPlotSize] = useState({ w: 0, h: 0 });
+
+  // Internal indicator state
+  const [internalOverlays, setInternalOverlays] = useState<OverlaySeries[]>(overlays);
+  const [internalSubpanes, setInternalSubpanes] = useState<SubPaneSeries[]>(subpanes);
+
+  useEffect(() => {
+    setInternalOverlays(overlays);
+  }, [overlays]);
+
+  useEffect(() => {
+    setInternalSubpanes(subpanes);
+  }, [subpanes]);
+
+  // Modals state
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [settingsModalState, setSettingsModalState] = useState<{
+    isOpen: boolean;
+    indicatorId: IndicatorName | string;
+    targetId: string;
+    isOverlay: boolean;
+    params: Record<string, number>;
+    color: string;
+  } | null>(null);
+
+  const effectiveOverlays = internalOverlays;
+  const effectiveSubpanes = internalSubpanes;
+
+  const handleSelectIndicator = useCallback(
+    (indicatorId: IndicatorName) => {
+      if (onAddIndicator) {
+        onAddIndicator(indicatorId);
+        return;
+      }
+      const meta = INDICATOR_REGISTRY[indicatorId];
+      if (!meta) return;
+      const instanceId = `${indicatorId}_${Date.now()}`;
+      const defaultParams = { ...meta.defaultParams };
+      const computed = computeIndicatorSeries(indicatorId, bars, defaultParams);
+
+      if (meta.category === 'overlay') {
+        const newOverlay: OverlaySeries = {
+          id: instanceId,
+          indicator: indicatorId,
+          name: `${meta.shortName} (${Object.values(defaultParams).join(', ')})`,
+          color: meta.defaultColor,
+          visible: true,
+          params: defaultParams,
+          values: computed.values,
+          series: computed.series,
+        };
+        setInternalOverlays((prev) => [...prev, newOverlay]);
+      } else {
+        const newSubpane: SubPaneSeries = {
+          id: instanceId,
+          indicator: indicatorId,
+          name: `${meta.shortName} (${Object.values(defaultParams).join(', ')})`,
+          color: meta.defaultColor,
+          visible: true,
+          params: defaultParams,
+          values: computed.values,
+          series: computed.series,
+        };
+        setInternalSubpanes((prev) => [...prev, newSubpane]);
+      }
+    },
+    [bars, onAddIndicator]
+  );
+
+  const handleRemoveIndicator = useCallback(
+    (idOrName: string) => {
+      if (onRemoveIndicator) {
+        onRemoveIndicator(idOrName);
+        return;
+      }
+      setInternalOverlays((prev) => prev.filter((o) => (o.id || o.indicator) !== idOrName));
+      setInternalSubpanes((prev) => prev.filter((s) => (s.id || s.indicator) !== idOrName));
+    },
+    [onRemoveIndicator]
+  );
+
+  const handleToggleVisibility = useCallback(
+    (idOrName: string) => {
+      if (onToggleVisibility) {
+        onToggleVisibility(idOrName);
+        return;
+      }
+      setInternalOverlays((prev) =>
+        prev.map((o) =>
+          (o.id || o.indicator) === idOrName ? { ...o, visible: o.visible === false } : o
+        )
+      );
+      setInternalSubpanes((prev) =>
+        prev.map((s) =>
+          (s.id || s.indicator) === idOrName ? { ...s, visible: s.visible === false } : s
+        )
+      );
+    },
+    [onToggleVisibility]
+  );
+
+  const handleUpdateParams = useCallback(
+    (targetId: string, newParams: Record<string, number>, newColor: string) => {
+      if (onUpdateParams) {
+        onUpdateParams(targetId, newParams, newColor);
+        return;
+      }
+      setInternalOverlays((prev) =>
+        prev.map((o) => {
+          if ((o.id || o.indicator) === targetId) {
+            const computed = computeIndicatorSeries(o.indicator, bars, newParams);
+            const meta = INDICATOR_REGISTRY[o.indicator as IndicatorName];
+            return {
+              ...o,
+              color: newColor,
+              params: newParams,
+              name: `${meta?.shortName || o.indicator} (${Object.values(newParams).join(', ')})`,
+              values: computed.values,
+              series: computed.series,
+            };
+          }
+          return o;
+        })
+      );
+      setInternalSubpanes((prev) =>
+        prev.map((s) => {
+          if ((s.id || s.indicator) === targetId) {
+            const computed = computeIndicatorSeries(s.indicator, bars, newParams);
+            const meta = INDICATOR_REGISTRY[s.indicator as IndicatorName];
+            return {
+              ...s,
+              color: newColor,
+              params: newParams,
+              name: `${meta?.shortName || s.indicator} (${Object.values(newParams).join(', ')})`,
+              values: computed.values,
+              series: computed.series,
+            };
+          }
+          return s;
+        })
+      );
+    },
+    [bars, onUpdateParams]
+  );
+
   useEffect(() => {
     const el = plotRef.current;
     if (!el) return;
@@ -209,6 +374,8 @@ export function TradingChart({
     ctx.scale(dpr, dpr);
 
     // Layout dimensions
+    const overlays = effectiveOverlays;
+    const subpanes = effectiveSubpanes;
     const priceScaleWidth = 65;
     const timeScaleHeight = 24;
     const activeSubpanes = (subpanes || []).filter((sp) => sp.visible !== false);
@@ -999,7 +1166,7 @@ export function TradingChart({
     ctx.stroke();
 
     ctx.restore();
-  }, [bars, viewWindow, crosshair, hoveredIdx, loading, symbol, timeframe, plotSize, theme, overlays, subpanes]);
+  }, [bars, viewWindow, crosshair, hoveredIdx, loading, symbol, timeframe, plotSize, theme, effectiveOverlays, effectiveSubpanes]);
 
   // Mouse interaction handlers
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -1133,6 +1300,22 @@ export function TradingChart({
           ))}
         </div>
 
+        {/* Indicators Picker Button */}
+        <button
+          type="button"
+          onClick={() => setIsPickerOpen(true)}
+          className="flex items-center gap-1.5 rounded-xl border border-accent/40 bg-accent/10 px-2.5 py-1 text-xs font-semibold text-accent hover:bg-accent/20 transition shadow-sm"
+          title="Add or configure technical indicators"
+        >
+          <Sliders className="h-3.5 w-3.5" />
+          <span>Indicators</span>
+          {(effectiveOverlays.length > 0 || effectiveSubpanes.length > 0) && (
+            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white">
+              {effectiveOverlays.length + effectiveSubpanes.length}
+            </span>
+          )}
+        </button>
+
         {/* Actions & Status */}
         <div className="flex items-center gap-2">
           <span
@@ -1212,50 +1395,181 @@ export function TradingChart({
       </div>
 
       {/* Active Overlays Readout in Legend */}
-      {overlays && overlays.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3.5 border-t border-ink/[0.06] py-1.5 font-mono text-[11px]">
-          {overlays.map((ov, oIdx) => {
-            if (ov.visible === false) return null;
+      {(effectiveOverlays.length > 0 || effectiveSubpanes.length > 0) && (
+        <div className="flex flex-wrap items-center gap-2.5 border-t border-ink/[0.06] py-1.5 font-mono text-[11px]">
+          {/* Overlays */}
+          {effectiveOverlays.map((ov, oIdx) => {
+            const isVisible = ov.visible !== false;
             const idx = hoveredIdx !== null ? hoveredIdx : (bars.length > 0 ? bars.length - 1 : null);
-            if (idx === null) return null;
             const color = ov.color || '#3B82F6';
             const label = ov.name || ov.indicator;
+            const targetId = ov.id || `${ov.indicator}-${oIdx}`;
 
-            if (ov.values) {
-              const val = ov.values[idx];
-              return (
-                <div key={ov.id || `${ov.indicator}-${oIdx}`} className="flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-                  <span className="text-ink/60">{label}:</span>
-                  <span className="font-semibold text-ink">
-                    {val !== null && val !== undefined ? val.toFixed(2) : '–'}
-                  </span>
-                </div>
-              );
-            }
+            return (
+              <div
+                key={targetId}
+                className={`group flex items-center gap-1.5 rounded-lg border px-2 py-0.5 transition ${
+                  isVisible
+                    ? 'border-ink/10 bg-ink/[0.02] text-ink'
+                    : 'border-dashed border-ink/10 bg-transparent text-ink/40 opacity-60'
+                }`}
+              >
+                <span className="inline-block h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                <span className="text-ink/70 font-medium">{label}:</span>
 
-            if (ov.series) {
-              return (
-                <div key={ov.id || `${ov.indicator}-${oIdx}`} className="flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
-                  <span className="text-ink/60">{label}:</span>
-                  {Object.entries(ov.series).map(([k, s]) => {
-                    const val = s[idx];
-                    const cleanKey = k.replace('_sen', '').replace('senkou_', '');
-                    return (
-                      <span key={k} className="text-ink/75">
-                        <span className="text-[9px] uppercase text-ink/45 mr-0.5">{cleanKey}:</span>
-                        <span className="font-medium text-ink">
-                          {val !== null && val !== undefined ? val.toFixed(2) : '–'}
-                        </span>
+                {isVisible && idx !== null && (
+                  <>
+                    {ov.values && (
+                      <span className="font-semibold text-ink">
+                        {ov.values[idx] !== null && ov.values[idx] !== undefined ? ov.values[idx]!.toFixed(2) : '–'}
                       </span>
-                    );
-                  })}
-                </div>
-              );
-            }
+                    )}
 
-            return null;
+                    {ov.series && (
+                      <span className="flex items-center gap-1.5">
+                        {Object.entries(ov.series).map(([k, s]) => {
+                          const val = s[idx];
+                          const cleanKey = k.replace('_sen', '').replace('senkou_', '');
+                          return (
+                            <span key={k} className="text-ink/75">
+                              <span className="text-[9px] uppercase text-ink/45 mr-0.5">{cleanKey}:</span>
+                              <span className="font-medium text-ink">
+                                {val !== null && val !== undefined ? val.toFixed(2) : '–'}
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </span>
+                    )}
+                  </>
+                )}
+
+                {/* Quick Action Icons */}
+                <div className="flex items-center gap-0.5 ml-1 opacity-70 group-hover:opacity-100 transition">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleVisibility(ov.id || ov.indicator)}
+                    className="rounded p-0.5 hover:bg-ink/10 text-ink/60 hover:text-ink transition"
+                    title={isVisible ? 'Hide overlay' : 'Show overlay'}
+                  >
+                    {isVisible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const meta = INDICATOR_REGISTRY[ov.indicator as IndicatorName];
+                      setSettingsModalState({
+                        isOpen: true,
+                        indicatorId: ov.indicator,
+                        targetId: ov.id || ov.indicator,
+                        isOverlay: true,
+                        params: ov.params || meta?.defaultParams || {},
+                        color: ov.color || meta?.defaultColor || '#3B82F6',
+                      });
+                    }}
+                    className="rounded p-0.5 hover:bg-ink/10 text-ink/60 hover:text-ink transition"
+                    title="Configure parameters & color"
+                  >
+                    <Settings className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveIndicator(ov.id || ov.indicator)}
+                    className="rounded p-0.5 hover:bg-loss/10 text-ink/40 hover:text-loss transition"
+                    title="Remove overlay"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Subpanes */}
+          {effectiveSubpanes.map((sp, sIdx) => {
+            const isVisible = sp.visible !== false;
+            const idx = hoveredIdx !== null ? hoveredIdx : (bars.length > 0 ? bars.length - 1 : null);
+            const color = sp.color || '#8B5CF6';
+            const label = sp.name || sp.indicator;
+            const targetId = sp.id || `${sp.indicator}-${sIdx}`;
+
+            return (
+              <div
+                key={targetId}
+                className={`group flex items-center gap-1.5 rounded-lg border px-2 py-0.5 transition ${
+                  isVisible
+                    ? 'border-ink/10 bg-ink/[0.02] text-ink'
+                    : 'border-dashed border-ink/10 bg-transparent text-ink/40 opacity-60'
+                }`}
+              >
+                <span className="inline-block h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                <span className="text-ink/70 font-medium">{label}:</span>
+
+                {isVisible && idx !== null && (
+                  <>
+                    {sp.values && (
+                      <span className="font-semibold text-ink">
+                        {sp.values[idx] !== null && sp.values[idx] !== undefined ? sp.values[idx]!.toFixed(2) : '–'}
+                      </span>
+                    )}
+
+                    {sp.series && (
+                      <span className="flex items-center gap-1.5">
+                        {Object.entries(sp.series).map(([k, s]) => {
+                          const val = s[idx];
+                          return (
+                            <span key={k} className="text-ink/75">
+                              <span className="text-[9px] uppercase text-ink/45 mr-0.5">{k}:</span>
+                              <span className="font-medium text-ink">
+                                {val !== null && val !== undefined ? val.toFixed(2) : '–'}
+                              </span>
+                            </span>
+                          );
+                        })}
+                      </span>
+                    )}
+                  </>
+                )}
+
+                {/* Quick Action Icons */}
+                <div className="flex items-center gap-0.5 ml-1 opacity-70 group-hover:opacity-100 transition">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleVisibility(sp.id || sp.indicator)}
+                    className="rounded p-0.5 hover:bg-ink/10 text-ink/60 hover:text-ink transition"
+                    title={isVisible ? 'Hide sub-pane' : 'Show sub-pane'}
+                  >
+                    {isVisible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const meta = INDICATOR_REGISTRY[sp.indicator as IndicatorName];
+                      setSettingsModalState({
+                        isOpen: true,
+                        indicatorId: sp.indicator,
+                        targetId: sp.id || sp.indicator,
+                        isOverlay: false,
+                        params: sp.params || meta?.defaultParams || {},
+                        color: sp.color || meta?.defaultColor || '#8B5CF6',
+                      });
+                    }}
+                    className="rounded p-0.5 hover:bg-ink/10 text-ink/60 hover:text-ink transition"
+                    title="Configure parameters & color"
+                  >
+                    <Settings className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveIndicator(sp.id || sp.indicator)}
+                    className="rounded p-0.5 hover:bg-loss/10 text-ink/40 hover:text-loss transition"
+                    title="Remove sub-pane"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            );
           })}
         </div>
       )}
@@ -1263,7 +1577,7 @@ export function TradingChart({
       <p className="pb-1 text-right text-[10px] text-ink/40">Drag to pan · Ctrl/⌘ + scroll to zoom</p>
       {/* Chart Canvas */}
       {(() => {
-        const subCount = (subpanes || []).filter((s) => s.visible !== false).length;
+        const subCount = (effectiveSubpanes || []).filter((s) => s.visible !== false).length;
         const dynamicH =
           subCount > 0
             ? `clamp(${320 + subCount * 90}px, ${48 + subCount * 12}vh, ${480 + subCount * 120}px)`
@@ -1286,6 +1600,36 @@ export function TradingChart({
           </div>
         );
       })()}
+
+      {/* Indicator Picker Modal */}
+      <IndicatorPickerModal
+        isOpen={isPickerOpen}
+        onClose={() => setIsPickerOpen(false)}
+        onSelectIndicator={handleSelectIndicator}
+        activeIndicatorIds={[
+          ...effectiveOverlays.map((o) => String(o.indicator)),
+          ...effectiveSubpanes.map((s) => String(s.indicator)),
+        ]}
+      />
+
+      {/* Indicator Settings Modal */}
+      {settingsModalState && (
+        <IndicatorSettingsModal
+          isOpen={settingsModalState.isOpen}
+          indicatorId={settingsModalState.indicatorId}
+          currentParams={settingsModalState.params}
+          currentColor={settingsModalState.color}
+          onClose={() => setSettingsModalState(null)}
+          onSave={(newParams, newColor) => {
+            handleUpdateParams(settingsModalState.targetId, newParams, newColor);
+            setSettingsModalState(null);
+          }}
+          onRemove={() => {
+            handleRemoveIndicator(settingsModalState.targetId);
+            setSettingsModalState(null);
+          }}
+        />
+      )}
     </div>
   );
 }

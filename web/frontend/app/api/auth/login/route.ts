@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { record as audit, requestMeta } from '@/lib/server/audit';
 import { EMAIL_RE } from '@/lib/auth-shared';
 import { findUser, generateOtp, hashPassword, publicUser, rehashPassword, setLoginCode, twoFactorOn, verifyPassword } from '@/lib/server/authStore';
+import { clearLoginFailures, GENERIC_AUTH_ERROR, isCaptchaRequiredOnLogin, recordLoginFailure, verifyCaptchaToken } from '@/lib/server/captcha';
 import { sendOtpEmail } from '@/lib/server/email';
 import { startSession } from '@/lib/server/session';
 import { clearFailedLogins, lockedUntil, lockMessage, LOCK_DURATION_MS, recordFailedLogin, shouldSendLockoutEmail } from '@/lib/server/lockout';
@@ -23,7 +24,7 @@ const locked = (until: number) =>
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { email, password } = body;
+    const { email, password, captchaToken } = body;
 
     if (typeof email !== 'string' || typeof password !== 'string' || !EMAIL_RE.test(email.trim()) || !password) {
       return NextResponse.json({ ok: false, error: 'Email and password are required.' }, { status: 400 });
@@ -32,6 +33,26 @@ export async function POST(req: Request) {
     const cleanEmail = email.trim().toLowerCase();
     const ip = clientIp(req);
     const meta = requestMeta(req);
+
+    // Task 4: CAPTCHA on sign-in after repeated failures. Count failures per account and per IP on server.
+    const captchaRequired = isCaptchaRequiredOnLogin(cleanEmail, ip);
+    if (captchaRequired) {
+      if (!captchaToken) {
+        return NextResponse.json(
+          { ok: false, error: 'Incorrect email or password. Security verification required to continue.', captchaRequired: true },
+          { status: 400 },
+        );
+      }
+      const captchaRes = await verifyCaptchaToken(captchaToken, 'login', { ip });
+      if (!captchaRes.ok) {
+        recordLoginFailure(cleanEmail, ip);
+        await audit({ action: 'auth.login.failure', outcome: 'failure', actor: { email: cleanEmail }, details: { reason: 'captcha_failed', step: 'login' } }, meta);
+        return NextResponse.json(
+          { ok: false, error: 'Security verification failed. Please complete the CAPTCHA and try again.', captchaRequired: true },
+          { status: 400 },
+        );
+      }
+    }
 
     // Per IP: a cap on all login traffic, and a tighter one on failures (password spraying across
     // many accounts). Per account: the lockout below (holds even if the attacker rotates IPs).
@@ -45,12 +66,14 @@ export async function POST(req: Request) {
     const user = await findUser(cleanEmail);
 
     if (!user) {
+      recordLoginFailure(cleanEmail, ip);
       await hit(ipFailKey, IP_FAIL_MAX, WINDOW);
       await audit({ action: 'auth.login.failure', outcome: 'failure', actor: { email: cleanEmail }, details: { reason: 'unknown_email' } }, meta);
       await noteSpike('failed_login');
+      // Task 4: Messages do not reveal whether an email exists
       return NextResponse.json(
-        { ok: false, error: 'No account found with this email. Please click "Sign Up" to register.' },
-        { status: 404 },
+        { ok: false, error: GENERIC_AUTH_ERROR, captchaRequired: isCaptchaRequiredOnLogin(cleanEmail, ip) },
+        { status: 401 },
       );
     }
 
@@ -64,6 +87,7 @@ export async function POST(req: Request) {
 
     const verifyRes = await verifyPassword(password, user.passwordHash);
     if (!verifyRes.ok) {
+      recordLoginFailure(cleanEmail, ip);
       await hit(ipFailKey, IP_FAIL_MAX, WINDOW);
       const failure = await recordFailedLogin(user.id);
       await audit({ action: 'auth.login.failure', outcome: 'failure', actor: user, details: { reason: 'wrong_password', failures: failure.failures } }, meta);
@@ -78,13 +102,15 @@ export async function POST(req: Request) {
         );
       }
       if (failure.lockedUntil) return locked(failure.lockedUntil);
+      // Task 4: Messages do not reveal whether an email exists
       return NextResponse.json(
-        { ok: false, error: 'Incorrect email or password. Please try again.' },
+        { ok: false, error: GENERIC_AUTH_ERROR, captchaRequired: isCaptchaRequiredOnLogin(cleanEmail, ip) },
         { status: 401 },
       );
     }
 
     await clearFailedLogins(user.id);
+    clearLoginFailures(cleanEmail, ip);
 
     // Old PBKDF2 (or outdated Argon2 parameters): upgrade the stored hash now that we have the
     // password. Compare-and-set, so a concurrent password change wins. Never blocks the sign-in.

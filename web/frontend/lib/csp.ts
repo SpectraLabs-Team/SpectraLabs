@@ -18,19 +18,19 @@ export function cspMode(raw = process.env.CSP_MODE): CspMode {
 
 export const CSP_REPORT_PATH = '/api/csp-report';
 
-export function buildCsp({ nonce, dev, https }: { nonce: string; dev: boolean; https: boolean }): string {
+export function buildCsp({ nonce, dev, https, captcha = false }: { nonce: string; dev: boolean; https: boolean; captcha?: boolean }): string {
   const directives: [string, ...string[]][] = [
     ['default-src', "'self'"],
     // Next's dev server evaluates modules with eval(); production never needs it.
-    ['script-src', "'self'", `'nonce-${nonce}'`, "'strict-dynamic'", ...(dev ? ["'unsafe-eval'"] : [])],
+    ['script-src', "'self'", `'nonce-${nonce}'`, "'strict-dynamic'", ...(captcha ? ['https://challenges.cloudflare.com'] : []), ...(dev ? ["'unsafe-eval'"] : [])],
     ['style-src', "'self'", "'unsafe-inline'"],
     ['img-src', "'self'", 'data:', 'blob:'],
     ['font-src', "'self'", 'data:'],
     // Hot reload talks to the dev server over a WebSocket.
-    ['connect-src', "'self'", ...(dev ? ['ws:', 'wss:'] : [])],
+    ['connect-src', "'self'", ...(captcha ? ['https://challenges.cloudflare.com'] : []), ...(dev ? ['ws:', 'wss:'] : [])],
     ['worker-src', "'self'", 'blob:'],
     ['manifest-src', "'self'"],
-    ['frame-src', "'none'"],
+    ['frame-src', ...(captcha ? ['https://challenges.cloudflare.com'] : ["'none'"])],
     ['frame-ancestors', "'none'"],
     ['object-src', "'none'"],
     ['base-uri', "'self'"],

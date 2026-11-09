@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cleanName, EMAIL_RE, isPasswordValid, MIN_NAME } from '@/lib/auth-shared';
 import { findUser, generateOtp, getPendingOtp, hashPassword, setPendingOtp } from '@/lib/server/authStore';
 import { isBreachedPassword } from '@/lib/server/breached';
+import { verifyCaptchaToken } from '@/lib/server/captcha';
 import { sendOtpEmail } from '@/lib/server/email';
 import { clientIp, hitAll, tooMany } from '@/lib/server/rateLimit';
 import { noteSpike } from '@/lib/server/spikes';
@@ -16,6 +17,7 @@ export async function POST(req: Request) {
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    const ip = clientIp(req);
 
     let passwordHash: string;
     let name: string;
@@ -35,6 +37,15 @@ export async function POST(req: Request) {
       name = pending.name;
       twoFactor = pending.twoFactor !== false;
     } else if (mode === 'signup') {
+      // Task 3: CAPTCHA on sign-up. Verify token on server; single-use, expire, bound to action 'signup'.
+      const captchaRes = await verifyCaptchaToken(body.captchaToken, 'signup', { ip });
+      if (!captchaRes.ok) {
+        return NextResponse.json(
+          { ok: false, error: 'Security verification failed. Please complete the CAPTCHA and try again.' },
+          { status: 400 },
+        );
+      }
+
       if (await findUser(cleanEmail)) {
         return NextResponse.json(
           { ok: false, error: 'An account with this email already exists. Please log in.' },

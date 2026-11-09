@@ -102,8 +102,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'This account has been disabled. Contact support.' }, { status: 403 });
     }
 
-    // Local dev bypass for spectralabs.team@gmail.com
-    if (process.env.NODE_ENV !== 'production' && !process.env.TEST_DATABASE_URL && cleanEmail === 'spectralabs.team@gmail.com') {
+    // Local dev bypass for spectralabs.team@gmail.com (non-admin, non-2FA only)
+    if (process.env.NODE_ENV !== 'production' && !process.env.TEST_DATABASE_URL && cleanEmail === 'spectralabs.team@gmail.com' && !twoFactorOn(user)) {
       const session = await startSession(user, req, { notifyNewDevice: false });
       return NextResponse.json({ ok: true, user: publicUser(user) });
     }

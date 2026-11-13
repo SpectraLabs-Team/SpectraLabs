@@ -33,6 +33,7 @@ import {
   YAxis,
 } from 'recharts';
 import { chartColors, useTheme } from '@/lib/theme';
+import { escapeText } from '@/lib/csvExport';
 import {
   describeRequest,
   getBacktest,
@@ -238,7 +239,10 @@ export function CompareRuns({ runIds, catalog, onSelectRun, onRemoveRun, onClose
       ['Final Equity ($)', ...validRuns.map((r) => cash(r.backtest.summary?.activity.final_equity))],
     ];
 
-    const csvContent = [headers.join(','), ...metricRows.map((row) => row.join(','))].join('\n');
+    const csvContent = [
+      headers.map(escapeText).join(','),
+      ...metricRows.map((row) => row.map((cell) => escapeText(String(cell))).join(',')),
+    ].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

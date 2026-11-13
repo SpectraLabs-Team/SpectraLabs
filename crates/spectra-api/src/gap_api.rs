@@ -627,9 +627,11 @@ fn gap_csv(rec: &spectra_db::gap::GapReportRecord) -> String {
     );
     let n = |t: &serde_json::Value, k: &str| field_f64(t, k).map_or(String::new(), |v| v.to_string());
     for t in matched_trades(rec) {
+        let raw_sym = field_str(t, "symbol").replace('"', "\"\"");
+        let escaped_sym = spectra_data::escape_csv_cell(&raw_sym);
         csv.push_str(&format!(
             "\"{}\",{},{},{},{},{},{},{},{},{}\n",
-            field_str(t, "symbol").replace('"', "\"\""),
+            escaped_sym,
             field_str(t, "side"),
             n(t, "qty"),
             n(t, "paper_price"),

@@ -801,13 +801,14 @@ pub fn generate_validation_csv(
     csv.push_str("\ntrial_num,objective_value,returns_mean,returns_vol,params\n");
     for t in trials {
         let p_str = serde_json::to_string(&t.params).unwrap_or_default().replace('"', "\"\"");
+        let escaped_params = spectra_data::escape_csv_cell(&p_str);
         csv.push_str(&format!(
             "{},{},{},{},\"{}\"\n",
             t.trial_num,
             t.objective_value,
             t.returns_mean.map_or(String::new(), |v| v.to_string()),
             t.returns_vol.map_or(String::new(), |v| v.to_string()),
-            p_str
+            escaped_params
         ));
     }
     csv

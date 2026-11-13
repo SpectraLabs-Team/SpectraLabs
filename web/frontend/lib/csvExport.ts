@@ -14,8 +14,13 @@ import { sortByShare, type Attribution } from './attribution';
  */
 export function escapeText(text: string): string {
   let s = text;
-  if (/^[=+\-@\t\r]/.test(s)) {
+  if (/^[=+\-@\t\r%]/.test(s)) {
     s = `'${s}`;
+  } else {
+    const trimmed = s.replace(/^[ \f\v]+/, '');
+    if (/^[=+\-@\t\r%]/.test(trimmed)) {
+      s = `'${s}`;
+    }
   }
   if (/[",\r\n]/.test(s) || s !== s.trim()) {
     return `"${s.replace(/"/g, '""')}"`;

@@ -175,7 +175,7 @@ pub async fn run_ingest(
             }
 
             let total_rows = spectra_parquet::parquet_total_rows(&path).unwrap_or(0);
-            if total_rows > spectra_data::DEFAULT_MAX_ROWS {
+            if total_rows > spectra_data::DEFAULT_MAX_ROWS as u64 {
                 return Err((
                     format!(
                         "row count {total_rows} exceeds maximum allowed limit of {}",

@@ -96,12 +96,12 @@ fn test_m29_corpus_workspace_upload_quotas() {
 
     // Exceeds storage limit boundary
     assert_eq!(
-        check_workspace_quota(1000_000, 50_000, max_storage, 1, max_uploads),
+        check_workspace_quota(1_000_000, 50_000, max_storage, 1, max_uploads),
         Err(SecurityError::QuotaExceeded { quota: "storage_bytes" })
     );
 
     // Exact boundary check (current + incoming == max)
-    assert!(check_workspace_quota(1000_000, 24 * 1024, max_storage, 4, max_uploads).is_ok());
+    assert!(check_workspace_quota(1_000_000, 24 * 1024, max_storage, 4, max_uploads).is_ok());
 }
 
 #[test]

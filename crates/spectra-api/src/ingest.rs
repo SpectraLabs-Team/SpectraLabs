@@ -175,6 +175,15 @@ pub async fn run_ingest(
             }
 
             let total_rows = spectra_parquet::parquet_total_rows(&path).unwrap_or(0);
+            if total_rows > spectra_data::DEFAULT_MAX_ROWS as u64 {
+                return Err((
+                    format!(
+                        "row count {total_rows} exceeds maximum allowed limit of {}",
+                        spectra_data::DEFAULT_MAX_ROWS
+                    ),
+                    None,
+                ));
+            }
             let loaded = spectra_parquet::load_parquet_file(
                 &path,
                 &opt,
@@ -199,6 +208,17 @@ pub async fn run_ingest(
                 }
             }
         } else {
+            {
+                let mut f = open().map_err(|e| (format!("cannot open the uploaded file: {e}"), None))?;
+                use std::io::Read;
+                let mut sample = [0u8; 4096];
+                let n = f.read(&mut sample).unwrap_or(0);
+                if let Err(e) =
+                    spectra_data::validate_text_upload(&sample[..n], spectra_data::DEFAULT_MAX_FILE_SIZE)
+                {
+                    return Err((format!("content check refused: {e}"), None));
+                }
+            }
             let file = open().map_err(|e| (format!("cannot open the uploaded file: {e}"), None))?;
             // Every byte is hashed on its way to the parser, and the rest of the file after it
             // stops, so a corrupt upload is reported as such whatever the parser made of it.

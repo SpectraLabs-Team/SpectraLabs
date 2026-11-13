@@ -247,10 +247,11 @@ pub(crate) fn store_error(e: &reports::CreateError) -> Response {
 /// A report download: its bytes, type and filename, with the stored id, version and hash as
 /// headers.
 pub(crate) fn report_response(meta: &ReportVersion, filename: &str, body: Vec<u8>) -> Response {
+    let safe_filename = spectra_data::sanitize_filename(filename);
     Response::builder()
         .status(200)
         .header("content-type", &meta.content_type)
-        .header("content-disposition", format!("attachment; filename=\"{filename}\""))
+        .header("content-disposition", format!("attachment; filename=\"{safe_filename}\""))
         .header("x-report-id", meta.report_id.to_string())
         .header("x-report-version", meta.version.to_string())
         .header("x-report-sha256", &meta.sha256)

@@ -1582,7 +1582,8 @@ pub(crate) async fn export_version(
         tracing::error!(error = %e, "parquet export failed");
         return error_response(500, format!("Could not export Parquet: {e}"));
     }
-    let filename = format!("{}-v{}.parquet", v.dataset_name, v.version);
+    let raw_filename = format!("{}-v{}.parquet", v.dataset_name, v.version);
+    let filename = spectra_data::sanitize_filename(&raw_filename);
     Response::builder()
         .status(200)
         .header("content-type", "application/vnd.apache.parquet")

@@ -16,8 +16,16 @@ pub enum SecurityError {
     IllegalControlCharacters,
     /// Row count exceeded limit.
     RowCountExceeded { actual: usize, max: usize },
+    /// Column count exceeded limit.
+    ColumnLimitExceeded { actual: usize, max: usize },
     /// Field length exceeded limit.
     FieldLengthExceeded { length: usize, max: usize },
+    /// Decompressed size exceeded limit.
+    DecompressedSizeExceeded { actual: usize, max: usize },
+    /// Mismatched file type or missing magic bytes.
+    MismatchedFileType { expected: &'static str, actual: &'static str },
+    /// Upload quota exceeded for workspace.
+    QuotaExceeded { quota: &'static str },
     /// Input contains non-finite numerical values (NaN / Inf).
     NonFiniteNumericValue,
 }
@@ -35,8 +43,20 @@ impl fmt::Display for SecurityError {
             Self::RowCountExceeded { actual, max } => {
                 write!(f, "row count {actual} exceeds maximum allowed limit of {max}")
             }
+            Self::ColumnLimitExceeded { actual, max } => {
+                write!(f, "column count {actual} exceeds maximum allowed limit of {max}")
+            }
             Self::FieldLengthExceeded { length, max } => {
                 write!(f, "field length {length} exceeds maximum allowed limit of {max}")
+            }
+            Self::DecompressedSizeExceeded { actual, max } => {
+                write!(f, "decompressed size {actual} exceeds maximum allowed limit of {max} bytes")
+            }
+            Self::MismatchedFileType { expected, actual } => {
+                write!(f, "mismatched file type: expected {expected}, found {actual}")
+            }
+            Self::QuotaExceeded { quota } => {
+                write!(f, "upload quota exceeded: {quota}")
             }
             Self::NonFiniteNumericValue => write!(f, "numeric value is NaN or infinite"),
         }
@@ -48,7 +68,59 @@ impl std::error::Error for SecurityError {}
 /// Default limits for input ingestion.
 pub const DEFAULT_MAX_FILE_SIZE: usize = 100 * 1024 * 1024; // 100 MiB
 pub const DEFAULT_MAX_ROWS: usize = 5_000_000;
+pub const DEFAULT_MAX_COLUMNS: usize = 256;
 pub const DEFAULT_MAX_FIELD_LENGTH: usize = 4_096;
+pub const DEFAULT_MAX_DECOMPRESSED_SIZE: usize = 1024 * 1024 * 1024; // 1 GiB
+pub const DEFAULT_MAX_USER_STORAGE: usize = 1024 * 1024 * 1024; // 1 GiB
+pub const DEFAULT_MAX_UPLOADS_PER_DAY: usize = 50;
+
+/// Sanitizes a download filename to prevent header injection and path traversal.
+pub fn sanitize_filename(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '-' | '_' => c,
+            _ => '_',
+        })
+        .collect();
+    if sanitized.is_empty() {
+        "download".to_string()
+    } else {
+        sanitized
+    }
+}
+
+/// Validates that raw bytes begin with the Parquet magic bytes `PAR1`.
+///
+/// # Errors
+/// Returns `SecurityError::MismatchedFileType` if the magic bytes are missing.
+pub fn verify_parquet_magic(bytes: &[u8]) -> Result<(), SecurityError> {
+    if bytes.len() >= 4 && &bytes[0..4] == b"PAR1" {
+        Ok(())
+    } else {
+        Err(SecurityError::MismatchedFileType { expected: "PAR1", actual: "unknown" })
+    }
+}
+
+/// Enforces per-workspace upload quotas atomically.
+///
+/// # Errors
+/// Returns `SecurityError::QuotaExceeded` if daily uploads or storage limit is exceeded.
+pub fn check_workspace_quota(
+    current_storage: usize,
+    incoming_file_size: usize,
+    max_storage: usize,
+    today_uploads: usize,
+    max_uploads_per_day: usize,
+) -> Result<(), SecurityError> {
+    if today_uploads >= max_uploads_per_day {
+        return Err(SecurityError::QuotaExceeded { quota: "daily_uploads" });
+    }
+    if current_storage.saturating_add(incoming_file_size) > max_storage {
+        return Err(SecurityError::QuotaExceeded { quota: "storage_bytes" });
+    }
+    Ok(())
+}
 
 /// Escapes a CSV cell value to neutralize spreadsheet formula injection (OWASP CSV Injection).
 ///

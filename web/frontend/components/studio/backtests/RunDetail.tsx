@@ -46,6 +46,7 @@ import type { HoldoutEvaluationItem } from '../RunDetail';
 import { BacktestToPaperGap } from '../BacktestToPaperGap';
 import { TearSheetModal } from '../TearSheetModal';
 import { BacktestReportPanel } from '../ReportPanel';
+import { escapeText } from '@/lib/csvExport';
 
 type Row = [label: string, value: string, tone?: 'profit' | 'loss' | 'neutral', metric?: MetricId];
 
@@ -1150,7 +1151,7 @@ export function RunDetail({
               ? [
                   'Strategy,Allocation,Final Equity,Total Return,Contribution,Sharpe,Max Drawdown',
                   ...b.summary.strategies.list.map(
-                    (s) => `"${s.strategy}",${s.allocation},${s.final_equity},${s.total_return},${s.contribution},${s.sharpe},${s.max_drawdown}`
+                    (s) => `${escapeText(s.strategy)},${s.allocation},${s.final_equity},${s.total_return},${s.contribution},${s.sharpe},${s.max_drawdown}`
                   ),
                 ].join('\n')
               : undefined

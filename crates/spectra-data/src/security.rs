@@ -55,17 +55,24 @@ pub const DEFAULT_MAX_FIELD_LENGTH: usize = 4_096;
 /// If the trimmed string starts with `=`, `+`, `-`, `@`, `\t`, `\r`, or `%`,
 /// it is prepended with a single quote `'` so spreadsheet applications treat it as text.
 pub fn escape_csv_cell(cell: &str) -> String {
-    let trimmed = cell.trim_start();
-    if trimmed.is_empty() {
+    if cell.is_empty() {
         return cell.to_string();
     }
 
-    let first = trimmed.as_bytes()[0];
-    if matches!(first, b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r' | b'%') {
-        format!("'{cell}")
-    } else {
-        cell.to_string()
+    let raw_first = cell.as_bytes()[0];
+    if matches!(raw_first, b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r' | b'%') {
+        return format!("'{cell}");
     }
+
+    let trimmed = cell.trim_start_matches([' ', '\x0C', '\x0B']);
+    if !trimmed.is_empty() {
+        let first = trimmed.as_bytes()[0];
+        if matches!(first, b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r' | b'%') {
+            return format!("'{cell}");
+        }
+    }
+
+    cell.to_string()
 }
 
 /// Sanitizes an entire CSV row against formula injection.

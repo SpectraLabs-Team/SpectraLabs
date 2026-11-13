@@ -556,8 +556,10 @@ impl SignalTestReport {
     pub fn to_csv(&self) -> String {
         let mut csv = String::new();
         csv.push_str("# SpectraLabs M12 Alpha Workbench: Signal Test Report\n");
-        csv.push_str(&format!("# Signal: {}\n", self.signal_name));
-        csv.push_str(&format!("# Universe: {}\n", self.universe.join(",")));
+        csv.push_str(&format!("# Signal: {}\n", spectra_data::escape_csv_cell(&self.signal_name)));
+        let escaped_universe: Vec<String> =
+            self.universe.iter().map(|s| spectra_data::escape_csv_cell(s)).collect();
+        csv.push_str(&format!("# Universe: {}\n", escaped_universe.join(",")));
         csv.push_str(&format!("# Start Date: {}\n", self.start_date));
         csv.push_str(&format!("# End Date: {}\n", self.end_date));
         csv.push_str(&format!("# Primary Horizon: {} days\n", self.primary_horizon));
@@ -569,7 +571,7 @@ impl SignalTestReport {
         csv.push_str(&format!("# Top-Quantile Turnover: {:.4}\n", self.quantiles.top_quantile_turnover));
         csv.push_str(&format!("# Passed Gate: {}\n", self.passed_gate));
         csv.push_str(&format!("# Tests Run Count: {}\n", self.tests_run_count));
-        csv.push_str(&format!("# Disclaimer: {}\n", self.disclaimer));
+        csv.push_str(&format!("# Disclaimer: {}\n", spectra_data::escape_csv_cell(self.disclaimer)));
         csv.push_str("date,horizon,mean_ic\n");
         for (d, ic) in &self.primary_ic.daily_ics {
             csv.push_str(&format!("{},{},{:.6}\n", d, self.primary_horizon, ic));

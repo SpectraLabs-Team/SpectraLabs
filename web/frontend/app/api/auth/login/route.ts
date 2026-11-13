@@ -46,7 +46,7 @@ export async function POST(req: Request) {
       const captchaRes = await verifyCaptchaToken(captchaToken, 'login', { ip });
       if (!captchaRes.ok) {
         recordLoginFailure(cleanEmail, ip);
-        await audit({ action: 'auth.login.failure', outcome: 'failure', actor: { email: cleanEmail }, details: { reason: 'captcha_failed', step: 'login' } }, meta);
+        await audit({ action: 'auth.captcha.failure', outcome: 'failure', actor: { email: cleanEmail }, details: { reason: 'captcha_failed', step: 'login' } }, meta);
         return NextResponse.json(
           { ok: false, error: 'Security verification failed. Please complete the CAPTCHA and try again.', captchaRequired: true },
           { status: 400 },

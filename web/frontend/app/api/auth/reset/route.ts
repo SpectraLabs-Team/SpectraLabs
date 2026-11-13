@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { record as audit, requestMeta } from '@/lib/server/audit';
 import { isPasswordValid } from '@/lib/auth-shared';
-import { checkResetCode, hashPassword, publicUser, updatePassword } from '@/lib/server/authStore';
+import { checkResetCode, hashPassword, publicUser, twoFactorOn, updatePassword } from '@/lib/server/authStore';
 import { isBreachedPassword } from '@/lib/server/breached';
 import { clearFailedLogins } from '@/lib/server/lockout';
 import { clientIp, hitAll, tooMany } from '@/lib/server/rateLimit';
@@ -55,10 +55,19 @@ export async function POST(req: Request) {
     if (!record) return NextResponse.json({ ok: false, error: 'Account not found.' }, { status: 404 });
 
     await clearFailedLogins(record.id); // a successful reset lifts any login lockout
-    // updatePassword revoked every session; this browser gets a fresh one (if the account is active).
-    if (record.status === 'active') await startSession(record, req);
-    await audit({ action: 'auth.password.reset', actor: record, target: { type: 'user', id: record.id }, details: { sessionsRevoked: true } }, requestMeta(req));
-    return NextResponse.json({ ok: true, user: publicUser(record) });
+    // Task 5: A reset must not skip the admin second step: after a reset, an admin
+    // still needs the second factor to sign in.
+    const needsTwoFactor = twoFactorOn(record);
+    if (record.status === 'active' && !needsTwoFactor) {
+      await startSession(record, req);
+    }
+    await audit({ action: 'auth.password.reset', actor: record, target: { type: 'user', id: record.id }, details: { sessionsRevoked: true, twoFactorRequired: needsTwoFactor } }, requestMeta(req));
+    return NextResponse.json({
+      ok: true,
+      user: needsTwoFactor ? undefined : publicUser(record),
+      twoFactorRequired: needsTwoFactor,
+      message: needsTwoFactor ? 'Password reset successfully. Two-step verification is required to sign in.' : 'Password reset successfully.',
+    });
   } catch (err) {
     console.error('[RESET ERROR]', err);
     return NextResponse.json({ ok: false, error: 'Could not reset the password.' }, { status: 500 });

@@ -17,6 +17,7 @@ export const AUDIT_ACTIONS = [
   'auth.login.failure',
   'auth.login.locked',
   'auth.login.new_device',
+  'auth.captcha.failure',
   'auth.logout',
   'auth.two_factor.enabled',
   'auth.two_factor.disabled',
@@ -100,11 +101,34 @@ export function requestMeta(req: Request): RequestMeta {
 }
 
 const MAX_DETAILS = 4096;
+const SECRET_KEY_RE = /password|token|code|secret|hash|otp|totp|seed|ciphertext|cookie|authorization|bearer|recovery/i;
+
+/** Redact any sensitive security credentials so they NEVER enter audit logs (M30 Task 6). */
+export function scrubSecrets(input: unknown): unknown {
+  if (input === null || typeof input !== 'object') return input;
+  if (Array.isArray(input)) return input.map((item) => scrubSecrets(item));
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (SECRET_KEY_RE.test(k)) {
+      out[k] = '[REDACTED]';
+    } else if (typeof v === 'string') {
+      if (/^spectra_(pat|wat)_[A-Za-z0-9_-]{43}$/.test(v) || (v.length === 6 && /^\d{6}$/.test(v))) {
+        out[k] = '[REDACTED]';
+      } else {
+        out[k] = v;
+      }
+    } else {
+      out[k] = scrubSecrets(v);
+    }
+  }
+  return out;
+}
 
 /** Append one event. Never throws (see above). */
 export async function record(event: AuditInput, meta?: RequestMeta | null): Promise<void> {
   try {
-    let details = JSON.stringify(event.details ?? {});
+    const cleanDetails = scrubSecrets(event.details ?? {});
+    let details = JSON.stringify(cleanDetails);
     if (details.length > MAX_DETAILS) details = JSON.stringify({ truncated: true });
     await query(
       `INSERT INTO audit_events (actor_id, actor_email, workspace_id, action, outcome, target_type, target_id, ip, user_agent, request_id, details)

@@ -83,5 +83,7 @@ jobs:
       # not supported by parquet 54.3.1. Requires upgrading parquet across major versions.
       # Date: 2026-11-02
       # remove by 2026-12-02
+      # RUSTSEC-2026-0459: libsqlite3-sys via C SQLite CVE-2026-119375 (Date: 2026-10-30)
+      # RUSTSEC-2026-0486: rustix xattr functions (Date: 2026-10-27)
       - name: Audit Cargo.lock
-        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0435
+        run: cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2024-0436 --ignore RUSTSEC-2026-0435 --ignore RUSTSEC-2026-0459 --ignore RUSTSEC-2026-0486

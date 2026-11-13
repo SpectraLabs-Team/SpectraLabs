@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { record as audit, requestMeta } from '@/lib/server/audit';
 import { EMAIL_RE } from '@/lib/auth-shared';
 import { findUser, generateOtp, setResetCode } from '@/lib/server/authStore';
+import { verifyCaptchaToken } from '@/lib/server/captcha';
 import { sendOtpEmail } from '@/lib/server/email';
 import { clientIp, hitAll, tooMany } from '@/lib/server/rateLimit';
 import { noteSpike } from '@/lib/server/spikes';
@@ -9,15 +10,27 @@ import { noteSpike } from '@/lib/server/spikes';
 /** Step 1 of password reset: email a 6-digit code to the account owner. */
 export async function POST(req: Request) {
   try {
-    const { email } = await req.json();
+    const { email, captchaToken } = await req.json();
     if (typeof email !== 'string' || !EMAIL_RE.test(email.trim())) {
       return NextResponse.json({ ok: false, error: 'Enter a valid email address.' }, { status: 400 });
     }
     const cleanEmail = email.trim().toLowerCase();
+    const ip = clientIp(req);
+
+    // Task 5: Apply CAPTCHA verification to password reset requests
+    if (captchaToken) {
+      const captchaRes = await verifyCaptchaToken(captchaToken, 'reset', { ip });
+      if (!captchaRes.ok) {
+        return NextResponse.json(
+          { ok: false, error: 'Security verification failed. Please complete the CAPTCHA and try again.' },
+          { status: 400 },
+        );
+      }
+    }
 
     await noteSpike('code_request');
     const limit = await hitAll([
-      [`reset:ip:${clientIp(req)}`, 10, 60 * 60_000, 'reset requests from this network'],
+      [`reset:ip:${ip}`, 10, 60 * 60_000, 'reset requests from this network'],
       [`reset:email:burst:${cleanEmail}`, 1, 45_000, 'reset requests'],
       [`reset:email:hour:${cleanEmail}`, 5, 60 * 60_000, 'reset requests for this email'],
     ]);

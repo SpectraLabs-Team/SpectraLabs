@@ -14,6 +14,7 @@ regexes = [
   '''^b-secret-0123456789abcdef$''',
   '''^another-secret-key-0123456789$''',
   '''^abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE$''',
+  '''^spectra_pat_1234567890123456789012345678901234567890123$''',
 ]
 
 # Spectra API tokens (web/frontend/lib/server/apiTokens.ts). Any match is a real, usable token:

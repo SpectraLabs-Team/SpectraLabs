@@ -7,17 +7,18 @@ import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type For
 import { checkPasswordRules, cleanName, EMAIL_RE, isPasswordValid, MIN_NAME, MIN_PASSWORD, useAuth, type AuthMode, type AuthUser } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import { isSafeNext, NEXT_KEY } from '@/components/landing/NavLink';
+import { CaptchaWidget } from './CaptchaWidget';
 
 const LEN = 6;
 const RESEND_SECONDS = 60;
 const empty = () => Array<string>(LEN).fill('');
 
 // ── Real API transport connecting to Gmail SMTP & session endpoints ──
-async function sendSignupCode(email: string, password: string, name: string, twoFactor: boolean): Promise<{ ok: boolean; message?: string }> {
+async function sendSignupCode(email: string, password: string, name: string, twoFactor: boolean, captchaToken?: string): Promise<{ ok: boolean; message?: string }> {
   const res = await fetch('/api/auth/send-otp', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, name, twoFactor, mode: 'signup' }),
+    body: JSON.stringify({ email, password, name, twoFactor, captchaToken, mode: 'signup' }),
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
@@ -55,17 +56,18 @@ async function verifySignupCode(email: string, code: string): Promise<{ ok: bool
 async function loginWithPassword(
   email: string,
   password: string,
-): Promise<{ ok: boolean; user?: AuthUser; twoFactor?: boolean; method?: 'email' | 'totp'; challenge?: string; error?: string }> {
+  captchaToken?: string,
+): Promise<{ ok: boolean; user?: AuthUser; twoFactor?: boolean; method?: 'email' | 'totp'; challenge?: string; error?: string; captchaRequired?: boolean }> {
   const res = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, captchaToken }),
   });
   const data = await res.json();
   if (!res.ok || !data.ok) {
-    return { ok: false, error: data.error || 'Incorrect email or password.' };
+    return { ok: false, error: data.error || 'Incorrect email or password.', captchaRequired: data.captchaRequired === true };
   }
-  return { ok: true, user: data.user, twoFactor: data.twoFactor === true, method: data.method === 'totp' ? 'totp' : 'email', challenge: data.challenge };
+  return { ok: true, user: data.user, twoFactor: data.twoFactor === true, method: data.method === 'totp' ? 'totp' : 'email', challenge: data.challenge, captchaRequired: false };
 }
 
 async function requestReset(email: string): Promise<{ message: string }> {
@@ -192,6 +194,8 @@ export function AuthModal() {
   const [challenge, setChallenge] = useState('');
   const [useRecovery, setUseRecovery] = useState(false);
   const [recovery, setRecovery] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string>('');
+  const [captchaRequired, setCaptchaRequired] = useState(false);
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
   const emailRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -219,6 +223,8 @@ export function AuthModal() {
     setInfo(null);
     setLeft(0);
     setTouched({});
+    setCaptchaToken('');
+    setCaptchaRequired(false);
     focusEmail();
   }, [isAuthModalOpen, authMode]);
 
@@ -288,7 +294,12 @@ export function AuthModal() {
     setBusy(true);
     setError(null);
     try {
-      const res = await loginWithPassword(email.trim(), password);
+      const res = await loginWithPassword(email.trim(), password, captchaToken);
+      if (res.captchaRequired) {
+        setCaptchaRequired(true);
+        setError(res.error || 'Incorrect email or password. Security check required.');
+        return;
+      }
       if (res.ok && res.twoFactor) {
         // Password accepted; this account also wants a second factor (emailed code or authenticator app).
         setMfaMethod(res.method ?? 'email');
@@ -321,7 +332,7 @@ export function AuthModal() {
     setBusy(true);
     setError(null);
     try {
-      await sendSignupCode(email.trim(), password, cleanName(name), twoFactor);
+      await sendSignupCode(email.trim(), password, cleanName(name), twoFactor, captchaToken);
       setStep(2);
       setDigits(empty());
       setLeft(RESEND_SECONDS);
@@ -639,6 +650,13 @@ export function AuthModal() {
                       Forgot password?
                     </button>
                   </div>
+                  {captchaRequired && (
+                    <CaptchaWidget
+                      action="login"
+                      onVerify={setCaptchaToken}
+                      onError={(err) => setError(err || 'Security verification failed.')}
+                    />
+                  )}
                   {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
                   <button type="submit" disabled={busy} className={cn(primaryBtn, 'mt-6')}>
                     {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Logging in…</> : <>Log In <ArrowRight className="h-4 w-4" /></>}
@@ -696,6 +714,11 @@ export function AuthModal() {
                       </span>
                     </span>
                   </label>
+                  <CaptchaWidget
+                    action="signup"
+                    onVerify={setCaptchaToken}
+                    onError={(err) => setError(err || 'Security verification failed.')}
+                  />
                   {error && <p className="mt-3 text-[12px] text-rose-500">{error}</p>}
                   <button type="submit" disabled={busy} className={cn(primaryBtn, 'mt-6')}>
                     {busy ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending code…</> : <>Send Verification Code <ArrowRight className="h-4 w-4" /></>}
